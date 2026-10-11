@@ -335,6 +335,10 @@ visible at the panel. No export, no delete — longer reading stays with SSH or 
 and no new dependency, so it works with only the Bluetooth pad. **Done when** each tab shows its log on `.188` and the filter hides
 non-error lines.
 
+State 2026-10-11: built (`log_page.c`, `log_filter.c`); scrolling is a button strip on the focus ring (pages get taps only, not
+pad events), plus touch drag. **Measured on `.188`** (`control_panel log` over SSH): SYSLOG opens at the newest line, 30 rows ×
+117 chars. **Untested (needs the panel):** RESPAWN and KERNEL tabs, ERRORS ONLY, the strip by touch, hold-repeat, and by pad.
+
 ### F142. A terminal app — open, operator request 2026-10-09, future
 
 The unit is a desk gaming device, not a meeting-room panel (operator, 2026-10-09), so a terminal is an ordinary feature. **It runs
