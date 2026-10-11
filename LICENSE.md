@@ -117,13 +117,56 @@ actually pin, because "current upstream" is not a fact anyone can check later.
 | BlueALSA (bluez-alsa) | 4.3.1 (sha256-pinned tarball) | **MIT** (`LICENSE`; sources say "licensed under the terms of the MIT license") | `bluetooth/build-bluealsa.sh` |
 | sbc (SBC codec library) | 2.0 (sha256-pinned tarball), linked statically into `bluealsa` | **LGPL-2.1-or-later** (library sources `sbc/*.c`, `sbc/*.h`: "version 2.1 of the License, or (at your option) any later version"; `COPYING.LIB` is LGPL 2.1). `COPYING` is GPLv2 and covers only `src/` tools, which are built `--disable-tools` | `bluetooth/build-bluealsa.sh` |
 | Linux kernel | 4.14.52 upstream; the image (never the modules) also applies `kernel/patches/` | **GPL-2.0-only** | `usb_host/build-kernel-modules.sh`; the tree lives at `usb_host/linux-4.14.52/` (gitignored) |
-| glibc | whatever `arm-linux-gnueabihf-gcc` provides | LGPL-2.1-or-later | the distribution's cross toolchain |
+| glibc (on the card) | 2.41 (git snapshot `2.41-161-g5dd252cf`) — the card's `/lib/libc.so.6`, from Buildroot's internal toolchain, **soft-float EABI** (`arm-buildroot-linux-gnueabi`, loader `/lib/ld-linux.so.3`) | **LGPL-2.1-or-later** (library); GPL-2.0-or-later (programs), BSD-3-Clause, MIT parts (Buildroot `legal-info`) | `rootfs/build-rootfs.sh` |
+| glibc (linked into our binaries) | whatever the host's cross toolchain provides: `native_apps` build with `arm-linux-gnueabi-gcc` (soft-float, **dynamic** against the card's glibc); `vnc_client` and `devmem_write` are **static, hard-float** (`gnueabihf`) and so embed the host toolchain's glibc | LGPL-2.1-or-later | the distribution's cross toolchains |
 
 ⚠️ **These are cross-compiled from source on purpose, not vendored.** This host cannot do armhf
 multiarch, so each component builds its own copies
 ([`SYSTEM_ANALYSIS.md` §6](SYSTEM_ANALYSIS.md#6-building-for-this-device)). The consequence for this file
 is that *nothing here is redistributed as source by this repository* — the obligations attach to the
 **binaries** a release publishes, which is the next section.
+
+### The root filesystem (`rootfs/`, Buildroot 2025.02.18)
+
+Every package in the card's p6 comes from one Buildroot build (`rootfs/configs/roomwizard_defconfig`,
+pinned and sha256-checked by `rootfs/build-rootfs.sh`). **Measured 2026-10-10** by running Buildroot's
+`make -k legal-info` over that tree in WSL: its `manifest.csv` lists the 25 target packages below, and
+the licence strings are Buildroot's own `<PKG>_LICENSE` for that version, not ours. Buildroot itself
+(GPL-2.0-or-later) and the host build tools are not shipped. Shared libraries pulled in as dependencies
+are on the card too, so they have rows.
+
+| Package | Version | Licence (per Buildroot) |
+|---|---|---|
+| glibc | 2.41 | see the glibc row above |
+| gcc runtime (`libgcc_s`, `libstdc++`) | 13.4.0 | **GPL-3.0-or-later with the GCC Runtime Library Exception** |
+| BusyBox | 1.37.0 | **GPL-2.0-only**; bzip2-1.0.6 for the bundled bzip2 code |
+| bash | 5.2.37 | **GPL-3.0-or-later** |
+| readline | 8.2 | **GPL-3.0-or-later** |
+| OpenSSH | 9.9p2 | BSD-3-Clause, BSD-2-Clause, public domain |
+| OpenSSL (`libopenssl`) | 3.5.8 | Apache-2.0 |
+| dbus | 1.14.10 | AFL-2.1 **or** GPL-2.0-or-later (library and tools) |
+| avahi | 0.8 | **LGPL-2.1-or-later** |
+| libdaemon | 0.14 | **LGPL-2.1-or-later** |
+| alsa-lib | 1.2.13 | **LGPL-2.1-or-later** (library); GPL-2.0-or-later (`aserver`) |
+| alsa-utils (`aplay`, `amixer`, `alsactl`) | 1.2.13 | **GPL-2.0-only** |
+| GLib (`libglib2`) | 2.82.5 | **LGPL-2.1-or-later** |
+| libffi | 3.4.6 | MIT |
+| PCRE2 | 10.46 | BSD-3-Clause |
+| expat | 2.8.4 | MIT |
+| zlib (`libzlib`) | 1.3.2 | zlib licence |
+| ncurses | 6.4-20230603 | MIT (with the advertising clause) |
+| eudev | 3.2.14 | **GPL-2.0-or-later** (programs), **LGPL-2.1-or-later** (libraries) |
+| kmod | 33 | **LGPL-2.1-or-later** (library); the tools are GPL-2.0-or-later (unverified: the manifest names only the library) |
+| libxcrypt | 4.4.38 | **LGPL-2.1-or-later** |
+| util-linux (+ `util-linux-libs`) | 2.40.4 | **GPL-2.0-or-later**, BSD-4-Clause, LGPL-2.1-or-later (libblkid, libfdisk, libmount), BSD-3-Clause (libuuid), BSD-2-Clause, ISC, MIT |
+| ethtool | 6.14 | **GPL-2.0-only** |
+| tzdata | 2026b | public domain |
+
+The Linux kernel headers (4.14.52, GPL-2.0 with the syscall exception) are build-time only. ⚠️ The
+`legal-info` run **aborted on them** — the custom 4.14 headers have no checksum entry, so Buildroot's
+hash check refused the tarball; with `-k` the other 25 rows still came out. **Unverified:** that the
+manifest is otherwise complete, and the copyright texts of each package (Buildroot's `licenses/`
+directory holds them; nothing here copies that directory yet).
 
 ---
 
@@ -150,10 +193,47 @@ release published from it is available**, because the offer is honoured for the 
 | `bluetoothd`, `bluetoothctl`, `libbluetooth.so.3` | **GPL-2.0-or-later** | BlueZ 5.66. Written offer in `NOTICE`: the upstream tarball plus `bluetooth/build-bluez.sh`. They link the device's own glib, dbus and readline dynamically. |
 | `bluealsa`, `bluealsa-aplay`, `libasound_module_{pcm,ctl}_bluealsa.so` | **MIT** (BlueALSA 4.3.1); `bluealsa` additionally contains **LGPL-2.1-or-later** sbc 2.0 | Only `bluealsa` links sbc (`libsbc.a`, static) — measured by `grep -a` for `sbc_encode`/`sbc_decode`: present in `bluealsa`, absent from `bluealsa-aplay` and both plugins. LGPL-2.1 §6 relinking: the sbc tarball, BlueALSA's tarball and `bluetooth/build-bluealsa.sh` reproduce the binary and a relink. Written offer in `NOTICE`; BlueALSA's MIT copyright notice is reproduced there too. |
 | the Bluetooth `.ko`s under `/lib/modules/4.14.52/bt` | **GPL-2.0-only** | Kernel modules. ⚠️ **Written source offer required**, in `NOTICE`: upstream Linux 4.14.52 plus `kernel/patches/`, `kernel/patches-modules/` (which modify `btusb.c` and `btrtl.c`) and `kernel/build-bt-modules.sh`. |
+| our `uImage-system` (`kernel/build-image.sh`), `cy8ctmg120_ts.ko`, `ca8_ibe.ko` | **GPL-2.0-only** | Not in a bundle; they enter a card image (`make-card-image.sh`). Source: upstream 4.14.52 + `kernel/patches/`, `kernel/dts/`, `kernel/drivers/`, `kernel/config-changes` — but ⚠️ **the base `.config` is not committed and no written offer exists yet** (see the gaps below). |
 | `rtl8761cu_{fw,config}.bin` | **Realtek redistributable firmware licence** (row above) | Staged unmodified with `LICENCE.rtlwifi_firmware.txt` beside them on the device; the notice is reproduced in `NOTICE`. |
 | `devmem_write`, the `native_apps` games and tools, `app_launcher` | MIT. `devmem_write` is statically linked against glibc (LGPL-2.1-or-later); the `native_apps` binaries link the device's own glibc and `libasound` dynamically | LGPL-2.1 §6 relinking: the objects and this repository are what a relink needs. |
 | `/opt/sound/fx_*.wav` (eleven sound effects) | **Not for commercial use** + **attribution to ElevenLabs (`elevenlabs.io`) required** (free account — see above) | ⚠️ **The one artifact that makes a bundle non-commercial.** A commercial redistribution must remove or replace them; every game falls back to its note tables without them, so removal breaks nothing. Stated in `NOTICE`. |
 | `/opt/sound/<stem><n>-mono.wav` (every music bed) | Royalty-free, commercial use permitted (musely.ai — see above) | None. No attribution required. Not this project's composition; stated in `NOTICE` anyway so a bundle carries its own provenance, along with the fact that removing any bed is safe. |
+
+### The source-offer duty for a distributed card image, and where this repository stands
+
+Publishing a **card image** (`rootfs/make-card-image.sh`), as opposed to the bundle above, distributes the
+whole root filesystem and the kernel modules in it. The duty, stated as the licences word it and not as
+legal advice: whoever distributes **GPL-2.0** binaries (kernel, BusyBox, alsa-utils, ethtool, eudev,
+util-linux) must pass on the complete corresponding source, or a written offer for it (GPL-2.0 §3);
+**GPL-3.0** programs (bash, readline, the GCC runtime pieces under their exception, ScummVM) carry the
+equivalent §6; **LGPL-2.1** libraries (glibc, avahi, alsa-lib, GLib, kmod, libxcrypt, libdaemon, sbc)
+additionally require that the recipient be able to relink — shared libraries on the card satisfy that by
+construction, static ones need the objects (see the `devmem_write` row). Licence texts and notices must
+travel with the binaries (BSD, MIT, Apache-2.0, zlib and the OpenSSH family require the notice).
+
+What the repository **does** today: the kernel image's source is upstream 4.14.52 plus the committed
+`kernel/patches/`, `kernel/dts/` and `kernel/config-changes`, built by `kernel/build-image.sh`; the bundle's
+`NOTICE` carries written offers for the bundle's own binaries (rows above); `release.sh` refuses to tag
+what is not on the public remote.
+
+**Gaps, stated plainly — none is closed:**
+
+- **No source offer for the Buildroot packages.** `release.sh`'s `NOTICE` covers the bundle components
+  only. Nothing generates or publishes Buildroot's `legal-info` output (`sources/`, `licenses/`,
+  `manifest.csv`) with a card image or rootfs tarball, and those package sources are not in this repository
+  (Buildroot fetches them from upstream mirrors). Until a `legal-info` tarball ships beside the image, or an
+  offer naming those exact versions does, **a published card image would not meet the duty.** Whether
+  pointing at upstream's mirrors would suffice is **unverified** and not assumed.
+- **The kernel image's base configuration is not committed.** `kernel/build-image.sh` starts from
+  `usb_host/device_config`, which is gitignored and is the unit's own `/proc/config.gz`; only our
+  changes (`kernel/config-changes`) are in the tree. The "scripts used to control compilation" are
+  incomplete in the repo for anyone who has not got that file.
+- **p1 is the vendor's.** `make-card-image.sh` copies p1 byte for byte from the donor unit, which holds
+  `mlo`, `u-boot.bin` and `ctrlblock.bin` (Steelcase's U-Boot is GPL-2.0-or-later, so it carries the same
+  duty we cannot meet) and the vendor `uImage-system`. **A published image must not contain them** — see
+  the vendor-kernel paragraph below. How a published image is to get a bootable p1 is undecided.
+- **`legal-info` has not been run to completion** (the headers hash failure above), and no licence texts
+  are copied into the image or the bundle for the rootfs packages.
 
 The three `.ko`s are the reason the choice of licence for this project's own code mattered at all: a
 GPL-2.0-**only** binary in the same distribution is what rules Apache-2.0 out.
