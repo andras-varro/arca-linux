@@ -11,12 +11,13 @@ pristine export) adds board `rw20` (`board/steelcase/rw20/`, `configs/rw20_defco
     export PATH=$W/tc/bin:$PATH
     make -C $W/u-boot rw20_defconfig O=../build
     make -C $W/u-boot O=../build -j8 CROSS_COMPILE=arm-linux-gnueabihf-
-Outputs: MLO (47440 B), u-boot.img (406512 B), u-boot-spl.bin, .config. Build outputs are not committed.
+Outputs: MLO (49416 B), u-boot.img (420800 B), u-boot-spl.bin, .config. Build outputs are not committed.
 
 ## Which file the SPL loads
 SPL (CONFIG_SPL_FS_FAT, SPL_MMC) mounts FAT partition 1 and reads u-boot.img (CONFIG_SPL_FS_LOAD_PAYLOAD_NAME), a legacy
 uImage (load/entry 0x80100000) -- NOT u-boot.bin (raw, no header). p1 must hold: MLO, u-boot.img, uImage-system, uImage-fallback.
-MLO = 512 B CHSETTINGS TOC + GP header (size word 0xb750 incl. the header, load 0x40200800) + SPL; checked by hex/python parse. u-boot-spl.bin 46920 B, GP header size < 0xEC00.
+MLO = 512 B CHSETTINGS TOC + GP header (size word 0xbf08 incl. the header, load 0x40200800) + SPL; checked by hex/python parse. u-boot-spl.bin 48896 B, GP header size < 0xEC00 (the scratch area at 0x4020EC00 limits an SPL linked at 0x40200800 to 0xE400).
+Partition 1 is an MBR partition: the defconfig must carry `CONFIG_DOS_PARTITION` (SPL gets `SPL_DOS_PARTITION` from it; without it `part_get_info(1)` finds no partition driver and the SPL cannot mount p1 [inferred from `disk/part.c`/`fs/fat/fat.c`, not run], `CMD_FAT` (the env's `fatload`) and `HUSH_PARSER` (the env's `if run ...; then`). `devkit8000_defconfig` gets all three from `CONFIG_DISTRO_DEFAULTS`, which `rw20_defconfig` does not set. Boot device: the SPL trusts the ROM-reported device (`save_omap_boot_params`, `boot-common.c`), which maps MMC1 to FS mode; ROM params outside SRAM 0x40208000-0x40210000 leave it `BOOT_DEVICE_NONE` and the SPL tries nothing.
 
 ## Value sources
 - SDRC MCFG_0 0x03588099, ACTIM_A 0x7AE1B4C6, ACTIM_B 0x00024217, RFR_CTRL 0x0005E601, MR 0x32: read from the live unit's SDRC registers.
@@ -48,15 +49,17 @@ SPL_TEXT_BASE is 0x40200800 (the vendor's load address; `CONFIG_SPL_TEXT_BASE` i
   SETDATAOUT (+0x94) / CLEARDATAOUT (+0x90) of `OMAP34XX_GPIO6_BASE` 0x49058000. GPIO6 access bus-faults without
   CM_FCLKEN_PER 0x48005000 / CM_ICLKEN_PER 0x48005010 bit 17 (EN_GPIO6; `PRCM_BASE` 0x48004000 + `struct prcm` 0x1000/0x1010), set first.
   Red lit from Linux with this exact sequence [measured]; green (bit 21) is inferred by symmetry. Code: `rw20.c` rw20_gpio6_enable / rw20_led(red, green) / rw20_witness.
-- Stages: 1 = end of `s_init` (SPL only: after the padconf replay, prcm_init and per_clocks_enable, before the C runtime and board_init_f): red on.
-  2 = board_init_f after omap3_mem_init(), only if a write/readback of 8 words at 0x80300000/0x84000000/0x88000000/0x8FF00000 passes: red + green.
-  3 = U-Boot proper `board_init()` (its own `s_init` replays the pads to mode 1, so it re-sets them): red off, green on.
-  4 = `sysboot` env, right before `bootm`: `mw.l 0x49058090 0x300000` (CLEARDATAOUT bits 20, 21; `CONFIG_CMD_GPIO` is off, `CMD_MEMORY` on): both off.
-- Reading the panel: dark = SPL never reached the witness; red = stuck in SPL before/at SDRAM; red + green (yellow) = SDRAM ok, stuck loading
-  u-boot.img; green only = U-Boot proper runs, stuck before bootm; dark again after green = kernel handed off. The vendor yellow LEDs
-  come from the vendor's own U-Boot, not from this build.
+- Stages: 1 = end of `s_init`, in the SPL and again in U-Boot proper (after the padconf replay, prcm_init and per_clocks_enable, before the C runtime):
+  red only. 2 = SPL `board_init_f` after omap3_mem_init(), only if a write/readback of 8 words at 0x80300000/0x84000000/0x88000000/0x8FF00000 passes:
+  red + green. 3 = SPL `spl_board_prepare_for_boot()` (the last hook in `board_init_r`, directly before `jump_to_image`): green only.
+  9 = SPL `hang()` (every SPL failure path ends there; hook placed before its `puts`): both off. 4 = `sysboot` env, right before `bootm`:
+  `mw.l 0x49058090 0x300000` (CLEARDATAOUT bits 20, 21; `CONFIG_CMD_GPIO` is off, `CMD_MEMORY` on): both off. U-Boot proper's `board_init()` sets nothing.
+- Reading the panel (in order of appearance): dark from the start = SPL never reached its `s_init`; red then yellow = SPL got through SDRAM. Stays yellow = SPL stuck before its jump hook (loading
+  u-boot.img, or an SPL exception: `vectors.S` loops in place). Yellow then dark = SPL reported failure (`hang()`). Green only = SPL jumped, U-Boot
+  proper never reached the end of its `s_init`. Red only after green = U-Boot proper running, stuck before bootm. Dark after that red = kernel handed off.
+  The vendor yellow LEDs come from the vendor's own U-Boot, not from this build.
 - GP header variants: MLO = 512 B CH TOC, then the GP header (size word at 0x200, load address at 0x204). Ours holds the size INCLUDING the
-  8-byte header (0xb750 = file - 512); the vendor's EXCLUDES it (0xc298 = file - 512 - 8). Vendor-style MLO: write `size - 8` as a
+  8-byte header (0xbf08 = file - 512); the vendor's EXCLUDES it (0xc298 = file - 512 - 8). Vendor-style MLO: write `size - 8` as a
   little-endian 32-bit word at offset 0x200 of a copy of the MLO; nothing else differs.
 - Checks: GP header size <= 0xEC00 and load 0x40200800; sdiv/udiv 0 in `spl/u-boot-spl` and `u-boot` (`objdump -d | grep -cE '\s(s|u)div\s'`);
-  `git apply --check` of the patch on a pristine tag export.
+  `git apply --check` of the patch on a pristine tag export; `part_get_info_dos` present in `spl/u-boot-spl.sym`.
