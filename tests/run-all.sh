@@ -97,6 +97,7 @@ SUITE_ROWS=(
     "rw_ssh_test.sh|deploy"
     "rw_state_test.sh|deploy"
     "rw_hostname_test.sh|deploy"
+    "dump_boot_regs_test.sh|deploy"
     "setup_build_env_test.sh|deploy"
     "smoke_first_screen_test.sh|deploy"
     "doc_check.sh|docs"
