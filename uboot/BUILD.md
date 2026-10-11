@@ -11,12 +11,12 @@ pristine export) adds board `rw20` (`board/steelcase/rw20/`, `configs/rw20_defco
     export PATH=$W/tc/bin:$PATH
     make -C $W/u-boot rw20_defconfig O=../build
     make -C $W/u-boot O=../build -j8 CROSS_COMPILE=arm-linux-gnueabihf-
-Outputs: MLO (47640 B), u-boot.img (406440 B), u-boot-spl.bin, .config. Build outputs are not committed.
+Outputs: MLO (47440 B), u-boot.img (406512 B), u-boot-spl.bin, .config. Build outputs are not committed.
 
 ## Which file the SPL loads
 SPL (CONFIG_SPL_FS_FAT, SPL_MMC) mounts FAT partition 1 and reads u-boot.img (CONFIG_SPL_FS_LOAD_PAYLOAD_NAME), a legacy
 uImage (load/entry 0x80100000) -- NOT u-boot.bin (raw, no header). p1 must hold: MLO, u-boot.img, uImage-system, uImage-fallback.
-MLO = 512 B CHSETTINGS TOC + GP header (size 0xb608, load 0x40200000) + SPL; checked by hex/python parse. SPL text 41855 B, GP header size 0xb818 (< 0xEC00).
+MLO = 512 B CHSETTINGS TOC + GP header (size word 0xb750 incl. the header, load 0x40200800) + SPL; checked by hex/python parse. u-boot-spl.bin 46920 B, GP header size < 0xEC00.
 
 ## Value sources
 - SDRC MCFG_0 0x03588099, ACTIM_A 0x7AE1B4C6, ACTIM_B 0x00024217, RFR_CTRL 0x0005E601, MR 0x32: read from the live unit's SDRC registers.
@@ -32,7 +32,7 @@ MLO = 512 B CHSETTINGS TOC + GP header (size 0xb608, load 0x40200000) + SPL; che
 - vram=12M and mpurate=auto (4.4 shows the variables unexpanded); sysroot/sysrootfstype from 4.4.
 - Live padconf was read AFTER Linux booted, so it may include kernel pinctrl changes, not only what the vendor U-Boot set.
 - bi_arch_number = MACH_TYPE_OVERO (Overo lineage); ignored by the DT/appended-DTB kernel (inferred).
-- SPL load address 0x40200000 (mainline) vs vendor 0x40200800; fallback if ROM refuses: SPL_TEXT_BASE=0x40200800.
+- SPL load address 0x40200800 (the vendor MLO's); mainline default 0x40200000 is not used.
 - No board_boot_order: ROM-reported boot device is trusted (assumed MMC1 after the redirector warm reset).
 - gpmc_init() kept as devkit8000 does; GPMC live dump not replayed (inferred unnecessary: kernel DT programs GPMC).
 - Watchdog, PLL/clock: mainline prcm_init for 13 MHz sys_clk; resulting MPU/L3 rates NOT compared to the live 600/166 MHz (compare after boot).
@@ -40,30 +40,23 @@ MLO = 512 B CHSETTINGS TOC + GP header (size 0xb608, load 0x40200000) + SPL; che
 - fatload of uImage-fallback: bootm returns on CRC failure so fallback runs (not tested).
 
 ## Witness build
-The patch contains a boot-progress witness, so a build from it differs from a plain board port. SPL_TEXT_BASE is 0x40200000
-(the patch's value); the vendor's 0x40200800 is built by appending CONFIG_SPL_TEXT_BASE=0x40200800 to the build's .config and
-running olddefconfig. Each yields MLO, u-boot.img, u-boot-spl.bin, .config. Nothing is installed by this build.
-- Panel-GPIO witness (no I2C; `rw20.c` rw20_panel_on / rw20_gpio1_enable): pwrdn gpio1[14], lvds gpio1[15], backlight gpio1[19],
-  active high [inferred from the vendor panel wiring]. Pads ETK_D0_ES2 0x480025DC, ETK_D1_ES2 0x480025DE, ETK_D5_ES2 0x480025E6 =
-  `OMAP34XX_CTRL_BASE` 0x48002000 + `CP()` offsets 0x5DC/0x5DE/0x5E6 of `arch-omap3/mux.h` (read from the tree), mode 4 (`M4`, 0x0004),
-  16-bit writes (not in the padconf replay). GPIO1 = WKUP bank `OMAP34XX_GPIO1_BASE` 0x48310000; clocks CM_FCLKEN_WKUP 0x48004C00 and
-  CM_ICLKEN_WKUP 0x48004C10 bit 3 (`struct prcm` offsets 0xc00/0xc10 from `PRCM_BASE` 0x48004000); OE +0x34, CLEARDATAOUT +0x90, SETDATAOUT +0x94.
-  SPL: rw20_witness(1), first thing in board_init_f after early_system_init(), drives all three high before any I2C.
-  U-Boot proper: board_init() (`CONFIG_BOARD_EARLY_INIT_F` is off, so board_init, run after relocation, is the earliest rw20 hook)
-  clears bit 19 only, via CLEARDATAOUT.
-- LED module (TWL4030 I2C chip 0x4a, LEDEN 0xee bit0 LEDA on, bit1 LEDB on, bit4/5 PWM enable, PWMAON/OFF 0xef/0xf0, PWMBON/OFF 0xf1/0xf2):
-  source u-boot include/twl4030.h and drivers/misc/twl4030_led.c; PWM layout and "on == off cycle = always on" from
-  usb_host/linux-4.14.52/drivers/pwm/pwm-twl-led.c. Value 1/1 [inferred: full brightness].
-- Stage 1 (both LEDs on, LEDEN 0x33): rw20_witness(1) after the panel GPIOs, BEFORE omap3_mem_init(). Own polled OMAP I2C1 code
-  (base 0x48070000, I2C1 f/i clocks, 100 kHz) because DM I2C is not up in board_init_f. Init order follows omap24xx_i2c.c: CON=0,
-  SYSC=2 (soft reset), CON=EN (RDONE sets only while EN is set), poll SYSS.RDONE, CON=0, PSC/SCLL/SCLH/OA, CON=EN. Timeouts, no hang on NACK.
-  Assumes s_init() already ran set_muxconf_regs()+prcm_init() (I2C1 pads from the replayed padconf) [inferred].
-- Stage 2 (LEDB off, LEDEN 0x11): rw20_witness(2) right after omap3_mem_init(), only if a write/readback of 8 words at
-  0x80300000/0x84000000/0x88000000/0x8FF00000 passes (omap3_mem_init itself checks nothing).
-- Stage 3 (both LEDs off): sysboot = ...run sysargs; i2c dev 0; i2c mw 0x4a 0xee 0x00; bootm (CMD_I2C was already on).
-- Reading the panel (the vendor yellow LEDs come from vendor U-Boot proper, so only the GPIO witness separates SPL from proper):
-  never glows = SPL never reached board_init_f; glows and stays = stuck in SPL after stage 1 (SDRAM, FAT, u-boot.img load);
-  glows ~1 s (bootdelay), then dark and nothing else = U-Boot proper runs, the kernel side is the problem.
-  LEDs add stage detail if the I2C path works: yellow = board_init_f reached; one colour = SDRAM test passed; off = bootm reached.
-  A failed I2C write leaves the previous LED state, so dark LEDs alone are ambiguous.
-- Checks: GP header size <= 0xEC00, load 0x40200000 (0x40200800 for the vendor-base variant); sdiv/udiv 0 in u-boot-spl and u-boot.
+The patch contains a boot-progress witness (no serial, no I2C, no SDRAM needed), so a build from it differs from a plain board port.
+SPL_TEXT_BASE is 0x40200800 (the vendor's load address; `CONFIG_SPL_TEXT_BASE` in the defconfig). Nothing is installed by this build.
+- The two side LEDs are SoC GPTimer PWM pads: red MCSPI2_SOMI 0x480021DA (GPT10), green MCSPI2_CS0 0x480021DC (GPT11), normally mode 1
+  [measured on the running unit]. The witness sets both to mode 4 (gpio_180 / gpio_181 = GPIO6 bits 20 / 21, active high) with 16-bit writes
+  (`OMAP34XX_CTRL_BASE` 0x48002000 + `CP(MCSPI2_SOMI/CS0)` 0x1DA/0x1DC of `arch-omap3/mux.h`, read from the tree), clears OE (+0x34) and writes
+  SETDATAOUT (+0x94) / CLEARDATAOUT (+0x90) of `OMAP34XX_GPIO6_BASE` 0x49058000. GPIO6 access bus-faults without
+  CM_FCLKEN_PER 0x48005000 / CM_ICLKEN_PER 0x48005010 bit 17 (EN_GPIO6; `PRCM_BASE` 0x48004000 + `struct prcm` 0x1000/0x1010), set first.
+  Red lit from Linux with this exact sequence [measured]; green (bit 21) is inferred by symmetry. Code: `rw20.c` rw20_gpio6_enable / rw20_led(red, green) / rw20_witness.
+- Stages: 1 = end of `s_init` (SPL only: after the padconf replay, prcm_init and per_clocks_enable, before the C runtime and board_init_f): red on.
+  2 = board_init_f after omap3_mem_init(), only if a write/readback of 8 words at 0x80300000/0x84000000/0x88000000/0x8FF00000 passes: red + green.
+  3 = U-Boot proper `board_init()` (its own `s_init` replays the pads to mode 1, so it re-sets them): red off, green on.
+  4 = `sysboot` env, right before `bootm`: `mw.l 0x49058090 0x300000` (CLEARDATAOUT bits 20, 21; `CONFIG_CMD_GPIO` is off, `CMD_MEMORY` on): both off.
+- Reading the panel: dark = SPL never reached the witness; red = stuck in SPL before/at SDRAM; red + green (yellow) = SDRAM ok, stuck loading
+  u-boot.img; green only = U-Boot proper runs, stuck before bootm; dark again after green = kernel handed off. The vendor yellow LEDs
+  come from the vendor's own U-Boot, not from this build.
+- GP header variants: MLO = 512 B CH TOC, then the GP header (size word at 0x200, load address at 0x204). Ours holds the size INCLUDING the
+  8-byte header (0xb750 = file - 512); the vendor's EXCLUDES it (0xc298 = file - 512 - 8). Vendor-style MLO: write `size - 8` as a
+  little-endian 32-bit word at offset 0x200 of a copy of the MLO; nothing else differs.
+- Checks: GP header size <= 0xEC00 and load 0x40200800; sdiv/udiv 0 in `spl/u-boot-spl` and `u-boot` (`objdump -d | grep -cE '\s(s|u)div\s'`);
+  `git apply --check` of the patch on a pristine tag export.

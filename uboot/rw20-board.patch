@@ -112,10 +112,29 @@ index 61e1c1a2..796e1eed 100644
  source "board/isee/igep00x0/Kconfig"
  source "board/lg/sniper/Kconfig"
 diff --git a/arch/arm/mach-omap2/omap3/board.c b/arch/arm/mach-omap2/omap3/board.c
-index 4b6ce694..c704bdee 100644
+index 4b6ce694..149be66f 100644
 --- a/arch/arm/mach-omap2/omap3/board.c
 +++ b/arch/arm/mach-omap2/omap3/board.c
-@@ -212,10 +212,19 @@ void s_init(void)
+@@ -186,6 +186,10 @@ static void try_unlock_memory(void)
+  * Description: Does early system init of muxing and clocks.
+  *              - Called path is with SRAM stack.
+  *****************************************************************************/
++#if defined(CONFIG_TARGET_RW20) && defined(CONFIG_XPL_BUILD)
++void rw20_witness(int stage);
++#endif
++
+ void s_init(void)
+ {
+ 	watchdog_init();
+@@ -208,14 +212,24 @@ void s_init(void)
+ #ifdef CONFIG_USB_EHCI_OMAP
+ 	ehci_clocks_enable();
+ #endif
++
++#if defined(CONFIG_TARGET_RW20) && defined(CONFIG_XPL_BUILD)
++	rw20_witness(1);
++#endif
+ }
  #endif
  
  #ifdef CONFIG_XPL_BUILD
@@ -125,9 +144,6 @@ index 4b6ce694..c704bdee 100644
  void board_init_f(ulong dummy)
  {
  	early_system_init();
-+#ifdef CONFIG_TARGET_RW20
-+	rw20_witness(1);
-+#endif
  	omap3_mem_init();
 +#ifdef CONFIG_TARGET_RW20
 +	rw20_witness(2);
@@ -337,10 +353,10 @@ index 00000000..f0d79279
 +};
 diff --git a/board/steelcase/rw20/rw20.c b/board/steelcase/rw20/rw20.c
 new file mode 100644
-index 00000000..ad0b50d3
+index 00000000..f648e065
 --- /dev/null
 +++ b/board/steelcase/rw20/rw20.c
-@@ -0,0 +1,202 @@
+@@ -0,0 +1,141 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/*
 + * Steelcase RoomWizard (OMAP3503, TWL4030, 256 MB DDR on CS0).
@@ -366,27 +382,45 @@ index 00000000..ad0b50d3
 +#include "rw20-mux.h"
 +
 +/*
-+ * Panel-GPIO witness (no I2C): pwrdn gpio1[14], lvds gpio1[15], backlight
-+ * gpio1[19], active high, pads ETK_D0_ES2/D1_ES2/D5_ES2 (CP() offsets from
-+ * asm/arch/mux.h + OMAP34XX_CTRL_BASE 0x48002000) in mode 4, 16-bit writes.
-+ * GPIO1 = OMAP34XX_GPIO1_BASE 0x48310000 (WKUP bank), clocks CM_FCLKEN_WKUP
-+ * 0x48004C00 / CM_ICLKEN_WKUP 0x48004C10 bit 3 (prcm struct offsets 0xc00/0xc10).
-+ * SPL turns all three on; U-Boot proper turns the backlight off.
++ * Boot-stage witness: the two side LEDs are SoC GPTimer PWM pads (not TWL4030):
++ * red = MCSPI2_SOMI (GPT10), green = MCSPI2_CS0 (GPT11); in mode 4 they are
++ * gpio_180 / gpio_181 = GPIO6 bits 20 / 21, active high. Pad addresses =
++ * OMAP34XX_CTRL_BASE 0x48002000 + CP() 0x1DA / 0x1DC (asm/arch/mux.h), 16-bit
++ * writes. GPIO6 = OMAP34XX_GPIO6_BASE 0x49058000 (OE +0x34, CLEARDATAOUT
++ * +0x90, SETDATAOUT +0x94). Clocks: CM_FCLKEN_PER 0x48005000 / CM_ICLKEN_PER
++ * 0x48005010 bit 17 (EN_GPIO6; PRCM_BASE 0x48004000 + struct prcm 0x1000 /
++ * 0x1010). Needs no I2C, no SDRAM, no serial.
++ * Readings: dark = SPL never got here; red = SPL stuck before/at SDRAM;
++ * red+green = SDRAM ok, stuck loading u-boot.img; green = U-Boot proper runs,
++ * stuck before bootm; dark again = kernel handed off.
 + */
-+#define RW20_GPIO1		OMAP34XX_GPIO1_BASE
-+#define RW20_PANEL_BITS		((1 << 14) | (1 << 15) | (1 << 19))
++#define RW20_GPIO6		OMAP34XX_GPIO6_BASE
++#define RW20_LED_RED		(1 << 20)
++#define RW20_LED_GREEN		(1 << 21)
 +
-+static void rw20_gpio1_enable(void)
++static void rw20_gpio6_enable(void)
 +{
-+	setbits_le32(PRCM_BASE + 0xc00, 1 << 3);	/* CM_FCLKEN_WKUP: EN_GPIO1 */
-+	setbits_le32(PRCM_BASE + 0xc10, 1 << 3);	/* CM_ICLKEN_WKUP: EN_GPIO1 */
++	setbits_le32(PRCM_BASE + 0x1000, 1 << 17);	/* CM_FCLKEN_PER: EN_GPIO6 */
++	setbits_le32(PRCM_BASE + 0x1010, 1 << 17);	/* CM_ICLKEN_PER: EN_GPIO6 */
++}
++
++/* Both pads to mode 4 (a pinmux replay puts them back to mode 1), then drive. */
++void rw20_led(int red, int green)
++{
++	rw20_gpio6_enable();
++	writew(M4, OMAP34XX_CTRL_BASE + CP(MCSPI2_SOMI));
++	writew(M4, OMAP34XX_CTRL_BASE + CP(MCSPI2_CS0));
++	clrbits_le32(RW20_GPIO6 + OMAP_GPIO_OE, RW20_LED_RED | RW20_LED_GREEN);
++	writel((red ? RW20_LED_RED : 0) | (green ? RW20_LED_GREEN : 0),
++	       RW20_GPIO6 + OMAP_GPIO_SETDATAOUT);
++	writel((red ? 0 : RW20_LED_RED) | (green ? 0 : RW20_LED_GREEN),
++	       RW20_GPIO6 + OMAP_GPIO_CLEARDATAOUT);
 +}
 +
 +int board_init(void)
 +{
-+	/* U-Boot proper started: backlight off (SPL drove it on) */
-+	rw20_gpio1_enable();
-+	writel(1 << 19, OMAP34XX_GPIO1_BASE + OMAP_GPIO_CLEARDATAOUT);
++	/* U-Boot proper runs: red off, green on (proper's s_init replayed the pads to mode 1) */
++	rw20_led(0, 1);
 +	gpmc_init();
 +	/* DT kernel with appended DTB ignores this; Overo lineage of the vendor build */
 +	gd->bd->bi_arch_number = MACH_TYPE_OVERO;
@@ -424,78 +458,6 @@ index 00000000..ad0b50d3
 +
 +
 +#ifdef CONFIG_XPL_BUILD
-+static void rw20_panel_on(void)
-+{
-+	rw20_gpio1_enable();
-+	writew(M4, OMAP34XX_CTRL_BASE + CP(ETK_D0_ES2));
-+	writew(M4, OMAP34XX_CTRL_BASE + CP(ETK_D1_ES2));
-+	writew(M4, OMAP34XX_CTRL_BASE + CP(ETK_D5_ES2));
-+	clrbits_le32(RW20_GPIO1 + OMAP_GPIO_OE, RW20_PANEL_BITS);
-+	writel(RW20_PANEL_BITS, RW20_GPIO1 + OMAP_GPIO_SETDATAOUT);
-+}
-+
-+/*
-+ * Boot-stage witness (no serial console needed): polled I2C1 writes to the
-+ * TWL4030 LED module (chip 0x4a, LEDEN 0xee, PWMAON/OFF 0xef/0xf0,
-+ * PWMBON/OFF 0xf1/0xf2; layout from drivers/pwm/pwm-twl-led.c: ON=1, PWM=bit4/5,
-+ * on-cycle == off-cycle == 1 means always on).
-+ * Stage 1: both LEDs on, called before SDRAM init.
-+ * Stage 2: after SDRAM init and a write/readback test, LEDB off if it passes.
-+ */
-+#define RW20_I2C1		0x48070000
-+#define I2C_REG(o)		(*(volatile u16 *)(RW20_I2C1 + (o)))
-+
-+static int rw20_i2c1_init(void)
-+{
-+	int t = 100000;
-+
-+	setbits_le32(0x48004A00, 1 << 15);	/* CM_FCLKEN1_CORE: EN_I2C1 */
-+	setbits_le32(0x48004A10, 1 << 15);	/* CM_ICLKEN1_CORE: EN_I2C1 */
-+	I2C_REG(0x24) = 0;			/* CON: disable */
-+	I2C_REG(0x20) = 2;			/* SYSC: soft reset */
-+	/* RDONE only sets while CON.EN is set (omap24xx_i2c.c, i2c-omap.c) */
-+	I2C_REG(0x24) = 0x8000;			/* CON: EN */
-+	while (!(I2C_REG(0x10) & 1) && --t)	/* SYSS: RDONE */
-+		;
-+	if (!t)
-+		return -1;
-+	I2C_REG(0x24) = 0;			/* CON: disable for PSC/SCL */
-+	I2C_REG(0x30) = 7;			/* PSC: 96 MHz / 8 = 12 MHz */
-+	I2C_REG(0x34) = 53;			/* SCLL: ~100 kHz */
-+	I2C_REG(0x38) = 55;			/* SCLH */
-+	I2C_REG(0x28) = 1;			/* OA0 */
-+	I2C_REG(0x24) = 0x8000;			/* CON: EN */
-+	return 0;
-+}
-+
-+static int rw20_i2c1_write(u8 chip, u8 reg, u8 val)
-+{
-+	int t = 100000;
-+
-+	I2C_REG(0x08) = 0xFFFF;			/* STAT: clear */
-+	I2C_REG(0x2C) = chip;			/* SA */
-+	I2C_REG(0x18) = 2;			/* CNT */
-+	I2C_REG(0x24) = 0x8603;			/* EN|MST|TRX|STP|STT */
-+	while (!(I2C_REG(0x08) & 0x10) && --t)	/* XRDY */
-+		;
-+	if (!t)
-+		return -1;
-+	I2C_REG(0x1C) = reg;
-+	I2C_REG(0x08) = 0x10;
-+	t = 100000;
-+	while (!(I2C_REG(0x08) & 0x10) && --t)
-+		;
-+	if (!t)
-+		return -1;
-+	I2C_REG(0x1C) = val;
-+	I2C_REG(0x08) = 0x10;
-+	t = 100000;
-+	while (!(I2C_REG(0x08) & 0x4) && --t)	/* ARDY */
-+		;
-+	I2C_REG(0x08) = 0xFFFF;
-+	return t ? 0 : -1;
-+}
-+
 +static int rw20_ram_ok(void)
 +{
 +	static const u32 addr[] = { 0x80300000, 0x84000000, 0x88000000,
@@ -517,20 +479,13 @@ index 00000000..ad0b50d3
 +	return ok;
 +}
 +
++/* stage 1: s_init (after pinmux replay and clocks), red on; stage 2: SDRAM ok, add green */
 +void rw20_witness(int stage)
 +{
-+	if (stage == 1) {
-+		rw20_panel_on();	/* before any I2C: backlight on = SPL reached board_init_f */
-+		if (rw20_i2c1_init())
-+			return;
-+		rw20_i2c1_write(0x4a, 0xef, 1);		/* PWMAON */
-+		rw20_i2c1_write(0x4a, 0xf0, 1);		/* PWMAOFF = ON: always on */
-+		rw20_i2c1_write(0x4a, 0xf1, 1);		/* PWMBON */
-+		rw20_i2c1_write(0x4a, 0xf2, 1);		/* PWMBOFF */
-+		rw20_i2c1_write(0x4a, 0xee, 0x33);	/* LEDEN: A,B on + PWM A,B */
-+	} else if (stage == 2 && rw20_ram_ok()) {
-+		rw20_i2c1_write(0x4a, 0xee, 0x11);	/* LEDB off, LEDA on */
-+	}
++	if (stage == 1)
++		rw20_led(1, 0);
++	else if (stage == 2 && rw20_ram_ok())
++		rw20_led(1, 1);
 +}
 +#endif
 +
@@ -545,10 +500,10 @@ index 00000000..ad0b50d3
 +}
 diff --git a/configs/rw20_defconfig b/configs/rw20_defconfig
 new file mode 100644
-index 00000000..d8be80e1
+index 00000000..18d2d330
 --- /dev/null
 +++ b/configs/rw20_defconfig
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,43 @@
 +CONFIG_ARM=y
 +CONFIG_ARCH_OMAP2PLUS=y
 +CONFIG_TEXT_BASE=0x80100000
@@ -558,6 +513,7 @@ index 00000000..d8be80e1
 +CONFIG_TARGET_RW20=y
 +CONFIG_SPL_SYS_MALLOC_F_LEN=0x400
 +CONFIG_SPL_BSS_START_ADDR=0x80000500
++CONFIG_SPL_TEXT_BASE=0x40200800
 +CONFIG_SPL=y
 +CONFIG_BOOTDELAY=1
 +CONFIG_BOOTCOMMAND="run rwboot"
@@ -593,7 +549,7 @@ index 00000000..d8be80e1
 +# CONFIG_SPL_NAND_SUPPORT is not set
 diff --git a/include/configs/rw20.h b/include/configs/rw20.h
 new file mode 100644
-index 00000000..42cf08ff
+index 00000000..37a17188
 --- /dev/null
 +++ b/include/configs/rw20.h
 @@ -0,0 +1,30 @@
@@ -619,7 +575,7 @@ index 00000000..42cf08ff
 +	"loadsysimage=fatload mmc ${mmcdev} ${loadaddr} uImage-system\0" \
 +	"loadfallback=fatload mmc ${mmcdev} ${loadaddr} uImage-fallback\0" \
 +	"sysboot=echo Booting from mmc ...; run sysargs; " \
-+		"i2c dev 0; i2c mw 0x4a 0xee 0x00; bootm ${loadaddr}\0" \
++		"mw.l 0x49058090 0x300000; bootm ${loadaddr}\0" \
 +	"rwboot=mmc dev ${mmcdev}; mmc rescan; " \
 +		"if run loadsysimage; then run sysboot; fi; " \
 +		"echo uImage-system failed, trying uImage-fallback; " \
