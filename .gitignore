@@ -556,12 +556,9 @@ tests/.sab-*
 .deploy.txt
 .tone.txt
 .b36_build*.txt
-.claude/settings.json.aesml
-.claude/settings.json.sdc
 
 # The operator's own priority list; personal, never tracked
 prio.lst
-.claude/settings.json.bedrock
 
 # commissioning/backup.sh output: per-unit state of a unit, INCLUDING SECRETS (VNC
 # password, SSH host keys). Never committed.
