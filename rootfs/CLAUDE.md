@@ -20,7 +20,11 @@ Everything that builds the **root filesystem we boot instead of the vendor's Yoc
 - **The root stays p6 and p1's boot files stay untouched** (`mlo`, `u-boot.bin`, `ctrlblock.bin`; `root=` is
   compiled into U-Boot): `SYSTEM_ANALYSIS.md#4-boot-chain-and-recovery`. Recovery is "reimage the card".
 - **Our links:** `rcS.d` `S01mountall` `S01seedrng` `S02alignment` `S03udev` `S04hostname` `S05sysctl`
-  `S06watchdog` `S07syslog` `S08networking`; `rc5.d` `S02dbus-1` `S09sshd` `S20hwclock.sh`.
+  `S04firstboot-hostname` `S06watchdog` `S07syslog` `S08networking`; `rc5.d` `S02dbus-1` `S09sshd` `S20hwclock.sh` `S30avahi-daemon`
+  (all linked by `rootfs/board/roomwizard/post-build.sh`). `/usr/sbin/set-hostname` is `commissioning/set-hostname.sh` installed under a
+  command name by the same script. **sshd generates an ed25519 host key only** (`overlay/etc/init.d/sshd`; `post-build.sh` removes the
+  RSA key and links ed25519 into p2): measured on `.188`, `ssh-keyscan` offers only `ssh-ed25519`, and the first-boot generation took
+  ~1 min with `seedrng: uninitialized urandom read` in dmesg before `crng init done` — the wait is entropy [inferred].
 
 - **Root's login shell is `/bin/bash`**, set by `rootfs/board/roomwizard/post-build.sh` (the Buildroot skeleton gives `/bin/sh`,
   BusyBox ash); the prompt comes from the overlay's `/etc/profile.d/prompt.sh`. Measured on `.188`.

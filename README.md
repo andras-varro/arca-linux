@@ -129,6 +129,13 @@ rules are in [lib/CLAUDE.md](lib/CLAUDE.md).
 
 `--from-bundle <tar.gz|dir>` is the same install with a local bundle instead of a download.
 
+### Getting SSH access to a generic card
+
+A card built with `--generic` carries no key and refuses SSH until the panel opens it. Measured on `.188`: on the Control Panel
+**SSH** page set a root password (on-screen keyboard), tap **ROOT LOGIN ALLOW**, then **KEY + PASSWORD**; from the PC run
+`ssh-copy-id root@<ip>` (password login, then key login both work). Then optionally tap **KEY ONLY** — not yet confirmed after
+`ssh-copy-id`; a first refusal was fixed and awaits a tap test.
+
 ### Developing on a unit — update, then deploy
 
 This is the build/deploy loop, and what you want while writing code. The unit already runs our own root

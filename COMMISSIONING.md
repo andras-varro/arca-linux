@@ -36,6 +36,23 @@ kernel modules from `kernel/build-modules.sh --out <dir>`; inputs, geometry and 
 the native WSL filesystem are in [`rootfs/CLAUDE.md`](rootfs/CLAUDE.md) and the script header. Write the
 finished image to the card from Windows.
 
+**A card with no unit state:** `rootfs/make-card-image.sh --generic` (see `--help`) reads no `state.tar`, refuses any SSH key
+material, and the unit names itself on first boot. Run as root, the module directory defaults to `~/rw-kmods` of the invoking user
+(`$SUDO_USER` under `sudo`); a root shell without `SUDO_USER` (`wsl.exe -u root`) looks in root's own home (read from the script, not run), so pass it. The recipe used on `.188`:
+
+```bash
+bash rootfs/build-rootfs.sh; bash release.sh --stage-only --skip-tests      # WSL, as the normal user
+rootfs/make-card-image.sh --generic --modules /home/z001x91h/rw-kmods --bundle build/release <partsdir> ~/br-rw-out/rootfs.tar <out.img>   # as root
+```
+
+⚠️ **After reflashing a card, remove the unit's old host key in both shells** (the keys live on p2, which an image creates empty, so
+the unit gets new ones; Git Bash and WSL keep separate `known_hosts`). A bundle-based update normally avoids reflashing.
+
+```bash
+ssh-keygen -R <ip>                                  # in Git Bash
+wsl.exe -e bash -lc "ssh-keygen -R <ip>"            # the same, in WSL
+```
+
 `--bundle` mounts p6, p2 and p3 as `<base>/{root,data,log}` and runs
 [`commissioning/commission-offline.sh`](commissioning/commission-offline.sh) over them. It asks nothing,
 cleans nothing and mounts nothing else: the boot scripts and links from

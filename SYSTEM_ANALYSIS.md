@@ -1640,6 +1640,9 @@ cannot go into a published image:** U-Boot is GPL-2.0, these builds are modified
 published, so a redistributor cannot offer the corresponding source. A card therefore takes them from
 the unit's own card (`rootfs/fetch-card-parts.sh`).
 
+Windows may add a `System Volume Information` directory to p1 when it writes a card. **It is ignored**: no boot stage reads it
+and nothing scripted writes p1 (`lib/CLAUDE.md`, *p1: nothing scripted writes it*).
+
 > **Gotcha — p6 is ext3, mounted by the ext4 driver.** U-Boot passes `rootfstype=ext4` and the ext4
 > driver happily mounts the ext3 filesystem. **Do not reformat it as ext4.** The converse also fails: `mke2fs -t ext3 -O none` makes a journal-less (ext2) filesystem that the kernel refuses as ext3 with `EINVAL`.
 

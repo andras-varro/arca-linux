@@ -143,16 +143,6 @@ residues:
 differ in more than the device, so the link is unproven. It needs a joint session (operator confirmed 2026-10-07): the operator replugs while ch6 is read. **Done when** an operator swaps pad and dongle back and forth on the port
 (reading `in_voltage6_input` after each swap, and once with the port empty) and the table says which condition, if any, moves it.
 
-### B63. Every reflash changes the host keys, and WSL keeps its own `known_hosts` — open, confirmed 2026-10-09
-
-`deploy-all.sh` run in WSL fails "REMOTE HOST IDENTIFICATION HAS CHANGED" after a reflash although Git Bash's entry was
-already removed; `ssh-keygen -R <ip>` is needed in **both** shells (measured again on the 2026-10-09 `--bundle` card).
-Cause, read in code: the keys live on p2 (`/home/root/data/ssh`, `overlay/etc/init.d/sshd`), which `lib/rw-state.sh`
-lists as backup-only and `RW_STATE_NEVER_IN_IMAGE` excludes, and an image creates p2 empty, so `sshd` generates new
-keys at first boot. Carrying them in `state.tar` needs that exclusion narrowed for `data/ssh` on a per-unit card (the
-per-unit identity ruling allows it); a generic image has no keys to carry. **Done when** a reflash of a known unit needs no
-`known_hosts` edit in either shell, or the scripts say which shell needs it.
-
 ## Features
 
 Userspace except F101, which is the image build.
@@ -259,9 +249,10 @@ a yes to both.
 
 ### F137. Users other than root — open, operator wish 2026-10-09, not designed
 
-The operator wants root not to be the default user on our root filesystem. Open question to the operator: login only
-(a non-root SSH account, apps stay root), or apps run as a non-root user too (which touches `/dev/fb0`, `/dev/input`,
-`/dev/dsp`, `/dev/watchdog` and the `roomwizard-app` respawn loop). **Done when** the operator has answered and the chosen shape is built.
+The operator wants root not to be the default user on our root filesystem. Operator's answer, 2026-10-10: a normal user and
+root; normal operation runs as the user; a change such as the SSH settings needs root (type the root password) and then runs as
+root, like `sudo`. That touches `/dev/fb0`, `/dev/input`, `/dev/dsp`, `/dev/watchdog` and the `roomwizard-app` respawn loop. If it
+is too much effort it goes last. **Done when** it is designed together with the operator and built.
 
 ### F140. A generic "flash and go" base card image — open, operator wish 2026-10-09, design settled 2026-10-09
 
@@ -291,13 +282,13 @@ panel's SSH page opens it, and the README's key procedure then works.
 
 State 2026-10-11: the code is in, built with `make-card-image.sh --generic`. **Measured on `.188` with that card:** first boot
 names it `arca-xxxx`, the banner shows until calibration, SSH is refused, then set password → root login allow →
-Key + password → password login → `ssh-copy-id` → key login all work; rename and pad/keyboard focus work. **Open:** (1) KEY ONLY
-was refused "NO AUTHORIZED KEY" after `ssh-copy-id` although the perms are right (755/700/600, root) — inferred cause: the
-page read its state only on entry; each tap now re-reads it (`ssh_page.c` `ask_mode`/`ask_root`), not yet deployed. (2) Off +
-reboot untested. (3) Drop the RSA host key (operator, 2026-10-11): `etc/init.d/sshd` generates ed25519 and rsa; ed25519
-alone took ~1 min on first boot — dmesg shows `seedrng: uninitialized urandom read` before `crng init done`, so the wait
-is entropy, not compute [inferred]; low priority, once per card. (4) Docs: README key procedure, `rootfs/CLAUDE.md` (avahi
-link now in the image, new rc links), `COMMISSIONING.md` *Image a card* (`--generic`, which needs `--modules` when run as root).
+Key + password → password login → `ssh-copy-id` → key login all work; rename and pad/keyboard focus work. sshd is ed25519-only
+now: on `.188` it restarted with that config and `ssh-keyscan` offers only `ssh-ed25519`. **Open:** (1) KEY ONLY was refused
+"NO AUTHORIZED KEY" after `ssh-copy-id` although the perms are right (755/700/600, root) — inferred cause: the page read its
+state only on entry; each tap now re-reads it (`ssh_page.c` `ask_mode`/`ask_root`), **deployed to `.188` 2026-10-11, waiting
+for the operator's tap test**. (2) Off + reboot untested.
+Operator checklist, on `.188`: Control Panel → SSH → tap KEY ONLY (must be accepted); tap OFF, reboot, `ssh root@192.168.50.188`
+must be refused (port closed); tap KEY ONLY again, key login works.
 
 ### F143. A status line across the top of the screen — open, operator idea 2026-10-09, future
 
@@ -307,7 +298,8 @@ on the software renderer. **Done when** the launcher shows it and a tap on a mes
 
 ### F144. Our own SPL + U-Boot on p1, so a card carries nothing from Steelcase — open, operator wish 2026-10-09, planned
 
-Replaces the vendor `mlo` and `u-boot.bin` (`SYSTEM_ANALYSIS.md` §4.2: modified GPL, no source, cannot be published) with
+Replaces the vendor `mlo` and `u-boot.bin` — ⚠️ mainline's SPL loads **`u-boot.img`** (legacy uImage, 0x80100000) from FAT p1, not
+`u-boot.bin` (`SYSTEM_ANALYSIS.md` §4.2: modified GPL, no source, cannot be published) with
 mainline U-Boot built here: a new board `rw20` modelled on `igep00x0`/`devkit8000`, SDRC programmed with the live values
 (§4.1), a boot script that loads `uImage-system` from FAT p1 with the vendor's bootargs; `ctrlblock.bin`, the duplicate U-Boot copy and
 the bootstrap pair are dropped. The NAND redirector is never touched, and a bad `MLO` costs a card swap. Plan (10 steps, risks,
@@ -320,9 +312,19 @@ plus a MAX3232 breakout (P4 → MAX3232 → TTL↔USB), not yet wired; the first
 stays (a window to stop at the serial prompt); the prompt is `arca #`, never `rw20 #`; the fallback kernel is
 `uImage-fallback`. No `devmem` dump of a 2017-build unit: which unit runs it is unknown, and its original card has no SSH.
 A U-Boot splash of the Arca logo is possible (`drivers/video/omap3_dss.c` is in v2026.10, but no board uses it) and comes
-after F101's kernel boot-logo row. **Done when** a card
-with our own `MLO` + `u-boot.bin` boots our kernel on two units with the register-dump diff empty, and F140's image
+after F101's kernel boot-logo row. **Host-side state 2026-10-10:** mainline U-Boot v2026.10 board `rw20` is built in WSL under
+`/home/z001x91h/rw-uboot/` (`rw20-board.patch`, `BUILD.md`, `out/MLO` 47112 B, `out/u-boot.img` 406360 B), zero `sdiv`/`udiv`;
+it refuses GCC 9, so it needs `gcc-10-arm-linux-gnueabihf` (installed). Not yet booted. Biggest blind-boot risk: the SPL text base
+0x40200000 (mainline) against the vendor's 0x40200800. **Done when** a card
+with our own `MLO` + `u-boot.img` boots our kernel on two units with the register-dump diff empty, and F140's image
 carries them.
+
+### F145. Update a unit from a bundle — open, operator request 2026-10-10, not designed
+
+Two package kinds: a ready-to-use image (`.img`, F140) and a bundle update. The bundle update installs only what changed
+(per component), and the upstream it fetches from is configurable (today `deploy-all.sh --from-release` fixes one). A bundle-based
+update normally avoids reflashing, so the unit keeps its host keys. **Done when** a unit updates from a bundle with only the changed
+components installed, from a configured upstream.
 
 ### F141. A log viewer page in the Control Panel — open, operator request 2026-10-09, future
 
@@ -442,16 +444,12 @@ on a line that also carries a key-binding marker (`Ctrl+`, `Alt+`, `Shift+`), or
 key table, is not a citation. ⚠️ Needs a control in both directions — a real bare citation must still fire,
 and it must fire in a file of the same kind, or the scan goes blind where it used to see.
 
-### C19. Windows leaves "System Volume Information" on p1 — open, harmless
+### D18. A published card image does not yet meet its source offer — open, measured 2026-10-10
 
-Windows writes it onto p1 when the card is written; p1 is meant to hold the boot files only. **Done when** a later step
-deletes it, or a note records that it is ignored.
-
-### D17. `LICENSE.md` overhaul — open, operator ruling 2026-09-29
-
-Our GPL kernel and modules ship (source-offer duty), the glibc row names only `gnueabihf`, and the obligation column is
-unreviewed; Buildroot's `legal-info` gives the package manifest. **Done when** every shipped package has a
-licence row and the source-offer duty is stated.
+`LICENSE.md` (*Gaps*) states three holes. No `legal-info` tarball or source offer ships with a card image or rootfs tarball.
+The kernel's base `.config` (`usb_host/device_config`, the unit's `/proc/config.gz`) is gitignored, so the build scripts are incomplete
+for anyone without it. `make legal-info` aborts on the custom 4.14 `linux-headers` (no hash entry), so it has never run to completion.
+The vendor p1 files are F144's, not repeated here. **Done when** a published card image comes with its source offer met.
 
 ---
 
