@@ -268,7 +268,7 @@ Replaces the vendor `mlo` and `u-boot.bin` — ⚠️ mainline's SPL loads **`u-
 `u-boot.bin` (`SYSTEM_ANALYSIS.md` §4.2: modified GPL, no source, cannot be published) with
 mainline U-Boot built here: a new board `rw20` modelled on `igep00x0`/`devkit8000`, SDRC programmed with the live values
 (§4.1), a boot script that loads `uImage-system` from FAT p1 with the vendor's bootargs; `ctrlblock.bin`, the duplicate U-Boot copy and
-the bootstrap pair are dropped. The NAND redirector is never touched, and a bad `MLO` costs a card swap. Plan (10 steps, risks,
+the bootstrap pair are dropped. The NAND redirector stays (a bad one needs JTAG); a bad `MLO` costs a card-reader edit. Plan (10 steps, risks,
 the register dump): `~/.claude/plans/own-p1-uboot-plan.md`. Biggest risk: pinmux or PMIC settings only the vendor bootloader
 makes — the kernel boots with a dead panel, touch or USB; the plan replays the live pin configuration, calls
 `twl4030_power_init()` and requires an empty register-dump diff after boot. **The first card test needs the `P4` serial

@@ -47,20 +47,22 @@ SysVinit, booting from a removable microSD card and powered over Ethernet. **No 
 all rendering is software. There is no local app to run: everything is cross-compiled on a host and
 deployed over SSH.
 
-### The rules that prevent a brick
+### What a boot-path write costs to undo
 
-Five rules. Observe them and there is no failure mode this device cannot recover from by itself.
+Every write here is allowed; what differs is the price of getting it wrong. Know it before the write.
 
-1. **Never write `/dev/mtd*`.** The 12 KB NAND redirector in `mtd0` is the only irreplaceable
-   non-SD component on the device, and the only thing that would make JTAG necessary.
-2. **Never overwrite `mlo`, `u-boot.bin`, `u-boot-sd.bin` or `ctrlblock.bin`** on boot partition 1.
-3. **Leave `uImage-system` alone.** Stage experimental kernels under a *different* filename.
-   `bootcmd` is hardcoded to `uImage-system`, so a power cycle is a free undo.
-4. **Keep a known-good SD image.** It is the entire failure surface and the entire recovery story.
-5. **Feed the watchdog.** Any app owning the screen for long periods must keep `/dev/watchdog`
-   fed (60 s) or the device hard-resets.
+1. **`/dev/mtd*`** — the 12 KB NAND redirector in `mtd0` is the only non-SD part of the boot path, and a bad
+   one is undone only by JTAG. Dump it (`cat /dev/mtd0`, read-only) before any write; reading is free.
+2. **`mlo`, `u-boot.bin`, `u-boot-sd.bin`, `ctrlblock.bin` on p1** — a bad one leaves the unit dark, undone
+   by editing p1 in a card reader (measured 2026-10-11: four failed `mlo`s on `.188`, each restored by
+   renaming the vendor copy back). Keep the vendor file beside the replacement under a new name.
+3. **`uImage-system`** — `bootcmd` is hardcoded to it; stage an experimental kernel under another name and a
+   power cycle is a free undo.
+4. **A known-good SD image** is the entire recovery story for everything except item 1.
+5. **The watchdog**: an app owning the screen for long must keep `/dev/watchdog` fed (60 s) or the device
+   hard-resets.
 
-Follow these and the worst case is a card reflash. Full detail:
+Full detail:
 [Boot chain and recovery](#4-boot-chain-and-recovery).
 
 ### Physical safety
@@ -1837,9 +1839,9 @@ run sysargs; bootm 0x82000000`. If it panics, power-cycle and do **not** interru
 untouched `uImage-system` and nothing has changed state. Promote only after several clean boots, keeping
 the old image under another name.
 
-> **JTAG is required only if you damage the 12 KB NAND redirector (`mtd0`) or write a bad
-> `mlo`/`u-boot.bin` to p1.** Observe the rules in [§1](#the-rules-that-prevent-a-brick) and it
-> never comes up. `P3` is a TI-14 JTAG header **[inferred]** if it ever does.
+> **JTAG is required only if you damage the 12 KB NAND redirector (`mtd0`)** — a bad `mlo`/`u-boot.bin`
+> on p1 is undone in a card reader ([§1](#what-a-boot-path-write-costs-to-undo)). `P3` is a TI-14 JTAG header
+> **[inferred]** if it ever does.
 
 **Logs** live in `/var/log/` (system), `/home/root/log/` (application),
 `/var/log/browser.{out,err}` and `/var/log/jettystart`.

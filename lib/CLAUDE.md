@@ -87,8 +87,8 @@ Measurements: `SYSTEM_ANALYSIS.md#42-partitions`. Reasoning: `COMMISSIONING.md` 
 There is **no boot-time MD5 check** of the kernel and no signing — the only gate on `uImage-system` is
 its uImage header + data CRC, which `mkimage` writes when `kernel/build-image.sh` packages our image.
 U-Boot has no `saveenv`, so the environment cannot be persisted or corrupted.
-
-**Rules:** never write `/dev/mtd*`; **never** overwrite `mlo`, `u-boot.bin` or `ctrlblock.bin` on p1;
+**No script here writes `/dev/mtd*`, `mlo`, `u-boot.bin` or `ctrlblock.bin`** — a scripted write lands on every unit it
+runs on; by hand, each is allowed, and its undo cost is `SYSTEM_ANALYSIS.md#what-a-boot-path-write-costs-to-undo`.
 stage experimental kernels under a *new* filename.
 
 **Only our own kernel image is supported**, and no library or script here writes `uImage-system`:

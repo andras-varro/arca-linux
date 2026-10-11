@@ -298,8 +298,9 @@ tool-level traps rather than device facts, and each has cost real time.
   other. The hardware is permanently mono. `SYSTEM_ANALYSIS.md#34-audio`.
 - **32-bit ARM:** `sizeof(long) == 4`. Never do `(now.tv_sec - 0) * 1000000L` — it overflows. Baseline
   timers to current time, not epoch 0.
-- **Firmware / boot edits.** Never write `/dev/mtd*`; **never** overwrite `mlo`, `u-boot.bin` or
-  `ctrlblock.bin` on p1; stage experimental kernels under a *new* filename. **Only our own kernel image
+- **Firmware / boot edits — you are root, and every write is allowed; know what each costs to undo.** A
+  bad `mtd0` needs JTAG (dump it first); a bad p1 file needs a card reader (keep the vendor copy beside
+  it); a kernel staged under a *new* filename is a free undo. Table: `SYSTEM_ANALYSIS.md#what-a-boot-path-write-costs-to-undo`. **Only our own kernel image
   is supported**, and nothing scripted writes `uImage-system`: installing it is a manual operator step
   (`kernel/README.md`), and the p1 rules are in `lib/CLAUDE.md`. The vendor-kernel byte-patch path is
   deleted; tag `last-vendor-kernel` is the last tree that ran on the vendor kernel, and `last-vendor-rootfs` the last that can commission the vendor root filesystem. Recovery:

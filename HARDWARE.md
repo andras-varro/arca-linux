@@ -221,9 +221,9 @@ corroborated by this board's own continuity above — pins 14/13/15/16 all land 
 
 Vref on 5 with grounds on 4/8/10 plus the key at 6 is not an arrangement anything else uses. Pin 12 is
 the loose end — a no-connect on this board, or a missed probe. The remaining pins (TMS, nTRST, TDI, TDO,
-RTCK, TCK, EMU0, EMU1) read open against `U27` because they run to the SoC. Not actionable — the brick
-rules in [SYSTEM_ANALYSIS.md §1](SYSTEM_ANALYSIS.md#the-rules-that-prevent-a-brick) exist so that JTAG is
-never needed — but don't mistake it for a second serial port.
+RTCK, TCK, EMU0, EMU1) read open against `U27` because they run to the SoC. Not actionable — the
+boot-path costs in [SYSTEM_ANALYSIS.md §1](SYSTEM_ANALYSIS.md#what-a-boot-path-write-costs-to-undo) mean JTAG is
+needed only for `mtd0` — but don't mistake it for a second serial port.
 
 **Test points: `TP1`–`TP59`**, individually labelled and probe-sized, over the whole top side. Dense
 clusters at `TP19`–`TP31` (around the SD socket), `TP13`–`TP18` (mid-board), `TP34`–`TP36` and a long run
