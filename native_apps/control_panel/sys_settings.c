@@ -211,6 +211,23 @@ const char *sys_ssh_refuse(SshMode mode, SshRootLogin root, bool has_key, bool h
     return NULL;
 }
 
+/* A lockout only counts when it takes access away.  A fresh card starts at Key only with
+ * no key, which sys_ssh_refuse() already calls locked out, so judging the target alone
+ * refused every way out of it (root login first: "no key"; Key + password first: "root
+ * login is key only").  When the current state gives no SSH access (Off, or locked out),
+ * a change cannot make it worse, and only the password and parse rules apply. */
+const char *sys_ssh_refuse_change(SshMode cur_mode, SshRootLogin cur_root,
+                                  SshMode mode, SshRootLogin root,
+                                  bool has_key, bool has_password) {
+    const char *why = sys_ssh_refuse(mode, root, has_key, has_password);
+    if (why == NULL || mode == SSH_MODE_UNKNOWN || root == SSH_ROOT_UNKNOWN) return why;
+    if (root == SSH_ROOT_PASSWORD && !has_password) return why;
+    if (mode == SSH_MODE_PASSWORD && !has_password) return why;
+    bool cur_open = cur_mode != SSH_MODE_OFF && cur_mode != SSH_MODE_UNKNOWN &&
+                    sys_ssh_refuse(cur_mode, cur_root, has_key, has_password) == NULL;
+    return cur_open ? why : NULL;
+}
+
 /* ── The root shadow line ───────────────────────────────────────────────── */
 
 /* The root line of shadow text: its start, and the span of its password field

@@ -74,6 +74,11 @@ int sys_ssh_set_password_auth(const char *text, bool password_yes,
  * (a key, or root login yes); root login yes needs a password; UNKNOWN is never
  * written; OFF needs nothing. */
 const char *sys_ssh_refuse(SshMode mode, SshRootLogin root, bool has_key, bool has_password);
+/* The guard a panel tap uses: as sys_ssh_refuse() on the target, except that a lockout
+ * is not refused when the current state already gives no SSH access. */
+const char *sys_ssh_refuse_change(SshMode cur_mode, SshRootLogin cur_root,
+                                  SshMode mode, SshRootLogin root,
+                                  bool has_key, bool has_password);
 
 /* True when authorized_keys text holds at least one plausible public-key
  * line: not blank, not '#', with a key-type token (ssh-*, ecdsa-sha2-*, sk-*)

@@ -6,7 +6,9 @@ PIDFILE=/run/messagebus.pid
 case "$1" in
     start)
         [ -x "$DAEMON" ] || exit 0
-        mkdir -p /var/run/dbus /var/lib/dbus
+        # /var/lib/dbus is a link to /tmp/dbus, and /tmp is on a tmpfs that starts empty;
+        # mkdir -p will not create a link's missing target, so name the target.
+        mkdir -p /var/run/dbus /tmp/dbus
         chown dbus:dbus /var/run/dbus
         dbus-uuidgen --ensure
         start-stop-daemon -S -q -p "$PIDFILE" -x "$DAEMON" -- --system

@@ -237,6 +237,27 @@ int main(void) {
         CHECK(sys_ssh_refuse(SSH_MODE_UNKNOWN, SSH_ROOT_KEY, true, true) != NULL, "I13 unknown mode refused");
         const char *why = sys_ssh_refuse(SSH_MODE_KEY_ONLY, SSH_ROOT_KEY, false, false);
         CHECK(why && strlen(why) > 0 && strlen(why) < 60, "I14 reason fits a status line");
+
+        /* the fresh card: Key only, root key-only, no key, password just set */
+        CHECK(sys_ssh_refuse_change(SSH_MODE_KEY_ONLY, SSH_ROOT_KEY, SSH_MODE_KEY_ONLY, SSH_ROOT_PASSWORD,
+                                    false, true) == NULL, "I15 fresh card: root login allow is a way out");
+        CHECK(sys_ssh_refuse_change(SSH_MODE_KEY_ONLY, SSH_ROOT_KEY, SSH_MODE_PASSWORD, SSH_ROOT_KEY,
+                                    false, true) == NULL, "I16 fresh card: key + password is a way out");
+        CHECK(sys_ssh_refuse_change(SSH_MODE_KEY_ONLY, SSH_ROOT_PASSWORD, SSH_MODE_PASSWORD, SSH_ROOT_PASSWORD,
+                                    false, true) == NULL, "I17 then key + password opens it");
+        CHECK(sys_ssh_refuse_change(SSH_MODE_KEY_ONLY, SSH_ROOT_KEY, SSH_MODE_PASSWORD, SSH_ROOT_KEY,
+                                    false, false) != NULL, "I18 fresh card, no password: key + password still refused");
+        CHECK(sys_ssh_refuse_change(SSH_MODE_KEY_ONLY, SSH_ROOT_KEY, SSH_MODE_KEY_ONLY, SSH_ROOT_PASSWORD,
+                                    false, false) != NULL, "I19 fresh card, no password: root login allow still refused");
+        /* control: from an open state the lockout still bites */
+        CHECK(sys_ssh_refuse_change(SSH_MODE_PASSWORD, SSH_ROOT_PASSWORD, SSH_MODE_PASSWORD, SSH_ROOT_KEY,
+                                    false, true) != NULL, "I20 open by password, no key: root key-only refused");
+        CHECK(sys_ssh_refuse_change(SSH_MODE_PASSWORD, SSH_ROOT_PASSWORD, SSH_MODE_KEY_ONLY, SSH_ROOT_PASSWORD,
+                                    false, true) != NULL, "I21 open by password, no key: key only refused");
+        CHECK(sys_ssh_refuse_change(SSH_MODE_OFF, SSH_ROOT_KEY, SSH_MODE_KEY_ONLY, SSH_ROOT_KEY,
+                                    false, false) == NULL, "I22 off to key only with no key: no worse than off");
+        CHECK(sys_ssh_refuse_change(SSH_MODE_KEY_ONLY, SSH_ROOT_KEY, SSH_MODE_UNKNOWN, SSH_ROOT_KEY,
+                                    false, true) != NULL, "I23 unknown target refused from a locked state");
     }
 
     /* J  the shadow file and the hash */

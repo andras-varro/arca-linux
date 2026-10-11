@@ -21,7 +21,7 @@
  *   HOST NAME   typed on the keyboard, confirmed, then applied at once by
  *               /usr/sbin/set-hostname, whose one-line stderr is shown on refusal.
  *
- * Every change is confirmed and passes sys_ssh_refuse() first (the lockout guard:
+ * Every change is confirmed and passes sys_ssh_refuse_change() first (the lockout guard:
  * a key mode needs a plausible authorized key, a password mode or root login yes
  * needs a password).  sshd_config is written as sshd_config.new, fsynced, checked
  * with `sshd -t -f`, then renamed over the original.
@@ -447,7 +447,8 @@ static void ask_mode(SshMode target) {
     if (target == mode) { cp_status("ALREADY SET", true); return; }
     /* a root login sshd refuses outright (PermitRootLogin no) is judged as key only */
     SshRootLogin r = root == SSH_ROOT_UNKNOWN ? SSH_ROOT_KEY : root;
-    const char *why = target == SSH_MODE_OFF ? NULL : sys_ssh_refuse(target, r, has_key, has_pw);
+    const char *why = target == SSH_MODE_OFF ? NULL
+                    : sys_ssh_refuse_change(mode, r, target, r, has_key, has_pw);
     if (why) {
         char msg[64];
         snprintf(msg, sizeof(msg), "REFUSED: %s", why);
@@ -470,7 +471,8 @@ static void ask_root(void) {
     /* judged against the mode in force; OFF or an unreadable mode only has the
      * root-login rule to meet, the mode's own is met when it is chosen */
     SshMode m = (mode == SSH_MODE_UNKNOWN) ? SSH_MODE_OFF : mode;
-    const char *why = sys_ssh_refuse(m, target, has_key, has_pw);
+    SshRootLogin r = root == SSH_ROOT_UNKNOWN ? SSH_ROOT_KEY : root;
+    const char *why = sys_ssh_refuse_change(mode, r, m, target, has_key, has_pw);
     if (why) {
         char msg[64];
         snprintf(msg, sizeof(msg), "REFUSED: %s", why);
