@@ -353,10 +353,10 @@ index 00000000..f0d79279
 +};
 diff --git a/board/steelcase/rw20/rw20.c b/board/steelcase/rw20/rw20.c
 new file mode 100644
-index 00000000..185f66e7
+index 00000000..c34be498
 --- /dev/null
 +++ b/board/steelcase/rw20/rw20.c
-@@ -0,0 +1,160 @@
+@@ -0,0 +1,178 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/*
 + * Steelcase RoomWizard (OMAP3503, TWL4030, 256 MB DDR on CS0).
@@ -390,10 +390,7 @@ index 00000000..185f66e7
 + * +0x90, SETDATAOUT +0x94). Clocks: CM_FCLKEN_PER 0x48005000 / CM_ICLKEN_PER
 + * 0x48005010 bit 17 (EN_GPIO6; PRCM_BASE 0x48004000 + struct prcm 0x1000 /
 + * 0x1010). Needs no I2C, no SDRAM, no serial.
-+ * Readings (uboot/BUILD.md, "Witness build"): stays yellow = SPL stuck before its
-+ * jump hook; yellow then dark = SPL reported failure (hang()); green only = SPL
-+ * jumped, U-Boot proper never reached its first witness; red only (after green)
-+ * = U-Boot proper running, stuck before bootm; dark after red = kernel handed off.
++ * Stages and the reading table: uboot/BUILD.md, "Witness build".
 + */
 +#define RW20_GPIO6		OMAP34XX_GPIO6_BASE
 +#define RW20_LED_RED		(1 << 20)
@@ -418,8 +415,11 @@ index 00000000..185f66e7
 +	       RW20_GPIO6 + OMAP_GPIO_CLEARDATAOUT);
 +}
 +
++void rw20_witness(int stage);
++
 +int board_init(void)
 +{
++	rw20_witness(4);
 +	gpmc_init();
 +	/* DT kernel with appended DTB ignores this; Overo lineage of the vendor build */
 +	gd->bd->bi_arch_number = MACH_TYPE_OVERO;
@@ -433,6 +433,15 @@ index 00000000..185f66e7
 +	omap_die_id_display();
 +	return 0;
 +}
++
++#ifndef CONFIG_XPL_BUILD
++/* Last init hook before the main loop (autoboot): green only. */
++int board_late_init(void)
++{
++	rw20_witness(5);
++	return 0;
++}
++#endif
 +
 +/* Replay of the live padconf (32-bit writes, two pads per word). */
 +void set_muxconf_regs(void)
@@ -501,10 +510,19 @@ index 00000000..185f66e7
 +		rw20_led(0, 0);
 +}
 +#else
++/*
++ * U-Boot proper: 1 = end of s_init: red only. 4 = board_init(), after relocation
++ * and DM: red + green. 5 = board_late_init(): green only. The bootcmd script
++ * takes over after that (include/configs/rw20.h).
++ */
 +void rw20_witness(int stage)
 +{
 +	if (stage == 1)
 +		rw20_led(1, 0);
++	else if (stage == 4)
++		rw20_led(1, 1);
++	else if (stage == 5)
++		rw20_led(0, 1);
 +}
 +#endif
 +
@@ -519,10 +537,10 @@ index 00000000..185f66e7
 +}
 diff --git a/configs/rw20_defconfig b/configs/rw20_defconfig
 new file mode 100644
-index 00000000..02076b9c
+index 00000000..9857213d
 --- /dev/null
 +++ b/configs/rw20_defconfig
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,48 @@
 +CONFIG_ARM=y
 +CONFIG_ARCH_OMAP2PLUS=y
 +CONFIG_TEXT_BASE=0x80100000
@@ -535,9 +553,11 @@ index 00000000..02076b9c
 +CONFIG_SPL_TEXT_BASE=0x40200800
 +CONFIG_SPL=y
 +CONFIG_BOOTDELAY=1
++CONFIG_USE_BOOTCOMMAND=y
 +CONFIG_BOOTCOMMAND="run rwboot"
 +CONFIG_SYS_PROMPT="arca # "
 +CONFIG_SYS_CONSOLE_INFO_QUIET=y
++CONFIG_BOARD_LATE_INIT=y
 +CONFIG_SPL_SYS_MALLOC_SIMPLE=y
 +CONFIG_SPL_SYS_MALLOC=y
 +CONFIG_SPL_HAS_CUSTOM_MALLOC_START=y
@@ -571,10 +591,10 @@ index 00000000..02076b9c
 +# CONFIG_SPL_NAND_SUPPORT is not set
 diff --git a/include/configs/rw20.h b/include/configs/rw20.h
 new file mode 100644
-index 00000000..37a17188
+index 00000000..e624f13c
 --- /dev/null
 +++ b/include/configs/rw20.h
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,48 @@
 +/* SPDX-License-Identifier: GPL-2.0+ */
 +/* Configuration for the Steelcase RoomWizard (rw20) */
 +
@@ -583,6 +603,11 @@ index 00000000..37a17188
 +
 +#include <configs/ti_omap3_common.h>
 +
++/*
++ * The led* variables drive the two side LEDs through GPIO6 (SETDATAOUT 0x49058094,
++ * CLEARDATAOUT 0x49058090; bit 20 red, bit 21 green) with mw.l; the xN variables
++ * flash three times and end lit. Reading table: uboot/BUILD.md, "Witness build".
++ */
 +#define CFG_EXTRA_ENV_SETTINGS \
 +	DEFAULT_LINUX_BOOT_ENV \
 +	"console=ttyO1,115200n8\0" \
@@ -596,13 +621,26 @@ index 00000000..37a17188
 +		"mpurate=${mpurate} root=${sysroot} rootfstype=${sysrootfstype}\0" \
 +	"loadsysimage=fatload mmc ${mmcdev} ${loadaddr} uImage-system\0" \
 +	"loadfallback=fatload mmc ${mmcdev} ${loadaddr} uImage-fallback\0" \
-+	"sysboot=echo Booting from mmc ...; run sysargs; " \
-+		"mw.l 0x49058090 0x300000; bootm ${loadaddr}\0" \
-+	"rwboot=mmc dev ${mmcdev}; mmc rescan; " \
-+		"if run loadsysimage; then run sysboot; fi; " \
-+		"echo uImage-system failed, trying uImage-fallback; " \
-+		"if run loadfallback; then run sysboot; fi; " \
-+		"echo no bootable kernel\0"
++	"ledoff=mw.l 0x49058090 0x300000\0" \
++	"ledred=mw.l 0x49058094 0x100000; mw.l 0x49058090 0x200000\0" \
++	"ledgreen=mw.l 0x49058094 0x200000; mw.l 0x49058090 0x100000\0" \
++	"ledyellow=mw.l 0x49058094 0x300000\0" \
++	"redx3=run ledoff; sleep 0.2; run ledred; sleep 0.2; run ledoff; " \
++		"sleep 0.2; run ledred; sleep 0.2; run ledoff; sleep 0.2; " \
++		"run ledred\0" \
++	"greenx3=run ledoff; sleep 0.2; run ledgreen; sleep 0.2; run ledoff; " \
++		"sleep 0.2; run ledgreen; sleep 0.2; run ledoff; sleep 0.2; " \
++		"run ledgreen\0" \
++	"yellowx3=run ledoff; sleep 0.2; run ledyellow; sleep 0.2; run ledoff; " \
++		"sleep 0.2; run ledyellow; sleep 0.2; run ledoff; sleep 0.2; " \
++		"run ledyellow\0" \
++	"sysboot=echo Booting from mmc ...; run sysargs; run greenx3; " \
++		"bootm ${loadaddr}\0" \
++	"rwboot=mmc dev ${mmcdev}; mmc rescan; run ledoff; " \
++		"if run loadsysimage; then run redx3; run sysboot; fi; " \
++		"echo uImage-system failed, trying uImage-fallback; run ledoff; " \
++		"if run loadfallback; then run redx3; run sysboot; fi; " \
++		"echo no bootable kernel; run yellowx3\0"
 +
 +#endif /* __CONFIG_H */
 diff --git a/lib/hang.c b/lib/hang.c

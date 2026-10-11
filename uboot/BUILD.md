@@ -11,7 +11,7 @@ pristine export) adds board `rw20` (`board/steelcase/rw20/`, `configs/rw20_defco
     export PATH=$W/tc/bin:$PATH
     make -C $W/u-boot rw20_defconfig O=../build
     make -C $W/u-boot O=../build -j8 CROSS_COMPILE=arm-linux-gnueabihf-
-Outputs: MLO (49416 B), u-boot.img (420800 B), u-boot-spl.bin, .config. Build outputs are not committed.
+Outputs: MLO (49416 B), u-boot.img (421544 B), u-boot-spl.bin, .config. Build outputs are not committed.
 
 ## Which file the SPL loads
 SPL (CONFIG_SPL_FS_FAT, SPL_MMC) mounts FAT partition 1 and reads u-boot.img (CONFIG_SPL_FS_LOAD_PAYLOAD_NAME), a legacy
@@ -27,6 +27,9 @@ Partition 1 is an MBR partition: the defconfig must carry `CONFIG_DOS_PARTITION`
 - Console UART2 (stdout-path=&uart2, SPL and U-Boot, DM serial). Pads 0x216C-0x2172 come from the dump (mode 1).
 - Env/bootargs: `SYSTEM_ANALYSIS.md` 4.4 sysargs verbatim; bootdelay=1; loadaddr 0x82000000; ATAG trio; prompt "arca # ".
 - bootcmd = run rwboot: mmc dev/rescan; fatload uImage-system && sysboot; else fatload uImage-fallback && sysboot. ENV_IS_NOWHERE.
+  `CONFIG_BOOTCOMMAND` is compiled in only with `CONFIG_USE_BOOTCOMMAND=y` (the defconfig carries both): with the string alone, `.config` drops it
+  and the default env has no `bootcmd` at all [measured: no `bootcmd=` in the `u-boot.bin` of the build before this fix], so autoboot ends at the prompt.
+  The needed commands are all on: CMD_BOOTM + LEGACY_IMAGE_FORMAT, CMD_FAT, CMD_MMC, CMD_MEMORY (`mw.l`), CMD_SLEEP (fractional), CMD_RUN, HUSH_PARSER, ATAG trio.
 - twl4030_power_init() in misc_init_r (full U-Boot only); twl4030_power_mmc_init(0) via board_mmc_power_init (VMMC1 3.15 V).
 
 ## Assumptions (inferred)
@@ -52,11 +55,25 @@ SPL_TEXT_BASE is 0x40200800 (the vendor's load address; `CONFIG_SPL_TEXT_BASE` i
 - Stages: 1 = end of `s_init`, in the SPL and again in U-Boot proper (after the padconf replay, prcm_init and per_clocks_enable, before the C runtime):
   red only. 2 = SPL `board_init_f` after omap3_mem_init(), only if a write/readback of 8 words at 0x80300000/0x84000000/0x88000000/0x8FF00000 passes:
   red + green. 3 = SPL `spl_board_prepare_for_boot()` (the last hook in `board_init_r`, directly before `jump_to_image`): green only.
-  9 = SPL `hang()` (every SPL failure path ends there; hook placed before its `puts`): both off. 4 = `sysboot` env, right before `bootm`:
-  `mw.l 0x49058090 0x300000` (CLEARDATAOUT bits 20, 21; `CONFIG_CMD_GPIO` is off, `CMD_MEMORY` on): both off. U-Boot proper's `board_init()` sets nothing.
+  9 = SPL `hang()` (every SPL failure path ends there; hook placed before its `puts`): both off.
+  U-Boot proper: 4 = `board_init()` (after relocation and DM; first board hook of `init_sequence_r`): red + green. 5 = `board_late_init()`
+  (`CONFIG_BOARD_LATE_INIT`; after `initr_mmc`, `initr_env`, `misc_init_r` = twl4030_power_init, right before `run_main_loop`, i.e. before bootdelay and bootcmd): green only.
+  Then the `rwboot` env script drives GPIO6 with `mw.l` on SETDATAOUT 0x49058094 / CLEARDATAOUT 0x49058090 (`CONFIG_CMD_GPIO` is off, `CMD_MEMORY` on;
+  variables `ledoff`, `ledred`, `ledgreen`, `ledyellow`, `redx3`, `greenx3`, `yellowx3` in `include/configs/rw20.h`; `x3` = off, on, off, on, off, on at 0.2 s steps with
+  `sleep 0.2`, ending lit): `ledoff` after `mmc dev`/`mmc rescan`; `redx3` after a successful `fatload`; `greenx3` in `sysboot`, right before `bootm`;
+  `yellowx3` at the very end (both loads failed or `bootm` returned both times). The 3-flash pattern is what tells these second red/green from the first ones.
 - Reading the panel (in order of appearance): dark from the start = SPL never reached its `s_init`; red then yellow = SPL got through SDRAM. Stays yellow = SPL stuck before its jump hook (loading
-  u-boot.img, or an SPL exception: `vectors.S` loops in place). Yellow then dark = SPL reported failure (`hang()`). Green only = SPL jumped, U-Boot
-  proper never reached the end of its `s_init`. Red only after green = U-Boot proper running, stuck before bootm. Dark after that red = kernel handed off.
+  u-boot.img, or an SPL exception: `vectors.S` loops in place). Yellow then dark = SPL reported failure (`hang()`). Then, after the SPL's green flash, U-Boot proper:
+  | LED (steady, after the last change) | meaning |
+  |---|---|
+  | red | proper stuck between its `s_init` and `board_init` (relocation, DM, timer, dram_init, serial) |
+  | yellow | `board_init` reached; stuck before `board_late_init` (MMC init with the twl4030 VMMC1 write, env, `misc_init_r`/twl4030_power_init) |
+  | green | `board_late_init` reached: the bootdelay second, or no bootcmd, or `mmc dev`/`mmc rescan` hung |
+  | dark | `rwboot` passed `mmc rescan`; `fatload` of uImage-system (or -fallback) failed or hung (also dark for the seconds a 5 MB load takes) |
+  | red after 3 flashes | `fatload` succeeded, `sysargs` running |
+  | green after 3 flashes | `bootm` reached. Still green = `bootm` hung or the kernel died before touching the pads; dark/other = the kernel took over the pads [inferred]; dark again then 3 red flashes = `bootm` returned (bad image) and the fallback ran |
+  | yellow after 3 flashes | `rwboot` ran to its end: nothing booted (distinct from the early yellow: it follows the dark phase) |
+  A frozen flash sequence (stuck dark in the middle of it) means `sleep` hangs, i.e. the timer is dead [inferred].
   The vendor yellow LEDs come from the vendor's own U-Boot, not from this build.
 - GP header variants: MLO = 512 B CH TOC, then the GP header (size word at 0x200, load address at 0x204). Ours holds the size INCLUDING the
   8-byte header (0xbf08 = file - 512); the vendor's EXCLUDES it (0xc298 = file - 512 - 8). Vendor-style MLO: write `size - 8` as a
