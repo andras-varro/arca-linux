@@ -19,17 +19,14 @@ genkeys() {
     # The links in /etc/ssh point at $KEYDIR, so the fallback keys must be reachable there.
     if [ "$dir" != "$KEYDIR" ]; then
         mkdir -p "$KEYDIR"
-        for t in ed25519 rsa; do
-            ln -sf "$dir/ssh_host_${t}_key" "$KEYDIR/ssh_host_${t}_key"
-            ln -sf "$dir/ssh_host_${t}_key.pub" "$KEYDIR/ssh_host_${t}_key.pub"
-        done
+        ln -sf "$dir/ssh_host_ed25519_key" "$KEYDIR/ssh_host_ed25519_key"
+        ln -sf "$dir/ssh_host_ed25519_key.pub" "$KEYDIR/ssh_host_ed25519_key.pub"
     fi
-    for t in ed25519 rsa; do
-        if [ ! -s "$dir/ssh_host_${t}_key" ]; then
-            echo "sshd: generating $t host key"
-            ssh-keygen -q -t "$t" -N "" -f "$dir/ssh_host_${t}_key"
-        fi
-    done
+    # ed25519 only: an RSA key doubled the first-boot wait, which is entropy-bound.
+    if [ ! -s "$dir/ssh_host_ed25519_key" ]; then
+        echo "sshd: generating ed25519 host key"
+        ssh-keygen -q -t ed25519 -N "" -f "$dir/ssh_host_ed25519_key"
+    fi
 }
 
 case "$1" in

@@ -2,7 +2,6 @@
 # The host keys are symlinks into /home/root/data/ssh (partition 2), which survives a
 # reflash of the root filesystem; /etc/init.d/sshd generates them on first start.
 HostKey /etc/ssh/ssh_host_ed25519_key
-HostKey /etc/ssh/ssh_host_rsa_key
 PidFile /var/run/sshd.pid
 PermitRootLogin prohibit-password
 PubkeyAuthentication yes

@@ -86,11 +86,11 @@ chmod 0700 "$TARGET/home/root/.ssh"
 chmod 0755 "$TARGET/home/root"
 
 # sshd host keys live on the data partition; /etc/init.d/sshd creates them there.
-for t in ed25519 rsa; do
-    rm -f "$TARGET/etc/ssh/ssh_host_${t}_key" "$TARGET/etc/ssh/ssh_host_${t}_key.pub"
-    ln -s "/home/root/data/ssh/ssh_host_${t}_key" "$TARGET/etc/ssh/ssh_host_${t}_key"
-    ln -s "/home/root/data/ssh/ssh_host_${t}_key.pub" "$TARGET/etc/ssh/ssh_host_${t}_key.pub"
-done
+# Only ed25519: an RSA key added a second generation wait to first boot for no client we use.
+rm -f "$TARGET/etc/ssh/ssh_host_rsa_key" "$TARGET/etc/ssh/ssh_host_rsa_key.pub"
+rm -f "$TARGET/etc/ssh/ssh_host_ed25519_key" "$TARGET/etc/ssh/ssh_host_ed25519_key.pub"
+ln -s /home/root/data/ssh/ssh_host_ed25519_key "$TARGET/etc/ssh/ssh_host_ed25519_key"
+ln -s /home/root/data/ssh/ssh_host_ed25519_key.pub "$TARGET/etc/ssh/ssh_host_ed25519_key.pub"
 
 # The on-device host-name tool is the commissioning script itself (one implementation of the
 # name rules and the /etc/hosts rewrite), installed under a command name.

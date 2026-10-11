@@ -146,7 +146,9 @@ check "sshd_config: PasswordAuthentication no" $?
 member etc/ssh/sshd_config | grep -qx 'PermitRootLogin prohibit-password'
 check "sshd_config: PermitRootLogin prohibit-password" $?
 [ "$(target_of etc/ssh/ssh_host_ed25519_key)" = "/home/root/data/ssh/ssh_host_ed25519_key" ]
-check "ssh host key links point into /home/root/data/ssh" $?
+check "ssh host ed25519 key link points into /home/root/data/ssh" $?
+! tar -tf "$TAR" | grep -q 'etc/ssh/ssh_host_rsa_key'
+check "no ssh_host_rsa_key in the image" $?
 
 member etc/passwd | grep -q '^root:[^:]*:0:0:[^:]*:/home/root:'
 check "root's home is /home/root" $?
