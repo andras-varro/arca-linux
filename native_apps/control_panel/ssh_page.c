@@ -444,6 +444,7 @@ static void apply_host(Config *cfg) {
 /* ── Input ──────────────────────────────────────────────────────────────── */
 
 static void ask_mode(SshMode target) {
+    read_ssh();     /* a key or password can arrive over SSH while the page is open */
     if (target == mode) { cp_status("ALREADY SET", true); return; }
     /* a root login sshd refuses outright (PermitRootLogin no) is judged as key only */
     SshRootLogin r = root == SSH_ROOT_UNKNOWN ? SSH_ROOT_KEY : root;
@@ -467,6 +468,7 @@ static void ask_mode(SshMode target) {
 }
 
 static void ask_root(void) {
+    read_ssh();
     SshRootLogin target = root == SSH_ROOT_PASSWORD ? SSH_ROOT_KEY : SSH_ROOT_PASSWORD;
     /* judged against the mode in force; OFF or an unreadable mode only has the
      * root-login rule to meet, the mode's own is met when it is chosen */

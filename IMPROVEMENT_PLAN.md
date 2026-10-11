@@ -289,6 +289,16 @@ line is F143. The per-unit image (a `state.tar` from one unit) stays as the seco
 `native_apps/app_launcher/app_launcher.c`. **Done when** a card built with no unit state boots on a unit, shows the banner, refuses SSH until the
 panel's SSH page opens it, and the README's key procedure then works.
 
+State 2026-10-11: the code is in, built with `make-card-image.sh --generic`. **Measured on `.188` with that card:** first boot
+names it `arca-xxxx`, the banner shows until calibration, SSH is refused, then set password → root login allow →
+Key + password → password login → `ssh-copy-id` → key login all work; rename and pad/keyboard focus work. **Open:** (1) KEY ONLY
+was refused "NO AUTHORIZED KEY" after `ssh-copy-id` although the perms are right (755/700/600, root) — inferred cause: the
+page read its state only on entry; each tap now re-reads it (`ssh_page.c` `ask_mode`/`ask_root`), not yet deployed. (2) Off +
+reboot untested. (3) Drop the RSA host key (operator, 2026-10-11): `etc/init.d/sshd` generates ed25519 and rsa; ed25519
+alone took ~1 min on first boot — dmesg shows `seedrng: uninitialized urandom read` before `crng init done`, so the wait
+is entropy, not compute [inferred]; low priority, once per card. (4) Docs: README key procedure, `rootfs/CLAUDE.md` (avahi
+link now in the image, new rc links), `COMMISSIONING.md` *Image a card* (`--generic`, which needs `--modules` when run as root).
+
 ### F143. A status line across the top of the screen — open, operator idea 2026-10-09, future
 
 One line of status: messages such as "not calibrated", date/time, CPU, refreshed once a second. Tapping a message opens the
