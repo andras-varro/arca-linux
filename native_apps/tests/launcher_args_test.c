@@ -19,7 +19,7 @@
  *       common/framebuffer.c common/touch_input.c common/hardware.c common/common.c \
  *       common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c \
  *       common/audio_out.c common/audio_wav.c common/config.c common/gamepad.c common/input_slots.c \
- *       common/input_scan.c common/ppm.c common/icon_grid.c common/logger.c common/pointer.c -lm && ./build/launcher_args_test
+ *       common/input_scan.c common/ppm.c common/icon_grid.c common/logger.c common/pointer.c common/status_line.c control_panel/cpu_load.c -lm && ./build/launcher_args_test
  *
  * What it asserts, and why: the four `args=` spellings app_launcher.c's own
  * manifest-format comment documents (fb,touch / fb / touch / none) each reach

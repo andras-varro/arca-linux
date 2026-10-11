@@ -261,7 +261,7 @@ step "24/30" "platformer"
 $CC "${WARN[@]}" -O2 platformer/platformer.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/platformer -lm "${AUDIO_LIBS[@]}"
 
 step "25/30" "app_launcher"
-$CC "${WARN[@]}" -O2 -I. app_launcher/app_launcher.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" build/ppm.o build/icon_grid.o build/pointer.o build/logger.o -o build/app_launcher -lm "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. app_launcher/app_launcher.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" build/ppm.o build/icon_grid.o build/pointer.o build/logger.o common/status_line.c control_panel/cpu_load.c -o build/app_launcher -lm "${AUDIO_LIBS[@]}"
 
 step "26/30" "theremin"
 $CC "${WARN[@]}" -O2 -I. \

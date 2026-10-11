@@ -33,7 +33,7 @@
 #include "common/pointer.h"
 #include "common/hardware.h"
 #include "common/config.h"
-#include "app_launcher/launcher_banner.h"
+#include "common/status_line.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +44,7 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <errno.h>
+#include <time.h>
 
 /* ── Limits ─────────────────────────────────────────────────────────────── */
 
@@ -60,6 +61,14 @@
 /* ── Grid geometry: common/icon_grid.c, shared with control_panel's home screen ── */
 
 #define TITLE_H         50
+/* The status strip sits at the top of the safe rectangle, above the title, so
+ * its message is inside the touchable area.  Two lines of scale-2 text would
+ * not fit; one line is 16 px tall.  The grid reserves it on top of TITLE_H. */
+#define STATUS_H        22
+#define STATUS_PAD_X    8
+#define STATUS_BG       RGB(40, 40, 58)
+#define STATUS_FG       RGB(200, 200, 220)
+#define STATUS_WARN     COLOR_ORANGE
 static IconGrid grid;
 
 /* ── The MUSIC / EFFECTS toggles are NOT here ────────────────────────────────
@@ -86,11 +95,19 @@ static ModalDialog power_dialog;
 static bool exit_pressed;        /* the current touch went down on the X */
 static int  power_press = -1;    /* dialog button the current touch went down on */
 static int  home_press = -1;     /* item the current touch went down on, -1 none */
+static bool msg_pressed;         /* the current touch went down on the status message */
+/* Returned by handle_touch() and handle_gamepad_input() for "open the page that
+ * fixes the shown message"; -2 is the exit X, so this is -3. */
+#define TOUCH_MESSAGE   (-3)
 
 /* Prints the layout receipt ("launcher: safe …") — see icon_grid_layout(). */
 static void compute_grid_layout(Framebuffer *fb) {
-    icon_grid_layout(&grid, fb, TITLE_H, "launcher");
+    /* The receipt's grid_top already includes the strip. */
+    icon_grid_layout(&grid, fb, STATUS_H + TITLE_H, "launcher");
+    /* The exit X belongs to the title band, which now starts below the strip. */
+    grid.exit_y += STATUS_H;
 }
+
 
 /* ── Colours ────────────────────────────────────────────────────────────── */
 
@@ -134,8 +151,63 @@ typedef struct {
     uint32_t    last_launch_return_ms;  /* Timestamp of last child-exit for cooldown */
     Logger      logger;
     bool        needs_redraw;       /* Dirty flag — skip rendering when false */
-    const char *calib_banner;       /* Banner text if calibration is missing, NULL if present */
+    /* The top strip (status_line.h): a message on the left, CPU and clock on
+     * the right, re-read once a second by status_refresh(). */
+    StatusCtx   status_ctx;
+    const StatusMsg *msg;           /* the message shown, NULL = none */
+    CpuSnap     cpu_prev;           /* last /proc reading, valid = a first one exists */
+    char        status_right[24];
+    uint32_t    status_next_ms;
+    bool        msg_focus;          /* the keyboard ring is on the message */
 } Launcher;
+
+/* The strip's message, as a tap target: its text plus padding, inside SAFE. */
+static bool message_hit(const Launcher *l, int x, int y) {
+    if (!l->msg) return false;
+    int w = text_measure_width(l->msg->text, 2) + 2 * STATUS_PAD_X;
+    return x >= SCREEN_SAFE_LEFT && x < SCREEN_SAFE_LEFT + w &&
+           y >= SCREEN_SAFE_TOP  && y < SCREEN_SAFE_TOP + STATUS_H;
+}
+
+/* Re-read the strip's inputs if a second has passed.  Returns true when what
+ * it draws changed (the right-hand text, or the message). */
+static bool status_refresh(Launcher *l, uint32_t now_ms) {
+    if (l->status_next_ms && (int32_t)(now_ms - l->status_next_ms) < 0) return false;
+    l->status_next_ms = now_ms + 1000;
+    if (l->status_next_ms == 0) l->status_next_ms = 1;
+
+    char stat_buf[2048] = "", up_buf[64] = "";
+    FILE *f = fopen("/proc/stat", "r");
+    if (f) { size_t n = fread(stat_buf, 1, sizeof(stat_buf) - 1, f); stat_buf[n] = '\0'; fclose(f); }
+    f = fopen("/proc/uptime", "r");
+    if (f) { size_t n = fread(up_buf, 1, sizeof(up_buf) - 1, f); up_buf[n] = '\0'; fclose(f); }
+    CpuSnap cur = status_cpu_snap(stat_buf, up_buf);
+    int pct = status_cpu_percent(&l->cpu_prev, &cur, (unsigned)sysconf(_SC_CLK_TCK));
+    if (cur.valid) l->cpu_prev = cur;
+
+    time_t t = time(NULL);
+    struct tm tm;
+    int hour = -1, min = -1;
+    if (localtime_r(&t, &tm)) { hour = tm.tm_hour; min = tm.tm_min; }
+    char right[sizeof(l->status_right)];
+    status_line_format(right, sizeof(right), pct, hour, min);
+
+    l->status_ctx.calibrated = (access("/etc/touch_calibration.conf", F_OK) == 0);
+    const StatusMsg *msg = status_msg_pick(&l->status_ctx);
+    if (!msg) l->msg_focus = false;
+
+    bool changed = msg != l->msg || strcmp(right, l->status_right) != 0;
+    l->msg = msg;
+    memcpy(l->status_right, right, sizeof(right));
+    return changed;
+}
+
+static void status_init(Launcher *l) {
+    status_refresh(l, get_time_ms());
+}
+
+/* Open the page that fixes the shown message. */
+static void launch_message(Launcher *l, const char *fb_dev, const char *touch_dev);
 
 /* ════════════════════════════════════════════════════════════════════════ */
 /*  Manifest parsing                                                       */
@@ -272,18 +344,31 @@ static void draw_tile(Framebuffer *fb, const AppEntry *app, int tx, int ty) {
 static void draw_launcher(Launcher *l) {
     fb_clear(&l->fb, BG_COLOR);
 
-    /* Title */
-    text_draw_centered(&l->fb, l->fb.width / 2, SCREEN_VISIBLE_TOP + 18,
-                       "ROOMWIZARD", TITLE_COLOR, 4);
-
-    /* Calibration banner: draw below title if calibration is missing.
-     * Centred at y 40, scale 2: rows 33-46, under the title (rows 4-31) and above
-     * the grid, which starts TITLE_H (50) below SCREEN_SAFE_TOP. 34 chars = 408 px, so
-     * it fits the 480 px portrait width too. */
-    if (l->calib_banner != NULL) {
-        text_draw_centered(&l->fb, l->fb.width / 2, SCREEN_VISIBLE_TOP + 40,
-                           l->calib_banner, TITLE_COLOR, 2);
+    /* Status strip: the visible band down to STATUS_H below SCREEN_SAFE_TOP, so
+     * it is flush with the top edge however large the touch inset is.  Message
+     * left (the tap target), CPU and clock right-aligned; 16 + 14 chars = 480 px
+     * at most, which is the portrait width. */
+    {
+        int strip_bottom = SCREEN_SAFE_TOP + STATUS_H;
+        fb_fill_rect(&l->fb, SCREEN_VISIBLE_LEFT, SCREEN_VISIBLE_TOP,
+                     SCREEN_VISIBLE_WIDTH, strip_bottom - SCREEN_VISIBLE_TOP, STATUS_BG);
+        int ty = SCREEN_SAFE_TOP + (STATUS_H - text_measure_height(2)) / 2;
+        if (l->msg) {
+            fb_draw_text(&l->fb, SCREEN_SAFE_LEFT + STATUS_PAD_X, ty,
+                         l->msg->text, STATUS_WARN, 2);
+            if (l->msg_focus)
+                icon_grid_draw_ring(&l->fb, SCREEN_SAFE_LEFT, SCREEN_SAFE_TOP,
+                                    text_measure_width(l->msg->text, 2) + 2 * STATUS_PAD_X,
+                                    STATUS_H);
+        }
+        fb_draw_text(&l->fb,
+                     SCREEN_SAFE_RIGHT - STATUS_PAD_X - text_measure_width(l->status_right, 2),
+                     ty, l->status_right, STATUS_FG, 2);
     }
+
+    /* Title: under the strip, 4..31 px into the title band as it always was. */
+    text_draw_centered(&l->fb, l->fb.width / 2, SCREEN_SAFE_TOP + STATUS_H + 18,
+                       "ROOMWIZARD", TITLE_COLOR, 4);
 
     /* Tiles for current page */
     int start = l->current_page * grid.per_page;
@@ -312,7 +397,7 @@ static void draw_launcher(Launcher *l) {
     icon_grid_draw_paging(&l->fb, &grid, l->current_page, l->total_pages);
 
     icon_grid_draw_exit(&l->fb, &grid);
-    if (l->focus.shown && l->focus.sel == ICON_GRID_NAV_EXIT)   /* focus on the X */
+    if (l->focus.shown && l->focus.sel == ICON_GRID_NAV_EXIT && !l->msg_focus)   /* focus on the X */
         icon_grid_draw_ring(&l->fb, grid.exit_x, grid.exit_y, grid.exit_w, grid.exit_h);
 
     /* The dialog highlights its focused button itself, always. */
@@ -340,17 +425,23 @@ static int tile_at(Launcher *l, int x, int y) {
  * the right page band); the page-flip bands act on the press.
  *  Returns:  >= 0   app index to launch
  *            -1     nothing (a page flip included)
- *            -2     the exit X, released over it */
+ *            -2     the exit X, released over it
+ *            TOUCH_MESSAGE  the strip's message, released over it */
 static int handle_touch(Launcher *l, const TouchState *ts) {
     if (ts->pressed) {
-        exit_pressed = icon_grid_exit_hit(&grid, ts->x, ts->y);
-        home_press   = exit_pressed ? -1 : tile_at(l, ts->x, ts->y);
-        if (!exit_pressed && home_press < 0)
+        exit_pressed  = icon_grid_exit_hit(&grid, ts->x, ts->y);
+        msg_pressed   = !exit_pressed && message_hit(l, ts->x, ts->y);
+        home_press    = (exit_pressed || msg_pressed) ? -1 : tile_at(l, ts->x, ts->y);
+        if (!exit_pressed && !msg_pressed && home_press < 0)
             l->current_page += icon_grid_page_hit(ts->x, l->current_page,
                                                   l->total_pages);
     }
     /* No else: a quick tap delivers press and release in the same poll. */
     if (!ts->released) return -1;
+    if (msg_pressed) {                 /* released over it, as a tile is */
+        msg_pressed = false;
+        return message_hit(l, ts->x, ts->y) ? TOUCH_MESSAGE : -1;
+    }
     if (exit_pressed) {
         exit_pressed = false;
         return icon_grid_exit_hit(&grid, ts->x, ts->y) ? -2 : -1;
@@ -389,6 +480,28 @@ static int handle_gamepad_input(Launcher *l, bool touch_press) {
     int dir = icon_grid_focus_dir(b[BTN_ID_UP].pressed, b[BTN_ID_DOWN].pressed,
                                   b[BTN_ID_LEFT].pressed, b[BTN_ID_RIGHT].pressed);
     bool enter = b[BTN_ID_JUMP].pressed || b[BTN_ID_ACTION].pressed;
+
+    /* The strip's message is one stop above the exit X: Up from the X reaches
+     * it, Enter opens its page, Down returns to the X, other arrows stay.  It
+     * is outside icon_grid_focus_frame()'s model on purpose (that is shared with
+     * the Control Panel home, which has no strip); a touch drops the ring as it
+     * does there. */
+    if (l->msg_focus && l->msg && !touch_press) {
+        if (enter) return TOUCH_MESSAGE;
+        if (dir == (int)UI_DIR_DOWN) {
+            l->msg_focus = false;
+            l->focus.sel = ICON_GRID_NAV_EXIT;
+            l->focus.shown = true;
+        }
+        return -1;
+    }
+    l->msg_focus = false;
+    if (l->msg && !touch_press && dir == (int)UI_DIR_UP &&
+        l->focus.shown && l->focus.sel == ICON_GRID_NAV_EXIT) {
+        l->msg_focus = true;
+        return -1;
+    }
+
     int act = icon_grid_focus_frame(&grid, l->app_count, &l->current_page,
                                     &l->focus, touch_press, dir, enter);
     if (act == ICON_GRID_NAV_EXIT) {             /* the X: as a tap on it */
@@ -402,10 +515,12 @@ static int handle_gamepad_input(Launcher *l, bool touch_press) {
 /*  App launching                                                          */
 /* ════════════════════════════════════════════════════════════════════════ */
 
-static void launch_app(Launcher *l, int index,
+/* `page`, when non-NULL, is passed as the last argument (control_panel opens
+ * that page).  `app` may point into l->apps: it is not used after the final
+ * re-scan, which is the last thing this function does. */
+static void launch_app(Launcher *l, const AppEntry *app, const char *page,
                        const char *fb_dev, const char *touch_dev)
 {
-    AppEntry *app = &l->apps[index];
     LOG_INFO(&l->logger, "Launching: %s (%s)", app->name, app->exec_path);
 
     /* Fade out launcher before switching to app */
@@ -426,21 +541,27 @@ static void launch_app(Launcher *l, int index,
          * the cmdline is then the only thing left to walk.  (`comm` was always
          * right: the kernel takes it from the file being executed.)  Nothing
          * reads argv[0] except the usage text of three CLI tools. */
+        const char *av[5];
+        int n = 0;
+        av[n++] = app->exec_path;
         switch (app->args) {
         case ARG_NONE:
-            execl(app->exec_path, app->exec_path, NULL);
             break;
         case ARG_FB:
-            execl(app->exec_path, app->exec_path, fb_dev, NULL);
+            av[n++] = fb_dev;
             break;
         case ARG_TOUCH:
-            execl(app->exec_path, app->exec_path, touch_dev, NULL);
+            av[n++] = touch_dev;
             break;
         case ARG_FB_TOUCH:
         default:
-            execl(app->exec_path, app->exec_path, fb_dev, touch_dev, NULL);
+            av[n++] = fb_dev;
+            av[n++] = touch_dev;
             break;
         }
+        if (page) av[n++] = page;
+        av[n] = NULL;
+        execv(app->exec_path, (char *const *)av);
         perror("execl failed");
         _exit(1);
     } else if (pid > 0) {
@@ -514,9 +635,29 @@ static void launch_app(Launcher *l, int index,
      * stale events from any source (keyboard, touch, mouse). */
     l->last_launch_return_ms = get_time_ms();
 
+    /* The child may have fixed what the strip names (calibration), and the clock
+     * has moved: read it all again on the next frame. */
+    l->status_next_ms = 0;
+
     /* Re-scan manifests in case new apps were deployed while app ran */
     LOG_INFO(&l->logger, "Re-scanning apps...");
     scan_apps(l);
+}
+
+static void launch_message(Launcher *l, const char *fb_dev, const char *touch_dev) {
+    if (!l->msg) return;
+    AppEntry app;
+    memset(&app, 0, sizeof(app));
+    snprintf(app.name, sizeof(app.name), "%s", l->msg->text);
+    snprintf(app.exec_path, sizeof(app.exec_path), "%s", l->msg->exec);
+    app.args = ARG_FB_TOUCH;
+    struct stat st;
+    if (stat(app.exec_path, &st) != 0 || !(st.st_mode & S_IXUSR)) {
+        LOG_WARN(&l->logger, "Message action not runnable: %s", app.exec_path);
+        return;
+    }
+    launch_app(l, &app, l->msg->page, fb_dev, touch_dev);
+    l->needs_redraw = true;
 }
 
 /* ════════════════════════════════════════════════════════════════════════ */
@@ -691,8 +832,7 @@ int main(int argc, char *argv[]) {
     compute_grid_layout(&launcher.fb);
     pointer_init(&launcher.pointer);   /* after touch_init: SCREEN_SAFE_* */
 
-    /* Check for missing calibration at startup */
-    launcher.calib_banner = launcher_check_calibration("/etc/touch_calibration.conf");
+    status_init(&launcher);   /* first reading: the strip is right on the first frame */
 
     modal_dialog_init(&power_dialog, "SHUT DOWN OR REBOOT?", NULL, 3);
     modal_dialog_set_button(&power_dialog, PWR_SHUTDOWN, "SHUT DOWN", BTN_COLOR_DANGER, COLOR_WHITE);
@@ -711,6 +851,7 @@ int main(int argc, char *argv[]) {
         int old_count    = launcher.app_count;
         bool old_dialog  = modal_dialog_is_active(&power_dialog);
         int  old_focus   = power_dialog.focus;
+        bool old_msg_focus = launcher.msg_focus;
 
         /* Poll touch (non-blocking) */
         touch_poll(&launcher.touch);
@@ -776,25 +917,32 @@ int main(int argc, char *argv[]) {
                 /* Back from the child, the selection is the tile that was used. */
                 icon_grid_focus_land(&grid, &launcher.focus,
                                      &launcher.current_page, result);
-                launch_app(&launcher, result, fb_dev, touch_dev);
-                /* Re-check calibration after app returns */
-                launcher.calib_banner = launcher_check_calibration("/etc/touch_calibration.conf");
+                launch_app(&launcher, &launcher.apps[result], NULL, fb_dev, touch_dev);
                 launcher.needs_redraw = true;  /* State changed after launch return */
+            } else if (result == TOUCH_MESSAGE) {
+                launch_message(&launcher, fb_dev, touch_dev);
             }
 
             /* Handle gamepad / keyboard navigation */
             int gp_result = handle_gamepad_input(&launcher, ts.pressed);
             if (gp_result >= 0) {
-                launch_app(&launcher, gp_result, fb_dev, touch_dev);
-                /* Re-check calibration after app returns */
-                launcher.calib_banner = launcher_check_calibration("/etc/touch_calibration.conf");
+                launch_app(&launcher, &launcher.apps[gp_result], NULL, fb_dev, touch_dev);
                 launcher.needs_redraw = true;  /* State changed after launch return */
+            } else if (gp_result == TOUCH_MESSAGE) {
+                launch_message(&launcher, fb_dev, touch_dev);
             }
         }
+
+        /* The strip: once a second, and the frame is redrawn only when its text
+         * or the message changed.  There is no partial-redraw path here (a full
+         * frame is cleared and swapped), so a changing CPU figure costs one full
+         * redraw a second while the launcher is idle. */
+        if (status_refresh(&launcher, get_time_ms())) launcher.needs_redraw = true;
 
         /* Detect any visual state changes from input handling */
         if (modal_dialog_is_active(&power_dialog) != old_dialog ||
             power_dialog.focus != old_focus ||
+            launcher.msg_focus != old_msg_focus ||
             launcher.focus.sel   != old_sel.sel   ||
             launcher.focus.shown != old_sel.shown ||
             launcher.current_page != old_page     ||
