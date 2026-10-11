@@ -133,8 +133,8 @@ rules are in [lib/CLAUDE.md](lib/CLAUDE.md).
 
 A card built with `--generic` carries no key and refuses SSH until the panel opens it. Measured on `.188`: on the Control Panel
 **SSH** page set a root password (on-screen keyboard), tap **ROOT LOGIN ALLOW**, then **KEY + PASSWORD**; from the PC run
-`ssh-copy-id root@<ip>` (password login, then key login both work). Then optionally tap **KEY ONLY** — not yet confirmed after
-`ssh-copy-id`; a first refusal was fixed and awaits a tap test.
+`ssh-copy-id root@<ip>` (password login, then key login both work). Then optionally tap **KEY ONLY** — confirmed working after
+`ssh-copy-id` (measured 2026-10-11); **OFF** also works and keeps the port closed across a reboot.
 
 ### Developing on a unit — update, then deploy
 

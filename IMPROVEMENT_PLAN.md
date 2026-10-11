@@ -254,42 +254,6 @@ root; normal operation runs as the user; a change such as the SSH settings needs
 root, like `sudo`. That touches `/dev/fb0`, `/dev/input`, `/dev/dsp`, `/dev/watchdog` and the `roomwizard-app` respawn loop. If it
 is too much effort it goes last. **Done when** it is designed together with the operator and built.
 
-### F140. A generic "flash and go" base card image — open, operator wish 2026-10-09, design settled 2026-10-09
-
-No per-unit state: flash, insert, and it boots and works. **Every component is on it** (`--bundle`). First boot picks a
-random host name and asks nothing (operator: safe defaults; the name need not say "rw"). **The published image carries no
-`authorized_keys` at all** (operator: a builder's key in a downloadable image is a login to every unit flashed from it); the
-image build refuses one, like the `lib/rw-state.sh` deny check. `sshd` is key-only and root's password is locked, so the
-image is closed out of the box. **It cannot publish the vendor's p1 files** (`SYSTEM_ANALYSIS.md` §4.2). Operator ruling,
-2026-10-09: build and test it now with the vendor p1 from our own units, never published; once our own SPL + U-Boot
-replaces those files, the image is published.
-
-Control Panel SSH page (operator, 2026-10-09). It **replaces** the System page's PASSWORD+KEY / KEY ONLY toggle
-(`native_apps/control_panel/system_page.c`, `sys_settings.c`): **Off** stops `sshd` and keeps it from starting at boot;
-**Key only**; **Key + password** — a password mode never turns key login off. A separate **root login** setting is needed:
-the overlay `sshd_config` has `PermitRootLogin prohibit-password` (asserted by `rootfs/check-rootfs.sh`), so today's toggle,
-which edits only `PasswordAuthentication`, cannot let root in by password [inferred from the code, not tried]. "Set password"
-on the on-screen keyboard is required before any password mode (no page calls `keyboard_enter` yet; BusyBox `chpasswd` and
-the crypt config are unmeasured). The page shows the IP and the host name; editing the name asks for confirmation, then
-applies at once (`/etc/hostname` + `/etc/hosts` as `commissioning/set-hostname.sh` does, then mDNS re-announces). README then
-explains: set a password, pick Key + password, `ssh-copy-id`, optionally back to Key only.
-
-While `/etc/touch_calibration.conf` is absent the launcher shows a "not calibrated" text on top — that text only; the status
-line is F143. The per-unit image (a `state.tar` from one unit) stays as the second package kind. Needs:
-`rootfs/make-card-image.sh` accepting no `state.tar`; a first-boot host-name init script; the banner in
-`native_apps/app_launcher/app_launcher.c`. **Done when** a card built with no unit state boots on a unit, shows the banner, refuses SSH until the
-panel's SSH page opens it, and the README's key procedure then works.
-
-State 2026-10-11: the code is in, built with `make-card-image.sh --generic`. **Measured on `.188` with that card:** first boot
-names it `arca-xxxx`, the banner shows until calibration, SSH is refused, then set password → root login allow →
-Key + password → password login → `ssh-copy-id` → key login all work; rename and pad/keyboard focus work. sshd is ed25519-only
-now: on `.188` it restarted with that config and `ssh-keyscan` offers only `ssh-ed25519`. **Open:** (1) KEY ONLY was refused
-"NO AUTHORIZED KEY" after `ssh-copy-id` although the perms are right (755/700/600, root) — inferred cause: the page read its
-state only on entry; each tap now re-reads it (`ssh_page.c` `ask_mode`/`ask_root`), **deployed to `.188` 2026-10-11, waiting
-for the operator's tap test**. (2) Off + reboot untested.
-Operator checklist, on `.188`: Control Panel → SSH → tap KEY ONLY (must be accepted); tap OFF, reboot, `ssh root@192.168.50.188`
-must be refused (port closed); tap KEY ONLY again, key login works.
-
 ### F143. A status line across the top of the screen — open, operator idea 2026-10-09, future
 
 One line of status: messages such as "not calibrated", date/time, CPU, refreshed once a second. Tapping a message opens the
@@ -316,12 +280,12 @@ after F101's kernel boot-logo row. **Host-side state 2026-10-10:** mainline U-Bo
 `/home/z001x91h/rw-uboot/` (`rw20-board.patch`, `BUILD.md`, `out/MLO` 47112 B, `out/u-boot.img` 406360 B), zero `sdiv`/`udiv`;
 it refuses GCC 9, so it needs `gcc-10-arm-linux-gnueabihf` (installed). Not yet booted. Biggest blind-boot risk: the SPL text base
 0x40200000 (mainline) against the vendor's 0x40200800. **Done when** a card
-with our own `MLO` + `u-boot.img` boots our kernel on two units with the register-dump diff empty, and F140's image
-carries them.
+with our own `MLO` + `u-boot.img` boots our kernel on two units with the register-dump diff empty, and the generic card
+image carries them.
 
 ### F145. Update a unit from a bundle — open, operator request 2026-10-10, not designed
 
-Two package kinds: a ready-to-use image (`.img`, F140) and a bundle update. The bundle update installs only what changed
+Two package kinds: a ready-to-use generic card image (`.img`) and a bundle update. The bundle update installs only what changed
 (per component), and the upstream it fetches from is configurable (today `deploy-all.sh --from-release` fixes one). A bundle-based
 update normally avoids reflashing, so the unit keeps its host keys. **Done when** a unit updates from a bundle with only the changed
 components installed, from a configured upstream.
@@ -343,11 +307,11 @@ pad events), plus touch drag. **Measured on `.188`** (`control_panel log` over S
 
 The unit is a desk gaming device, not a meeting-room panel (operator, 2026-10-09), so a terminal is an ordinary feature. **It runs
 `/bin/login` in a pty, not a shell**: access is exactly what accounts grant, so with root's password locked nobody gets in, and the
-app carries no security logic of its own — that is F137's and F140's set-password. Its own launcher tile (`.app` manifest), also
+app carries no security logic of its own — that is F137's responsibility (the user accounts). Its own launcher tile (`.app` manifest), also
 started from the Control Panel; leaving the shell returns to the launcher. Cross-build `libvterm` (one dependency, like alsa-lib)
 rather than write a VT parser; text through `framebuffer.c`, input through `gamepad.c` from a USB or Bluetooth keyboard, the
 on-screen keyboard plus a Ctrl/Tab/Esc/arrows row as fallback. `/dev/pts` on our root is inferred, not measured. Can be built in
-parallel with F137/F140; logging in needs one of them. **Done when** a login, `vi` and `top` work from the tile on `.188`.
+parallel with F137; logging in needs user accounts to exist. **Done when** a login, `vi` and `top` work from the tile on `.188`.
 
 ### F106. Support BeagleBone Black boards — open, operator idea 2026-10-01, future
 
@@ -392,7 +356,7 @@ cuckoo calling out of a clock-house. The operator accepted it as the working log
 `distro/render.sh` (WSL, `rsvg-convert`) renders it at 512, 96, 32 and 16 px into the untracked `distro/preview/`. It
 reads at 32 px; at 16 px only the house is left, so a favicon needs a simpler variant. On the boot screen it is
 F101's boot-logo row. Host name and prompt: `arca-<per-unit part>`
-replaces `rw20`, and it fits F140's random first-boot name. The distro name goes in `/etc/os-release` and the boot banner,
+replaces `rw20`, and it fits the generic card image's random first-boot name. The distro name goes in `/etc/os-release` and the boot banner,
 not in `PS1`.
 
 Collision check 2026-10-10 (shallow, WebFetch only, no search engine): DistroWatch lists no Arca, and GitHub shows no Arca
