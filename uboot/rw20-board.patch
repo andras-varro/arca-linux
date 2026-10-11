@@ -337,10 +337,10 @@ index 00000000..f0d79279
 +};
 diff --git a/board/steelcase/rw20/rw20.c b/board/steelcase/rw20/rw20.c
 new file mode 100644
-index 00000000..1c4a33eb
+index 00000000..ad0b50d3
 --- /dev/null
 +++ b/board/steelcase/rw20/rw20.c
-@@ -0,0 +1,167 @@
+@@ -0,0 +1,202 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/*
 + * Steelcase RoomWizard (OMAP3503, TWL4030, 256 MB DDR on CS0).
@@ -358,14 +358,35 @@ index 00000000..1c4a33eb
 +#include <asm/arch/mux.h>
 +#include <asm/arch/sys_proto.h>
 +#include <asm/arch/mem.h>
++#include <asm/arch/gpio.h>
 +#include <asm/mach-types.h>
 +
 +DECLARE_GLOBAL_DATA_PTR;
 +
 +#include "rw20-mux.h"
 +
++/*
++ * Panel-GPIO witness (no I2C): pwrdn gpio1[14], lvds gpio1[15], backlight
++ * gpio1[19], active high, pads ETK_D0_ES2/D1_ES2/D5_ES2 (CP() offsets from
++ * asm/arch/mux.h + OMAP34XX_CTRL_BASE 0x48002000) in mode 4, 16-bit writes.
++ * GPIO1 = OMAP34XX_GPIO1_BASE 0x48310000 (WKUP bank), clocks CM_FCLKEN_WKUP
++ * 0x48004C00 / CM_ICLKEN_WKUP 0x48004C10 bit 3 (prcm struct offsets 0xc00/0xc10).
++ * SPL turns all three on; U-Boot proper turns the backlight off.
++ */
++#define RW20_GPIO1		OMAP34XX_GPIO1_BASE
++#define RW20_PANEL_BITS		((1 << 14) | (1 << 15) | (1 << 19))
++
++static void rw20_gpio1_enable(void)
++{
++	setbits_le32(PRCM_BASE + 0xc00, 1 << 3);	/* CM_FCLKEN_WKUP: EN_GPIO1 */
++	setbits_le32(PRCM_BASE + 0xc10, 1 << 3);	/* CM_ICLKEN_WKUP: EN_GPIO1 */
++}
++
 +int board_init(void)
 +{
++	/* U-Boot proper started: backlight off (SPL drove it on) */
++	rw20_gpio1_enable();
++	writel(1 << 19, OMAP34XX_GPIO1_BASE + OMAP_GPIO_CLEARDATAOUT);
 +	gpmc_init();
 +	/* DT kernel with appended DTB ignores this; Overo lineage of the vendor build */
 +	gd->bd->bi_arch_number = MACH_TYPE_OVERO;
@@ -403,6 +424,16 @@ index 00000000..1c4a33eb
 +
 +
 +#ifdef CONFIG_XPL_BUILD
++static void rw20_panel_on(void)
++{
++	rw20_gpio1_enable();
++	writew(M4, OMAP34XX_CTRL_BASE + CP(ETK_D0_ES2));
++	writew(M4, OMAP34XX_CTRL_BASE + CP(ETK_D1_ES2));
++	writew(M4, OMAP34XX_CTRL_BASE + CP(ETK_D5_ES2));
++	clrbits_le32(RW20_GPIO1 + OMAP_GPIO_OE, RW20_PANEL_BITS);
++	writel(RW20_PANEL_BITS, RW20_GPIO1 + OMAP_GPIO_SETDATAOUT);
++}
++
 +/*
 + * Boot-stage witness (no serial console needed): polled I2C1 writes to the
 + * TWL4030 LED module (chip 0x4a, LEDEN 0xee, PWMAON/OFF 0xef/0xf0,
@@ -422,10 +453,13 @@ index 00000000..1c4a33eb
 +	setbits_le32(0x48004A10, 1 << 15);	/* CM_ICLKEN1_CORE: EN_I2C1 */
 +	I2C_REG(0x24) = 0;			/* CON: disable */
 +	I2C_REG(0x20) = 2;			/* SYSC: soft reset */
++	/* RDONE only sets while CON.EN is set (omap24xx_i2c.c, i2c-omap.c) */
++	I2C_REG(0x24) = 0x8000;			/* CON: EN */
 +	while (!(I2C_REG(0x10) & 1) && --t)	/* SYSS: RDONE */
 +		;
 +	if (!t)
 +		return -1;
++	I2C_REG(0x24) = 0;			/* CON: disable for PSC/SCL */
 +	I2C_REG(0x30) = 7;			/* PSC: 96 MHz / 8 = 12 MHz */
 +	I2C_REG(0x34) = 53;			/* SCLL: ~100 kHz */
 +	I2C_REG(0x38) = 55;			/* SCLH */
@@ -486,6 +520,7 @@ index 00000000..1c4a33eb
 +void rw20_witness(int stage)
 +{
 +	if (stage == 1) {
++		rw20_panel_on();	/* before any I2C: backlight on = SPL reached board_init_f */
 +		if (rw20_i2c1_init())
 +			return;
 +		rw20_i2c1_write(0x4a, 0xef, 1);		/* PWMAON */

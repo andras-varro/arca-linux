@@ -11,12 +11,12 @@ pristine export) adds board `rw20` (`board/steelcase/rw20/`, `configs/rw20_defco
     export PATH=$W/tc/bin:$PATH
     make -C $W/u-boot rw20_defconfig O=../build
     make -C $W/u-boot O=../build -j8 CROSS_COMPILE=arm-linux-gnueabihf-
-Outputs: MLO (47112 B), u-boot.img (406360 B), u-boot-spl.bin, .config. Build outputs are not committed.
+Outputs: MLO (47640 B), u-boot.img (406440 B), u-boot-spl.bin, .config. Build outputs are not committed.
 
 ## Which file the SPL loads
 SPL (CONFIG_SPL_FS_FAT, SPL_MMC) mounts FAT partition 1 and reads u-boot.img (CONFIG_SPL_FS_LOAD_PAYLOAD_NAME), a legacy
 uImage (load/entry 0x80100000) -- NOT u-boot.bin (raw, no header). p1 must hold: MLO, u-boot.img, uImage-system, uImage-fallback.
-MLO = 512 B CHSETTINGS TOC + GP header (size 0xb608, load 0x40200000) + SPL; checked by hex/python parse. SPL text 41327 B (< 0xEC00).
+MLO = 512 B CHSETTINGS TOC + GP header (size 0xb608, load 0x40200000) + SPL; checked by hex/python parse. SPL text 41855 B, GP header size 0xb818 (< 0xEC00).
 
 ## Value sources
 - SDRC MCFG_0 0x03588099, ACTIM_A 0x7AE1B4C6, ACTIM_B 0x00024217, RFR_CTRL 0x0005E601, MR 0x32: read from the live unit's SDRC registers.
@@ -40,18 +40,30 @@ MLO = 512 B CHSETTINGS TOC + GP header (size 0xb608, load 0x40200000) + SPL; che
 - fatload of uImage-fallback: bootm returns on CRC failure so fallback runs (not tested).
 
 ## Witness build
-The patch contains an LED witness (boot progress on the TWL4030 LEDs), so a build from it differs from a plain board port. Two
-variants: SPL_TEXT_BASE 0x40200000 (A) and 0x40200800 (B, vendor value; append CONFIG_SPL_TEXT_BASE=0x40200800 to the build's
-.config and run olddefconfig). Each yields MLO, u-boot.img, u-boot-spl.bin, .config. Nothing is installed by this build.
-- LED module: TWL4030 I2C chip 0x4a, LEDEN 0xee (bit0 LEDA on, bit1 LEDB on, bit4/5 PWM enable), PWMAON/OFF 0xef/0xf0, PWMBON/OFF 0xf1/0xf2.
-  Source: u-boot include/twl4030.h (TWL4030_CHIP_LED 0x4a, LEDEN 0xEE, bits) and drivers/misc/twl4030_led.c; PWM layout and "on == off cycle =
-  always on" from usb_host/linux-4.14.52/drivers/pwm/pwm-twl-led.c (PWMA base = LEDEN+1, 2 regs per LED). Value 1/1 [inferred: full brightness].
-- Stage 1 (both on, LEDEN 0x33): rw20_witness(1) in omap3/board.c board_init_f, after early_system_init() and BEFORE omap3_mem_init().
-  Own polled OMAP I2C1 code (base 0x48070000, enables I2C1 f/i clocks, soft reset, 100 kHz) because DM I2C is not up in board_init_f.
-  Assumes s_init() already ran set_muxconf_regs()+prcm_init() (I2C1 pads from the replayed padconf) [inferred]. Timeouts, no hang on NACK.
+The patch contains a boot-progress witness, so a build from it differs from a plain board port. SPL_TEXT_BASE is 0x40200000
+(the patch's value); the vendor's 0x40200800 is built by appending CONFIG_SPL_TEXT_BASE=0x40200800 to the build's .config and
+running olddefconfig. Each yields MLO, u-boot.img, u-boot-spl.bin, .config. Nothing is installed by this build.
+- Panel-GPIO witness (no I2C; `rw20.c` rw20_panel_on / rw20_gpio1_enable): pwrdn gpio1[14], lvds gpio1[15], backlight gpio1[19],
+  active high [inferred from the vendor panel wiring]. Pads ETK_D0_ES2 0x480025DC, ETK_D1_ES2 0x480025DE, ETK_D5_ES2 0x480025E6 =
+  `OMAP34XX_CTRL_BASE` 0x48002000 + `CP()` offsets 0x5DC/0x5DE/0x5E6 of `arch-omap3/mux.h` (read from the tree), mode 4 (`M4`, 0x0004),
+  16-bit writes (not in the padconf replay). GPIO1 = WKUP bank `OMAP34XX_GPIO1_BASE` 0x48310000; clocks CM_FCLKEN_WKUP 0x48004C00 and
+  CM_ICLKEN_WKUP 0x48004C10 bit 3 (`struct prcm` offsets 0xc00/0xc10 from `PRCM_BASE` 0x48004000); OE +0x34, CLEARDATAOUT +0x90, SETDATAOUT +0x94.
+  SPL: rw20_witness(1), first thing in board_init_f after early_system_init(), drives all three high before any I2C.
+  U-Boot proper: board_init() (`CONFIG_BOARD_EARLY_INIT_F` is off, so board_init, run after relocation, is the earliest rw20 hook)
+  clears bit 19 only, via CLEARDATAOUT.
+- LED module (TWL4030 I2C chip 0x4a, LEDEN 0xee bit0 LEDA on, bit1 LEDB on, bit4/5 PWM enable, PWMAON/OFF 0xef/0xf0, PWMBON/OFF 0xf1/0xf2):
+  source u-boot include/twl4030.h and drivers/misc/twl4030_led.c; PWM layout and "on == off cycle = always on" from
+  usb_host/linux-4.14.52/drivers/pwm/pwm-twl-led.c. Value 1/1 [inferred: full brightness].
+- Stage 1 (both LEDs on, LEDEN 0x33): rw20_witness(1) after the panel GPIOs, BEFORE omap3_mem_init(). Own polled OMAP I2C1 code
+  (base 0x48070000, I2C1 f/i clocks, 100 kHz) because DM I2C is not up in board_init_f. Init order follows omap24xx_i2c.c: CON=0,
+  SYSC=2 (soft reset), CON=EN (RDONE sets only while EN is set), poll SYSS.RDONE, CON=0, PSC/SCLL/SCLH/OA, CON=EN. Timeouts, no hang on NACK.
+  Assumes s_init() already ran set_muxconf_regs()+prcm_init() (I2C1 pads from the replayed padconf) [inferred].
 - Stage 2 (LEDB off, LEDEN 0x11): rw20_witness(2) right after omap3_mem_init(), only if a write/readback of 8 words at
   0x80300000/0x84000000/0x88000000/0x8FF00000 passes (omap3_mem_init itself checks nothing).
-- Stage 3 (both off): sysboot = ...run sysargs; i2c dev 0; i2c mw 0x4a 0xee 0x00; bootm (CMD_I2C was already on).
-- Reading: dark = SPL never ran (or I2C1/TWL path failed); yellow = SPL reached board_init_f; one colour = SDRAM test passed;
-  off = U-Boot proper reached bootm. Note: a failed I2C write leaves the previous state, so dark is ambiguous between "no SPL" and "no I2C".
-- Checks: GP header both size 0xb7b0 (<= 0xEC00), load 0x40200000 / 0x40200800; sdiv/udiv 0 in spl and u-boot for both.
+- Stage 3 (both LEDs off): sysboot = ...run sysargs; i2c dev 0; i2c mw 0x4a 0xee 0x00; bootm (CMD_I2C was already on).
+- Reading the panel (the vendor yellow LEDs come from vendor U-Boot proper, so only the GPIO witness separates SPL from proper):
+  never glows = SPL never reached board_init_f; glows and stays = stuck in SPL after stage 1 (SDRAM, FAT, u-boot.img load);
+  glows ~1 s (bootdelay), then dark and nothing else = U-Boot proper runs, the kernel side is the problem.
+  LEDs add stage detail if the I2C path works: yellow = board_init_f reached; one colour = SDRAM test passed; off = bootm reached.
+  A failed I2C write leaves the previous LED state, so dark LEDs alone are ambiguous.
+- Checks: GP header size <= 0xEC00, load 0x40200000 (0x40200800 for the vendor-base variant); sdiv/udiv 0 in u-boot-spl and u-boot.
