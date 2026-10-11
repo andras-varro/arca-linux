@@ -260,6 +260,8 @@ One line of status: messages such as "not calibrated", date/time, CPU, refreshed
 app or page that fixes it (calibration for "not calibrated"). Not designed: which apps show it, and what it costs per frame
 on the software renderer. **Done when** the launcher shows it and a tap on a message opens the right page.
 
+State 2026-10-11: built (`common/status_line.c`, launcher strip 22 px at the safe top; NOT CALIBRATED replaces the old banner; a tap or Up-then-Enter from the exit X opens `control_panel input`). **Measured on `.188`:** strip drawn, launcher receipt grid_top 86 fits, CPU 4 % with the launcher idle (one full redraw per second while the figure changes). **Untested:** the tap/pad route to the Input page, and the message clearing after calibration.
+
 ### F144. Our own SPL + U-Boot on p1, so a card carries nothing from Steelcase — open, operator wish 2026-10-09, planned
 
 Replaces the vendor `mlo` and `u-boot.bin` — ⚠️ mainline's SPL loads **`u-boot.img`** (legacy uImage, 0x80100000) from FAT p1, not
@@ -282,6 +284,8 @@ it refuses GCC 9, so it needs `gcc-10-arm-linux-gnueabihf` (installed). Not yet 
 0x40200000 (mainline) against the vendor's 0x40200800. **Done when** a card
 with our own `MLO` + `u-boot.img` boots our kernel on two units with the register-dump diff empty, and the generic card
 image carries them.
+
+**First boot, 2026-10-11 (blind, no serial).** Measured: on `.188` p1, our `MLO` (md5 e94bb429…, 47112 B) replaced `mlo` and `u-boot.img` (md5 5f2bc92f…) was added; the vendor `mlo` was kept as `mlo.vendor` on p1 and on the host in `C:\work\rw-scratch-uboot\vendor-p1\` (with `u-boot.bin`). After `reboot` the unit gave no SSH in 3 min and no ARP/ping reply (Destination host unreachable). So it failed somewhere between the ROM and the kernel's network bring-up; which stage is unknown. Checked before the boot: SPL linked at 0x40200000 = GP-header load address (so not the load-address mismatch); SPL 41327 B < 0xEC00. **Candidates [inferred, none tested]:** ROM rejected the image (CH TOC / header); SPL SDRAM/clock setup; U-Boot ran but the kernel failed (the live vendor bootargs also carry `vt.global_cursor_default=0 usbcore.autosuspend=-1 console=tty0` and vendor `curBoot*/coldBoot*/prmRstSt` words that our env does not set; the ATAG/appended-DTB handoff is untested); or the 60 s hardware watchdog if something armed it. **Next step without the serial console:** build a witness into the SPL — e.g. drive a PMIC LED (the LEDs are on the TWL4030, so it needs I2C1 up in SPL) or the backlight GPIO, early in board_init_f, then again in U-Boot proper before bootm, so the panel shows which stage was reached. With `P4` wired, the serial console answers it directly. **Recovery (operator):** card into the Windows reader; on p1: delete `mlo`, rename `mlo.vendor` to `mlo`; `u-boot.img` can stay (the vendor SPL loads `u-boot.bin`).
 
 ### F145. Update a unit from a bundle — open, operator request 2026-10-10, not designed
 
