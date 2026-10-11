@@ -386,7 +386,8 @@ Links LibVNCClient (GPLv2+), zlib (zlib licence) and libjpeg-turbo
 native_apps
 -----------
 This project's own code (MIT — see LICENSE.md), statically linked against glibc
-(LGPL-2.1+).
+(LGPL-2.1+).  `terminal` also contains libvterm 0.3.3, linked statically and
+licensed under the MIT license: Copyright (c) 2008 Paul Evans.
 
 Audio assets  ⚠️ NOT FOR COMMERCIAL USE
 ---------------------------------------

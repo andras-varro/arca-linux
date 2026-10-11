@@ -44,6 +44,7 @@ samegame|SameGame|/opt/games/samegame|/opt/roomwizard/icons/samegame.ppm|fb,touc
 frogger|Frogger|/opt/games/frogger|/opt/roomwizard/icons/frogger.ppm|fb,touch
 platformer|Office Runner|/opt/games/platformer|/opt/roomwizard/icons/platformer.ppm|fb,touch
 theremin|Tap-a-Theremin|/opt/games/theremin|/opt/roomwizard/icons/theremin.ppm|fb,touch
+terminal|Terminal|/opt/games/terminal|/opt/roomwizard/icons/terminal.ppm|fb,touch
 control_panel|Control Panel|/opt/games/control_panel|/opt/roomwizard/icons/control_panel.ppm|
 '
 

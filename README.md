@@ -196,6 +196,7 @@ roomwizard/
 ├── scummvm-roomwizard/          # ScummVM backend
 ├── usb_host/                    # USB host mode + Xbox controller modules
 ├── bluetooth/                   # BlueZ + btmon, BT modules (incl. rfcomm), RTL8761CU firmware, boot start; BlueALSA (a2dp-source, hfp-ag)
+├── uboot/                       # Our own mainline U-Boot v2026.10 board port (rw20-board.patch) and its BUILD.md; host build only
 └── vnc_client/                  # VNC remote desktop viewer
 ```
 
