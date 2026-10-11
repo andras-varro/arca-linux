@@ -14,6 +14,7 @@
  *   Input        — the keyboard/mouse/pad testers, on any bus (input_page.c)
  *   Network      — gateway, DNS and every interface (network_page.c)
  *   Monitor      — live uptime, load, memory and storage (monitor_page.c)
+ *   Log          — syslog, respawn log and kernel ring, read-only (log_page.c)
  *   Information  — what this unit is (info_page.c)
  */
 
@@ -118,6 +119,7 @@ static const CpPage *const home_pages[] = {
     &cp_ssh_page,
     &cp_monitor_page,
     &cp_system_page,
+    &cp_log_page,
     &cp_info_page,
 };
 #define HOME_PAGE_COUNT ((int)(sizeof(home_pages) / sizeof(home_pages[0])))

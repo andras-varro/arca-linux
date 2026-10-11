@@ -157,6 +157,7 @@ CTEST_ROWS=(
     "sys_settings_test|-I.|control_panel/sys_settings.c"
     "cp_exec_test|-I.|control_panel/cp_exec.c"
     "usb_bus_test|-I.|control_panel/usb_bus.c"
+    "log_filter_test|-I.|control_panel/log_filter.c"
     "vnc_pad_test|-I common -I ../vnc_client|../vnc_client/vnc_pad.c common/ui_focus.c common/input_scan.c"
 )
 
