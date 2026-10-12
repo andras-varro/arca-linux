@@ -41,6 +41,18 @@
 #   arch/arm/mach-omap2/prm3xxx.h OMAP3_PRM_VOLTCTRL_OFFSET 0x60 on OMAP3430_GR_MOD
 #   (prcm-common.h 0xa00) over OMAP3430_PRM_BASE 0x48306800 (omap34xx.h) = 0x48307260.
 #
+# -- Reading a diff -----------------------------------------------------------
+# Take both dumps with the backlight in the SAME state.  CM_FCLKEN_PER 0x48005000
+# bit 10 (EN_GPT9, 0x400) follows the backlight [inferred: GPT9 is the backlight PWM;
+# seen on two units, backlight 100 -> 0x400, backlight 0 -> bit clear].  A dump taken
+# just after boot, while the backlight is still lit, differs from one taken with the
+# backlight at 0 in that bit alone.  With the backlight at 0, GPT9 is unclocked and
+# its own registers bus-fault, which the dump records as FAULT (measured, 2026-10-12:
+# 251 registers, vendor chain vs build H, empty diff in the same backlight state).
+# A unit whose root filesystem has no devmem applet reports EVERY register as FAULT;
+# a dump that is all FAULT is a missing tool, not a hardware result.  Check the fault
+# count on the last line (stderr) before diffing.
+#
 # Usage: uboot/tools/dump-boot-regs.sh <ip> > regs.txt
 #        uboot/tools/dump-boot-regs.sh --list     (names + addresses, no device)
 
