@@ -1,0 +1,30 @@
+# uEnv.txt -- optional settings for the RoomWizard U-Boot.
+#
+# Put this file in the root of the FAT partition (p1), next to MLO and u-boot.img.
+# It is optional: a missing or empty file means the built-in defaults, and deleting
+# the file restores them. Nothing is printed either way.
+#
+# Plain name=value lines, no quotes. Lines starting with # are comments; remove
+# the leading # to enable a line. Only the five names below are read, any other
+# line is ignored. LF or CRLF line endings both work. Keep the file under 2 KB.
+# An empty value (name=) deletes the variable: that restores the default for
+# bootargs, optargs and bootdelay, but never leave kernel= or fallback= empty.
+
+# Kernel command line. Replaces the built-in one completely. Without this line the
+# built-in one is used:
+#   console=ttyO1,115200n8 vram=12M initcall_blacklist=fb_logo_late_init
+#   consoleblank=0 mpurate=auto root=/dev/mmcblk0p6 rw rootfstype=ext4 rootwait
+#bootargs=console=ttyO1,115200n8 root=/dev/mmcblk0p6 rw rootfstype=ext4 rootwait
+
+# Extra kernel arguments, appended to the command line (the built-in one, or bootargs above).
+#optargs=quiet
+
+# Kernel image on p1 that is tried first. Default: uImage-system
+#kernel=uImage-system
+
+# Kernel image tried if the first fails to load or boot. Default: uImage-fallback
+#fallback=uImage-fallback
+
+# Seconds to wait for a key press on the serial console before booting. Default: 1
+# 0 = do not wait, -1 = wait forever (stops at the prompt).
+#bootdelay=1

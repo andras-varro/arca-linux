@@ -112,7 +112,7 @@ index 61e1c1a2..796e1eed 100644
  source "board/isee/igep00x0/Kconfig"
  source "board/lg/sniper/Kconfig"
 diff --git a/arch/arm/mach-omap2/omap3/board.c b/arch/arm/mach-omap2/omap3/board.c
-index 4b6ce694..bcb48b07 100644
+index 4b6ce694..f410027a 100644
 --- a/arch/arm/mach-omap2/omap3/board.c
 +++ b/arch/arm/mach-omap2/omap3/board.c
 @@ -186,6 +186,10 @@ static void try_unlock_memory(void)
@@ -120,7 +120,7 @@ index 4b6ce694..bcb48b07 100644
   *              - Called path is with SRAM stack.
   *****************************************************************************/
 +#ifdef CONFIG_TARGET_RW20
-+void rw20_witness(int stage);
++void rw20_boot_stage(int stage);
 +#endif
 +
  void s_init(void)
@@ -132,21 +132,21 @@ index 4b6ce694..bcb48b07 100644
  #endif
 +
 +#ifdef CONFIG_TARGET_RW20
-+	rw20_witness(1);
++	rw20_boot_stage(1);
 +#endif
  }
  #endif
  
  #ifdef CONFIG_XPL_BUILD
 +#ifdef CONFIG_TARGET_RW20
-+void rw20_witness(int stage);
++void rw20_boot_stage(int stage);
 +#endif
  void board_init_f(ulong dummy)
  {
  	early_system_init();
  	omap3_mem_init();
 +#ifdef CONFIG_TARGET_RW20
-+	rw20_witness(2);
++	rw20_boot_stage(2);
 +#endif
  	/*
  	* Save the boot parameters passed from romcode.
@@ -353,10 +353,10 @@ index 00000000..f0d79279
 +};
 diff --git a/board/steelcase/rw20/rw20.c b/board/steelcase/rw20/rw20.c
 new file mode 100644
-index 00000000..c34be498
+index 00000000..95bb09f4
 --- /dev/null
 +++ b/board/steelcase/rw20/rw20.c
-@@ -0,0 +1,178 @@
+@@ -0,0 +1,214 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/*
 + * Steelcase RoomWizard (OMAP3503, TWL4030, 256 MB DDR on CS0).
@@ -382,7 +382,7 @@ index 00000000..c34be498
 +#include "rw20-mux.h"
 +
 +/*
-+ * Boot-stage witness: the two side LEDs are SoC GPTimer PWM pads (not TWL4030):
++ * Boot-progress LEDs: the two side LEDs are SoC GPTimer PWM pads (not TWL4030):
 + * red = MCSPI2_SOMI (GPT10), green = MCSPI2_CS0 (GPT11); in mode 4 they are
 + * gpio_180 / gpio_181 = GPIO6 bits 20 / 21, active high. Pad addresses =
 + * OMAP34XX_CTRL_BASE 0x48002000 + CP() 0x1DA / 0x1DC (asm/arch/mux.h), 16-bit
@@ -390,7 +390,8 @@ index 00000000..c34be498
 + * +0x90, SETDATAOUT +0x94). Clocks: CM_FCLKEN_PER 0x48005000 / CM_ICLKEN_PER
 + * 0x48005010 bit 17 (EN_GPIO6; PRCM_BASE 0x48004000 + struct prcm 0x1000 /
 + * 0x1010). Needs no I2C, no SDRAM, no serial.
-+ * Stages and the reading table: uboot/BUILD.md, "Witness build".
++ * Steady colour = working on that stage, or hung there; blinking = failure.
++ * Stages and the reading table: uboot/BUILD.md, "Boot-progress LEDs".
 + */
 +#define RW20_GPIO6		OMAP34XX_GPIO6_BASE
 +#define RW20_LED_RED		(1 << 20)
@@ -415,11 +416,43 @@ index 00000000..c34be498
 +	       RW20_GPIO6 + OMAP_GPIO_CLEARDATAOUT);
 +}
 +
-+void rw20_witness(int stage);
++/*
++ * hang(): red blinks at 2 Hz forever, from the SoC's 32 kHz sync counter
++ * (SYNC_32KTIMER_BASE + 0x10; read by prcm_init() already, so it runs this early),
++ * not udelay(): the GPTimer behind udelay() may not be started yet in the SPL, and
++ * a udelay() on a stopped timer never returns. If the counter does not move, the
++ * spin cap ends each wait anyway, at an unknown rate.
++ */
++#define RW20_HALF_PERIOD	8192	/* 32 kHz ticks = 0.25 s */
++
++static void rw20_wait(void)
++{
++	u32 start = readl(SYNC_32KTIMER_BASE + 0x10);
++	u32 spin = 0;
++
++	while (readl(SYNC_32KTIMER_BASE + 0x10) - start < RW20_HALF_PERIOD)
++		if (++spin > 2000000)
++			break;
++}
++
++static void rw20_hang_blink(void)
++{
++	struct prcm *prcm_base = (struct prcm *)PRCM_BASE;
++
++	setbits_le32(&prcm_base->iclken_wkup, EN_32KSYNC);
++	for (;;) {
++		rw20_led(1, 0);
++		rw20_wait();
++		rw20_led(0, 0);
++		rw20_wait();
++	}
++}
++
++void rw20_boot_stage(int stage);
 +
 +int board_init(void)
 +{
-+	rw20_witness(4);
++	rw20_boot_stage(4);
 +	gpmc_init();
 +	/* DT kernel with appended DTB ignores this; Overo lineage of the vendor build */
 +	gd->bd->bi_arch_number = MACH_TYPE_OVERO;
@@ -438,7 +471,7 @@ index 00000000..c34be498
 +/* Last init hook before the main loop (autoboot): green only. */
 +int board_late_init(void)
 +{
-+	rw20_witness(5);
++	rw20_boot_stage(5);
 +	return 0;
 +}
 +#endif
@@ -470,7 +503,7 @@ index 00000000..c34be498
 + *          SPL and in U-Boot proper): red only.
 + * stage 2: SPL, SDRAM test passed: red + green.
 + * stage 3: SPL, spl_board_prepare_for_boot(), the last hook before the jump: green only.
-+ * stage 9: SPL, hang(): both off.
++ * stage 9: hang(), SPL and proper: red blinks forever (never returns).
 + * U-Boot proper's stage 1 therefore shows red only, after the SPL's green.
 + */
 +#ifdef CONFIG_XPL_BUILD
@@ -500,22 +533,23 @@ index 00000000..c34be498
 +	return ok;
 +}
 +
-+void rw20_witness(int stage)
++void rw20_boot_stage(int stage)
 +{
 +	if (stage == 1)
 +		rw20_led(1, 0);
 +	else if (stage == 2 && rw20_ram_ok())
 +		rw20_led(1, 1);
 +	else if (stage == 9)
-+		rw20_led(0, 0);
++		rw20_hang_blink();
 +}
 +#else
 +/*
 + * U-Boot proper: 1 = end of s_init: red only. 4 = board_init(), after relocation
-+ * and DM: red + green. 5 = board_late_init(): green only. The bootcmd script
-+ * takes over after that (include/configs/rw20.h).
++ * and DM: red + green. 5 = board_late_init(): green only. 9 = hang(): red
++ * blinks forever. The preboot and bootcmd scripts take over after 5
++ * (include/configs/rw20.h).
 + */
-+void rw20_witness(int stage)
++void rw20_boot_stage(int stage)
 +{
 +	if (stage == 1)
 +		rw20_led(1, 0);
@@ -523,6 +557,8 @@ index 00000000..c34be498
 +		rw20_led(1, 1);
 +	else if (stage == 5)
 +		rw20_led(0, 1);
++	else if (stage == 9)
++		rw20_hang_blink();
 +}
 +#endif
 +
@@ -537,10 +573,10 @@ index 00000000..c34be498
 +}
 diff --git a/configs/rw20_defconfig b/configs/rw20_defconfig
 new file mode 100644
-index 00000000..9857213d
+index 00000000..43c0f334
 --- /dev/null
 +++ b/configs/rw20_defconfig
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,50 @@
 +CONFIG_ARM=y
 +CONFIG_ARCH_OMAP2PLUS=y
 +CONFIG_TEXT_BASE=0x80100000
@@ -555,6 +591,8 @@ index 00000000..9857213d
 +CONFIG_BOOTDELAY=1
 +CONFIG_USE_BOOTCOMMAND=y
 +CONFIG_BOOTCOMMAND="run rwboot"
++CONFIG_USE_PREBOOT=y
++CONFIG_PREBOOT="run uenv"
 +CONFIG_SYS_PROMPT="arca # "
 +CONFIG_SYS_CONSOLE_INFO_QUIET=y
 +CONFIG_BOARD_LATE_INIT=y
@@ -591,10 +629,10 @@ index 00000000..9857213d
 +# CONFIG_SPL_NAND_SUPPORT is not set
 diff --git a/include/configs/rw20.h b/include/configs/rw20.h
 new file mode 100644
-index 00000000..e624f13c
+index 00000000..0eef3e29
 --- /dev/null
 +++ b/include/configs/rw20.h
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,67 @@
 +/* SPDX-License-Identifier: GPL-2.0+ */
 +/* Configuration for the Steelcase RoomWizard (rw20) */
 +
@@ -606,7 +644,16 @@ index 00000000..e624f13c
 +/*
 + * The led* variables drive the two side LEDs through GPIO6 (SETDATAOUT 0x49058094,
 + * CLEARDATAOUT 0x49058090; bit 20 red, bit 21 green) with mw.l; the xN variables
-+ * flash three times and end lit. Reading table: uboot/BUILD.md, "Witness build".
++ * flash three times at 0.1 s steps and end lit; yellowblink blinks (2 Hz) until
++ * Ctrl-C. Reading table: uboot/BUILD.md, "Boot-progress LEDs".
++ *
++ * preboot ("run uenv", CONFIG_PREBOOT) runs before bootdelay is read: an optional
++ * uEnv.txt on p1 may set bootargs (replaces sysargs), optargs (appended to either
++ * command line), kernel, fallback and bootdelay, and nothing else (env import is
++ * given that list). userargs keeps the file's bootargs: sysboot can run twice.
++ * The 4 KB buffer is filled with newlines first, then the file is loaded over it
++ * and 4 KB imported: with -r (CRLF) himport_r leaves old bytes behind the data, so
++ * a last line without a newline would read them as its own tail. File <= 2 KB.
 + */
 +#define CFG_EXTRA_ENV_SETTINGS \
 +	DEFAULT_LINUX_BOOT_ENV \
@@ -616,50 +663,63 @@ index 00000000..e624f13c
 +	"mpurate=auto\0" \
 +	"sysroot=/dev/mmcblk0p6 rw\0" \
 +	"sysrootfstype=ext4 rootwait\0" \
-+	"sysargs=setenv bootargs console=${console} vram=${vram} " \
++	"kernel=uImage-system\0" \
++	"fallback=uImage-fallback\0" \
++	"uenv=if test -e mmc ${mmcdev} uEnv.txt; then " \
++		"mw.b ${loadaddr} 0x0a 0x1000; " \
++		"if fatload mmc ${mmcdev} ${loadaddr} uEnv.txt; then " \
++		"env import -r -t ${loadaddr} 0x1000 " \
++		"bootargs optargs kernel fallback bootdelay; fi; fi; " \
++		"setenv userargs ${bootargs}\0" \
++	"sysargs=if test -n \"${userargs}\"; then " \
++		"setenv bootargs ${userargs}; else " \
++		"setenv bootargs console=${console} vram=${vram} " \
 +		"initcall_blacklist=fb_logo_late_init consoleblank=0 " \
-+		"mpurate=${mpurate} root=${sysroot} rootfstype=${sysrootfstype}\0" \
-+	"loadsysimage=fatload mmc ${mmcdev} ${loadaddr} uImage-system\0" \
-+	"loadfallback=fatload mmc ${mmcdev} ${loadaddr} uImage-fallback\0" \
++		"mpurate=${mpurate} root=${sysroot} rootfstype=${sysrootfstype}; " \
++		"fi; setenv bootargs ${bootargs} ${optargs}\0" \
++	"loadsysimage=fatload mmc ${mmcdev} ${loadaddr} ${kernel}\0" \
++	"loadfallback=fatload mmc ${mmcdev} ${loadaddr} ${fallback}\0" \
 +	"ledoff=mw.l 0x49058090 0x300000\0" \
 +	"ledred=mw.l 0x49058094 0x100000; mw.l 0x49058090 0x200000\0" \
 +	"ledgreen=mw.l 0x49058094 0x200000; mw.l 0x49058090 0x100000\0" \
 +	"ledyellow=mw.l 0x49058094 0x300000\0" \
-+	"redx3=run ledoff; sleep 0.2; run ledred; sleep 0.2; run ledoff; " \
-+		"sleep 0.2; run ledred; sleep 0.2; run ledoff; sleep 0.2; " \
++	"redx3=run ledoff; sleep 0.1; run ledred; sleep 0.1; run ledoff; " \
++		"sleep 0.1; run ledred; sleep 0.1; run ledoff; sleep 0.1; " \
 +		"run ledred\0" \
-+	"greenx3=run ledoff; sleep 0.2; run ledgreen; sleep 0.2; run ledoff; " \
-+		"sleep 0.2; run ledgreen; sleep 0.2; run ledoff; sleep 0.2; " \
++	"greenx3=run ledoff; sleep 0.1; run ledgreen; sleep 0.1; run ledoff; " \
++		"sleep 0.1; run ledgreen; sleep 0.1; run ledoff; sleep 0.1; " \
 +		"run ledgreen\0" \
-+	"yellowx3=run ledoff; sleep 0.2; run ledyellow; sleep 0.2; run ledoff; " \
-+		"sleep 0.2; run ledyellow; sleep 0.2; run ledoff; sleep 0.2; " \
-+		"run ledyellow\0" \
++	"yellowblink=while run ledyellow && sleep 0.25 && run ledoff && " \
++		"sleep 0.25; do true; done; run ledyellow\0" \
 +	"sysboot=echo Booting from mmc ...; run sysargs; run greenx3; " \
 +		"bootm ${loadaddr}\0" \
 +	"rwboot=mmc dev ${mmcdev}; mmc rescan; run ledoff; " \
 +		"if run loadsysimage; then run redx3; run sysboot; fi; " \
-+		"echo uImage-system failed, trying uImage-fallback; run ledoff; " \
++		"echo ${kernel} failed, trying ${fallback}; run ledoff; " \
 +		"if run loadfallback; then run redx3; run sysboot; fi; " \
-+		"echo no bootable kernel; run yellowx3\0"
++		"echo no bootable kernel, Ctrl-C for the prompt; run yellowblink\0"
 +
 +#endif /* __CONFIG_H */
 diff --git a/lib/hang.c b/lib/hang.c
-index f3c3c896..c9e11f95 100644
+index f3c3c896..e63a05d0 100644
 --- a/lib/hang.c
 +++ b/lib/hang.c
-@@ -20,8 +20,16 @@
+@@ -20,8 +20,19 @@
   * the user one needs to catch the bootstage_error (see show_boot_progress())
   * in the board code.
   */
-+#if defined(CONFIG_TARGET_RW20) && defined(CONFIG_XPL_BUILD)
-+void rw20_witness(int stage);
++#if defined(CONFIG_TARGET_RW20)
++void rw20_boot_stage(int stage);
 +#endif
 +
  void hang(void)
  {
-+#if defined(CONFIG_TARGET_RW20) && defined(CONFIG_XPL_BUILD)
-+	/* rw20 witness: SPL failure = both side LEDs off; before puts(), which may itself block */
-+	rw20_witness(9);
++#if defined(CONFIG_TARGET_RW20)
++	/*
++	 * rw20 boot progress: red side LED blinks forever, SPL and proper alike.
++	 * Before puts(), which may itself block, so it never returns here.
++	 */
++	rw20_boot_stage(9);
 +#endif
  #if !defined(CONFIG_XPL_BUILD) || \
  		(CONFIG_IS_ENABLED(LIBCOMMON_SUPPORT) && \
