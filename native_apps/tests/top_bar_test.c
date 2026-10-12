@@ -185,6 +185,24 @@ int main(void) {
     top_bar_layout(&live);
     CHECK(live.L.bottom == 44, "E: re-layout after the inset changes: bottom %d", live.L.bottom);
 
+    /* E2 — the buttons are DRAWN inside the bar with a margin, but keep the full hit target */
+    screen_touch_inset_top = 17;
+    top_bar_layout(&live);
+    UiRect bd = top_bar_button_draw_rect(&live.L, TB_BACK);
+    UiRect xd = top_bar_button_draw_rect(&live.L, TB_EXIT);
+    CHECK(bd.x == live.L.back.x + TOP_BAR_BTN_INSET && bd.y == live.L.top + TOP_BAR_BTN_INSET &&
+          bd.w == TOP_BAR_BTN_W - 2 * TOP_BAR_BTN_INSET && bd.h == live.L.h - 2 * TOP_BAR_BTN_INSET,
+          "E2: back drawn rect %d,%d %dx%d", bd.x, bd.y, bd.w, bd.h);
+    CHECK(xd.x + xd.w == live.L.exit.x + live.L.exit.w - TOP_BAR_BTN_INSET && xd.h == live.L.h - 2 * TOP_BAR_BTN_INSET,
+          "E2: exit drawn rect %d,%d %dx%d", xd.x, xd.y, xd.w, xd.h);
+    CHECK(top_bar_hit(&live.L, live.L.back.x, live.L.top) == TB_BACK &&
+          top_bar_hit(&live.L, live.L.exit.x + live.L.exit.w - 1, live.L.bottom - 1) == TB_EXIT,
+          "E2: the hit target still reaches the corners the drawing no longer covers");
+    CHECK(top_bar_button_draw_rect(&live.L, TB_MSG).w == 0, "E2: only back and exit have a drawn rect");
+    CHECK(live.back.width == TOP_BAR_BTN_W && live.back.height == live.L.h, "E2: the Button keeps its full hit rectangle");
+    screen_touch_inset_top = 0;
+    top_bar_layout(&live);
+
     /* F — the once-a-second clock */
     TopBar c;
     top_bar_init(&c, false, false);

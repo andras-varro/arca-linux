@@ -210,7 +210,7 @@ static void info_page_layout(void) {
     stacked = CONTENT_WIDTH < 600;
     value_x = stacked ? CONTENT_LEFT + 30
                       : CONTENT_LEFT + 10 + text_measure_width(INFO_WIDE_LABEL, 2) + 12;
-    int y = CONTENT_Y + 6;
+    int y = CONTENT_Y + CONTENT_TOP_GAP;
 
     sec_sys_y = y;  y += INFO_HEADER_H;
     for (int r = ROW_KERNEL; r <= ROW_DEFAULT_APP; r++) y = place_row(r, y);

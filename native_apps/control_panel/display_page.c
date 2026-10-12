@@ -376,7 +376,7 @@ static void display_page_layout(void) {
     int pct_w   = text_measure_width("100%", 2);   /* draw_brightness_bar()'s widest */
     int label_w = text_measure_width(DISP_BL_LABEL, 2);
 
-    sec_disp_y = CONTENT_Y + 2;
+    sec_disp_y = CONTENT_Y + CONTENT_TOP_GAP;
 
     /* One row — label, [-], bar, percentage, [+] — when that fits the content
      * width, otherwise the controls drop under the label.  Decided from

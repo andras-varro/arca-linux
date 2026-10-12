@@ -159,7 +159,7 @@ static int  utc_y, rtc_y, tz_y, label_y, value_y, col_w, value_scale, note_y;
 static int  clock_vx;   /* value columns: each section's widest label + SYS_VALUE_GAP */
 
 static void system_page_layout(void) {
-    int y = CONTENT_Y + 6;
+    int y = CONTENT_Y + CONTENT_TOP_GAP;
     /* The values start just past the labels, not at
      * draw_info_row()'s 150/270 column: in portrait that column put the LOCAL
      * time against the right edge. */

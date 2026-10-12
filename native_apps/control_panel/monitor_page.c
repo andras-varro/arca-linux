@@ -442,7 +442,7 @@ static int meter_bottom(int y, int lines) {
 /* The text column from the top: UPTIME, LOAD, SOC TEMP and RTC CELL (if present), then
  * MEMORY and STORAGE.  Returns the y under the last storage bar. */
 static int place_text(int row_h, int gap) {
-    int y = CONTENT_Y + 6;
+    int y = CONTENT_Y + CONTENT_TOP_GAP;
     uptime_y = y;
     load_y   = y + row_h;
     temp_y   = y + 2 * row_h;   /* each drawn only when its row is present */
@@ -532,7 +532,7 @@ static void monitor_page_layout(void) {
         bar_w = text_right - bar_x;
         header_right = text_right;
         text_bottom   = place_text_fit();
-        graphs_bottom = place_graphs(col_x, (CONTENT_RIGHT - 10) - col_x, CONTENT_Y + 6);
+        graphs_bottom = place_graphs(col_x, (CONTENT_RIGHT - 10) - col_x, CONTENT_Y + CONTENT_TOP_GAP);
     } else {
         bar_w = CONTENT_WIDTH - 20;
         header_right = CONTENT_RIGHT;

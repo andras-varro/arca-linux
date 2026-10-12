@@ -161,7 +161,7 @@ static Button       mix_test_btn;
 
 /* Row 2 carries MUSIC / EFFECTS / OUT under the master switch; row 3 the
  * MIX BUS TEST launch, alone, so a finger aimed at it lands on nothing else. */
-#define AUD_SEC_Y      (CONTENT_Y + 2)
+#define AUD_SEC_Y      (CONTENT_Y + CONTENT_TOP_GAP)
 #define AUD_ROW2_Y     (AUD_SEC_Y + 54)
 #define AUD_ROW3_Y     (AUD_ROW2_Y + 54)
 #define AUD_TRACK_W    60

@@ -192,7 +192,7 @@ static void ssh_page_enter(void) {
 }
 
 static void ssh_page_layout(void) {
-    int y = CONTENT_Y + 6;
+    int y = CONTENT_Y + CONTENT_TOP_GAP;
     vx = CONTENT_LEFT + 10 + text_measure_width("ROOT LOGIN:", 2) + SSH_VALUE_GAP;
 
     sec_ssh_y = y;  y += SSH_HEADER_H;

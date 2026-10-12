@@ -653,7 +653,7 @@ static bool player_step(Config *cfg, int slot, int dir) {
  * its width out among its slots — a quarter of the content for the touch tools,
  * a third for the testers — up to INPUT_BTN_MAX_W, centred under its header. */
 static void input_page_layout(void) {
-    sec_touch_y = CONTENT_Y + 2;
+    sec_touch_y = CONTENT_Y + CONTENT_TOP_GAP;
     int touch_by = sec_touch_y + 26 + INPUT_CALIB_ROW_H;
     int touch_bw = (CONTENT_WIDTH - (TOUCH_SLOTS - 1) * INPUT_BTN_GAP) / TOUCH_SLOTS;
     if (touch_bw > INPUT_BTN_MAX_W) touch_bw = INPUT_BTN_MAX_W;
@@ -680,7 +680,7 @@ static void input_page_layout(void) {
                                   INPUT_TEST_ROW_GAP, CONTENT_LEFT, 0,
                                   CONTENT_WIDTH, 3, 1, probe);
         touch_h = INPUT_TOUCH_H + (touch_rows - 1) * (INPUT_BTN_H + INPUT_BTN_GAP);
-        int players_y = CONTENT_Y + 2 + touch_h + 26
+        int players_y = CONTENT_Y + CONTENT_TOP_GAP + touch_h + 26
                       + (test_rows - 1) * (INPUT_BTN_H + INPUT_TEST_ROW_GAP)
                       + INPUT_BTN_H + 8 + 8 + 10;
         int bottom = players_y + 26 + (player_rows - 1) * (PLAYER_ROW_H + PLAYER_ROW_GAP)
@@ -697,7 +697,7 @@ static void input_page_layout(void) {
                                  touch_labels[i], touch_colors[i], COLOR_WHITE,
                                  RGB(0,200,80), touch_scale);
     }
-    sec_test_y = CONTENT_Y + 2 + touch_h;
+    sec_test_y = CONTENT_Y + CONTENT_TOP_GAP + touch_h;
     int by = sec_test_y + 26;
     {
         UiRect r[3];

@@ -39,6 +39,11 @@
 #define TOP_BAR_BTN_W        55     /* back and exit X: the width they always had */
 #define TOP_BAR_PAD          8      /* inside a text target, and between sections */
 #define TOP_BAR_RING_INSET   3      /* focus ring sits inside the target, clear of the screen edge */
+/* back and exit X are DRAWN this far inside their (full-bar-height, bezel-reaching)
+ * hit target on every side, so they sit in the bar with a margin instead of
+ * filling it edge to edge.  The hit target and the Button's geometry are unchanged;
+ * larger than TOP_BAR_RING_INSET so the focus ring still encloses the drawn button. */
+#define TOP_BAR_BTN_INSET    6
 
 /* The row the bar ends on (exclusive: the 1 px rule is drawn ON it).  The larger
  * of "44 px tall" and "TOP_BAR_MIN_TOUCH_H rows below the touchable edge". */
@@ -112,6 +117,11 @@ void top_bar_draw(Framebuffer *fb, TopBar *t);
 
 /* The ring rect for a target, inset so the ring stays inside the screen. */
 UiRect top_bar_ring_rect(const TopBarLayout *L, TbHit which);
+
+/* The rectangle a back/exit button is drawn in: its hit target inset by
+ * TOP_BAR_BTN_INSET on every side (pure; `which` is TB_BACK or TB_EXIT, else
+ * all zero).  top_bar_hit() still answers for the whole target. */
+UiRect top_bar_button_draw_rect(const TopBarLayout *L, TbHit which);
 
 /* Print one receipt line saying how much of the bar is pressable. */
 void top_bar_receipt(const TopBar *t, const char *tag);

@@ -182,7 +182,7 @@ static void network_page_layout(void) {
     row_step = row_height();
     block_h  = NET_IFACE_ROWS * row_step + NET_GAP;
 
-    int y = CONTENT_Y + 6;
+    int y = CONTENT_Y + CONTENT_TOP_GAP;
     sec_route_y = y;  y += NET_HEADER_H;
     gw_y  = y;        y += row_step;
     dns_y = y;        y += row_step;

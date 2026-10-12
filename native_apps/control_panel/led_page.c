@@ -243,7 +243,7 @@ static void led_page_layout(void) {
     int pct_w   = text_measure_width("100%", 2);   /* draw_brightness_bar()'s widest */
     int label_w = text_measure_width(LED_BRIGHT_LABEL, 2);
 
-    sec_led_y = CONTENT_Y + 2;
+    sec_led_y = CONTENT_Y + CONTENT_TOP_GAP;
     toggle_init(&led_toggle, CONTENT_LEFT + 5, sec_led_y + 20, 60, 28,
                 LED_TOGGLE_LABEL, true);
 

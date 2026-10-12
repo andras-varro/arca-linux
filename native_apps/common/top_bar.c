@@ -126,6 +126,30 @@ UiRect top_bar_ring_rect(const TopBarLayout *L, TbHit which) {
     return r;
 }
 
+UiRect top_bar_button_draw_rect(const TopBarLayout *L, TbHit which) {
+    TbSpan s = { 0, 0 };
+    if (which == TB_BACK) s = L->back;
+    else if (which == TB_EXIT) s = L->exit;
+    UiRect r = { 0, 0, 0, 0 };
+    if (s.w > 2 * TOP_BAR_BTN_INSET && L->h > 2 * TOP_BAR_BTN_INSET) {
+        r.x = s.x + TOP_BAR_BTN_INSET;
+        r.y = L->top + TOP_BAR_BTN_INSET;
+        r.w = s.w - 2 * TOP_BAR_BTN_INSET;
+        r.h = L->h - 2 * TOP_BAR_BTN_INSET;
+    }
+    return r;
+}
+
+/* Draw `b` (whose geometry is the full hit target) inside `r`: a copy, so the
+ * Button the caller hit-tests keeps its whole rectangle. */
+static void draw_inset_button(Framebuffer *fb, const Button *b, UiRect r, bool exit_x) {
+    if (r.w <= 0) return;
+    Button v = *b;
+    v.x = r.x; v.y = r.y; v.width = r.w; v.height = r.h;
+    if (exit_x) button_draw_exit(fb, &v);
+    else button_draw(fb, &v);
+}
+
 static void place_button(Button *b, TbSpan s, const TopBarLayout *L, bool present) {
     b->x = s.x;
     b->y = L->top;
@@ -187,8 +211,8 @@ void top_bar_draw(Framebuffer *fb, TopBar *t) {
         fb_draw_text(fb, L->info.x, cy - text_measure_height(TB_TEXT_SCALE) / 2,
                      t->right, TB_INFO_FG, TB_TEXT_SCALE);
 
-    if (t->has_back) button_draw(fb, &t->back);
-    if (t->has_exit) button_draw_exit(fb, &t->exit);
+    if (t->has_back) draw_inset_button(fb, &t->back, top_bar_button_draw_rect(L, TB_BACK), false);
+    if (t->has_exit) draw_inset_button(fb, &t->exit, top_bar_button_draw_rect(L, TB_EXIT), true);
 }
 
 void top_bar_receipt(const TopBar *t, const char *tag) {

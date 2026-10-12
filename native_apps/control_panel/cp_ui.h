@@ -33,6 +33,10 @@
 #define TAB_DIVIDER_H     2
 #define CONTENT_Y         (TOP_BAR_BOTTOM + TAB_DIVIDER_H)
 #define CONTENT_H         (SCREEN_SAFE_BOTTOM - CONTENT_Y)
+/* Where a page's first section header sits below CONTENT_Y: the same breathing
+ * room the headers further down get from the content above them (12 to 20 px),
+ * so the first one is not flush against the bar's rule. */
+#define CONTENT_TOP_GAP   12
 #define CONTENT_LEFT      (SCREEN_SAFE_LEFT + 10)
 #define CONTENT_RIGHT     (SCREEN_SAFE_RIGHT - 10)
 #define CONTENT_WIDTH     (CONTENT_RIGHT - CONTENT_LEFT)
