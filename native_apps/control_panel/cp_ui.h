@@ -16,6 +16,7 @@
 
 #include "../common/framebuffer.h"
 #include "../common/touch_input.h"
+#include "../common/top_bar.h"
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -26,11 +27,12 @@
 /* The touch curve and bezel the wizard writes and the touch tests load. */
 #define CALIB_FILE        "/etc/touch_calibration.conf"
 
-/* The content rectangle: the safe area below the page bar. */
-#define TAB_BAR_H         44
+/* The content rectangle: the safe area below the top bar (common/top_bar.h) and
+ * its rule.  The bar is tall enough that this never starts lower than it did
+ * under the old 44 px page bar, so a page that fitted still fits. */
 #define TAB_DIVIDER_H     2
-#define CONTENT_Y         (SCREEN_SAFE_TOP + TAB_BAR_H + TAB_DIVIDER_H)
-#define CONTENT_H         (SCREEN_SAFE_HEIGHT - TAB_BAR_H - TAB_DIVIDER_H)
+#define CONTENT_Y         (TOP_BAR_BOTTOM + TAB_DIVIDER_H)
+#define CONTENT_H         (SCREEN_SAFE_BOTTOM - CONTENT_Y)
 #define CONTENT_LEFT      (SCREEN_SAFE_LEFT + 10)
 #define CONTENT_RIGHT     (SCREEN_SAFE_RIGHT - 10)
 #define CONTENT_WIDTH     (CONTENT_RIGHT - CONTENT_LEFT)

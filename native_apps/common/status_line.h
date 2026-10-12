@@ -1,7 +1,7 @@
-/* status_line.h — the launcher's top strip: which message to show, the text on
+/* status_line.h — what the top bar says: which message to show, the text on
  * its right, and the CPU share behind it.
  *
- * Pure: strings and numbers in, strings and numbers out.  The launcher reads
+ * Pure: strings and numbers in, strings and numbers out.  top_bar.c reads
  * /proc and the clock and draws; a host test drives everything here with
  * fixtures.  The CPU arithmetic is control_panel/cpu_load.c's (wall-time
  * denominator, not /proc/stat's grand total), linked in rather than copied.

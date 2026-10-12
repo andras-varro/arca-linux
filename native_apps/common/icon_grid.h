@@ -28,13 +28,13 @@ typedef struct {
     int tile_w, tile_h;
     int content_w, content_h;       /* the tile block, gaps included */
     int left, top;                  /* its top-left corner */
-    int exit_x, exit_y, exit_w, exit_h;   /* the exit button, top-right of the title band */
 } IconGrid;
 
 /* Derive the grid from the screen's current orientation and safe rectangle.
- * `top_reserve` is the band under SCREEN_SAFE_TOP kept for a title; the page
- * dots take a fixed band at the bottom. Prints one receipt line prefixed with
- * `tag` saying whether the last row lands inside the touchable rectangle. */
+ * `top_reserve` is the band under SCREEN_SAFE_TOP kept for the top bar
+ * (top_bar.h: TOP_BAR_GRID_RESERVE); the page dots take a fixed band at the
+ * bottom. Prints one receipt line prefixed with `tag` saying whether the last
+ * row lands inside the touchable rectangle. */
 void icon_grid_layout(IconGrid *g, const Framebuffer *fb, int top_reserve,
                       const char *tag);
 
@@ -74,7 +74,7 @@ int  icon_grid_page_hit(int x, int page, int pages);
  * where the first key lands is the caller's choice. */
 int  icon_grid_nav(const IconGrid *g, int count, int cur, UiDir d);
 
-/* As icon_grid_nav, plus the exit X (icon_grid_draw_exit) as a stop above the
+/* As icon_grid_nav, plus the exit X (top_bar.h) as a stop above the
  * grid: Up from the top row of `page` goes to ICON_GRID_NAV_EXIT and records
  * the tile in *from; Down from the X returns to *from when it is on `page`,
  * else to the page's first tile; any other key on the X stays there. */
@@ -122,14 +122,6 @@ int  icon_grid_focus_frame(const IconGrid *g, int count, int *page,
  * back to home puts the ring, when it is up, on the tile that was used. */
 void icon_grid_focus_land(const IconGrid *g, IconGridFocus *f, int *page,
                           int idx);
-
-/* The standard red-X exit button in the title band. The grid only draws it and
- * reports the tap; what exiting means is the caller's (the control panel just
- * exits). Needs `top_reserve` >= ICON_GRID_EXIT_H + 2. */
-#define ICON_GRID_EXIT_W 55
-#define ICON_GRID_EXIT_H 40
-void icon_grid_draw_exit(Framebuffer *fb, const IconGrid *g);
-bool icon_grid_exit_hit(const IconGrid *g, int x, int y);
 
 /* Load a PPM icon, scaled to ICON_GRID_ICON_SIZE. NULL if it is missing or
  * unreadable (the tile then falls back to the letter). Free with free(). */

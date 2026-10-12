@@ -199,6 +199,7 @@ step "12/31" "audio_wav";    $CC "${WARN[@]}" -O2 -c common/audio_wav.c       -o
 step "13/31" "audio_bed";    $CC "${WARN[@]}" -O2 -c common/audio_bed.c       -o build/audio_bed.o
 step "14/31" "ppm";          $CC "${WARN[@]}" -O2 -c common/ppm.c             -o build/ppm.o
                               $CC "${WARN[@]}" -O2 -c common/icon_grid.c       -o build/icon_grid.o
+                              $CC "${WARN[@]}" -O2 -I. -c common/top_bar.c         -o build/top_bar.o
                               $CC "${WARN[@]}" -O2 -c common/ui_focus.c        -o build/ui_focus.o
                               $CC "${WARN[@]}" -O2 -c common/pointer.c         -o build/pointer.o
                               $CC "${WARN[@]}" -O2 -c common/start_menu.c      -o build/start_menu.o
@@ -275,7 +276,7 @@ step "24/31" "platformer"
 $CC "${WARN[@]}" -O2 platformer/platformer.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/platformer -lm "${AUDIO_LIBS[@]}"
 
 step "25/31" "app_launcher"
-$CC "${WARN[@]}" -O2 -I. app_launcher/app_launcher.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" build/ppm.o build/icon_grid.o build/pointer.o build/logger.o common/status_line.c control_panel/cpu_load.c -o build/app_launcher -lm "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. app_launcher/app_launcher.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" build/ppm.o build/icon_grid.o build/top_bar.o build/pointer.o build/logger.o common/status_line.c control_panel/cpu_load.c -o build/app_launcher -lm "${AUDIO_LIBS[@]}"
 
 step "26/31" "theremin"
 $CC "${WARN[@]}" -O2 -I. \
@@ -287,7 +288,7 @@ $CC "${WARN[@]}" -O2 -I. \
 # The standalone unified_calibrate was folded into it and deleted — it was a
 # second, independent copy of the same 9-tap fit, carrying the same defect.
 step "27/31" "control_panel"
-$CC "${WARN[@]}" -O2 -I. control_panel/control_panel.c control_panel/cp_page_name.c control_panel/usb_bus.c control_panel/touch_wizard.c control_panel/led_page.c control_panel/monitor_page.c control_panel/cpu_load.c control_panel/soc_temp.c control_panel/mon_graph.c sysmon/mon_ring.c control_panel/info_page.c control_panel/network_page.c control_panel/usb_page.c control_panel/input_page.c control_panel/audio_page.c control_panel/display_page.c control_panel/bluetooth_page.c control_panel/system_page.c control_panel/log_page.c control_panel/log_filter.c control_panel/ssh_page.c control_panel/cp_exec.c control_panel/sys_settings.c control_panel/bt_ctl.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" $CALIB_OBJ build/ui_layout.o build/ui_flow.o build/ui_focus.o build/ppm.o build/icon_grid.o build/pointer.o -o build/control_panel -lm "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. control_panel/control_panel.c control_panel/cp_page_name.c control_panel/usb_bus.c control_panel/touch_wizard.c control_panel/led_page.c control_panel/monitor_page.c control_panel/cpu_load.c control_panel/soc_temp.c control_panel/mon_graph.c sysmon/mon_ring.c control_panel/info_page.c control_panel/network_page.c control_panel/usb_page.c control_panel/input_page.c control_panel/audio_page.c control_panel/display_page.c control_panel/bluetooth_page.c control_panel/system_page.c control_panel/log_page.c control_panel/log_filter.c control_panel/ssh_page.c control_panel/cp_exec.c control_panel/sys_settings.c control_panel/bt_ctl.c common/status_line.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" $CALIB_OBJ build/ui_layout.o build/ui_flow.o build/ui_focus.o build/ppm.o build/icon_grid.o build/top_bar.o build/pointer.o -o build/control_panel -lm "${AUDIO_LIBS[@]}"
 
 # Touch diagnostic. It was previously absent from this script, which is why a
 # deployed copy of the old trace tool was stale (pre-bezel); that tool now lives in

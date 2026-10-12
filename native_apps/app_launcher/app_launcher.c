@@ -34,6 +34,7 @@
 #include "common/hardware.h"
 #include "common/config.h"
 #include "common/status_line.h"
+#include "common/top_bar.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,17 +59,12 @@
  * held key to stop generating repeats, but short enough to feel instant. */
 #define LAUNCH_COOLDOWN_MS 500
 
-/* ── Grid geometry: common/icon_grid.c, shared with control_panel's home screen ── */
-
-#define TITLE_H         50
-/* The status strip sits at the top of the safe rectangle, above the title, so
- * its message is inside the touchable area.  Two lines of scale-2 text would
- * not fit; one line is 16 px tall.  The grid reserves it on top of TITLE_H. */
-#define STATUS_H        22
-#define STATUS_PAD_X    8
-#define STATUS_BG       RGB(40, 40, 58)
-#define STATUS_FG       RGB(200, 200, 220)
-#define STATUS_WARN     COLOR_ORANGE
+/* ── Grid geometry: common/icon_grid.c, shared with control_panel's home screen ──
+ * The grid starts under the top bar (common/top_bar.h): the message on the left
+ * (the tap target), the title, CPU and clock, and the exit X.  The bar is
+ * flush with the top edge and reserves TOP_BAR_GRID_RESERVE under the touch
+ * inset, so its buttons stay pressable on any unit. */
+#define TITLE_TEXT      "Arca Launcher"
 static IconGrid grid;
 
 /* ── The MUSIC / EFFECTS toggles are NOT here ────────────────────────────────
@@ -99,15 +95,6 @@ static bool msg_pressed;         /* the current touch went down on the status me
 /* Returned by handle_touch() and handle_gamepad_input() for "open the page that
  * fixes the shown message"; -2 is the exit X, so this is -3. */
 #define TOUCH_MESSAGE   (-3)
-
-/* Prints the layout receipt ("launcher: safe …") — see icon_grid_layout(). */
-static void compute_grid_layout(Framebuffer *fb) {
-    /* The receipt's grid_top already includes the strip. */
-    icon_grid_layout(&grid, fb, STATUS_H + TITLE_H, "launcher");
-    /* The exit X belongs to the title band, which now starts below the strip. */
-    grid.exit_y += STATUS_H;
-}
-
 
 /* ── Colours ────────────────────────────────────────────────────────────── */
 
@@ -151,54 +138,41 @@ typedef struct {
     uint32_t    last_launch_return_ms;  /* Timestamp of last child-exit for cooldown */
     Logger      logger;
     bool        needs_redraw;       /* Dirty flag — skip rendering when false */
-    /* The top strip (status_line.h): a message on the left, CPU and clock on
-     * the right, re-read once a second by status_refresh(). */
+    /* The top bar (top_bar.h): the message on the left, CPU and clock on the
+     * right, re-read once a second by status_refresh(). */
+    TopBar      bar;
     StatusCtx   status_ctx;
     const StatusMsg *msg;           /* the message shown, NULL = none */
-    CpuSnap     cpu_prev;           /* last /proc reading, valid = a first one exists */
-    char        status_right[24];
-    uint32_t    status_next_ms;
     bool        msg_focus;          /* the keyboard ring is on the message */
 } Launcher;
 
-/* The strip's message, as a tap target: its text plus padding, inside SAFE. */
-static bool message_hit(const Launcher *l, int x, int y) {
-    if (!l->msg) return false;
-    int w = text_measure_width(l->msg->text, 2) + 2 * STATUS_PAD_X;
-    return x >= SCREEN_SAFE_LEFT && x < SCREEN_SAFE_LEFT + w &&
-           y >= SCREEN_SAFE_TOP  && y < SCREEN_SAFE_TOP + STATUS_H;
+/* Prints the layout receipts ("launcher: safe …", "launcher: bar …") — see
+ * icon_grid_layout() and top_bar_receipt(). */
+static void compute_grid_layout(Launcher *l) {
+    top_bar_layout(&l->bar);
+    top_bar_receipt(&l->bar, "launcher");
+    icon_grid_layout(&grid, &l->fb, TOP_BAR_GRID_RESERVE, "launcher");
 }
 
-/* Re-read the strip's inputs if a second has passed.  Returns true when what
+/* The bar's message, as a tap target: its text plus padding, full bar height. */
+static bool message_hit(const Launcher *l, int x, int y) {
+    return l->msg && top_bar_hit(&l->bar.L, x, y) == TB_MSG;
+}
+
+/* Re-read the bar's inputs if a second has passed.  Returns true when what
  * it draws changed (the right-hand text, or the message). */
 static bool status_refresh(Launcher *l, uint32_t now_ms) {
-    if (l->status_next_ms && (int32_t)(now_ms - l->status_next_ms) < 0) return false;
-    l->status_next_ms = now_ms + 1000;
-    if (l->status_next_ms == 0) l->status_next_ms = 1;
-
-    char stat_buf[2048] = "", up_buf[64] = "";
-    FILE *f = fopen("/proc/stat", "r");
-    if (f) { size_t n = fread(stat_buf, 1, sizeof(stat_buf) - 1, f); stat_buf[n] = '\0'; fclose(f); }
-    f = fopen("/proc/uptime", "r");
-    if (f) { size_t n = fread(up_buf, 1, sizeof(up_buf) - 1, f); up_buf[n] = '\0'; fclose(f); }
-    CpuSnap cur = status_cpu_snap(stat_buf, up_buf);
-    int pct = status_cpu_percent(&l->cpu_prev, &cur, (unsigned)sysconf(_SC_CLK_TCK));
-    if (cur.valid) l->cpu_prev = cur;
-
-    time_t t = time(NULL);
-    struct tm tm;
-    int hour = -1, min = -1;
-    if (localtime_r(&t, &tm)) { hour = tm.tm_hour; min = tm.tm_min; }
-    char right[sizeof(l->status_right)];
-    status_line_format(right, sizeof(right), pct, hour, min);
+    if (!top_bar_info_due(&l->bar, now_ms)) return false;
+    bool changed = top_bar_info_sample(&l->bar);
 
     l->status_ctx.calibrated = (access("/etc/touch_calibration.conf", F_OK) == 0);
     const StatusMsg *msg = status_msg_pick(&l->status_ctx);
     if (!msg) l->msg_focus = false;
 
-    bool changed = msg != l->msg || strcmp(right, l->status_right) != 0;
+    changed = changed || msg != l->msg;
     l->msg = msg;
-    memcpy(l->status_right, right, sizeof(right));
+    l->bar.message = msg ? msg->text : NULL;
+    top_bar_layout(&l->bar);       /* the message moves the title's room */
     return changed;
 }
 
@@ -344,31 +318,17 @@ static void draw_tile(Framebuffer *fb, const AppEntry *app, int tx, int ty) {
 static void draw_launcher(Launcher *l) {
     fb_clear(&l->fb, BG_COLOR);
 
-    /* Status strip: the visible band down to STATUS_H below SCREEN_SAFE_TOP, so
-     * it is flush with the top edge however large the touch inset is.  Message
-     * left (the tap target), CPU and clock right-aligned; 16 + 14 chars = 480 px
-     * at most, which is the portrait width. */
-    {
-        int strip_bottom = SCREEN_SAFE_TOP + STATUS_H;
-        fb_fill_rect(&l->fb, SCREEN_VISIBLE_LEFT, SCREEN_VISIBLE_TOP,
-                     SCREEN_VISIBLE_WIDTH, strip_bottom - SCREEN_VISIBLE_TOP, STATUS_BG);
-        int ty = SCREEN_SAFE_TOP + (STATUS_H - text_measure_height(2)) / 2;
-        if (l->msg) {
-            fb_draw_text(&l->fb, SCREEN_SAFE_LEFT + STATUS_PAD_X, ty,
-                         l->msg->text, STATUS_WARN, 2);
-            if (l->msg_focus)
-                icon_grid_draw_ring(&l->fb, SCREEN_SAFE_LEFT, SCREEN_SAFE_TOP,
-                                    text_measure_width(l->msg->text, 2) + 2 * STATUS_PAD_X,
-                                    STATUS_H);
-        }
-        fb_draw_text(&l->fb,
-                     SCREEN_SAFE_RIGHT - STATUS_PAD_X - text_measure_width(l->status_right, 2),
-                     ty, l->status_right, STATUS_FG, 2);
+    /* The top bar, flush with the top edge however large the touch inset is:
+     * message left (the tap target), the title, CPU and clock, and the exit X.
+     * The keyboard rings on the message and on the exit X are drawn inside
+     * their targets, so the top edge of the screen does not clip them. */
+    l->bar.title = TITLE_TEXT;
+    l->bar.title_color = TITLE_COLOR;
+    top_bar_draw(&l->fb, &l->bar);
+    if (l->msg_focus && l->msg) {
+        UiRect r = top_bar_ring_rect(&l->bar.L, TB_MSG);
+        icon_grid_draw_ring(&l->fb, r.x, r.y, r.w, r.h);
     }
-
-    /* Title: under the strip, 4..31 px into the title band as it always was. */
-    text_draw_centered(&l->fb, l->fb.width / 2, SCREEN_SAFE_TOP + STATUS_H + 18,
-                       "ROOMWIZARD", TITLE_COLOR, 4);
 
     /* Tiles for current page */
     int start = l->current_page * grid.per_page;
@@ -396,9 +356,10 @@ static void draw_launcher(Launcher *l) {
     /* Page arrows and dots */
     icon_grid_draw_paging(&l->fb, &grid, l->current_page, l->total_pages);
 
-    icon_grid_draw_exit(&l->fb, &grid);
-    if (l->focus.shown && l->focus.sel == ICON_GRID_NAV_EXIT && !l->msg_focus)   /* focus on the X */
-        icon_grid_draw_ring(&l->fb, grid.exit_x, grid.exit_y, grid.exit_w, grid.exit_h);
+    if (l->focus.shown && l->focus.sel == ICON_GRID_NAV_EXIT && !l->msg_focus) {   /* focus on the X */
+        UiRect r = top_bar_ring_rect(&l->bar.L, TB_EXIT);
+        icon_grid_draw_ring(&l->fb, r.x, r.y, r.w, r.h);
+    }
 
     /* The dialog highlights its focused button itself, always. */
     modal_dialog_draw(&power_dialog, &l->fb);
@@ -426,10 +387,10 @@ static int tile_at(Launcher *l, int x, int y) {
  *  Returns:  >= 0   app index to launch
  *            -1     nothing (a page flip included)
  *            -2     the exit X, released over it
- *            TOUCH_MESSAGE  the strip's message, released over it */
+ *            TOUCH_MESSAGE  the bar's message, released over it */
 static int handle_touch(Launcher *l, const TouchState *ts) {
     if (ts->pressed) {
-        exit_pressed  = icon_grid_exit_hit(&grid, ts->x, ts->y);
+        exit_pressed  = top_bar_hit(&l->bar.L, ts->x, ts->y) == TB_EXIT;
         msg_pressed   = !exit_pressed && message_hit(l, ts->x, ts->y);
         home_press    = (exit_pressed || msg_pressed) ? -1 : tile_at(l, ts->x, ts->y);
         if (!exit_pressed && !msg_pressed && home_press < 0)
@@ -444,7 +405,7 @@ static int handle_touch(Launcher *l, const TouchState *ts) {
     }
     if (exit_pressed) {
         exit_pressed = false;
-        return icon_grid_exit_hit(&grid, ts->x, ts->y) ? -2 : -1;
+        return top_bar_hit(&l->bar.L, ts->x, ts->y) == TB_EXIT ? -2 : -1;
     }
     int p = home_press;
     home_press = -1;
@@ -481,10 +442,10 @@ static int handle_gamepad_input(Launcher *l, bool touch_press) {
                                   b[BTN_ID_LEFT].pressed, b[BTN_ID_RIGHT].pressed);
     bool enter = b[BTN_ID_JUMP].pressed || b[BTN_ID_ACTION].pressed;
 
-    /* The strip's message is one stop above the exit X: Up from the X reaches
+    /* The bar's message is one stop above the exit X: Up from the X reaches
      * it, Enter opens its page, Down returns to the X, other arrows stay.  It
      * is outside icon_grid_focus_frame()'s model on purpose (that is shared with
-     * the Control Panel home, which has no strip); a touch drops the ring as it
+     * the Control Panel home, which has no message); a touch drops the ring as it
      * does there. */
     if (l->msg_focus && l->msg && !touch_press) {
         if (enter) return TOUCH_MESSAGE;
@@ -592,7 +553,7 @@ static void launch_app(Launcher *l, const AppEntry *app, const char *page,
         LOG_ERROR(&l->logger, "Failed to re-initialise framebuffer");
 
     /* Recompute grid layout (screen dimensions may differ after child) */
-    compute_grid_layout(&l->fb);
+    compute_grid_layout(l);
 
     /* Re-acquire touch */
     if (touch_init(&l->touch, touch_dev) == 0) {
@@ -635,9 +596,9 @@ static void launch_app(Launcher *l, const AppEntry *app, const char *page,
      * stale events from any source (keyboard, touch, mouse). */
     l->last_launch_return_ms = get_time_ms();
 
-    /* The child may have fixed what the strip names (calibration), and the clock
+    /* The child may have fixed what the bar names (calibration), and the clock
      * has moved: read it all again on the next frame. */
-    l->status_next_ms = 0;
+    top_bar_info_invalidate(&l->bar);
 
     /* Re-scan manifests in case new apps were deployed while app ran */
     LOG_INFO(&l->logger, "Re-scanning apps...");
@@ -826,13 +787,14 @@ int main(int argc, char *argv[]) {
     memset(&launcher.input, 0, sizeof(launcher.input));
     launcher.last_launch_return_ms = 0;
     icon_grid_focus_init(&launcher.focus);  /* no ring until a key is pressed */
+    top_bar_init(&launcher.bar, false, true);   /* no back: the exit X opens the power dialog */
     launcher.needs_redraw = true;  /* Force initial frame draw */
 
     /* Compute grid layout based on screen dimensions */
-    compute_grid_layout(&launcher.fb);
+    compute_grid_layout(&launcher);
     pointer_init(&launcher.pointer);   /* after touch_init: SCREEN_SAFE_* */
 
-    status_init(&launcher);   /* first reading: the strip is right on the first frame */
+    status_init(&launcher);   /* first reading: the bar is right on the first frame */
 
     modal_dialog_init(&power_dialog, "SHUT DOWN OR REBOOT?", NULL, 3);
     modal_dialog_set_button(&power_dialog, PWR_SHUTDOWN, "SHUT DOWN", BTN_COLOR_DANGER, COLOR_WHITE);
@@ -933,7 +895,7 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        /* The strip: once a second, and the frame is redrawn only when its text
+        /* The bar: once a second, and the frame is redrawn only when its text
          * or the message changed.  There is no partial-redraw path here (a full
          * frame is cleared and swapped), so a changing CPU figure costs one full
          * redraw a second while the launcher is idle. */

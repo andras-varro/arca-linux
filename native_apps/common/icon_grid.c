@@ -64,11 +64,6 @@ void icon_grid_layout(IconGrid *g, const Framebuffer *fb, int top_reserve,
     g->left = SCREEN_SAFE_LEFT + (SCREEN_SAFE_WIDTH - g->content_w) / 2;
     g->top  = SCREEN_SAFE_TOP + top_reserve + (avail_h - g->content_h) / 2;
 
-    g->exit_w = ICON_GRID_EXIT_W;
-    g->exit_h = ICON_GRID_EXIT_H;
-    g->exit_x = SCREEN_SAFE_RIGHT - ICON_GRID_EXIT_W - 10;
-    g->exit_y = SCREEN_SAFE_TOP + 2;
-
     /* ⚠️ The RECEIPT. A layout that puts a row past the bottom of the touchable
      * rect looks perfect in a framebuffer screenshot and is simply dead to a
      * finger, so the derivation prints itself and says whether it fits. */
@@ -181,18 +176,6 @@ int icon_grid_page_hit(int x, int page, int pages) {
     if (x < SCREEN_SAFE_LEFT + PAGE_EDGE_BAND && page > 0) return -1;
     if (x > SCREEN_SAFE_RIGHT - PAGE_EDGE_BAND && page < pages - 1) return 1;
     return 0;
-}
-
-void icon_grid_draw_exit(Framebuffer *fb, const IconGrid *g) {
-    Button b;
-    button_init_full(&b, g->exit_x, g->exit_y, g->exit_w, g->exit_h, "X",
-                     BTN_EXIT_COLOR, COLOR_WHITE, BTN_HIGHLIGHT_COLOR, 2);
-    button_draw_exit(fb, &b);
-}
-
-bool icon_grid_exit_hit(const IconGrid *g, int x, int y) {
-    return x >= g->exit_x && x < g->exit_x + g->exit_w &&
-           y >= g->exit_y && y < g->exit_y + g->exit_h;
 }
 
 uint32_t *icon_grid_load_icon(const char *path) {

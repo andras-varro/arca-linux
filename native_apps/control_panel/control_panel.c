@@ -61,8 +61,6 @@
  * Color Palette
  * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
-#define COLOR_PAGE_BAR_BG    RGB(30, 30, 45)
-#define COLOR_BACK_BTN       RGB(35, 35, 50)
 #define COLOR_SECTION_LINE   RGB(60, 60, 80)
 #define COLOR_HEADER_TEXT    COLOR_CYAN
 #define COLOR_BAR_BG         RGB(40, 40, 40)
@@ -74,11 +72,8 @@
  * Layout Constants
  * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
-/* TAB_BAR_H, CONTENT_*, BAR_WIDTH/BAR_HEIGHT and COLOR_LABEL live in cp_ui.h,
+/* CONTENT_*, BAR_WIDTH/BAR_HEIGHT and COLOR_LABEL live in cp_ui.h,
  * which the page modules share. */
-
-#define BACK_BTN_W        55
-#define BACK_BTN_H        40
 
 /* How long a status message stays up.  A page's message is held longer: the
  * one that exists names a file path, which a 2 s flash does not let anyone
@@ -123,7 +118,6 @@ static const CpPage *const home_pages[] = {
     &cp_info_page,
 };
 #define HOME_PAGE_COUNT ((int)(sizeof(home_pages) / sizeof(home_pages[0])))
-#define HOME_TITLE_H    50
 
 typedef struct {
     const CpPage *page;               /* the open page; NULL = the home grid */
@@ -154,7 +148,7 @@ bool cp_running(void) { return running; }
 
 /* â”€â”€ UI Elements â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
-static Button back_btn;          /* the page bar's BACK to the home grid */
+static TopBar bar;              /* the shared top bar: BACK on a page, the exit X on home */
 
 /* The panel's one confirmation dialog: every page's cp_confirm() (cp_page.h)
  * opens this same instance.  While
@@ -264,42 +258,41 @@ void draw_usage_bar(Framebuffer *fb, int x, int y, int width,
  * Page Bar
  * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
-static void create_page_bar(void) {
-    /* BACK on the left, where the full-screen testers keep theirs: the top-right
-     * corner is the home grid's exit X, and a double tap there must not both
-     * leave the page and quit. */
-    button_init_full(&back_btn,
-                     SCREEN_SAFE_LEFT + 10, SCREEN_SAFE_TOP + 2,
-                     BACK_BTN_W, BACK_BTN_H, "<",
-                     COLOR_BACK_BTN, COLOR_WHITE,
-                     BTN_HIGHLIGHT_COLOR, 3);
+/* The bar's content follows the view: BACK on a page, the exit X on the home
+ * grid.  BACK sits on the left, where the full-screen testers keep theirs: the
+ * top-right corner is the home grid's exit X, and a double tap there must not
+ * both leave the page and quit.  Both are full-bar-height targets
+ * (common/top_bar.h).  Re-run after any fb_set_bezel(), by rebuild_ui(). */
+static void bar_configure(const CpPage *page) {
+    bar.has_back = page != NULL;
+    bar.has_exit = page == NULL;
+    top_bar_layout(&bar);
+}
+
+static void create_page_bar(const AppState *state) {
+    bar_configure(state->page);
+    top_bar_receipt(&bar, "control_panel");   /* how much of the bar is pressable */
 }
 
 /* Drawn over an open page only: BACK, and the page's name — which is also its
  * tile's label — or the page's status line while one shows. */
 static void draw_page_bar(Framebuffer *fb, AppState *state) {
-    fb_fill_rect(fb, SCREEN_SAFE_LEFT, SCREEN_SAFE_TOP,
-                 SCREEN_SAFE_WIDTH, TAB_BAR_H, COLOR_PAGE_BAR_BG);
     if (state->status_msg[0]) {
         /* A page's status line takes the title's place while it shows: the
          * page owns the whole content rect, so the bar is the one spot that is
          * free in both orientations.  Scale 2 where it fits between BACK and
-         * the right edge, else scale 1, cut with ".." if even that is too wide. */
-        int left = back_btn.x + back_btn.width + 10;
-        int scale = (text_measure_width(state->status_msg, 2) <= CONTENT_RIGHT - left) ? 2 : 1;
-        char cut[sizeof(state->status_msg)];
-        fit_value(state->status_msg, left, scale, cut, sizeof(cut));
-        text_draw_centered(fb, (left + CONTENT_RIGHT) / 2,
-                           back_btn.y + back_btn.height / 2, cut,
-                           state->status_ok ? COLOR_GREEN : COLOR_ORANGE, scale);
+         * the info, else scale 1, cut with ".." if even that is too wide. */
+        bar.title = state->status_msg;
+        bar.title_color = state->status_ok ? COLOR_GREEN : COLOR_ORANGE;
+        bar.title_scale = 2;
+        bar.title_cut = true;
     } else {
-        text_draw_centered(fb, fb->width / 2, back_btn.y + back_btn.height / 2,
-                           state->page->name, COLOR_WHITE, 3);
+        bar.title = state->page->name;
+        bar.title_color = COLOR_WHITE;
+        bar.title_scale = 3;
+        bar.title_cut = false;
     }
-    button_draw(fb, &back_btn);
-    fb_draw_line(fb, SCREEN_SAFE_LEFT, SCREEN_SAFE_TOP + TAB_BAR_H,
-                 SCREEN_SAFE_RIGHT, SCREEN_SAFE_TOP + TAB_BAR_H,
-                 COLOR_SECTION_LINE);
+    top_bar_draw(fb, &bar);
 }
 
 /* The one place a view changes — page NULL is the home grid — so entering and
@@ -316,6 +309,7 @@ static void set_view(AppState *state, const CpPage *page) {
         state->status_hold_ms = 0;
     }
     state->page = page;
+    bar_configure(page);       /* BACK on a page, the exit X on home */
     state->page_fullscreen = false;
     if (page && page != prev_page) {
         if (page->enter) page->enter();
@@ -325,7 +319,7 @@ static void set_view(AppState *state, const CpPage *page) {
 
 static void handle_page_bar_input(AppState *state, int tx, int ty,
                                   bool touching, uint32_t now) {
-    if (button_update(&back_btn, tx, ty, touching, now))
+    if (button_update(&bar.back, tx, ty, touching, now))
         set_view(state, NULL);
 }
 
@@ -357,9 +351,11 @@ static void draw_home(Framebuffer *fb, AppState *state) {
     int pages = icon_grid_pages(&home_grid, HOME_PAGE_COUNT);
     if (state->home_page >= pages) state->home_page = pages - 1;
 
-    text_draw_centered(fb, fb->width / 2, SCREEN_SAFE_TOP + 14, "CONTROL PANEL",
-                       COLOR_WHITE, 3);
-    icon_grid_draw_exit(fb, &home_grid);
+    bar.title = "Control Panel";
+    bar.title_color = COLOR_WHITE;
+    bar.title_scale = 3;
+    bar.title_cut = false;
+    top_bar_draw(fb, &bar);
 
     int start = state->home_page * home_grid.per_page;
     int n = home_count_on_page(state->home_page);
@@ -382,7 +378,7 @@ static void handle_home_input(AppState *state, const TouchState *ts) {
     if (ts->pressed) {
         int tile = icon_grid_hit(&home_grid, home_count_on_page(state->home_page),
                                  ts->x, ts->y);
-        home_press = icon_grid_exit_hit(&home_grid, ts->x, ts->y) ? -1
+        home_press = top_bar_hit(&bar.L, ts->x, ts->y) == TB_EXIT ? -1
                    : tile >= 0 ? tile : -2;
         if (home_press == -2)
             state->home_page += icon_grid_page_hit(ts->x, state->home_page,
@@ -394,7 +390,7 @@ static void handle_home_input(AppState *state, const TouchState *ts) {
     int pressed = home_press;
     home_press = -2;
     if (pressed == -1) {
-        if (icon_grid_exit_hit(&home_grid, ts->x, ts->y)) running = false;
+        if (top_bar_hit(&bar.L, ts->x, ts->y) == TB_EXIT) running = false;
         return;
     }
     if (icon_grid_hit(&home_grid, home_count_on_page(state->home_page),
@@ -454,11 +450,11 @@ static int focus_collect(AppState *state, UiRect *out, const void **ctx,
             out[n++] = (UiRect){ x, y, home_grid.tile_w, home_grid.tile_h };
         }
         *n_tiles = n;
-        out[n++] = (UiRect){ home_grid.exit_x, home_grid.exit_y,
-                             home_grid.exit_w, home_grid.exit_h };
+        out[n++] = top_bar_ring_rect(&bar.L, TB_EXIT);
     } else {
         *ctx = state->page;
-        n = focus_add_button(out, 0, FOCUS_MAX, &back_btn);
+        out[0] = top_bar_ring_rect(&bar.L, TB_BACK);
+        n = 1;
         focus_page_base = n;
         if (state->page->focusables)
             n += state->page->focusables(out + n, FOCUS_MAX - n);
@@ -819,12 +815,12 @@ static void run_touch_diagnostic(Framebuffer *fb, TouchInput *touch) {
  * logical screen size changes, since all of them derive their geometry from
  * SCREEN_SAFE_*. */
 static void rebuild_ui(AppState *state) {
-    create_page_bar();
+    create_page_bar(state);
     /* Each prints its "control_panel: <page> stack …" receipt. */
     for (int i = 0; i < HOME_PAGE_COUNT; i++)
         home_pages[i]->layout();
     /* Prints the "control_panel home: safe …" receipt — see icon_grid_layout(). */
-    icon_grid_layout(&home_grid, g_fb, HOME_TITLE_H, "control_panel home");
+    icon_grid_layout(&home_grid, g_fb, TOP_BAR_GRID_RESERVE, "control_panel home");
 }
 
 void cp_run_touch_tool(Framebuffer *fb, TouchInput *touch, int mode) {
@@ -940,6 +936,7 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < HOME_PAGE_COUNT; i++)
         home_pages[i]->load(&state.cfg);
 
+    top_bar_init(&bar, false, true);   /* home first; set_view() follows the view */
     rebuild_ui(&state);
     home_load_icons();   /* the home grid is the startup view */
     if (start_page) set_view(&state, start_page);   /* BACK then reaches the home grid */
@@ -958,6 +955,11 @@ int main(int argc, char *argv[]) {
             state.status_hold_ms = 0;
             needs_redraw = true;
         }
+
+        /* The bar's CPU and clock: re-read once a second, and the frame is
+         * repainted only when the text changed. */
+        if (top_bar_info_due(&bar, now) && top_bar_info_sample(&bar))
+            needs_redraw = true;
 
         if (state.page && state.page_fullscreen) {
             run_current_fullscreen_mode(&fb, &touch, &state);
