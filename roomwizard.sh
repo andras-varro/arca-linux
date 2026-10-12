@@ -63,7 +63,7 @@ scripts it calls. To script a step, call that script directly:
   ./commissioning/provision.sh <target> [flags]         update a unit (ssh, reboots)
   ./commissioning/provision.sh <target> --hostname NAME name only, no reboot
   ./deploy-all.sh <target> [component]                  deploy (ssh)
-  ./rootfs/make-card-image.sh --bundle <b> <parts> <rootfs.tar> <out.img>   card image
+  ./rootfs/make-card-image.sh --mlo <f> --uboot <f> --kernel <f> --bundle <b> <rootfs.tar> <out.img>   card image
   ./setup-build-env.sh [--install-deps] [--scummvm]     host build prerequisites
 
 Full guide: COMMISSIONING.md
@@ -145,22 +145,24 @@ confirm() {
 do_image_card() {
     hdr "6. Build a card IMAGE (our own root, bundle installed, offline)"
     cat <<'PRE'
-  Builds an image file of the whole card: our Buildroot root on p6, empty p2/p3/p5,
-  the release bundle installed and verified. You write the file to a card yourself
-  and the unit boots working. Updating a unit that is already running is item 2.
+  Builds an image file of the whole card: our boot files on p1, our Buildroot root on p6,
+  empty p2/p3/p5, the release bundle installed and verified. The same image for every unit:
+  no vendor file, no SSH key, no host name. You write the file to a card of 4 GB or more
+  yourself and the unit boots working. Updating a unit that is already running is item 2.
 
   Before continuing:
 
     - this must run as root on the native WSL filesystem (not /mnt/c)
-    - the parts directory is what rootfs/fetch-card-parts.sh filled
+    - the boot files are MLO and u-boot.img from uboot/build.sh, and a uImage kernel
+      from kernel/build-image.sh
     - the root filesystem tar is what rootfs/build-rootfs.sh left in ~/br-rw-out
     - you have a bundle: ./release.sh --stage-only leaves one in build/release
     - the kernel modules are in ~/rw-kmods (cy8ctmg120_ts.ko is required)
 
-  It never touches a block device or p1's boot files.
+  It never touches a block device.
 PRE
     echo ""
-    local bundle parts tar out
+    local bundle mlo uboot kernel tar out
     read -r -p "  Bundle (tarball or directory) [build/release]: " bundle
     bundle="${bundle:-build/release}"
     if [ ! -e "$SCRIPT_DIR/$bundle" ] && [ ! -e "$bundle" ]; then
@@ -169,8 +171,14 @@ PRE
         return 1
     fi
     [ -e "$bundle" ] || bundle="$SCRIPT_DIR/$bundle"
-    read -r -p "  Parts directory: " parts
-    [ -d "$parts" ] || { err "No such directory: $parts"; return 1; }
+    read -r -p "  MLO [$HOME/rw-uboot-out/MLO]: " mlo
+    mlo="${mlo:-$HOME/rw-uboot-out/MLO}"
+    [ -f "$mlo" ] || { err "No such file: $mlo"; return 1; }
+    read -r -p "  u-boot.img [$HOME/rw-uboot-out/u-boot.img]: " uboot
+    uboot="${uboot:-$HOME/rw-uboot-out/u-boot.img}"
+    [ -f "$uboot" ] || { err "No such file: $uboot"; return 1; }
+    read -r -p "  Kernel (uImage): " kernel
+    [ -f "$kernel" ] || { err "No such file: $kernel"; return 1; }
     read -r -p "  Root filesystem tar [$HOME/br-rw-out/rootfs.tar]: " tar
     tar="${tar:-$HOME/br-rw-out/rootfs.tar}"
     [ -f "$tar" ] || { err "No such file: $tar"; return 1; }
@@ -179,7 +187,8 @@ PRE
     echo ""
     confirm "Build $out?" || { warn "Skipped."; return 0; }
     echo ""
-    sudo bash "$SCRIPT_DIR/rootfs/make-card-image.sh" --bundle "$bundle" "$parts" "$tar" "$out" \
+    sudo bash "$SCRIPT_DIR/rootfs/make-card-image.sh" --mlo "$mlo" --uboot "$uboot" --kernel "$kernel" \
+        --bundle "$bundle" "$tar" "$out" \
         || err "Building the image failed."
 }
 

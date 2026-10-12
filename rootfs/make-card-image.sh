@@ -1,12 +1,13 @@
 #!/bin/bash
-# make-card-image.sh [--generic] [--modules <dir>] [--bundle <b>] <partsdir> <rootfs.tar> <out.img>
+# make-card-image.sh --mlo <MLO> --uboot <u-boot.img> --kernel <uImage> [--uenv <file>] [--modules <dir>]
+#                    [--bundle <b>] <rootfs.tar> <out.img>
 #
-# Builds a whole SD-card IMAGE FILE for a RoomWizard whose p6 is our own root
-# filesystem. Inputs: the directory fetch-card-parts.sh filled (partition table
-# and p1 raw, the extended-partition boot records, the per-unit state of the old
-# p6), a Buildroot rootfs.tar, and a directory of kernel modules (*.ko, built by
-# kernel/build-modules.sh --out <dir>; default ~/rw-kmods of the invoking user,
-# i.e. $SUDO_USER under sudo; cy8ctmg120_ts.ko must be there).
+# Builds a whole SD-card IMAGE FILE for a RoomWizard, from nothing but our own parts: one kind of
+# image, generic and publishable, with no file of the vendor's on it and nothing of any unit's.
+# Inputs: our boot chain (MLO and u-boot.img from uboot/build.sh, a uImage kernel from
+# kernel/build-image.sh), a Buildroot rootfs.tar, and a directory of kernel modules (*.ko, built by
+# kernel/build-modules.sh --out <dir>; default ~/rw-kmods of the invoking user, i.e. $SUDO_USER under
+# sudo; cy8ctmg120_ts.ko must be there).
 #
 # Run as ROOT in WSL (wsl.exe -u root -e bash -lc ...), on the native WSL fs:
 # DrvFs (/mnt/c) keeps no symlinks, modes or device nodes, so the image is
@@ -15,33 +16,40 @@
 # never opens /dev/mmcblk* or any other disk, and any argument that is a
 # block device is refused.
 #
-# With --generic there is no per-unit state at all: the parts directory then supplies only the
-# partition table and p1 (geometry.txt, head.bin, md5.txt, ebr-*.bin; state.tar is ignored if
-# present), the card carries no SSH key of anyone, and the unit names itself on first boot.
+# The partition table is written here by sfdisk (LAYOUT below, the positions every unit's card has
+# and lib/rw-identify.sh identifies partitions by), and the three extended-partition boot records
+# are written by hand, 63 sectors before each logical partition as on the units: sfdisk would put
+# them one sector before. The image ends with p7, so it is 6618780 sectors (3.16 GB) and fits a 4 GB card.
 #
-# p1 is copied byte for byte (the FAT geometry must not change), then everything
-# on it except the five boot-chain files is deleted. p2/p3/p5 are made fresh and
-# EMPTY; p6 gets the rootfs, the per-unit state and the kernel modules.
+# p1 is formatted FAT32 here and holds exactly: MLO (written first, into the root directory, where
+# the OMAP3 boot ROM looks), u-boot.img, uImage-system, uImage-fallback and uEnv.txt. The fallback is
+# a second copy of the same kernel: the boot script tries it when the first fails to load, so it
+# only guards against a damaged file until the operator stages a different kernel as uImage-system.
+# p2/p3/p5 are made fresh and EMPTY; p6 gets the rootfs and the kernel modules; p7 is swap.
+#
+# No SSH key material of any kind may be in the rootfs tar, on p6, or from the bundle (refused, never
+# filtered), and the image has no host name of its own: the unit names itself and makes its SSH host
+# key on the first boot.
 #
 # With --bundle <dir|tar> (a release.sh --stage-only bundle) it then mounts p6, p2,
 # p3 as <base>/{root,data,log} and runs commissioning/commission-offline.sh
 # over them: the boot scripts, their links and every component's files go in, and that
 # script's own verify pass checks them. It asks nothing and cleans nothing: the tree is
-# ours, with no vendor stack, and the per-unit state is already in p6. p1 is not mounted
-# by that step.
+# ours, with no vendor stack. p1 is not mounted by that step.
 set -u
 
 die() { echo "FAIL: $*" >&2; exit 1; }
 
 usage() {
     cat <<'USAGE'
-Usage: make-card-image.sh [--generic] [--modules <dir>] [--bundle <dir|tar>] <partsdir> <rootfs.tar> <out.img>
+Usage: make-card-image.sh --mlo <MLO> --uboot <u-boot.img> --kernel <uImage> [--uenv <file>]
+                          [--modules <dir>] [--bundle <dir|tar>] <rootfs.tar> <out.img>
 
-  --generic        a card with NO per-unit state: state.tar is not read (ignored if the
-                   parts directory has one) and no SSH key material of any kind may be on
-                   the finished card (refused, never filtered). p1 and the partition table
-                   still come from the parts directory. The unit picks its own host name
-                   on first boot. Works with --bundle.
+  --mlo <file>     the SPL (MLO) from uboot/build.sh; becomes p1/MLO, written first
+  --uboot <file>   u-boot.img from uboot/build.sh (a legacy uImage); becomes p1/u-boot.img
+  --kernel <file>  our kernel, a uImage from kernel/build-image.sh; becomes p1/uImage-system and,
+                   as a second copy, p1/uImage-fallback
+  --uenv <file>    p1/uEnv.txt (default: uboot/uEnv.txt, the all-commented template)
   --modules <dir>  directory of kernel modules (*.ko) copied to p6
                    /lib/modules/4.14.52/extra/ (default: ~/rw-kmods of the
                    invoking user, $SUDO_USER under sudo). cy8ctmg120_ts.ko is required.
@@ -51,33 +59,52 @@ Usage: make-card-image.sh [--generic] [--modules <dir>] [--bundle <dir|tar>] <pa
                    and no provision.sh or deploy-all.sh afterwards. Needs
                    arm-linux-gnueabihf-objdump (that script's ARM check).
   -h, --help       this text
+
+The image is the same for every unit: no vendor file, no SSH key, no host name (the unit picks
+one and generates its host key on first boot). It is 6618780 sectors and fits a 4 GB card.
 USAGE
 }
-GENERIC=0
 MODDIR=""
 BUNDLE=""
+MLO=""
+UBOOT=""
+KERNEL=""
+UENV=""
+need_val() { [ "$1" -ge 2 ] || { usage >&2; exit 2; }; }
 while [ $# -gt 0 ]; do
     case "$1" in
         -h|--help) usage; exit 0 ;;
-        --generic) GENERIC=1; shift ;;
-        --modules) [ $# -ge 2 ] || { usage >&2; exit 2; }; MODDIR="$2"; shift 2 ;;
+        --mlo) need_val $#; MLO="$2"; shift 2 ;;
+        --mlo=*) MLO="${1#--mlo=}"; shift ;;
+        --uboot) need_val $#; UBOOT="$2"; shift 2 ;;
+        --uboot=*) UBOOT="${1#--uboot=}"; shift ;;
+        --kernel) need_val $#; KERNEL="$2"; shift 2 ;;
+        --kernel=*) KERNEL="${1#--kernel=}"; shift ;;
+        --uenv) need_val $#; UENV="$2"; shift 2 ;;
+        --uenv=*) UENV="${1#--uenv=}"; shift ;;
+        --modules) need_val $#; MODDIR="$2"; shift 2 ;;
         --modules=*) MODDIR="${1#--modules=}"; shift ;;
-        --bundle) [ $# -ge 2 ] || { usage >&2; exit 2; }; BUNDLE="$2"; shift 2 ;;
+        --bundle) need_val $#; BUNDLE="$2"; shift 2 ;;
         --bundle=*) BUNDLE="${1#--bundle=}"; shift ;;
         --) shift; break ;;
         -*) usage >&2; exit 2 ;;
         *) break ;;
     esac
 done
-[ $# -eq 3 ] || { usage >&2; exit 2; }
-PARTS="$1"; ROOTTAR="$2"; OUT="$3"
+[ $# -eq 2 ] || { usage >&2; exit 2; }
+if [ -z "$MLO" ] || [ -z "$UBOOT" ] || [ -z "$KERNEL" ]; then
+    echo "--mlo, --uboot and --kernel are all required" >&2; usage >&2; exit 2
+fi
+ROOTTAR="$1"; OUT="$2"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+[ -n "$UENV" ] || UENV="$SCRIPT_DIR/../uboot/uEnv.txt"
 if [ -z "$MODDIR" ]; then
     UHOME=$HOME
     if [ -n "${SUDO_USER:-}" ]; then UHOME=$(getent passwd "$SUDO_USER" | cut -d: -f6); fi
     MODDIR="$UHOME/rw-kmods"
 fi
 
-for a in "$@"; do
+for a in "$ROOTTAR" "$OUT" "$MLO" "$UBOOT" "$KERNEL" "$UENV"; do
     [ ! -b "$a" ] || die "$a is a block device; this script only writes an image file"
 done
 [ "$(id -u)" -eq 0 ] || die "run as root (wsl.exe -u root ...)"
@@ -87,15 +114,16 @@ case "$OUTABS" in
     /dev/*) die "$OUTABS is under /dev" ;;
 esac
 [ ! -e "$OUTABS" ] || [ -f "$OUTABS" ] || die "$OUTABS exists and is not a regular file"
-[ -d "$PARTS" ] || die "no parts directory $PARTS"
 [ -f "$ROOTTAR" ] || die "no rootfs tar $ROOTTAR"
 [ -f "$MODDIR/cy8ctmg120_ts.ko" ] || die "no $MODDIR/cy8ctmg120_ts.ko (build with kernel/build-modules.sh --out <dir>, or pass --modules)"
-REQ="geometry.txt head.bin md5.txt"
-[ "$GENERIC" -eq 1 ] || REQ="$REQ state.tar"
-for f in $REQ; do
-    [ -f "$PARTS/$f" ] || die "missing $PARTS/$f"
+[ -s "$MLO" ] || die "no MLO $MLO"
+[ -f "$UENV" ] || die "no uEnv.txt $UENV"
+# u-boot.img and the kernel are legacy uImages: magic 0x27051956 in the first four bytes.
+for f in "$UBOOT" "$KERNEL"; do
+    [ -s "$f" ] || die "no $f"
+    [ "$(head -c 4 "$f" | od -An -tx1 | tr -d ' \n')" = "27051956" ] || die "$f is not a uImage (bad magic)"
 done
-for t in sfdisk losetup mke2fs mkswap e2fsck truncate; do
+for t in sfdisk losetup mke2fs mkswap e2fsck fsck.vfat mkfs.vfat truncate; do
     command -v "$t" > /dev/null || die "$t not installed"
 done
 BUNDLE_TAG=""
@@ -116,44 +144,26 @@ if [ -n "$BUNDLE" ]; then
     [ -n "$BUNDLE_TAG" ] || BUNDLE_TAG="untagged (no manifest.d/bundle.info)"
 fi
 
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1090,SC1091
 . "$SCRIPT_DIR/../lib/rw-identify.sh" || die "cannot source rw-identify.sh"
 # shellcheck disable=SC1090,SC1091
 . "$SCRIPT_DIR/../lib/rw-state.sh" || die "cannot source rw-state.sh"
 
-# The image gate, before any image exists: state.tar may hold only the IMAGE set of
-# lib/rw-state.sh — never the VNC password, ScummVM's ini, saves or game data, loose
-# /home/root files, calibration .bak files, the vendor /etc/hosts or p2 contents.
-# Refused, not filtered: a state.tar that fails was made by an older
-# fetch-card-parts.sh, and the cure is to fetch a clean one.
-if [ "$GENERIC" -eq 1 ]; then
-    # A generic image has no state.tar to gate; what it must not hold is SSH key material,
-    # in the rootfs tar here and, below, in everything that lands on the card.
-    # Symlinks are left out: they carry no key bytes, and the image deliberately links
-    # etc/ssh/ssh_host_*_key into the data partition, where each unit makes its own.
-    tar -tf "$ROOTTAR" > /dev/null || die "$ROOTTAR does not list"
-    ROOT_LIST=$(tar -tvf "$ROOTTAR" | awk '$1 !~ /^l/ { $1 = $2 = $3 = $4 = $5 = ""; sub(/^ +/, ""); print }')
-    if ! KEYS_DENIED=$(printf '%s\n' "$ROOT_LIST" | rw_state_ssh_keys_deny); then
-        echo "FAIL: $ROOTTAR carries SSH key material a generic image may not hold:" >&2
-        printf '%s\n' "$KEYS_DENIED" | sed 's/^/  /' >&2
-        echo "No image was written. Rebuild the rootfs without it." >&2
-        exit 1
-    fi
-else
-    STATE_LIST=$(tar -tf "$PARTS/state.tar") || die "$PARTS/state.tar does not list"
-    if ! STATE_DENIED=$(printf '%s\n' "$STATE_LIST" | rw_state_image_deny); then
-        echo "FAIL: $PARTS/state.tar carries entries no card image may hold:" >&2
-        printf '%s\n' "$STATE_DENIED" | sed 's/^/  /' >&2
-        echo "No image was written. Regenerate the parts with the current script (as the normal user):" >&2
-        echo "  rootfs/fetch-card-parts.sh <unit-ip> $PARTS" >&2
-        echo "and keep the unit's private config with commissioning/backup.sh <unit-ip>." >&2
-        exit 1
-    fi
-fi
+# The partition table: <n>:<start>:<size>:<type>, 512-byte sectors, identical on every unit's card
+# (measured on an 8 GB and a 4 GB card). p4 is the extended container holding p5..p7; each logical
+# partition's boot record sits 63 sectors before it. Sectors 1..62 stay zero.
+LAYOUT="1:63:144522:c 2:144585:514080:83 3:658665:498015:83 4:1156680:5462100:5 5:1156743:2939832:83 6:4096638:2008062:83 7:6104763:514017:82"
+DISK_SECT=6618780
+EXT_START=1156680
+lay() { echo "$LAYOUT" | tr ' ' '\n' | awk -F: -v n="$1" -v c="$2" '$1==n{print $c}'; }
+# The image ends where p7 ends, and p4 spans exactly p5..p7.
+[ $(($(lay 7 2) + $(lay 7 3))) -eq "$DISK_SECT" ] || die "LAYOUT: p7 does not end at DISK_SECT"
+[ $(($(lay 4 2) + $(lay 4 3))) -eq "$DISK_SECT" ] || die "LAYOUT: p4 does not end at DISK_SECT"
+[ "$(lay 4 2)" -eq $(($(lay 5 2) - 63)) ] || die "LAYOUT: p4 does not start 63 sectors before p5"
 
-# ssh_scan <dir>... — the same refusal over what is already on the card (the bundle can
-# carry files the rootfs tar does not). Run on the mounted trees; never crosses a mount.
+# ssh_scan <dir>... — the refusal over what lands on the card: the rootfs tar is listed below
+# before any image exists, this runs on the mounted trees (the bundle can carry files the tar does
+# not). Never crosses a mount.
 ssh_scan() {
     local d hits
     for d in "$@"; do
@@ -166,16 +176,28 @@ ssh_scan() {
     return 0
 }
 
-geom() { awk -v n="$1" -v c="$2" '$1==n{print $c}' "$PARTS/geometry.txt"; }
-DISK_SECT=$(geom mmcblk0 3)
-P2START=$(geom mmcblk0p2 2)
-if [ -z "$DISK_SECT" ] || [ -z "$P2START" ]; then die "geometry.txt lacks the disk or p2"; fi
+# The image gate, before any image exists. Symlinks are left out: they carry no key bytes, and the
+# image deliberately links etc/ssh/ssh_host_*_key into the data partition, where each unit makes its own.
+tar -tf "$ROOTTAR" > /dev/null || die "$ROOTTAR does not list"
+ROOT_LIST=$(tar -tvf "$ROOTTAR" | awk '$1 !~ /^l/ { $1 = $2 = $3 = $4 = $5 = ""; sub(/^ +/, ""); print }')
+if ! KEYS_DENIED=$(printf '%s\n' "$ROOT_LIST" | rw_state_ssh_keys_deny); then
+    echo "FAIL: $ROOTTAR carries SSH key material a card image may not hold:" >&2
+    printf '%s\n' "$KEYS_DENIED" | sed 's/^/  /' >&2
+    echo "No image was written. Rebuild the rootfs without it." >&2
+    exit 1
+fi
 
-# Prove the copy of the head is exact BEFORE building on it.
-WANT_MD5=$(tr -d ' \n' < "$PARTS/md5.txt")
-HAVE_MD5=$(md5sum < "$PARTS/head.bin" | awk '{print $1}')
-[ "$WANT_MD5" = "$HAVE_MD5" ] || die "head.bin md5 $HAVE_MD5 differs from the unit's $WANT_MD5"
-[ "$(stat -c %s "$PARTS/head.bin")" -eq $((P2START * 512)) ] || die "head.bin has the wrong size"
+# table_of <image> — "<n>:<start>:<size>:<type>" per partition from sfdisk -d, plus " boot" on p1 if active.
+table_of() {
+    sfdisk -d "$1" | awk '
+        $0 ~ /^[^ ]+[0-9] *:/ {
+            n = $1; sub(/^.*[^0-9]/, "", n)
+            match($0, /start= *[0-9]+/); s = substr($0, RSTART, RLENGTH); gsub(/[^0-9]/, "", s)
+            match($0, /size= *[0-9]+/);  z = substr($0, RSTART, RLENGTH); gsub(/[^0-9]/, "", z)
+            match($0, /type=[0-9a-f]+/); t = substr($0, RSTART + 5, RLENGTH - 5)
+            printf "%s:%s:%s:%s%s\n", n, s, z, t, ($0 ~ /bootable/ ? " boot" : "")
+        }' | tr '\n' ' ' | sed 's/ $//'
+}
 
 LOOP=""
 MNT=$(mktemp -d /tmp/rw-card-mnt.XXXXXX) || die "mktemp"
@@ -196,32 +218,58 @@ echo "== creating sparse $OUTABS ($DISK_SECT sectors)"
 mkdir -p "$(dirname "$OUTABS")" || die "mkdir"
 rm -f "$OUTABS"
 truncate -s $((DISK_SECT * 512)) "$OUTABS" || die "truncate"
-dd if="$PARTS/head.bin" of="$OUTABS" bs=512 conv=notrunc status=none || die "write head"
-EBRS=0
-for e in "$PARTS"/ebr-*.bin; do
-    [ -e "$e" ] || break
-    n=$(basename "$e" .bin); n=${n#ebr-}
-    s=$(geom "mmcblk0p$n" 2)
-    [ -n "$s" ] || die "no geometry for p$n"
-    dd if="$e" of="$OUTABS" bs=512 seek=$((s - 63)) conv=notrunc status=none || die "write ebr $n"
-    EBRS=$((EBRS + 1))
-done
-[ "$EBRS" -ge 1 ] || die "no ebr-*.bin in $PARTS"
+
+echo "== partition table"
+{
+    echo "label: dos"
+    echo "label-id: 0x00000000"
+    echo "unit: sectors"
+    echo
+    for e in $LAYOUT; do
+        IFS=: read -r n s z t <<< "$e"
+        printf 'x%s : start=%s, size=%s, type=%s%s\n' "$n" "$s" "$z" "$t" "$([ "$n" = 1 ] && echo ', bootable')"
+    done
+} > "$MNT/table.sfdisk"
+sfdisk --no-reread --no-tell-kernel "$OUTABS" < "$MNT/table.sfdisk" > "$MNT/sfdisk.log" 2>&1 \
+    || { cat "$MNT/sfdisk.log" >&2; die "sfdisk"; }
+
+# sfdisk puts a logical partition's boot record one sector before it; the units have it 63 before.
+# Zero what it wrote and write the three records here: entry 1 is the partition (63 sectors on),
+# entry 2 links to the next record, relative to the start of the extended partition.
+le32() { printf '%b' "$(printf '\\x%02x\\x%02x\\x%02x\\x%02x' $(($1 & 255)) $((($1 >> 8) & 255)) $((($1 >> 16) & 255)) $((($1 >> 24) & 255)))"; }
+write_ebr() {   # write_ebr <n> <next n or 0>
+    local n="$1" nx="$2" at=$(($(lay "$1" 2) - 63))
+    dd if=/dev/zero of="$OUTABS" bs=512 seek=$(($(lay "$n" 2) - 1)) count=1 conv=notrunc status=none || die "zero ebr $n"
+    {
+        head -c 446 /dev/zero
+        printf '\x00\xfe\xff\xff'; printf '%b' "\\x$(lay "$n" 4)"; printf '\xfe\xff\xff'
+        le32 63; le32 "$(lay "$n" 3)"
+        if [ "$nx" -ne 0 ]; then
+            printf '\x00\xfe\xff\xff\x05\xfe\xff\xff'
+            le32 $(($(lay "$nx" 2) - 63 - EXT_START)); le32 $(($(lay "$nx" 3) + 63))
+        else
+            head -c 16 /dev/zero
+        fi
+        head -c 32 /dev/zero
+        printf '\x55\xaa'
+    } > "$MNT/ebr.bin"
+    [ "$(stat -c %s "$MNT/ebr.bin")" -eq 512 ] || die "ebr $n is not 512 bytes"
+    dd if="$MNT/ebr.bin" of="$OUTABS" bs=512 seek="$at" count=1 conv=notrunc status=none || die "write ebr $n"
+}
+write_ebr 5 6
+write_ebr 6 7
+write_ebr 7 0
 
 echo "== partition table of the image"
 sfdisk -d "$OUTABS"
+WANT_TABLE=""
+for e in $LAYOUT; do WANT_TABLE="$WANT_TABLE${WANT_TABLE:+ }${e}$([ "${e%%:*}" = 1 ] && echo ' boot')"; done
+GOT_TABLE=$(table_of "$OUTABS")
+[ "$GOT_TABLE" = "$WANT_TABLE" ] || die "partition table differs: want [$WANT_TABLE], got [$GOT_TABLE]"
 rw_is_card_disk "$OUTABS" || die "rw_is_card_disk says the image does not carry the RoomWizard layout"
-echo "rw_is_card_disk: yes"
-for n in 1 2 3 5 6 7; do
-    want="$(geom "mmcblk0p$n" 2),$(geom "mmcblk0p$n" 3)"
-    got=$(sfdisk -d "$OUTABS" | awk -v n="$n" '$1 ~ ("[^0-9]" n "$") && match($0, /start=[ ]*[0-9]+/) {
-        s=substr($0, RSTART, RLENGTH); gsub(/[^0-9]/, "", s)
-        match($0, /size=[ ]*[0-9]+/); z=substr($0, RSTART, RLENGTH); gsub(/[^0-9]/, "", z); print s "," z }')
-    [ "$want" = "$got" ] || die "p$n: geometry.txt says $want, the image table says $got"
-done
-# p4 is the extended container: sysfs reports 2 sectors, the table its true span, so only its start is compared.
-sfdisk -d "$OUTABS" | grep -Eq "[^0-9]4 : start= *$(geom mmcblk0p4 2)," || die "p4 start differs from geometry.txt"
-echo "all seven partitions match geometry.txt (p4 by start only)"
+echo "rw_is_card_disk: yes; all seven partitions match LAYOUT"
+# Sectors 1..62 (between the MBR and p1) are zero on every unit.
+[ "$(dd if="$OUTABS" bs=512 skip=1 count=62 status=none | tr -d '\000' | wc -c)" -eq 0 ] || die "sectors 1..62 are not zero"
 
 LOOP=$(losetup -P --show -f "$OUTABS") || die "losetup"
 echo "== loop device $LOOP"
@@ -238,56 +286,42 @@ echo "== mkfs"
 mkext() { mke2fs -F -q -t "$1" -O "$2" -L "$3" -m 1 "$4" || die "mke2fs $4"; }
 mkext ext4 ^metadata_csum,^64bit rw-data "$(rw_part_dev "$LOOP" 2)"
 mkext ext4 ^metadata_csum,^64bit rw-log "$(rw_part_dev "$LOOP" 3)"
-# p5: formatted like p2, empty and not mounted (kept so the table matches the unit).
+# p5: formatted like p2, empty and not mounted (kept so the table matches the units').
 mkext ext4 ^metadata_csum,^64bit rw-spare "$(rw_part_dev "$LOOP" 5)"
 mkext ext4 ^metadata_csum,^64bit rw-root "$(rw_part_dev "$LOOP" 6)"
 mkswap "$(rw_part_dev "$LOOP" 7)" > /dev/null || die "mkswap"
 
-echo "== p1: whitelist (the byte copy keeps the FAT geometry; only entries are deleted)"
+echo "== p1: FAT32, our boot files only"
 P1DEV=$(rw_part_dev "$LOOP" 1)
+# A fixed volume id keeps two builds of the same inputs identical on this partition.
+mkfs.vfat -F 32 -n RWBOOT -i 52574231 "$P1DEV" > /dev/null || die "mkfs.vfat $P1DEV"
 mkdir "$MNT/p" || die "mkdir mnt"
 mount -t vfat "$P1DEV" "$MNT/p" || die "mount p1"
-P1KEEP="mlo u-boot.bin u-boot-sd.bin ctrlblock.bin uImage-system"
-shopt -s nullglob dotglob
-for e in "$MNT/p"/*; do
-    b=$(basename "$e")
-    keep=0
-    for k in $P1KEEP; do [ "${b,,}" != "${k,,}" ] || keep=1; done   # FAT names are case-insensitive
-    if [ "$keep" -eq 0 ]; then
-        echo "p1: removing $b"
-        rm -rf -- "$e" || die "rm p1/$b"
-    fi
-done
-shopt -u nullglob dotglob
-for k in $P1KEEP; do [ -f "$MNT/p/$k" ] || die "p1 lacks $k after the whitelist"; done
+# MLO first: the boot ROM reads it from the root directory of the first FAT partition.
+P1_WANT="MLO u-boot.img uImage-system uImage-fallback uEnv.txt"
+cp "$MLO" "$MNT/p/MLO" || die "copy MLO"
+cp "$UBOOT" "$MNT/p/u-boot.img" || die "copy u-boot.img"
+cp "$KERNEL" "$MNT/p/uImage-system" || die "copy uImage-system"
+cp "$KERNEL" "$MNT/p/uImage-fallback" || die "copy uImage-fallback"
+cp "$UENV" "$MNT/p/uEnv.txt" || die "copy uEnv.txt"
 sync
 echo "p1 final listing:"
 ls -la "$MNT/p"
+P1_HAVE=$(find "$MNT/p" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
+P1_EXPECT=$(echo "$P1_WANT" | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
+[ "$P1_HAVE" = "$P1_EXPECT" ] || die "p1 holds [$P1_HAVE], expected [$P1_EXPECT]"
 umount "$MNT/p" || die "umount p1"
 
-fill() {   # fill <partnum> <rootfs tar> [<state tar>]
+fill() {   # fill <partnum> <rootfs tar>
     local n="$1"
     mount "$(rw_part_dev "$LOOP" "$n")" "$MNT/p" || die "mount p$n"
     # The rootfs keeps its owners (dbus, avahi and the like are real users there).
     tar --numeric-owner -xpf "$2" -C "$MNT/p" || die "extract $2 into p$n"
-    # The per-unit state does not: it is files captured from a unit, and the owner an
-    # entry can carry (default-app was 1000/1000 in one) names no user on p6.
-    if [ $# -ge 3 ]; then
-        tar --no-same-owner -xpf "$3" -C "$MNT/p" || die "extract $3 into p$n"
-    fi
     if [ "$n" = 6 ]; then
         # p2 and p3 mount here; the mount points stay empty. p5 has no mount point.
         mkdir -p "$MNT/p/home/root/data" "$MNT/p/home/root/log"
         [ ! -d "$MNT/p/home/root/.ssh" ] || chmod 700 "$MNT/p/home/root/.ssh"
-        [ ! -f "$MNT/p/home/root/.ssh/authorized_keys" ] || chmod 600 "$MNT/p/home/root/.ssh/authorized_keys"
-        # state.tar no longer carries /etc/hosts (the vendor's), so the rootfs's own
-        # (A generic image keeps the build-time placeholder name: the first boot replaces it.)
-        # maps 127.0.1.1 to the build-time name; map the carried one to loopback too.
-        if [ "$GENERIC" -eq 0 ] && [ -f "$MNT/p/etc/hostname" ]; then
-            UNIT_NAME=$(head -n 1 "$MNT/p/etc/hostname" | tr -d ' \t\r')
-            sh "$SCRIPT_DIR/../commissioning/set-hostname.sh" "$UNIT_NAME" "$MNT/p" \
-                || die "set-hostname.sh $UNIT_NAME on p6"
-        fi
+        # The image keeps the build-time placeholder host name: the first boot replaces it.
         EXTRA="$MNT/p/lib/modules/4.14.52/extra"
         mkdir -p "$EXTRA" || die "mkdir $EXTRA"
         NKO=0
@@ -298,16 +332,16 @@ fill() {   # fill <partnum> <rootfs tar> [<state tar>]
         done
         [ -f "$EXTRA/cy8ctmg120_ts.ko" ] || die "cy8ctmg120_ts.ko did not land in p6"
         echo "p6 holds $(find "$MNT/p" -xdev | wc -l) entries; $NKO kernel modules in /lib/modules/4.14.52/extra"
-        if [ "$GENERIC" -eq 1 ] && ! ssh_scan "$MNT/p"; then
+        if ! ssh_scan "$MNT/p"; then
             umount "$MNT/p"; rm -f "$OUTABS"
-            die "SSH key material on a generic image; the image is deleted"
+            die "SSH key material on the image; the image is deleted"
         fi
     fi
     sync
     umount "$MNT/p" || die "umount p$n"
 }
 echo "== filling p6 (p2, p3, p5 stay empty)"
-if [ "$GENERIC" -eq 1 ]; then fill 6 "$ROOTTAR"; else fill 6 "$ROOTTAR" "$PARTS/state.tar"; fi
+fill 6 "$ROOTTAR"
 
 if [ -n "$BUNDLE" ]; then
     echo "== installing bundle $BUNDLE_TAG"
@@ -324,9 +358,9 @@ if [ -n "$BUNDLE" ]; then
         die "commission-offline.sh failed (above); the image is deleted, write nothing"
     fi
     sync
-    if [ "$GENERIC" -eq 1 ] && ! ssh_scan "$MNT/base/root" "$MNT/base/data" "$MNT/base/log"; then
+    if ! ssh_scan "$MNT/base/root" "$MNT/base/data" "$MNT/base/log"; then
         rm -f "$OUTABS"
-        die "the bundle put SSH key material on a generic image; the image is deleted"
+        die "the bundle put SSH key material on the image; the image is deleted"
     fi
     for r in root data log; do umount "$MNT/base/$r" || die "umount base/$r"; done
 fi
@@ -340,31 +374,31 @@ for n in 2 3 5 6; do
         echo "p$n: e2fsck reported problems"; cat "$MNT/fsck.$n"; FSCK_BAD=1
     fi
 done
+if fsck.vfat -n "$P1DEV" > "$MNT/fsck.1" 2>&1; then
+    echo "p1: clean ($(tail -n 1 "$MNT/fsck.1"))"
+else
+    echo "p1: fsck.vfat reported problems"; cat "$MNT/fsck.1"; FSCK_BAD=1
+fi
 
 losetup -d "$LOOP" && LOOP=""
 sync
 
-echo "== head check (MBR and gap before p1; p1 itself was edited on purpose)"
-P1START=$(geom mmcblk0p1 2)
-[ -n "$P1START" ] || die "geometry.txt lacks p1"
-IMG_MD5=$(dd if="$OUTABS" bs=512 count="$P1START" status=none | md5sum | awk '{print $1}')
-HEAD_MD5=$(dd if="$PARTS/head.bin" bs=512 count="$P1START" status=none | md5sum | awk '{print $1}')
-if [ "$IMG_MD5" = "$HEAD_MD5" ]; then MATCH=yes; else MATCH=no; fi
+echo "== table check after the fill"
+[ "$(table_of "$OUTABS")" = "$WANT_TABLE" ] || die "partition table changed while filling"
 
-if [ "$GENERIC" -eq 1 ]; then STATE_N="generic: none"; else STATE_N="$(tar -tf "$PARTS/state.tar" | grep -vc '/$') non-directory entries from the old p6"; fi
 echo
 echo "==================== SUMMARY ===================="
 echo "image:           $OUTABS"
-echo "size:            $(stat -c %s "$OUTABS") bytes apparent, $(du -h "$OUTABS" | awk '{print $1}') allocated"
+echo "size:            $(stat -c %s "$OUTABS") bytes apparent ($DISK_SECT sectors), $(du -h "$OUTABS" | awk '{print $1}') allocated"
 echo "rootfs tar:      $ROOTTAR ($(stat -c %y "$ROOTTAR"))"
-echo "head match:      $MATCH (sectors 0..$((P1START - 1)) vs head.bin)"
-echo "fsck:            $([ "$FSCK_BAD" -eq 0 ] && echo 'all four clean' || echo 'PROBLEMS, see above')"
-echo "state carried:   $STATE_N"
+echo "p1:              $P1_WANT"
+echo "fsck:            $([ "$FSCK_BAD" -eq 0 ] && echo 'all five clean' || echo 'PROBLEMS, see above')"
 echo "bundle:          ${BUNDLE_TAG:-none (no --bundle: run provision.sh and deploy-all.sh after the first boot)}"
 echo
 echo "Next, on Windows: copy the image out of WSL, e.g."
-printf '  copy \\\\wsl$\\<distro>%s C:\\work\\rw-scratch-s0930\\s1000\\card.img\n' "$OUTABS"
-echo "(outside the repo), write it with Rufus, balenaEtcher or Win32 Disk Imager to the"
-echo "8 GB card (the operator authorized wiping that card), then put it in the unit."
-echo "The original card stays untouched as the fallback."
-[ "$MATCH" = yes ] && [ "$FSCK_BAD" -eq 0 ]
+printf '  copy \\\\wsl$\\<distro>%s C:\\work\\rw-scratch\\card.img\n' "$OUTABS"
+echo "(outside the repo), write it with Rufus, balenaEtcher or Win32 Disk Imager to a"
+echo "card of 4 GB or more, then put it in the unit. The image holds no key and root has no"
+echo "password: SSH is opened from the unit's Control Panel, SSH page (README.md, 'Getting SSH"
+echo "access to a generic card')."
+[ "$FSCK_BAD" -eq 0 ]

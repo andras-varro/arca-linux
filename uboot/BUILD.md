@@ -4,14 +4,9 @@ Base: pristine U-Boot tag v2026.10. Patch: `uboot/rw20-board.patch` (git diff vs
 pristine export) adds board `rw20` (`board/steelcase/rw20/`, `configs/rw20_defconfig`, `omap3-rw20.dts`). Defconfig: `rw20_defconfig`.
 
 ## Commands
-    # host: Ubuntu 20.04 WSL; apt-get install gcc-10-arm-linux-gnueabihf (root) because stock gcc 9 is refused by U-Boot 2026.10 ("older than 10.0")
-    # W = a scratch dir OUTSIDE the repo (e.g. ~/rw-uboot); UB = a pristine v2026.10 checkout
-    mkdir -p $W/tc/bin   # symlink all /usr/bin/arm-linux-gnueabihf-* into $W/tc/bin, gcc->gcc-10, cpp->cpp-10
-    cp -a $UB $W/u-boot && git -C $W/u-boot apply /mnt/c/work/roomwizard/uboot/rw20-board.patch
-    export PATH=$W/tc/bin:$PATH
-    make -C $W/u-boot rw20_defconfig O=../build
-    make -C $W/u-boot O=../build -j8 CROSS_COMPILE=arm-linux-gnueabihf-
-Outputs: MLO (49496 B), u-boot.img (422064 B), u-boot-spl.bin, .config. Build outputs are not committed.
+Run in WSL: `uboot/build.sh [--out <dir>]` (default output `~/rw-uboot-out`; `--help` for the rest). It exports the
+v2026.10 tag fresh, applies the patch to that copy, builds `rw20_defconfig` with gcc-10, runs the sdiv/udiv gate and
+copies `MLO` and `u-boot.img` to the output dir. Every step is in the script. Build outputs are not committed.
 
 ## Which file the SPL loads
 SPL (CONFIG_SPL_FS_FAT, SPL_MMC) mounts FAT partition 1 and reads u-boot.img (CONFIG_SPL_FS_LOAD_PAYLOAD_NAME), a legacy

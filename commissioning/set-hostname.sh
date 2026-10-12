@@ -4,8 +4,9 @@
 #
 # ONE implementation, called from two places with different connection models:
 #
-#   rootfs/make-card-image.sh   offline, against a mounted card:
-#                                 sudo ./commissioning/set-hostname.sh NAME /mnt/rw
+#   S04firstboot-hostname       on the unit at the first boot of a card image, as /usr/sbin/set-hostname
+#                               (the image carries no name of its own); and, offline against a
+#                               mounted card:  sudo ./commissioning/set-hostname.sh NAME /mnt/rw
 #   provision.sh --hostname     over SSH, against the live root:
 #                                 ./commissioning/set-hostname.sh NAME
 #

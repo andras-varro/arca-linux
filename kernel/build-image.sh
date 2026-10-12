@@ -4,8 +4,8 @@
 # kernel/README.md.
 #
 # Prerequisites: every host package this needs comes from ../setup-build-env.sh, the one
-# home for them (the cross-compiler is its `core` group; mkimage and fdtput its `kmod` group,
-# fdtput by way of the device-tree-compiler package).
+# home for them (the cross-compiler is its `core` group; mkimage its `kmod` group). The device
+# tree is compiled by the kernel tree's own scripts/dtc, so it needs nothing more.
 #
 # Produces: <out>/zImage-with-dtb and <out>/uImage-test. It never writes p1: installing the image
 # as uImage-system is a manual operator step (kernel/README.md), and nothing scripted writes it.
@@ -20,37 +20,33 @@ KERNEL_TARBALL="${REPO_DIR}/usb_host/linux-${KERNEL_VERSION}.tar.xz"
 DEVICE_CONFIG="${REPO_DIR}/usb_host/device_config"
 PATCH_DIR="${SCRIPT_DIR}/patches"
 CONFIG_CHANGES="${SCRIPT_DIR}/config-changes"
-DTS_SCRIPT_DIR="${SCRIPT_DIR}/dts"
-# The DTB appended to the vendor uImage-system, sliced out byte for byte: original.dtb
-# is identical to it (both 67004 B). Gitignored, like device_config: neither is ours to publish.
-VENDOR_DTB="${REPO_DIR}/usb_host/original.dtb"
-VENDOR_DTB_MD5="2c2be9b54cc33635f17a2c6611239d58"
+# Our own board description (kernel/dts/rw20.dts), compiled against the tree's mainline dtsi files.
+DTS_SOURCE="${SCRIPT_DIR}/dts/rw20.dts"
 CROSS_COMPILE="arm-linux-gnueabihf-"
 ARCH="arm"
 
 WORK_DIR="${HOME}/rw-kbuild-image"
 OUT_DIR=""
 DTB=""
-DTB_MODE="scripts"
+DTB_MODE="build"
 REUSE=0
 
 usage() {
     cat <<'USAGE'
-Usage: kernel/build-image.sh [--work <dir>] [--out <dir>] [--vendor-dtb | --dtb <file>] [--reuse]
+Usage: kernel/build-image.sh [--work <dir>] [--out <dir>] [--dtb <file>] [--reuse]
 
 Extract a fresh 4.14.52 tree from usb_host/linux-4.14.52.tar.xz, apply kernel/patches/*.patch
 in sorted order, configure from usb_host/device_config + kernel/config-changes + olddefconfig,
-build zImage, append a DTB and wrap it with mkimage into uImage-test. Stage that under a NEW
-name on p1.
+compile kernel/dts/rw20.dtb, build zImage, append the DTB and wrap it with mkimage into
+uImage-test. Stage that under a NEW name on p1.
 
-The DTB, by default: a copy of usb_host/original.dtb (md5-checked) edited in place by every
-kernel/dts/*.sh in sorted order, each run as `bash <script> <dtb>`.
+The DTB, by default: kernel/dts/rw20.dts, copied into the tree's arch/arm/boot/dts and built
+there with `make rw20.dtb`, so the tree's own cpp include path and scripts/dtc apply.
 
   --work <dir>   Build tree parent, in the WSL filesystem (default: ~/rw-kbuild-image).
                  Refused under /mnt: a kernel build on DrvFs is many times slower.
   --out <dir>    Where zImage-with-dtb and uImage-test go (default: the work dir).
-  --vendor-dtb   Append usb_host/original.dtb verbatim, md5-checked. The control arm.
-  --dtb <file>   Append this DTB instead.
+  --dtb <file>   Append this DTB instead of building rw20.dts.
   --reuse        Keep an existing tree, applying only patches not yet in it. Fast rebuilds.
   -h, --help     This text.
 
@@ -64,7 +60,6 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --work)       shift; WORK_DIR="${1:?--work needs a directory}" ;;
         --out)        shift; OUT_DIR="${1:?--out needs a directory}" ;;
-        --vendor-dtb) DTB_MODE="vendor" ;;
         --dtb)        shift; DTB="${1:?--dtb needs a file}"; DTB_MODE="file" ;;
         --reuse)      REUSE=1 ;;
         -h|--help)    usage; exit 0 ;;
@@ -77,34 +72,26 @@ KERNEL_DIR="${WORK_DIR}/linux-${KERNEL_VERSION}"
 
 echo "[0/6] Checking prerequisites..."
 missing=0
-for tool in "${CROSS_COMPILE}gcc" mkimage fdtput fdtget bc bison flex; do
+for tool in "${CROSS_COMPILE}gcc" mkimage bc bison flex; do
     command -v "$tool" &>/dev/null || { echo "ERROR: ${tool} not found."; missing=1; }
 done
 if [ "$missing" -ne 0 ]; then
-    echo "  Install them with: ./setup-build-env.sh --install-deps   (kmod group: mkimage, bc, bison, flex; its device-tree-compiler carries fdtput)"
+    echo "  Install them with: ./setup-build-env.sh --install-deps   (kmod group: mkimage, bc, bison, flex)"
     exit 1
 fi
 [ -f "$KERNEL_TARBALL" ] || { echo "ERROR: ${KERNEL_TARBALL} not found."; exit 1; }
-# Both are gitignored vendor files, so a fresh clone has neither: they come off a unit.
+# gitignored, so a fresh clone lacks it: it comes off a unit.
 if [ ! -f "$DEVICE_CONFIG" ]; then
     echo "ERROR: ${DEVICE_CONFIG} not found (gitignored; it is the unit's own /proc/config.gz)."
     echo "  In usb_host/: scp root@<ip>:/proc/config.gz device_config.gz && gunzip device_config.gz"
     exit 1
 fi
-if [ ! -f "$VENDOR_DTB" ]; then
-    echo "ERROR: ${VENDOR_DTB} not found (gitignored; it is the vendor's own DTB)."
-    echo "  It is the 67004-byte DTB appended to p1's uImage-system at offset 0x4eb788, sliced out"
-    echo "  byte for byte (usb_host/README.md, 'DTB Location in uImage'); md5 ${VENDOR_DTB_MD5}."
-    exit 1
-fi
+[ "$DTB_MODE" = file ] || [ -f "$DTS_SOURCE" ] || { echo "ERROR: ${DTS_SOURCE} not found."; exit 1; }
 case "$(realpath -m "$WORK_DIR")" in
     /mnt/*) echo "ERROR: work dir ${WORK_DIR} is on DrvFs. Use a path under \$HOME."; exit 1 ;;
 esac
 mapfile -t PATCHES < <(find "$PATCH_DIR" -maxdepth 1 -name '*.patch' | sort)
 [ "${#PATCHES[@]}" -gt 0 ] || { echo "ERROR: no patches in ${PATCH_DIR} (the image boots with no network without them)."; exit 1; }
-mapfile -t DTS_SCRIPTS < <(find "$DTS_SCRIPT_DIR" -maxdepth 1 -name '*.sh' 2>/dev/null | sort)
-md5() { md5sum "$1" | cut -d' ' -f1; }
-[ "$(md5 "$VENDOR_DTB")" = "$VENDOR_DTB_MD5" ] || { echo "ERROR: ${VENDOR_DTB} is not the vendor DTB."; exit 1; }
 # Pin every timestamp and build-identity string the image embeds, so the same inputs give the
 # same bytes: the kernel's UTS version string (read literally), and mkimage's header time.
 EPOCH=$(git -C "$REPO_DIR" log -1 --format=%ct 2>/dev/null || stat -c %Y "$KERNEL_TARBALL")
@@ -114,23 +101,15 @@ export KBUILD_BUILD_USER=roomwizard KBUILD_BUILD_HOST=build
 echo "  Cross compiler: $(${CROSS_COMPILE}gcc --version | head -1)"
 echo "  Build epoch:    ${EPOCH} (${KBUILD_BUILD_TIMESTAMP})"
 
-# First, because it takes a second and fails before a kernel build would. The base is the
-# md5-checked vendor blob itself, so the DT scripts' edits are the only difference.
+# The device tree is compiled in step 5, before the kernel build, because it needs the tree
+# and its .config; only the choice is made here.
 echo; echo "[1/6] Device tree (${DTB_MODE})..."
 mkdir -p "$WORK_DIR"
 case "$DTB_MODE" in
-    vendor) DTB="$VENDOR_DTB"; DTB_SOURCE="vendor usb_host/original.dtb, verbatim" ;;
     file)   [ -f "$DTB" ] || { echo "ERROR: DTB ${DTB} not found."; exit 1; }
             DTB_SOURCE="--dtb ${DTB}" ;;
-    scripts)
-        DTB="${WORK_DIR}/roomwizard.dtb"
-        cp "$VENDOR_DTB" "$DTB"
-        for s in "${DTS_SCRIPTS[@]}"; do
-            bash "$s" "$DTB" || { echo "ERROR: DT script $(basename "$s") failed."; exit 1; }
-            echo "  Applied: $(basename "$s")"
-        done
-        DTB_SOURCE="original.dtb + ${#DTS_SCRIPTS[@]} DT script(s):$(for s in "${DTS_SCRIPTS[@]}"; do printf ' %s' "$(basename "$s")"; done)"
-        ;;
+    build)  DTB="${KERNEL_DIR}/arch/${ARCH}/boot/dts/rw20.dtb"
+            DTB_SOURCE="kernel/dts/rw20.dts, built in the tree" ;;
 esac
 
 echo; echo "[2/6] Extracting kernel source..."
@@ -196,7 +175,17 @@ comm -23 <(grep -E "$sym_re" "$DEVICE_CONFIG" | cut -d= -f1 | sort -u) \
 echo "  Dropped by olddefconfig ($(wc -l < "$DROPPED") symbols, saved to ${DROPPED}):"
 sed 's/^/    /' "$DROPPED"
 
-echo; echo "[5/6] Building zImage with -j$(nproc)..."
+echo; echo "[5/6] Building the device tree and zImage with -j$(nproc)..."
+# The tree's own rule for a .dtb (cpp with the tree's include path, then scripts/dtc), run on a
+# copy of rw20.dts dropped in beside the mainline dtsi files it includes. Before the kernel build,
+# so a DTS error costs seconds. Always copied: under --reuse the tree may hold an older rw20.dts.
+if [ "$DTB_MODE" = build ]; then
+    cp "$DTS_SOURCE" "${KERNEL_DIR}/arch/${ARCH}/boot/dts/rw20.dts"
+    rm -f "$DTB"
+    make -C "$KERNEL_DIR" ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE rw20.dtb
+    [ -s "$DTB" ] || { echo "ERROR: rw20.dtb was not produced."; exit 1; }
+    echo "  Built: $(basename "$DTB") ($(stat -c %s "$DTB") bytes)"
+fi
 start=$SECONDS
 make -C "$KERNEL_DIR" ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE -j"$(nproc)" zImage
 echo "  zImage built in $((SECONDS - start)) s."
