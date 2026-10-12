@@ -692,19 +692,14 @@ DAC1 (app rate -> 48000 SRC) -> HandsfreeL Mux (AudioL1) -> HandsfreeL Switch -\
 | `DAC1 Digital Coarse Playback Volume` | 0..2 | 0 (0 dB) |
 | `PreDriv Playback Volume` | 0..3 | 0 = mute, 3 = +6 dB |
 
-Boot setup is `/etc/init.d/audio-enable` (→ `rc5.d/S29audio-enable`):
-
-```bash
-echo out > /sys/class/gpio/gpio12/direction
-echo 1   > /sys/class/gpio/gpio12/value
-amixer -c 0 cset name="HandsfreeL Mux" AudioL1
-amixer -c 0 cset name="HandsfreeR Mux" AudioR1
-amixer -c 0 cset name="HandsfreeL Switch" on
-amixer -c 0 cset name="HandsfreeR Switch" on
-```
-
-DAC volumes persist via `alsactl store` → `/var/lib/alsa/asound.state`, restored by
-`/etc/init.d/alsa-state`.
+Boot setup is `device-files/audio-enable` (→ `rc5.d/S29audio-enable`): GPIO12, the Handsfree
+controls above, **and the Predrive path** — `PreDriv Playback Volume` 3, the `PredriveL/R Mixer`
+inputs on, `DAC2` analog 4 / coarse 2. ⚠️ **Without the Predrive settings the speaker is silent, and the
+codec boots with them muted** — measured on `.188` 2026-10-11: a card with an empty `/var/lib/alsa/`
+played nothing under either bootloader; loading a playing card's mixer state, then the script alone,
+each restored sound by ear. ⚠️ **Our root filesystem restores no mixer state** — it has no
+`alsa-state` init script (measured, `/etc/init.d` on `.188`), so `asound.state` is read only by a
+manual `alsactl restore`, and every setting the speaker needs must be in `audio-enable`.
 
 Native rate is 48000 Hz; `plughw` and the OSS shim both sample-rate-convert automatically. ScummVM runs 22050 Hz
 (`[inferred]` halves OPL synthesis cost — arithmetic, never measured), native games 44100 Hz.

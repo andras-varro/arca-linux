@@ -8,3 +8,15 @@ amixer -c 0 cset name="HandsfreeL Mux" AudioL1  > /dev/null 2>&1
 amixer -c 0 cset name="HandsfreeR Mux" AudioR1  > /dev/null 2>&1
 amixer -c 0 cset name="HandsfreeL Switch" on    > /dev/null 2>&1
 amixer -c 0 cset name="HandsfreeR Switch" on    > /dev/null 2>&1
+# The speaker is silent without the Predrive path, and the codec boots with it muted:
+# a card with no /var/lib/alsa/asound.state played nothing until these were set
+# (measured on .188, 2026-10-11; values are those of a card that plays).
+amixer -c 0 cset name="PreDriv Playback Volume" 3             > /dev/null 2>&1
+amixer -c 0 cset name="DAC2 Analog Playback Volume" 4         > /dev/null 2>&1
+amixer -c 0 cset name="DAC2 Digital Coarse Playback Volume" 2 > /dev/null 2>&1
+for m in AudioL1 AudioL2 AudioR2 Voice; do
+    amixer -c 0 cset name="PredriveL Mixer $m" on > /dev/null 2>&1
+done
+for m in AudioL2 AudioR1 AudioR2 Voice; do
+    amixer -c 0 cset name="PredriveR Mixer $m" on > /dev/null 2>&1
+done
