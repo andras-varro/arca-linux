@@ -1453,7 +1453,7 @@ rules out. `in_voltage9` needs no wire (the Monitor page's `RTC CELL` row, found
 **`ttyO1` is the console:** 115200 8N1, kernel console output plus a **root login shell already
 running** (`/etc/inittab`: `O1:12345:respawn:/bin/start_getty 115200 ttyO1 vt102`, and `ttyO1` is
 in `/etc/securetty`). U-Boot prints there too with `bootdelay=1` — a one-second window to reach the
-`rw20 #` prompt. Physically it comes out at **`P4`** at RS-232 levels — pinout in
+`arca #` prompt (`rw20 #` under the vendor U-Boot). Physically it comes out at **`P4`** at RS-232 levels — pinout in
 [Unpopulated and expansion](HARDWARE.md#4-unpopulated-and-expansion).
 
 > **The serial console is not on the recovery path, but the header is now fitted.** Recovery is: pull
@@ -1587,58 +1587,99 @@ watchdog above is a separate mechanism and stays.
 
 ### 4.1 The chain
 
+**One ROM and one NAND shim start two possible boot chains; which one runs is decided by what is on p1 of the card.**
+If you know the Raspberry Pi: the SoC's mask ROM (the Pi's GPU boot ROM) reads a small first-stage file from the FAT
+partition (`MLO` here, `bootcode.bin` on the Pi 3 and earlier) whose only job is to wake SDRAM; a bigger loader follows (`u-boot.img`, where
+the Pi has `start.elf`), then the kernel; and U-Boot reads an optional text file of settings (`uEnv.txt`, roughly the Pi's
+`cmdline.txt` plus `config.txt`). Two things have no Pi counterpart: the OMAP ROM looks in NAND first **[inferred]**, so a
+12 KB program there exists only to send it to the card, and the kernel is a U-Boot `uImage` (64-byte header) with the
+device tree appended.
+
 ```
-OMAP3 ROM
- └─> NAND /dev/mtd0 "boot" @0x0 (+ mirror @0x20000)
-       TI GP header, 12,548 B, load addr 0x40200800 (SRAM)
-       strings: "Nuvation NAND-Boot Redirector Ver 1.0"
-       └─> redirects boot to SD
- └─> SD /dev/mmcblk0p1  (FAT32, bootable, 70.6 MB)   <-- everything lives here
-       mlo (50,336 B)  ->  u-boot.bin (467,696 B)
- └─> U-Boot 2015.07 (build date varies per unit, §4.2), board=rw20, soc=omap3
-       bootcmd: mmc dev 0; mmc rescan;
-                cb_getinfo 0x82000000        <-- custom command, READS ctrlblock.bin from FAT
-                if cb_boot_mode == "system":    run loadsysimage; run sysboot
-                if cb_boot_mode == "bootstrap": loadramfs + uimage-bootstrap
- └─> uImage-system (5,225,796 B)
-       = 64 B legacy uImage header + zImage (5,158,728 B) + APPENDED DTB (67,004 B @ 0x4eb788)
-       CONFIG_ARM_APPENDED_DTB=y  -> there is no separate .dtb file anywhere
- └─> Linux 4.14.52, root=/dev/mmcblk0p6 (ext4 driver, ext3 filesystem)
+OMAP3 ROM (in the SoC, cannot be changed)
+ └─> NAND /dev/mtd0 "boot" @0x0 (+ mirror @0x20000): "Nuvation NAND-Boot Redirector Ver 1.0"
+       TI GP header, 12,548 B, load addr 0x40200800 (SRAM). Prints a banner on UART2 (115200).
+       Writes a software boot configuration "MMC1" (0x480029C0, pointer at 0x48002910), then
+       warm-resets via PRM_RSTCTRL. It loads nothing itself; the ROM loads MLO without any check by it.
+ └─> OMAP3 ROM again: loads MLO from FAT p1 of the card (bootable, 70.6 MB) to 0x40200800
+ └─> SPL (the MLO file): clocks, pinmux, SDRAM, then the next stage from FAT p1
+ └─> U-Boot proper  ──>  kernel uImage-system (appended DTB)  ──>  Linux 4.14.52, root=/dev/mmcblk0p6
 ```
+
+The redirector was disassembled from a dump of `mtd0` (measured). The two chains differ from the SPL's file name on:
+
+| Stage | Vendor chain | Our chain |
+|---|---|---|
+| SPL | `mlo`, U-Boot SPL 2015.07 | `MLO` (FAT is case-blind: the same directory entry), mainline SPL from `uboot/rw20-board.patch` |
+| SPL loads | `u-boot.bin` (raw) | `u-boot.img` (legacy uImage, load/entry `0x80100000`) — the mainline SPL does **not** load `u-boot.bin` |
+| U-Boot | 2015.07 Gumstix-Overo derivative, board `rw20`, prompt `rw20 # `; build date varies per unit | v2026.10, prompt `arca # `, no persistent environment; build notes `uboot/BUILD.md` |
+| Before booting | `bootcmd`: `mmc dev 0; mmc rescan; cb_getinfo 0x82000000` — the custom command reads `ctrlblock.bin` ([§4.5](#45-control-block-and-boot_tracker)) | `preboot` imports `uEnv.txt` if present (whitelist `bootargs`, `optargs`, `kernel`, `fallback`, `bootdelay`), then the `bootdelay` (1 s) |
+| Chooses the kernel | `cb_boot_mode` `system`: `uImage-system`; `bootstrap`: `uImage-bootstrap` + `ramfilesys.gz` | `uImage-system`, else `uImage-fallback` (names overridable by `uEnv.txt`); no `cb_getinfo`, so `ctrlblock.bin` is never read |
+| Boots it | `sysargs` then `bootm` ([§4.4](#44-the-u-boot-environment-cannot-be-persisted)) | `fatload` then `bootm`, ATAGs + the DTB appended in the image; `bootm` returning (bad image) falls through to the fallback |
+
+**The two chains program the SoC identically** — measured 2026-10-11 on `.188` with `uboot/tools/dump-boot-regs.sh`: 251
+registers (padconf, SDRC, CM, PRM, GPMC) are byte-identical between the vendor's chain and ours. **The PMIC (TWL4030) is
+not covered by that comparison.** A card reader undoes a bad `MLO` or `u-boot.img`, JTAG a bad `mtd0` ([§1](#what-a-boot-path-write-costs-to-undo)).
 
 **The vendor U-Boot is a Gumstix Overo derivative** (its strings carry Overo's "Unrecognized expansion board" and
 `rw20-storm`). **The SDRAM setup it leaves behind**, read with `devmem` on `.188` 2026-10-09 and found as the same words in one
 table in all three vendor SPLs: 256 MB on CS0 only (`SDRC_MCFG_0` `0x03588099`, CS1 disabled), `ACTIM_CTRLA_0`
 `0x7AE1B4C6`, `ACTIM_CTRLB_0` `0x00024217`, `RFR_CTRL_0` `0x0005E601`, `MR_0` `0x32`, `CS_CFG` `0x2`, `SHARING` `0x100`,
 `DLLA_CTRL` `0xA`. Clocks: 13 MHz sys_clk, core 332 MHz, L3 166 MHz, MPU 600 MHz. The refresh word is the 200 MHz table's,
-so at 166 MHz refresh runs about every 9.1 µs [inferred from the decode]. **The NAND redirector does not load `mlo` itself**
-[inferred, strongly: its strings and `PRM_RSTST` `0x2`, a software reset]: it sets a software boot configuration and
-resets, and the ROM loads `MLO` from FAT p1 — so a bad `MLO` is undone by swapping the card.
+so at 166 MHz refresh runs about every 9.1 µs [inferred from the decode].
+
+**p1, file by file** — md5 and `grep -a 'U-Boot'` on the p1 of four units, 2026-10-09; the last three rows are ours:
+
+| File | What it is | Read by | Notes |
+|---|---|---|---|
+| `mlo` | the SPL | the ROM, after the redirector's reset | **differs per unit**: three vendor builds, 2017-08-06 (53,260 B), 2021-04-06 and 2021-12-13 (50,336 B); any one boots on any unit (operator, cross-booted cards). Ours replaces it in place |
+| `mlo.vendor` | a copy of the vendor's `mlo` kept beside ours on the test unit | nothing | the undo: copy it back over `mlo` |
+| `u-boot.bin` | vendor U-Boot, with `cb_getinfo` | the vendor SPL | the same build as that unit's `mlo` |
+| `u-boot-sd.bin` | **byte-identical to `u-boot.bin`** on all four (md5 `34550b9c…`) | neither chain | — |
+| `ctrlblock.bin` | the 28-byte control block, [§4.5](#45-control-block-and-boot_tracker) | vendor `cb_getinfo`; userspace `/opt/sbin/ctrlblk` | **identical** on all four (md5 `e9ec9adb…`) |
+| `uImage-bootstrap`, `ramfilesys.gz` | the vendor's recovery/upgrade kernel and ramdisk | vendor U-Boot in `bootstrap` mode | deleted from our card |
+| `uImage-system` | the kernel: 64 B header + zImage + appended DTB (`CONFIG_ARM_APPENDED_DTB=y`; no `.dtb` file exists). The vendor's original is 5,225,796 B (zImage 5,158,728 B, DTB 67,004 B @ `0x4eb788`) | both U-Boots | ours: `kernel/README.md` |
+| `u-boot.img` | our U-Boot proper | our SPL | placed by hand |
+| `uImage-fallback` | a kernel tried when `uImage-system` fails to load or boot | our U-Boot | placed by hand |
+| `uEnv.txt` | optional settings, template `uboot/uEnv.txt` | our U-Boot (`preboot`) | missing or empty = the built-in defaults |
+
+A card from `rootfs/make-card-image.sh` keeps only the vendor files ([§4.2](#42-partitions)); `mlo.vendor` and the last three rows are
+placed by hand.
+
+**The kernel command line** has three sources: U-Boot's string (vendor: `sysargs` plus words U-Boot appends; ours: the built-in default, or
+`bootargs` from `uEnv.txt`, with `optargs` appended), passed in the ATAGs (neither the vendor DTB, `usb_host/original.dts`, nor `kernel/dts/`
+sets `bootargs`); then the words built into the kernel by `CMDLINE_EXTEND`, appended after it (`kernel/config-changes`, `set-str CMDLINE`). The line
+on `.188` under our chain (`/proc/cmdline`, 2026-10-11) is U-Boot's words up to `rootwait`, then the kernel's own:
+
+| Word | Comes from | Read by |
+|---|---|---|
+| `console=ttyO1,115200n8` | U-Boot (`${console}`) | the kernel console: UART2 gets every printk ([§3.12](#312-serial-ports)) |
+| `vram=12M` | U-Boot | **nothing**: the `omapfb` parameter is `omapfb.vram` (`module_param_named` in `omapfb-main.c`, built in), so this bare word ends in init's environment — measured, `/proc/1/environ` on `.188`. The value `12M` is `[inferred]` from the vendor's unexpanded `${vram}` |
+| `initcall_blacklist=fb_logo_late_init` | U-Boot | `init/main.c`: skips `fb_logo_late_init` (`drivers/video/logo/logo.c`), which marks the boot logos freed; skipped, they stay usable `[inferred]` |
+| `consoleblank=0` | U-Boot | `drivers/tty/vt/vt.c` (`core_param`): the text console never blanks |
+| `mpurate=auto` | U-Boot | **nothing**: no occurrence in the 4.14.52 tree, and it is in init's environment (measured, as `vram`). Inherited from the Overo lineage `[inferred]` |
+| `root=/dev/mmcblk0p6 rw rootfstype=ext4 rootwait` | U-Boot | `init/do_mounts.c`; the ext3 root is mounted by the ext4 driver ([§4.2](#42-partitions)); by position, never by UUID |
+| `vt.global_cursor_default=0` | kernel `CMDLINE_EXTEND` | `drivers/tty/vt/vt.c`: the console cursor is off by default |
+| `usbcore.autosuspend=-1` | kernel `CMDLINE_EXTEND` | `drivers/usb/core/usb.c`: USB autosuspend off; the reason is in `kernel/config-changes` |
+| `console=tty0` | kernel `CMDLINE_EXTEND` | the kernel console: the panel; last, so it is `/dev/console` while `ttyO1` keeps every printk |
+
+**Under the vendor U-Boot the line also carries `curBoot1`, `curBoot2`, `prmRstSt`, `coldBoot1`, `coldBoot2`** (boot-ROM status words, appended by the vendor U-Boot `[inferred]`: the recovered `sysargs` lacks them). Nothing in our
+tree reads them; the vendor rootfs's `/opt/sbin/getBootStatus.sh` parses them out of `/proc/cmdline` into `/var/volatile/tmp/bootROMStatus`, and the `/opt/sbin/ctrlblk` binary names that script
+(`grep -a`; whether it runs it is `[unverified]`). Our U-Boot appends none of them.
 
 ### 4.2 Partitions
 
 | Partition | Type | Size | Mount | Contents |
 |---|---|---|---|---|
-| p1 | FAT32 | 70.6 MB | `/var/volatile/boot` | Boot files, listed below the table. **The DTB is inside `uImage-system`** — no separate `.dtb` file exists. |
+| p1 | FAT32 | 70.6 MB | `/var/volatile/boot` | Boot files, listed in [§4.1](#41-the-chain). **The DTB is inside `uImage-system`** — no separate `.dtb` file exists. |
 | p2 | ext3 | 256 MB | `/home/root/data` | Application data |
 | p3 | ext3 | 250 MB | `/home/root/log` | System logs |
 | p5 | ext3 | 1500 MB | `/home/root/backup` | Firmware backup, incl. `factory/` upgrade images + `.md5` files; on our own root it stays in the table, unused and never mounted |
 | p6 | ext3 | ~981 MB | `/` | Root filesystem |
 
-**The vendor's p1, file by file** — md5 and `grep -a 'U-Boot'` on the p1 of four units, 2026-10-09:
-
-| File | What it is | Per unit? | On our card |
-|---|---|---|---|
-| `mlo` (FAT is case-blind: `MLO` is the same entry) | U-Boot SPL 2015.07: loaded from FAT p1 by the NAND redirector, programs SDRAM, loads `u-boot.bin` | **differs**: three builds, 2017-08-06 (53,260 B), 2021-04-06 and 2021-12-13 (50,336 B); any one boots on any unit (operator, cross-booted cards) | kept |
-| `u-boot.bin` | U-Boot 2015.07, board `rw20`, with the custom `cb_getinfo` (§4.5) | same build as that unit's `mlo` | kept |
-| `u-boot-sd.bin` | **byte-identical to `u-boot.bin`** on all four; the chain above loads `u-boot.bin` | — | kept |
-| `ctrlblock.bin` | the 28-byte control block, §4.5 | **identical** on all four (md5 `e9ec9adb…`) | kept |
-| `uImage-system` | the kernel, DTB appended | — | ours (`kernel/README.md`) |
-| `uImage-bootstrap`, `ramfilesys.gz` | the recovery/upgrade kernel and ramdisk that `bootstrap` mode boots | — | deleted |
-
-Our card keeps the first four because nothing else boots this board yet, and deletes the bootstrap pair
-because we never set `bootstrap` mode (`P1KEEP` in `rootfs/make-card-image.sh`). ⚠️ **Those four files
-cannot go into a published image:** U-Boot is GPL-2.0, these builds are modified, and no source is
+p1's files, their roles and readers: [§4.1](#41-the-chain). Our card keeps `mlo`, `u-boot.bin`, `u-boot-sd.bin`, `ctrlblock.bin`
+and `uImage-system`, and deletes the bootstrap pair because we never set `bootstrap` mode (`P1KEEP` in
+`rootfs/make-card-image.sh`). ⚠️ **The four vendor files cannot go into a published image:** U-Boot is GPL-2.0, these builds are modified, and no source is
 published, so a redistributor cannot offer the corresponding source. A card therefore takes them from
 the unit's own card (`rootfs/fetch-card-parts.sh`).
 
@@ -1734,6 +1775,8 @@ measured. Probe block devices by name, never bare `blkid`.
 
 ### 4.4 The U-Boot environment cannot be persisted
 
+**This section is the vendor U-Boot's.** Ours has no persistent environment either; its variables and `uEnv.txt` are in [§4.1](#41-the-chain).
+
 `u-boot.bin` contains `setenv`, `printenv`, `editenv` and `showvar` but **no `saveenv`** — verified,
 zero occurrences of the string. It is built `CONFIG_ENV_IS_NOWHERE`, consistent with the absence of
 `fw_printenv`/`fw_setenv` on the device, no `/etc/fw_env.config`, and no `environ` MTD partition.
@@ -1815,7 +1858,7 @@ Verified behaviour:
 
 **Three independent layers. JTAG is not one of them.**
 
-**Layer 1 — the untouched-kernel trick (zero-cost rollback).** `bootcmd` is hardcoded to
+**Layer 1 — the untouched-kernel trick (zero-cost rollback).** The vendor `bootcmd` is hardcoded to
 `fatload ... uImage-system`. Stage experiments under a *different filename* and leave
 `uImage-system` alone; a failed experiment is undone by a power cycle.
 
@@ -1832,9 +1875,9 @@ recovery from a `uImage-system` that does not boot (short of copying the backup 
 — nothing runs before the kernel loads, so there is no SSH and no serial console to fix it from.
 
 **Layer 3 — the serial console**, if you ever wire it up. `bootdelay=1` gives a one-second window
-to `rw20 #`; a root shell is already running there. Not used by this project — see
+to the U-Boot prompt (`arca #` ours, `rw20 #` the vendor's); a root shell is already running there. See
 [Serial ports](#312-serial-ports). The loop it enables, with a card backup taken first: stage the
-experiment under a **new** filename on p1, interrupt into `rw20 #`, `fatload mmc 0 0x82000000 uImage-test;
+experiment under a **new** filename on p1, interrupt into the prompt, `fatload mmc 0 0x82000000 uImage-test;
 run sysargs; bootm 0x82000000`. If it panics, power-cycle and do **not** interrupt — `bootcmd` loads the
 untouched `uImage-system` and nothing has changed state. Promote only after several clean boots, keeping
 the old image under another name.

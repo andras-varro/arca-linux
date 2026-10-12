@@ -67,21 +67,8 @@ that stage, or hung there; blinking = a failure the code detected. SPL_TEXT_BASE
   `udelay()` is not started in the early SPL [inferred from `omap-common/timer.c`, not run], and a `udelay` on a stopped timer never returns. A counter that does not move
   falls back to a spin cap (rate unknown) [inferred]. `yellowblink` loops `while run ledyellow && sleep 0.25 && run ledoff && sleep 0.25`; Ctrl-C makes `sleep`
   fail, ends the loop and leaves yellow steady at the `arca # ` prompt [measured in a sandbox build with a pty feeding ^C, not on the device's UART].
-- Reading the panel (in order of appearance):
-  | LED | meaning |
-  |---|---|
-  | dark from the start | SPL never reached its `s_init` |
-  | red, then red + green | SPL got through SDRAM; stays red = SDRAM test failed |
-  | red + green steady | SPL stuck before its jump hook (loading u-boot.img, or an SPL exception: `vectors.S` loops in place) |
-  | red blinking, 2 Hz | `hang()`: an SPL failure (it is reached by every SPL failure path) or a U-Boot proper failure; the serial console has the reason |
-  | green (SPL's last), then red | proper stuck between its `s_init` and `board_init` (relocation, DM, timer, dram_init, serial) |
-  | red + green (proper) | `board_init` reached; stuck before `board_late_init` (MMC init with the twl4030 VMMC1 write, env, `misc_init_r`) |
-  | green | `board_late_init` reached: preboot, the bootdelay second, or no bootcmd, or `mmc dev`/`mmc rescan` hung |
-  | dark | `rwboot` passed `mmc rescan`; `fatload` of the kernel (or the fallback) failed or hung (also dark for the seconds a 5 MB load takes) |
-  | red x3 | `fatload` succeeded, `sysargs` running |
-  | green x3 | `bootm` reached. Still green = `bootm` hung or the kernel died before touching the pads; dark/other = the kernel took over the pads [inferred]; dark again then red x3 = `bootm` returned (bad image) and the fallback ran |
-  | yellow blinking, 2 Hz | `rwboot` ran to its end: nothing booted. Ctrl-C on the serial console stops it at the prompt (yellow steady) |
-  A frozen flash sequence (stuck dark in the middle of it) means `sleep` hangs, i.e. the timer is dead [inferred]. The vendor yellow LEDs come from the vendor's own U-Boot, not from this build.
+- Reading the panel (what each steady or blinking state means, and a good boot's sequence): `COMMISSIONING.md` -> *Boot troubleshooting*. Builder's notes only: a frozen
+  flash sequence (stuck dark part-way) means `sleep` hangs, i.e. the timer is dead [inferred]; the vendor yellow LEDs come from the vendor's own U-Boot, not from this build.
 
 ## uEnv.txt
 `uboot/uEnv.txt` is an all-commented template for an optional file of the same name in the root of FAT p1 (BeagleBone convention: plain `name=value` lines).

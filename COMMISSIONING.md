@@ -361,6 +361,56 @@ ssh root@<ip> 'echo /opt/roomwizard/app_launcher > /opt/roomwizard/default-app'
 ssh root@<ip> reboot
 ```
 
+### Boot troubleshooting
+
+When a unit does not come up there is no SSH to ask, so the two side LEDs and the serial console are the only witnesses. The
+chain they describe (ROM, NAND redirector, `MLO`, U-Boot, kernel) and the role of each file on p1 are in
+[SYSTEM_ANALYSIS.md §4.1](SYSTEM_ANALYSIS.md#41-the-chain). The LEDs below belong to **our** U-Boot; the vendor's chain
+lights them differently.
+
+**A good cold boot**, from power-on (seconds, read off a video, so approximate): green at 1; red at 2; green at 3; off at 4;
+three short red flashes at 4 to 5; three short green flashes at 5; green, then off, at 6; dark and a black screen from 6 to 9;
+at 9 the screen comes on and the LED turns yellow (Linux has taken the LEDs over **[inferred]**); kernel messages from 10;
+the launcher at about 45. The first stages (red, then both lit) are too short to see.
+
+**Where it stopped: the last LED state** (steady = working on that stage, or hung there; **blinking is a failure the code detected**):
+
+| LED | Meaning |
+|---|---|
+| dark from the start | the SPL never reached its first stage: `MLO` missing or unreadable, or the redirector's reset did not happen **[inferred]** |
+| red, then red + green (both lit) | the SPL got through SDRAM; stays red = the SDRAM test failed |
+| red + green steady | the SPL is stuck before handing over: loading `u-boot.img` (missing, unreadable), or an SPL exception |
+| red blinking, 2 Hz | a detected failure in the SPL or in U-Boot; the serial console has the reason |
+| green, then red, then stuck | U-Boot started and is stuck early (relocation, timer, memory, serial) |
+| red + green (U-Boot's) | U-Boot is stuck before MMC and environment init |
+| green | U-Boot is waiting out its `bootdelay`, or has no `bootcmd`, or the card does not answer |
+| dark | the card answered; loading the kernel (or the fallback) failed or hung (also dark for the seconds a 5 MB load takes) |
+| three red flashes | the kernel file was loaded; the command line is being built |
+| three green flashes | `bootm` was reached. Still green = `bootm` hung or the kernel died before touching the pads; dark = Linux took the pads **[inferred]**; dark then red flashes again = the first image was bad and the fallback ran |
+| yellow blinking, 2 Hz | U-Boot ran to its end and nothing booted: neither `uImage-system` nor `uImage-fallback` loaded. Ctrl-C on the serial console stops the blinking at the prompt (steady yellow) |
+
+A flash sequence that freezes part-way means U-Boot's timer is dead **[inferred]**. Which line of the build drives which state, and why
+the SPL's earliest stages cannot be seen: [uboot/BUILD.md](uboot/BUILD.md).
+
+**`uEnv.txt`** is optional: a file of that name in the root of p1, plain `name=value` lines, read by U-Boot before it boots. Only
+`bootargs` (replaces the kernel command line), `optargs` (appended to it), `kernel` and `fallback` (image names; defaults `uImage-system`
+and `uImage-fallback`) and `bootdelay` (seconds, default 1) are taken; anything else is ignored. A missing or empty file means the defaults, silently.
+The template is `uboot/uEnv.txt`, every line commented out; delete the file to undo it. What `bootargs` replaces: the table in
+[SYSTEM_ANALYSIS.md §4.1](SYSTEM_ANALYSIS.md#41-the-chain).
+
+**Recovery with a card reader.** Nothing runs on the card before the SPL, so a bad `MLO`, `u-boot.img` or kernel is undone on the host with
+the card in a reader, not on the unit. A bad `MLO` or `u-boot.img`: copy the vendor's `MLO` (kept as `mlo.vendor` beside ours on the test unit) back over
+`mlo`, which hands the unit back to the vendor U-Boot (`u-boot.bin`, which must still be on p1). A bad `uImage-system`: our U-Boot already tries
+`uImage-fallback`; otherwise copy a known-good image over it. Or re-image the whole card ([*Imaging a card*](#imaging-a-card), or the archive of
+[*Backup and restore*](#backup-and-restore)). FAT is case-insensitive, so `mlo` and `MLO` are one file. Only a damaged NAND redirector (`mtd0`) needs JTAG
+([SYSTEM_ANALYSIS.md §1](SYSTEM_ANALYSIS.md#what-a-boot-path-write-costs-to-undo)).
+
+**The serial console** shows what the LEDs cannot say. Header `P4` (pinout and wiring: [HARDWARE.md](HARDWARE.md#4-unpopulated-and-expansion)),
+UART2, **115200 8N1, no flow control**. `P4` is at RS-232 levels behind a MAX3232 on the board, so a bare 3.3 V TTL cable will not work: use an RS-232
+adapter, or put a MAX3232 breakout between `P4` and the TTL-to-USB cable (the test unit's setup). The NAND redirector prints a banner there
+first (it is the proof that the ROM ran); our U-Boot then prints its own messages and the prompt `arca # `, after a `bootdelay` of 1 s in which
+any key stops the autoboot. Typed commands are a one-shot experiment: our U-Boot has no persistent environment.
+
 ## Related Documentation
 
 - [SYSTEM_ANALYSIS.md](SYSTEM_ANALYSIS.md) — Hardware specs, boot chain, subsystems
