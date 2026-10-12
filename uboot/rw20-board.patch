@@ -353,10 +353,10 @@ index 00000000..f0d79279
 +};
 diff --git a/board/steelcase/rw20/rw20.c b/board/steelcase/rw20/rw20.c
 new file mode 100644
-index 00000000..95bb09f4
+index 00000000..911f8760
 --- /dev/null
 +++ b/board/steelcase/rw20/rw20.c
-@@ -0,0 +1,214 @@
+@@ -0,0 +1,259 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/*
 + * Steelcase RoomWizard (OMAP3503, TWL4030, 256 MB DDR on CS0).
@@ -533,11 +533,56 @@ index 00000000..95bb09f4
 +	return ok;
 +}
 +
++/*
++ * One OMAP34xx temperature-sensor conversion in the SPL. On a cold boot
++ * CONTROL_TEMP_SENSOR (0x48002524) reads 0 until something converts, and the
++ * Linux ti-soc-thermal probe tests that register (omap3 has no efuse offset,
++ * so bgap_efuse = 0 is this register) and logs "Non-trimmed BGAP" when it is
++ * 0 [ti-bandgap.c:1310, inferred for the cold-boot value, not measured].
++ * Same sequence as ti_bandgap_force_single_read(): SOC (bit 8) up, wait for
++ * EOCZ (bit 7) up, SOC down, wait for EOCZ down; the result is in TEMP, bits
++ * 6:0. ts_fck is CM_FCLKEN3_CORE (PRCM_BASE + 0xA08) bit 1, restored after.
++ * Each wait is bounded by the 32 kHz sync counter (like rw20_wait()): 328
++ * ticks = 10 ms, with a spin cap if the counter is stopped; a timeout is
++ * ignored, so the worst case is 20 ms added and nothing hangs.
++ */
++#define RW20_TS_CTRL		(OMAP34XX_CTRL_BASE + 0x524)
++#define RW20_TS_SOC		(1 << 8)
++#define RW20_TS_EOCZ		(1 << 7)
++#define RW20_TS_TIMEOUT		328
++
++static void rw20_ts_wait(u32 eocz)
++{
++	u32 start = readl(SYNC_32KTIMER_BASE + 0x10);
++	u32 spin = 0;
++
++	while ((readl(RW20_TS_CTRL) & RW20_TS_EOCZ) != eocz &&
++	       readl(SYNC_32KTIMER_BASE + 0x10) - start < RW20_TS_TIMEOUT)
++		if (++spin > 20000)
++			break;
++}
++
++static void rw20_ts_convert(void)
++{
++	struct prcm *prcm_base = (struct prcm *)PRCM_BASE;
++	u32 was = readl(PRCM_BASE + 0xA08) & (1 << 1);
++
++	setbits_le32(&prcm_base->iclken_wkup, EN_32KSYNC);
++	setbits_le32(PRCM_BASE + 0xA08, 1 << 1);	/* EN_TS */
++	setbits_le32(RW20_TS_CTRL, RW20_TS_SOC);
++	rw20_ts_wait(RW20_TS_EOCZ);
++	clrbits_le32(RW20_TS_CTRL, RW20_TS_SOC);
++	rw20_ts_wait(0);
++	if (!was)
++		clrbits_le32(PRCM_BASE + 0xA08, 1 << 1);
++}
++
 +void rw20_boot_stage(int stage)
 +{
-+	if (stage == 1)
++	if (stage == 1) {
 +		rw20_led(1, 0);
-+	else if (stage == 2 && rw20_ram_ok())
++		rw20_ts_convert();
++	} else if (stage == 2 && rw20_ram_ok())
 +		rw20_led(1, 1);
 +	else if (stage == 9)
 +		rw20_hang_blink();
