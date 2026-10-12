@@ -430,7 +430,7 @@ BUSYBOX_SHOW_OTHERS	rootfs/CLAUDE.md	IMPROVEMENT_PLAN.md
 S01seedrng	rootfs/CLAUDE.md	IMPROVEMENT_PLAN.md
 GLIBC_2.28	rootfs/CLAUDE.md	IMPROVEMENT_PLAN.md
 config.c:65	rootfs/CLAUDE.md	IMPROVEMENT_PLAN.md
-u-boot-sd.bin	rootfs/CLAUDE.md	IMPROVEMENT_PLAN.md
+nothing from Steelcase on the card, at all	rootfs/CLAUDE.md	IMPROVEMENT_PLAN.md
 rw-spare	rootfs/CLAUDE.md	IMPROVEMENT_PLAN.md
 EOF
 }

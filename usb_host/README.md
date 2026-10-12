@@ -114,8 +114,8 @@ configuration descriptor (`bMaxPower = 250`, also in 2mA units).
 
 ### Power budget in our own image
 
-Our image's DTB carries `power = <0xfa>` (500 mA), set by `kernel/dts/musb-power.sh`: **measured 2026-10-06 on
-`.188`**, `/proc/device-tree` reads `0xfa`, the byte at DTB offset `0xeb47`, and an Xbox 360 pad plugged
+Our image's DTB carries `power = <250>` (`0xfa`, 500 mA), set in `usb_otg_hs` of `kernel/dts/rw20.dts`: **measured 2026-10-06 on
+`.188`** (an image whose DTB carried the same value from an earlier scripted edit), `/proc/device-tree` reads `0xfa`, and an Xbox 360 pad plugged
 directly (no hub) enumerated as `input1` with no `insufficient available bus power` in `dmesg` (operator, n=1).
 The vendor image keeps `0x32` (100 mA), where a powered hub is needed; its byte patch is deleted with
 vendor-kernel support. `build-and-deploy.sh` prints the live value at the end:

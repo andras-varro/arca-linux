@@ -60,8 +60,8 @@ build-time one, on the unstripped artifact. Detail: `tests/CLAUDE.md`, and `IMPR
 It writes `/etc/hostname` and rewrites `/etc/hosts` so the device's own name never sits on a
 non-loopback line (a unit would otherwise resolve its own name to a wrong address). It keys the
 `/etc/hosts` removal on the name it reads from `/etc/hostname`, never a hardcoded one, and has a
-negative control: it refuses to write an `/etc/hosts` that lost `localhost`. `rootfs/make-card-image.sh`
-calls it offline and `provision.sh --hostname` over SSH, so they cannot drift; `--hostname` does
+negative control: it refuses to write an `/etc/hosts` that lost `localhost`. The unit's `S04firstboot-hostname` (first boot of a card image,
+which carries no name of its own) calls it as `/usr/sbin/set-hostname`, and `provision.sh --hostname` over SSH, so they cannot drift; `--hostname` does
 **not** reboot, which is what makes it usable on a unit in service as a live display. `/etc/hostname`
 is the only home of the name.
 

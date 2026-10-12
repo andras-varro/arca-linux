@@ -55,7 +55,7 @@ don't copy.
 | `device-files/CLAUDE.md` | what is installed verbatim, and how to author the two rules files |
 | `tests/CLAUDE.md` | the host regressions, what each cannot see, sabotage-harness discipline |
 | `scummvm-roomwizard/CLAUDE.md`, `vnc_client/CLAUDE.md` | those ports |
-| `rootfs/CLAUDE.md` | our own p6 root filesystem: Buildroot tree, ABI, rc links, per-unit state, card image |
+| `rootfs/CLAUDE.md` | our own p6 root filesystem: Buildroot tree, ABI, rc links, the generic card image |
 | `kernel/CLAUDE.md` | our 4.14.52 image: its patches, DT changes, build script and missing drivers — notes in `kernel/README.md` |
 
 ⚠️ **The vanilla kernel tree is the authority for every subsystem the vendor did not patch, and
@@ -131,7 +131,7 @@ cd native_apps && ./build-and-deploy.sh [<ip>] [set-default]
 
 **Units run only our own root filesystem** (`rootfs/`); a card comes from `rootfs/make-card-image.sh`, and
 `provision.sh` updates a running unit, taking a `backup.sh` archive before its first write. Neither path
-writes p1. `set-default` is the only mode `native_apps/build-and-deploy.sh` accepts. The boot service is
+writes a unit's p1 (the card-image builder formats the p1 of an image file). `set-default` is the only mode `native_apps/build-and-deploy.sh` accepts. The boot service is
 installed **only** by the provision rules — never by a component script. All of it:
 `commissioning/CLAUDE.md`.
 

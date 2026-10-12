@@ -15,7 +15,7 @@ source `rw-bundle.sh` on the *write* side while the commissioner reads it, and e
 | `rw-bundle.sh` | the release-bundle layout |
 | `rw-release.sh` | fetch a published release — **the one library here that opens a socket** |
 | `rw-ssh.sh` | the one answer to "can I reach this device" |
-| `rw-state.sh` | the per-unit state lists: what a card image may carry (allowlist plus hard deny) and the BACKUP set; `rootfs/` and `commissioning/backup.sh`/`restore.sh` source it, `tests/rw_state_test.sh` covers it |
+| `rw-state.sh` | the per-unit state lists: the BACKUP set and the SSH-key deny the card-image builder applies; `rootfs/` and `commissioning/backup.sh`/`restore.sh` source it, `tests/rw_state_test.sh` covers it |
 
 ## One SSH gate, and BatchMode stays on it
 
@@ -87,8 +87,10 @@ Measurements: `SYSTEM_ANALYSIS.md#42-partitions`. Reasoning: `COMMISSIONING.md` 
 There is **no boot-time MD5 check** of the kernel and no signing — the only gate on `uImage-system` is
 its uImage header + data CRC, which `mkimage` writes when `kernel/build-image.sh` packages our image.
 U-Boot has no `saveenv`, so the environment cannot be persisted or corrupted.
-**No script here writes `/dev/mtd*`, `mlo`, `u-boot.bin` or `ctrlblock.bin`** — a scripted write lands on every unit it
+**No script here writes `/dev/mtd*`, `mlo`, `u-boot.bin` or `ctrlblock.bin` of a unit** — a scripted write lands on every unit it
 runs on; by hand, each is allowed, and its undo cost is `SYSTEM_ANALYSIS.md#what-a-boot-path-write-costs-to-undo`.
+The one exception is `rootfs/make-card-image.sh`, which formats and fills the p1 of an image **file** it created itself (it refuses a
+block device), with our own `MLO`, `u-boot.img` and kernel; no vendor file is ever copied.
 stage experimental kernels under a *new* filename.
 
 **Only our own kernel image is supported**, and no library or script here writes `uImage-system`:

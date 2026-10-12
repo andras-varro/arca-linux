@@ -99,15 +99,15 @@ native app, and gives its first frame one verdict (pass / did-not-start / starte
 
 ### Delivering a unit — build a card image, one boot
 
-A card is one whole-card image built by `rootfs/make-card-image.sh` (root, WSL): our root filesystem,
-the kernel modules and — with `--bundle` — every component, installed by
+A card is one whole-card image built by `rootfs/make-card-image.sh` (root, WSL): our boot files on p1 (`MLO`,
+`u-boot.img` and the kernel), our root filesystem, the kernel modules and — with `--bundle` — every component, installed by
 `commissioning/commission-offline.sh`. The unit works at first boot and never needs to be reachable.
 
 ```bash
-sudo ./rootfs/make-card-image.sh --bundle <tar.gz|dir> <partsdir> <rootfs.tar> <out.img>
+sudo ./rootfs/make-card-image.sh --mlo <MLO> --uboot <u-boot.img> --kernel <uImage> --bundle <tar.gz|dir> <rootfs.tar> <out.img>
 ```
 
-`<partsdir>` comes from `rootfs/fetch-card-parts.sh`, `<rootfs.tar>` from `rootfs/build-rootfs.sh`; the
+`MLO` and `u-boot.img` come from `uboot/build.sh`, `<uImage>` from `kernel/build-image.sh`, `<rootfs.tar>` from `rootfs/build-rootfs.sh`; the
 operator-facing steps are in [COMMISSIONING.md](COMMISSIONING.md). Make a bundle with
 `./release.sh --stage-only`, or publish one with `./release.sh --tag <tag>`. For a card larger than the
 image, grow p6 afterwards with `commissioning/clone-to-32gb.sh` ([SD_CARD_UPGRADE.md](SD_CARD_UPGRADE.md)).
@@ -131,7 +131,7 @@ rules are in [lib/CLAUDE.md](lib/CLAUDE.md).
 
 ### Getting SSH access to a generic card
 
-A card built with `--generic` carries no key and refuses SSH until the panel opens it. Measured on `.188`: on the Control Panel
+A card built by `make-card-image.sh` carries no key and refuses SSH until the panel opens it. Measured on `.188`: on the Control Panel
 **SSH** page set a root password (on-screen keyboard), tap **ROOT LOGIN ALLOW**, then **KEY + PASSWORD**; from the PC run
 `ssh-copy-id root@<ip>` (password login, then key login both work). Then optionally tap **KEY ONLY** — confirmed working after
 `ssh-copy-id` (measured 2026-10-11); **OFF** also works and keeps the port closed across a reboot.
@@ -196,7 +196,7 @@ roomwizard/
 ├── scummvm-roomwizard/          # ScummVM backend
 ├── usb_host/                    # USB host mode + Xbox controller modules
 ├── bluetooth/                   # BlueZ + btmon, BT modules (incl. rfcomm), RTL8761CU firmware, boot start; BlueALSA (a2dp-source, hfp-ag)
-├── uboot/                       # Our own mainline U-Boot v2026.10 board port (rw20-board.patch) and its BUILD.md; host build only
+├── uboot/                       # Our own mainline U-Boot v2026.10 board port (rw20-board.patch), build.sh and BUILD.md; host build only
 └── vnc_client/                  # VNC remote desktop viewer
 ```
 

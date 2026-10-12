@@ -41,10 +41,10 @@ Everything committed in this repository **except the files named in the next sec
 and shared library under `native_apps/`, `vnc_client/`'s client and its renderer/input/settings, the
 ScummVM backend port under `scummvm-roomwizard/backend-files/`, `usb_host/`'s `devmem_write.c` and Python
 tooling, every shell script (`roomwizard.sh`, `deploy-all.sh`, `release.sh`, `lib/`, `commissioning/`,
-`device-files/`, `tests/`), `kernel/`'s `build-image.sh`, `build-modules.sh`, `dts/*.sh` and `tools/*.c`, `uboot/BUILD.md` and `gen-mux.py`, the `.ppm`
-launcher icons, and the documentation. `kernel/dts/panel-dpi.sh` is MIT — the operator confirmed it
-2026-09-23 — because it carries the vendor panel's timing
-*numbers* and none of the vendor device tree's text — that is why it is a script and not a DTS diff.
+`device-files/`, `tests/`), `kernel/`'s `build-image.sh`, `build-modules.sh` and `tools/*.c`, `uboot/BUILD.md` and `gen-mux.py`, the `.ppm`
+launcher icons, and the documentation. `kernel/dts/rw20.dts` is **not** MIT: its SPDX line says GPL-2.0-only and it includes the kernel
+tree's own `.dtsi` files; it carries the vendor panel's timing
+*numbers* and none of the vendor device tree's text.
 
 ⚠️ **The audio assets are NOT MIT and this used to say the opposite.** `native_apps/sounds/fx_*.wav` were
 once the output of the committed `native_apps/sounds/fx_gen.c`, which made them MIT by construction; that
@@ -230,10 +230,10 @@ what is not on the public remote.
   `usb_host/device_config`, which is gitignored and is the unit's own `/proc/config.gz`; only our
   changes (`kernel/config-changes`) are in the tree. The "scripts used to control compilation" are
   incomplete in the repo for anyone who has not got that file.
-- **p1 is the vendor's.** `make-card-image.sh` copies p1 byte for byte from the donor unit, which holds
-  `mlo`, `u-boot.bin` and `ctrlblock.bin` (Steelcase's U-Boot is GPL-2.0-or-later, so it carries the same
-  duty we cannot meet) and the vendor `uImage-system`. **A published image must not contain them** — see
-  the vendor-kernel paragraph below. How a published image is to get a bootable p1 is undecided.
+- **p1 is ours, and its source offer is not written.** `make-card-image.sh` puts our `MLO` and `u-boot.img` (U-Boot v2026.10 plus
+  `uboot/rw20-board.patch`, built by `uboot/build.sh`; GPL-2.0-or-later) and our kernel on p1 and copies no file of the vendor's.
+  The U-Boot upstream tag plus the committed patch and script rebuild
+  both files, but no written offer for them ships with an image.
 - **`legal-info` has not been run to completion** (the headers hash failure above), and no licence texts
   are copied into the image or the bundle for the rootfs packages.
 
