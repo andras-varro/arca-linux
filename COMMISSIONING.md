@@ -39,7 +39,7 @@ donor card and no vendor file is an input. Why the image is built on the native 
 
 **Every image is the same, with no unit state:** it refuses any SSH key material, and the unit names itself
 (`arca-<4 hex>`) and generates its SSH host key on first boot. Run as root, the module directory defaults to `~/rw-kmods` of the invoking user
-(`$SUDO_USER` under `sudo`); a root shell without `SUDO_USER` (`wsl.exe -u root`) looks in root's own home (read from the script, not run), so pass it. The whole sequence (not yet booted on a unit):
+(`$SUDO_USER` under `sudo`); a root shell without `SUDO_USER` (`wsl.exe -u root`) looks in root's own home (read from the script, not run), so pass it. The whole sequence (booted on `.115`, 2026-10-12):
 
 ```bash
 bash rootfs/build-rootfs.sh; bash release.sh --stage-only --skip-tests      # WSL, as the normal user
@@ -391,7 +391,7 @@ the launcher at about 45. The first stages (red, then both lit) are too short to
 | three green flashes | `bootm` was reached. Still green = `bootm` hung or the kernel died before touching the pads; dark = Linux took the pads **[inferred]**; dark then red flashes again = the first image was bad and the fallback ran |
 | yellow blinking, 2 Hz | U-Boot ran to its end and nothing booted: neither `uImage-system` nor `uImage-fallback` loaded. Ctrl-C on the serial console stops the blinking at the prompt (steady yellow) |
 
-A flash sequence that freezes part-way means U-Boot's timer is dead **[inferred]**. Which line of the build drives which state, and why
+A flash sequence that freezes part-way means U-Boot's timer is dead **[inferred]**. The red blink in `hang()` and the yellow blink at the end have not run on hardware **[unverified]**. Which line of the build drives which state, and why
 the SPL's earliest stages cannot be seen: [uboot/BUILD.md](uboot/BUILD.md).
 
 **`uEnv.txt`** is optional: a file of that name in the root of p1, plain `name=value` lines, read by U-Boot before it boots. Only

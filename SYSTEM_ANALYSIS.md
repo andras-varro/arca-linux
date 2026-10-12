@@ -1612,9 +1612,16 @@ The redirector was disassembled from a dump of `mtd0` (measured). The two chains
 | Chooses the kernel | `cb_boot_mode` `system`: `uImage-system`; `bootstrap`: `uImage-bootstrap` + `ramfilesys.gz` | `uImage-system`, else `uImage-fallback` (names overridable by `uEnv.txt`); no `cb_getinfo`, so `ctrlblock.bin` is never read |
 | Boots it | `sysargs` then `bootm` ([§4.4](#44-the-u-boot-environment-cannot-be-persisted)) | `fatload` then `bootm`, ATAGs + the DTB appended in the image; `bootm` returning (bad image) falls through to the fallback |
 
-**The two chains program the SoC identically** — measured 2026-10-11 on `.188` with `uboot/tools/dump-boot-regs.sh`: 251
-registers (padconf, SDRC, CM, PRM, GPMC) are byte-identical between the vendor's chain and ours. **The PMIC (TWL4030) is
-not covered by that comparison.** A card reader undoes a bad `MLO` or `u-boot.img`, JTAG a bad `mtd0` ([§1](#what-a-boot-path-write-costs-to-undo)).
+**The two chains program the SoC identically** — measured with `uboot/tools/dump-boot-regs.sh`, 251 registers (padconf, SDRC, CM,
+PRM, GPMC), the vendor's chain against ours. `.188` 2026-10-11 and `.115` on a warm reboot: byte-identical. `.115` 2026-10-12, booted
+from a generated card, both dumps with the backlight at 0: 249 identical, 0 faults, **two differ** — `CM_FCLKEN1_CORE` (0x48004A00)
+0x4000 against 0xC000 (bit 15, `EN_I2C1`) and `CM_IDLEST_CKGEN` (0x48004D20) 0xA0B against 0xA0F (bit 2, the 96 MHz clock, I2C's
+functional clock); a repeat dump gave the same. **[inferred]** Kernel runtime state, not bootloader setup: measured on that card
+`i2c1_fck` enable count 1, `48070000.i2c` `runtime_status` active, `twl4030-usb` (the only TWL child with runtime PM) active, musb mode
+`a_host`; and the same U-Boot build gave 0xC000/0xA0F on `.188` and 0x4000/0xA0B on `.115`'s old card. **Take both dumps with the
+backlight in the same state:** `CM_FCLKEN_PER` (0x48005000) bit 10 (`EN_GPT9`) follows it, and with it off GPT9's registers bus-fault
+**[inferred]**: GPT9 is the backlight PWM; seen on both units. **Not covered by the comparison:** the PMIC (TWL4030), the GPIO banks,
+McBSP, `CONTROL_DEVCONF*`, `CM_CLKOUT_CTRL`. A card reader undoes a bad `MLO` or `u-boot.img`, JTAG a bad `mtd0` ([§1](#what-a-boot-path-write-costs-to-undo)).
 
 **The vendor U-Boot is a Gumstix Overo derivative** (its strings carry Overo's "Unrecognized expansion board" and
 `rw20-storm`). **The SDRAM setup it leaves behind**, read with `devmem` on `.188` 2026-10-09 and found as the same words in one

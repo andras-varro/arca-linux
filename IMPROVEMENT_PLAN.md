@@ -77,10 +77,10 @@ possible recursive locking detected` — `sk_lock-AF_BLUETOOTH-BTPROTO_L2CAP` ta
 reconnect. **Second sighting 2026-10-05, ~60 s after boot, during incoming BT connections:** the same splat in
 `hci_rx_work` → `l2cap_recv_frame` → `l2cap_connect` → `l2cap_sock_new_connection_cb` → `bt_accept_enqueue` →
 `lock_sock_nested`, held `conn->chan_lock`, `chan->lock#2/2` and `sk_lock-AF_BLUETOOTH-BTPROTO_L2CAP`, kernel 4.14.52
-tainted `O` (our out-of-tree modules). Console warnings are defects even when harmless. Our image evidently has lockdep enabled
-(`CONFIG_PROVE_LOCKING` or similar) **[inferred; the config was not read]**. Cause not investigated;
+tainted `O` (our out-of-tree modules). Console warnings are defects even when harmless. **Measured 2026-10-12, `/proc/config.gz` on `.115`:** `CONFIG_PROVE_LOCKING`, `LOCKDEP`, `DEBUG_LOCK_ALLOC`, `DEBUG_MUTEXES` and `DEBUG_SPINLOCK` are all `=y`, and the syslog there carries the same lockdep trace; these are debug options with a CPU cost on a 600 MHz core. Whether they come from the vendor config or from us is unknown: none of them is named in `kernel/config-changes` (the base `.config` is not in the repo, see D18).
+Cause not investigated;
 **[inferred]** candidate: the 4.14 parent/child L2CAP socket false positive that upstream later annotated with a
-nesting subclass. **Next:** read `.config` for the lockdep symbols and the upstream change to
+nesting subclass. **Next:** read the upstream change to
 `l2cap_sock_new_connection_cb`; decide between backporting the annotation and dropping lockdep from the image.
 
 ### B51. BT failover miss: a BlueALSA A2DP stream froze without error — open, sporadic, seen once 2026-10-02
@@ -146,6 +146,30 @@ differ in more than the device, so the link is unproven. It needs a joint sessio
 ### B58. `tests/provision_online_test.sh` check "C2 the backup was attempted (lister ran)" failed once in a full run — open, intermittent, n=1
 
 Seen 2026-10-12 in one full `./tests/run-all.sh` run in WSL; run alone the same test passed 2/2 straight after. Cause unknown: an ordering or timing dependence between the fake lister and the check, or load from the neighbouring tests, are guesses, not findings. **Done when** the cause is found and the check is deterministic (it passes in a loop of full-gate runs, and fails against a fixture where the lister really does not run).
+
+### B64. The device-tree `model` string and the U-Boot board name disagree — open, measured 2026-10-12
+
+`kernel/dts/rw20.dts:25` says `model = "Steelcase RoomWizard 20"` (the vendor DT's string; `HARDWARE.md` records it, the kernel prints it as `Machine model:`), while `uboot/rw20-board.patch:42` says `"Steelcase RoomWizard rw20"`. Operator ruling 2026-10-12: the board name stays "Steelcase RoomWizard rw20", because it names the hardware. **Measured by `Grep`:** nothing in the tree reads `/proc/device-tree/model` on the device (the one reader, `vnc_client/setup-vnc-viewer.sh`, checks for a Raspberry Pi host), so the string reaches only the boot log. **Done when** the DT string matches the ruling and `HARDWARE.md` says the vendor's own string was the old one.
+
+### B65. A first boot of a generated card prints "uninitialized urandom read" lines — open, measured 2026-10-12
+
+Boot-console errors are defects here. **Measured, `.115` dmesg against `.188`'s:** the only new error lines on the generated card are the first-boot "uninitialized urandom read" ones, from seedrng, udevd, avahi-autoipd and dbus-uuidgen; `.188` has none. `/var/lib/seedrng` now holds `seed.no-credit` on `.115`. **[inferred]** The pool has no seed on a first boot, so early readers see it uninitialised; whether the next boot is quiet has not been measured. **Done when** a first boot prints none of them, or the cause shows they cannot be avoided and that is written down.
+
+### B66. sshd still generates an RSA host key on first boot — open, operator-observed 2026-10-12
+
+The operator expected ed25519 only. `rootfs/board/roomwizard/overlay/etc/init.d/sshd` generates only ed25519, `overlay/etc/ssh/sshd_config` names one `HostKey`, and `rootfs/board/roomwizard/post-build.sh:90` deletes RSA files from the tree, so something else makes the RSA key; not found (those three files were read, nothing more). `rootfs/check-rootfs.sh:150` asserts only that the *tar* has no RSA key file, so a key made at run time passes it. **Done when** a first boot leaves only ed25519 in `/home/root/data/ssh`.
+
+### B67. The launcher clock ignores a timezone change made in the Control Panel — open, operator-reproduced 2026-10-12
+
+The Control Panel and the System applet follow the new timezone; the launcher's clock stays on UTC until the launcher restarts. **[inferred]** Cause: the launcher is a long-running process whose glibc has cached `/etc/localtime`; `control_panel/system_page.c:322` calls `tzset()` in the Control Panel's own process only, and the clock is drawn by `common/top_bar.c:251` with `localtime_r`. The cause and any fix are hypotheses until the symptom is reproduced under `strace`. **Done when** the launcher clock follows a timezone change without a restart.
+
+### B68. The syslog shows red lines at every boot — open, operator-observed 2026-10-12
+
+Seen in the Control Panel log viewer; boot-console errors are defects here. **Measured in the syslog:** `bluetoothd` `daemon.err` 18 and `warn` 11 ("error updating services: Host is down"); `omap_hwmod`: mcbsp sidetone "broken dt data"; `twl4030` madc: "supply not found"; `twl4030` bci: "battery temperature out of range"; `sr_init`: "No PMIC hook". **[inferred]** The bci line is there because the board has no battery and the DT node from the mainline `omap34xx`/`twl` includes is not disabled in `kernel/dts/rw20.dts`; the others are untraced. Lockdep's trace is its own entry (B47). **Done when** each line is removed at its cause, or recorded as unavoidable with the reason.
+
+### B69. Does the SD slot's card-detect switch work, and is it on the pad the DT names? — open, unverified
+
+`kernel/dts/rw20.dts:550` has `cd-gpios = <&gpio4 31 GPIO_ACTIVE_LOW>` (gpio_127, the vendor's value, kept) while the pad it muxes as a GPIO (`rw20.dts:278`) is `sdmmc1_dat4` = gpio_126. **[unverified]** Whether the switch is read at all has not been checked; the card boots, so nothing observed depends on it. **Done when** a card insert and removal is observed in the kernel log, or the property is shown to be inert.
 
 ## Features
 
@@ -219,7 +243,7 @@ deployed on** — panel and touch working.
 | Boot messages on the panel | append `console=tty0` **last** in the same `CONFIG_CMDLINE_EXTEND`, so the panel is `/dev/console` (operator's choice) | ⚠️ **Resolve the hazard first — measured by code search:** no app sets `KD_GRAPHICS` or touches the VT, and apps `mmap` `/dev/fb0` directly, so once `tty0` is a console any printk at the default console loglevel — the known USB printk loop, say — draws over a running game. **The fix is `KDSETMODE KD_GRAPHICS` in `fb_init()` in `native_apps/common/framebuffer.c`** (operator agreed; every shipped fb program goes through it, so redeploy all three components): open `/dev/tty0` explicitly (apps have no controlling tty), set it unconditionally on every init so a crashed or `kill -9`ed predecessor is repaired, and do **not** restore `KD_TEXT` in `fb_close()` — the launcher closes and re-inits around each child, so that would flash the console; restore it only in the init script's `stop`, via a small helper. A `loglevel=` stays as a second line of defence. The serial getty on `ttyO1` comes from `inittab`, so it is unaffected **[inferred]** |
 | Scheduling | `PREEMPT`, `HZ=250` | config-only, and never measured to limit anything — include it, but do not justify the image with it |
 | USB gadget mode | `CONFIG_USB_GADGET` | config-only: the micro-B socket is already the one physical port |
-| Boot logo | the Arca cuckoo replaces Tux: render `distro/arca-logo.svg` to a ≤224-colour plain PPM and have a `kernel/patches/` entry replace `drivers/video/logo/logo_linux_clut224.ppm` (`LOGO_LINUX_CLUT224` is already enabled in `kernel/config-changes`) | 4.14 draws the logo at the top-left with no centring (`drivers/video/fbdev/core/fbmem.c:503`, `image.dx = 0`), so the bezel can cover its corner. Pad the PPM: a margin, or a full 800×480 frame with the logo centred. The full frame costs ~375 KB of image [inferred: one byte per pixel of `clut224` data]. Earlier than the kernel needs our own U-Boot (F144) |
+| Boot logo | the Arca cuckoo replaces Tux: render `distro/arca-logo.svg` to a ≤224-colour plain PPM and have a `kernel/patches/` entry replace `drivers/video/logo/logo_linux_clut224.ppm` (`LOGO_LINUX_CLUT224` is already enabled in `kernel/config-changes`) | 4.14 draws the logo at the top-left with no centring (`drivers/video/fbdev/core/fbmem.c:503`, `image.dx = 0`), so the bezel can cover its corner. Pad the PPM: a margin, or a full 800×480 frame with the logo centred. The full frame costs ~375 KB of image [inferred: one byte per pixel of `clut224` data]. A U-Boot splash of the logo is possible (`drivers/video/omap3_dss.c` is in v2026.10, but no board uses it) and would come after this row |
 
 **The order to do it in, cheapest first.**
 
@@ -257,7 +281,7 @@ a yes to both.
 The operator wants root not to be the default user on our root filesystem. Operator's answer, 2026-10-10: a normal user and
 root; normal operation runs as the user; a change such as the SSH settings needs root (type the root password) and then runs as
 root, like `sudo`. That touches `/dev/fb0`, `/dev/input`, `/dev/dsp`, `/dev/watchdog` and the `roomwizard-app` respawn loop. If it
-is too much effort it goes last. **Done when** it is designed together with the operator and built.
+is too much effort it goes last. The terminal app (`native_apps/terminal/`) runs `/bin/login`, so it grants exactly what the accounts grant. **Done when** it is designed together with the operator and built.
 
 ### F143. A status line across the top of the screen — open, operator idea 2026-10-09, future
 
@@ -265,28 +289,7 @@ One line of status: messages such as "not calibrated", date/time, CPU, refreshed
 app or page that fixes it (calibration for "not calibrated"). Not designed: which apps show it, and what it costs per frame
 on the software renderer. **Done when** the launcher shows it and a tap on a message opens the right page.
 
-State 2026-10-12: a shared top bar, `native_apps/common/top_bar.c` (commit 624f798), is used by the launcher and every Control Panel page: five sections (back, message tap target, centred title, CPU + clock, exit X). It starts at `SCREEN_VISIBLE_TOP`; its bottom is `max(VISIBLE_TOP+44, SAFE_TOP+40)` (`top_bar_bottom()`), so the targets keep 40 px touchable at any inset. The launcher title is "Arca Launcher" (the big ROOMWIZARD / CONTROL PANEL headings are gone); the exit X moved from `icon_grid` into the bar; NOT CALIBRATED is the message (`common/status_line.c`) and opens `control_panel input`. Host test `native_apps/tests/top_bar_test.c`. **Deployed to `.188`** (`native_apps`, 14/14 md5 verified). **Measured by framebuffer capture:** the launcher bar shows "Arca Launcher", CPU + clock and the X, with layout receipt `grid_top 76 … fits` (safe 790x423 at (5,16)); with the calibration file renamed (restored after) NOT CALIBRATED shows in orange at the left; the Control Panel home bar shows "Control Panel" + CPU/clock + X; the Audio page bar shows back + "Audio" + CPU/clock. **Seen at capture, not yet fixed:** the back button is a white outline while the X is a filled red button; the page content's first section header ("AUDIO") sits almost flush under the bar. **Untested (needs a finger):** the message tap, X, back, the pad route to the Input page, the 1/s tick by eye, portrait, and the message clearing after calibration.
-
-### F144. Our own SPL + U-Boot on p1, so a card carries nothing from Steelcase — open, operator wish 2026-10-09, planned
-
-Replaces the vendor `mlo` and `u-boot.bin` — ⚠️ mainline's SPL loads **`u-boot.img`** (legacy uImage, 0x80100000) from FAT p1, not
-`u-boot.bin` (`SYSTEM_ANALYSIS.md` §4.2: modified GPL, no source, cannot be published) with
-mainline U-Boot built here: a new board `rw20` modelled on `igep00x0`/`devkit8000`, SDRC programmed with the live values
-(§4.1), a boot script that loads `uImage-system` from FAT p1 with the vendor's bootargs; `ctrlblock.bin`, the duplicate U-Boot copy and
-the bootstrap pair are dropped. The NAND redirector stays (a bad one needs JTAG); a bad `MLO` costs a card-reader edit. Plan (10 steps, risks,
-the register dump): `~/.claude/plans/own-p1-uboot-plan.md`. Biggest risk: pinmux or PMIC settings only the vendor bootloader
-makes — the kernel boots with a dead panel, touch or USB; the plan replays the live pin configuration, calls
-`twl4030_power_init()` and requires an empty register-dump diff after boot. **The first card test needs the `P4` serial
-console** (a dead SPL is otherwise silent). Operator answers, 2026-10-10: `P4` is fitted on `.188`; the adapter is a 3.3 V TTL↔USB
-plus a MAX3232 breakout (P4 → MAX3232 → TTL↔USB), not yet wired; the first test uses the 8 GB card on `.188`; `bootdelay=1`
-stays (a window to stop at the serial prompt); the prompt is `arca #`, never `rw20 #`; the fallback kernel is
-`uImage-fallback`. No `devmem` dump of a 2017-build unit: which unit runs it is unknown, and its original card has no SSH.
-A U-Boot splash of the Arca logo is possible (`drivers/video/omap3_dss.c` is in v2026.10, but no board uses it) and comes
-after F101's kernel boot-logo row. The board port is `uboot/` (patch, `build.sh`, `BUILD.md`, `gen-mux.py`); `uboot/build.sh` writes `MLO` and `u-boot.img` to `~/rw-uboot-out`; it refuses GCC 9 and needs `gcc-10-arm-linux-gnueabihf` (installed). **Done when** a card generated by
-`make-card-image.sh` with our own `MLO` + `u-boot.img` boots our kernel with the register-dump diff empty (see the last paragraph).
-
-**State 2026-10-12 — build H boots both units from a warm reboot** (measured: `/proc/cmdline` lacks the vendor's `curBoot`/`coldBoot` arguments, i.e. our U-Boot booted them). Build G = `uboot/rw20-board.patch` at the earlier HEAD (boot-progress LEDs, blink = failure; `uEnv.txt` via preboot); build H adds one temperature-sensor conversion in the SPL (`SYSTEM_ANALYSIS.md` §3.11, the BGAP line), confirmed by a cold power-on of both units. `.188` p1: `mlo` = H (md5 81710892…), `u-boot.img` 835fc5cc…, G kept as `mlo.G` (06c64d42…) / `u-boot.img.G` (7f34fbdb…), `mlo.vendor` beside them for card-reader recovery; `thermal_zone0` 75000, `CONTROL_TEMP_SENSOR` 0x47. `.115` (`arwtest2`, 4 GB card) p1: `mlo` = H, `u-boot.img` = H, `mlo.vendor` c4e6c801…, `uImage-fallback` = copy of `uImage-system` (45b05f77…), a `uEnv.txt` template; `thermal_zone0` 62000. The chain, the p1 files and the LED reading are documented (`SYSTEM_ANALYSIS.md` §4.1, `COMMISSIONING.md` → *Boot troubleshooting*); the red blink in `hang()` and the yellow blink at the end of `rwboot` have not run on hardware.
-**Register dump, measured on `.115` (vendor chain against build H): 251 registers, diff EMPTY when both dumps are taken with the backlight in the same state.** The first dump under ours differed only in `CM_FCLKEN_PER` 0x48005000 bit 10 (EN_GPT9, 0x400) because the backlight was still lit; at backlight 0 GPT9 is unclocked (its registers bus-fault) and the bit is 0 [inferred: GPT9 is the backlight PWM; seen on both units, `.188` backlight 100 → 0x400]. `.115` runs an older root filesystem (BusyBox 1.31.1, no `devmem` applet, glibc older than 2.33); a static read-only `devmem` was installed at `/usr/sbin/devmem` there for the dump. `uboot/tools/dump-boot-regs.sh` compares only the 251 registers our U-Boot programs — not GPIO banks, McBSP, `CONTROL_DEVCONF*`, `CM_CLKOUT_CTRL` or any TWL4030 register. So "two units, register diff empty" is met. **Still open: the first boot of a generated card.** The code is done (commit 006a2b8): `rootfs/make-card-image.sh` writes the partition table itself and puts only our `MLO`, `u-boot.img`, `uImage-system`, `uImage-fallback` and `uEnv.txt` on p1 (operator ruling 2026-10-12: the published card carries nothing from the vendor), `uboot/build.sh` builds `MLO` and `u-boot.img`, and `kernel/dts/rw20.dts` is our own DTS. **The kernel with `rw20.dtb` boots `.188`** (measured 2026-10-12: staged as p1 `uImage-rw20`, md5 f7d0d01c…, selected by `kernel=uImage-rw20` in its `uEnv.txt`, fallback the old kernel; launcher on the panel by fb capture, `lsmod`, platform-device count and `/dev/input`/`fb`/`dsp` identical to the previous boot, warning lines identical); touch, USB and audio under it are not yet checked by hand. **The generated card has not been booted.** Image: `C:\work\rw-scratch-card\arca-card-20261012.img`, md5 7d3709e7…. The next step is the operator writing a generated image to `.115`'s 4 GB card with the Windows card reader and booting it; **done when** that boot has an empty register-dump diff (`uboot/tools/dump-boot-regs.sh`) and the first screen is up. [unverified] From the DTS work: `cd-gpios` of `&mmc1` is gpio_127 (`&gpio4 31`, the vendor's value, kept) while the pad muxed as GPIO is `sdmmc1_dat4` = gpio_126; whether the card-detect switch is read at all has not been checked.
+State 2026-10-12: a shared top bar, `native_apps/common/top_bar.c` (commit 624f798), is used by the launcher and every Control Panel page: five sections (back, message tap target, centred title, CPU + clock, exit X). It starts at `SCREEN_VISIBLE_TOP`; its bottom is `max(VISIBLE_TOP+44, SAFE_TOP+40)` (`top_bar_bottom()`), so the targets keep 40 px touchable at any inset. The launcher title is "Arca Launcher" (the big ROOMWIZARD / CONTROL PANEL headings are gone); the exit X moved from `icon_grid` into the bar; NOT CALIBRATED is the message (`common/status_line.c`) and opens `control_panel input`. Host test `native_apps/tests/top_bar_test.c`. **Deployed to `.188`** (`native_apps`, 14/14 md5 verified). **Measured by framebuffer capture:** the launcher bar shows "Arca Launcher", CPU + clock and the X, with layout receipt `grid_top 76 … fits` (safe 790x423 at (5,16)); with the calibration file renamed (restored after) NOT CALIBRATED shows in orange at the left; the Control Panel home bar shows "Control Panel" + CPU/clock + X; the Audio page bar shows back + "Audio" + CPU/clock. **Seen at capture, not yet fixed:** the back button is a white outline while the X is a filled red button; the page content's first section header ("AUDIO") sits almost flush under the bar. **Operator-verified at the panel 2026-10-12:** on `.188` the X closes and `<` goes back in the Control Panel; on `.115` touch calibration started from the NOT CALIBRATED status worked. **Still untested (needs a finger):** the message tap as such, the pad route to the Input page, the 1/s tick by eye, portrait, and the message clearing after calibration.
 
 ### F145. Update a unit from a bundle — open, operator request 2026-10-10, not designed
 
@@ -295,29 +298,13 @@ Two package kinds: a ready-to-use generic card image (`.img`) and a bundle updat
 update normally avoids reflashing, so the unit keeps its host keys. **Done when** a unit updates from a bundle with only the changed
 components installed, from a configured upstream.
 
-### F141. A log viewer page in the Control Panel — open, operator request 2026-10-09, future
+### F146. A 12-hour AM/PM clock format — open, operator request 2026-10-12
 
-**Read-only, beside the Monitor page** (`native_apps/control_panel/monitor_page.c` is the shape to copy). One tab each for
-`/home/root/log/messages` (syslog, p3), `/var/log/roomwizard/respawn.log` (which app exited, and how) and the kernel ring buffer;
-opens at the newest line, scrolls by pad, touch drag or keyboard, and has an "errors only" filter that makes a boot-console error
-visible at the panel. No export, no delete — longer reading stays with SSH or `commissioning/backup.sh`. Needs no login, no keyboard
-and no new dependency, so it works with only the Bluetooth pad. **Done when** each tab shows its log on `.188` and the filter hides
-non-error lines.
+An option for the clocks that print the time (`native_apps/common/top_bar.c:251`, `control_panel/system_page.c`, `control_panel/control_panel.c:586`). It goes in the settings app (the Control Panel), as a persisted setting. **Done when** the choice is made on a Control Panel page and every one of those clocks follows it.
 
-State 2026-10-11: built (`log_page.c`, `log_filter.c`); scrolling is a button strip on the focus ring (pages get taps only, not
-pad events), plus touch drag. **Measured on `.188`** (`control_panel log` over SSH): SYSLOG opens at the newest line, 30 rows ×
-117 chars. **Untested (needs the panel):** RESPAWN and KERNEL tabs, ERRORS ONLY, the strip by touch, hold-repeat, and by pad.
+### F147. Immersive games with no on-screen menu or close button — open, operator wish 2026-10-12, not designed
 
-### F142. A terminal app — open, operator request 2026-10-09, future
-
-The unit is a desk gaming device, not a meeting-room panel (operator, 2026-10-09), so a terminal is an ordinary feature. **It runs
-`/bin/login` in a pty, not a shell**: access is exactly what accounts grant, so with root's password locked nobody gets in, and the
-app carries no security logic of its own — that is F137's responsibility (the user accounts). Its own launcher tile (`.app` manifest), also
-started from the Control Panel; leaving the shell returns to the launcher. **State 2026-10-11:** `native_apps/terminal/` is built
-(libvterm static, `build-libvterm.sh`) and **deployed to `.188` with its own launcher tile** (`terminal.app`); started over SSH it shows `arca-8ce1 login:` on `/dev/pts/0` at 133x43 with the toolbar (measured; `/dev/pts` present). The Control Panel launch is not done; the `xterm` terminfo on our root is inferred, not measured. **Untested:** keyboard, toolbar, pad, exit paths, login. Panel check: tile → `login:`; USB/BT keyboard (Shift, Backspace, Ctrl-C);
-toolbar KBD, CTRL, ESC, TAB, arrows, FONT (`stty size` follows); pad D-pad, A Enter, B Esc, X Tab, Start keyboard, Select tap
-^C, Select held 1 s leaves; EXIT, `exit` and Ctrl-D return to the launcher. Logging in needs F137's accounts. **Done when** a
-login, `vi` and `top` work from the tile on `.188`.
+The operator wants games that show no menu or close button at all. Open design question: how a touch-only player pauses and exits (pad and keyboard keep their keys). **Done when** the question is answered with the operator and one game follows the answer.
 
 ### F106. Support BeagleBone Black boards — open, operator idea 2026-10-01, future
 
@@ -371,7 +358,7 @@ distro. Outside IT the word is crowded (NYSE Arca and others), which is why the 
 package-name checks (AUR, Debian, PyPI, npm, Docker Hub) once the `arca-*` identifiers are picked.
 
 Scope: the device paths (`/opt/roomwizard/`, `/var/log/roomwizard/`, the `roomwizard-app` init script) need a
-migration step for units already deployed. The identifiers in code (`lib/rw-*.sh`, `RW_*`, `rw_*` tests, F144's board
+migration step for units already deployed. The identifiers in code (`lib/rw-*.sh`, `RW_*`, `rw_*` tests, the U-Boot board
 name), the scripts (`roomwizard.sh`), the docs and `LICENSE.md` follow separately. **Done when** the trademark search is
 recorded, `grep -ri roomwizard` outside that README line and `LICENSE.md`'s provenance rows finds nothing, and a migrated
 unit boots under the new paths.
@@ -423,7 +410,7 @@ and it must fire in a file of the same kind, or the scan goes blind where it use
 `LICENSE.md` (*Gaps*) states the holes. No `legal-info` tarball or source offer ships with a card image or rootfs tarball.
 The kernel's base `.config` (`usb_host/device_config`, the unit's `/proc/config.gz`) is gitignored, so the build scripts are incomplete
 for anyone without it. `make legal-info` aborts on the custom 4.14 `linux-headers` (no hash entry), so it has never run to completion.
-p1 holds only our own `MLO`, `u-boot.img` and kernel, which need the same written offer. **Done when** a published card image comes with its source offer met.
+p1 holds only our own `MLO`, `u-boot.img` and kernel, which need the same written offer. **Operator ruling 2026-10-12: the offer is required** for the published image, and the operator assumed the source is in the repo. **Measured:** it is not: the repo holds only our patches, configs and scripts, so the corresponding source of upstream U-Boot v2026.10, of the 4.14.52 kernel and of every GPL package in the Buildroot root filesystem (BusyBox and the rest) must be supplied as well; Buildroot's `make legal-info` is the usual tool. **Done when** a published card image comes with its source offer met.
 
 ---
 
