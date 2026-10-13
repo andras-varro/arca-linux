@@ -22,6 +22,7 @@
 #include <stdint.h>
 
 #define ICON_GRID_ICON_SIZE 96      /* icons are drawn at exactly this size */
+#define ICON_GRID_RING_RADIUS 12    /* a tile's corner radius, and its focus ring's */
 
 typedef struct {
     int cols, rows, per_page;
@@ -55,6 +56,9 @@ void icon_grid_draw_selection(Framebuffer *fb, const IconGrid *g, int tx, int ty
 /* The same ring around any rect — the one selection look, for keyboard focus
  * on widgets that are not tiles (control_panel's pages). */
 void icon_grid_draw_ring(Framebuffer *fb, int x, int y, int w, int h);
+/* The same ring with the target's own corner radius (capped at half its
+ * height), so a square-cornered button gets a square-cornered ring. */
+void icon_grid_draw_ring_r(Framebuffer *fb, int x, int y, int w, int h, int radius);
 
 /* Page dots (nothing when there is one page) and the edge chevrons. */
 void icon_grid_draw_paging(Framebuffer *fb, const IconGrid *g, int page, int pages);
@@ -77,10 +81,17 @@ int  icon_grid_nav(const IconGrid *g, int count, int cur, UiDir d);
 /* As icon_grid_nav, plus the exit X (top_bar.h) as a stop above the
  * grid: Up from the top row of `page` goes to ICON_GRID_NAV_EXIT and records
  * the tile in *from; Down from the X returns to *from when it is on `page`,
- * else to the page's first tile; any other key on the X stays there. */
+ * else to the page's first tile; any other key on the X stays there.
+ *
+ * has_msg: the bar's message (top_bar.h) is showing, and is a second stop in
+ * the bar's row, LEFT of the X: Left or Up from the X goes to
+ * ICON_GRID_NAV_MSG; on it Right or Down return to the X and Left/Up stay.
+ * It is a parameter, not a field, so a caller cannot leave it stale; with it
+ * false everything is as before, and a selection still on the MSG falls to the X. */
 #define ICON_GRID_NAV_EXIT (-2)
+#define ICON_GRID_NAV_MSG  (-3)
 int  icon_grid_nav_exit(const IconGrid *g, int count, int page, int cur,
-                        int *from, UiDir d);
+                        int *from, UiDir d, bool has_msg);
 
 /* ── The home-grid focus model ───────────────────────────────────────────────
  * The keyboard/pad selection on a paged grid, ONE model for the launcher and
@@ -96,7 +107,7 @@ int  icon_grid_nav_exit(const IconGrid *g, int count, int page, int cur,
  *   - one direction per frame — pick it with icon_grid_focus_dir().
  * Returning to home after a tile was used: icon_grid_focus_land(). */
 typedef struct {
-    int  sel;        /* absolute item index, ICON_GRID_NAV_EXIT, or -1 = none yet */
+    int  sel;        /* absolute item index, ICON_GRID_NAV_EXIT/_MSG, or -1 = none yet */
     bool shown;      /* the ring is drawn */
     int  exit_from;  /* the tile Up left for the X (icon_grid_nav_exit) */
 } IconGridFocus;
@@ -110,12 +121,14 @@ int  icon_grid_focus_dir(bool up, bool down, bool left, bool right);
 /* One frame.  *page is the page shown (already flipped by this frame's touch,
  * if any) and is moved when the selection leaves it or the list shrank under
  * it.  touch_press is a REAL finger's press edge — never a synthetic tap.
- * dir is icon_grid_focus_dir()'s.  Returns what Enter activates — an absolute
- * index or ICON_GRID_NAV_EXIT — and -1 for nothing; Enter acts only on a ring
- * that was already showing at the start of the frame. */
+ * dir is icon_grid_focus_dir()'s.  has_msg: the bar's message is showing this
+ * frame (see icon_grid_nav_exit); a selection on a message that has gone falls
+ * back to the X, ring state kept.  Returns what Enter activates — an absolute
+ * index, ICON_GRID_NAV_EXIT or ICON_GRID_NAV_MSG — and -1 for nothing; Enter
+ * acts only on a ring that was already showing at the start of the frame. */
 int  icon_grid_focus_frame(const IconGrid *g, int count, int *page,
                            IconGridFocus *f, bool touch_press, int dir,
-                           bool enter);
+                           bool enter, bool has_msg);
 
 /* Item idx was used (tapped or Entered): select it and show its page.  The
  * ring keeps its state — hidden after a tap, shown after Enter — so coming

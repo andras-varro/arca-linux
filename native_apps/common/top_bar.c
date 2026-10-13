@@ -1,6 +1,7 @@
 /* top_bar.c — see top_bar.h. */
 #include "top_bar.h"
 #include "status_line.h"
+#include "icon_grid.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -261,4 +262,11 @@ bool top_bar_info_sample(TopBar *t) {
     memcpy(t->right_buf, right, sizeof(right));
     t->right = t->right_buf;
     return changed;
+}
+
+void top_bar_draw_focus(Framebuffer *fb, const TopBarLayout *L, TbHit which) {
+    if (which == TB_NONE) return;
+    UiRect r = top_bar_ring_rect(L, which);
+    if (r.w <= 0) return;
+    icon_grid_draw_ring_r(fb, r.x, r.y, r.w, r.h, TOP_BAR_RING_RADIUS);
 }

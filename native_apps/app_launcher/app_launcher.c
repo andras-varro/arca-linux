@@ -142,7 +142,6 @@ typedef struct {
     TopBar      bar;
     StatusCtx   status_ctx;
     const StatusMsg *msg;           /* the message shown, NULL = none */
-    bool        msg_focus;          /* the keyboard ring is on the message */
 } Launcher;
 
 /* Prints the layout receipts ("launcher: safe …", "launcher: bar …") — see
@@ -166,7 +165,6 @@ static bool status_refresh(Launcher *l, uint32_t now_ms) {
 
     l->status_ctx.calibrated = (access("/etc/touch_calibration.conf", F_OK) == 0);
     const StatusMsg *msg = status_msg_pick(&l->status_ctx);
-    if (!msg) l->msg_focus = false;
 
     changed = changed || msg != l->msg;
     l->msg = msg;
@@ -323,10 +321,6 @@ static void draw_launcher(Launcher *l) {
      * their targets, so the top edge of the screen does not clip them. */
     l->bar.title = TITLE_TEXT;
     top_bar_draw(&l->fb, &l->bar);
-    if (l->msg_focus && l->msg) {
-        UiRect r = top_bar_ring_rect(&l->bar.L, TB_MSG);
-        icon_grid_draw_ring(&l->fb, r.x, r.y, r.w, r.h);
-    }
 
     /* Tiles for current page */
     int start = l->current_page * grid.per_page;
@@ -354,9 +348,10 @@ static void draw_launcher(Launcher *l) {
     /* Page arrows and dots */
     icon_grid_draw_paging(&l->fb, &grid, l->current_page, l->total_pages);
 
-    if (l->focus.shown && l->focus.sel == ICON_GRID_NAV_EXIT && !l->msg_focus) {   /* focus on the X */
-        UiRect r = top_bar_ring_rect(&l->bar.L, TB_EXIT);
-        icon_grid_draw_ring(&l->fb, r.x, r.y, r.w, r.h);
+    /* Focus on the bar: the message or the X; the bar draws its own ring. */
+    if (l->focus.shown) {
+        if (l->focus.sel == ICON_GRID_NAV_MSG)       top_bar_draw_focus(&l->fb, &l->bar.L, TB_MSG);
+        else if (l->focus.sel == ICON_GRID_NAV_EXIT) top_bar_draw_focus(&l->fb, &l->bar.L, TB_EXIT);
     }
 
     /* The dialog highlights its focused button itself, always. */
@@ -440,29 +435,12 @@ static int handle_gamepad_input(Launcher *l, bool touch_press) {
                                   b[BTN_ID_LEFT].pressed, b[BTN_ID_RIGHT].pressed);
     bool enter = b[BTN_ID_JUMP].pressed || b[BTN_ID_ACTION].pressed;
 
-    /* The bar's message is one stop above the exit X: Up from the X reaches
-     * it, Enter opens its page, Down returns to the X, other arrows stay.  It
-     * is outside icon_grid_focus_frame()'s model on purpose (that is shared with
-     * the Control Panel home, which has no message); a touch drops the ring as it
-     * does there. */
-    if (l->msg_focus && l->msg && !touch_press) {
-        if (enter) return TOUCH_MESSAGE;
-        if (dir == (int)UI_DIR_DOWN) {
-            l->msg_focus = false;
-            l->focus.sel = ICON_GRID_NAV_EXIT;
-            l->focus.shown = true;
-        }
-        return -1;
-    }
-    l->msg_focus = false;
-    if (l->msg && !touch_press && dir == (int)UI_DIR_UP &&
-        l->focus.shown && l->focus.sel == ICON_GRID_NAV_EXIT) {
-        l->msg_focus = true;
-        return -1;
-    }
-
+    /* The bar's message is a stop in the focus model beside the X (left of it);
+     * whether it is showing is passed in each frame. */
     int act = icon_grid_focus_frame(&grid, l->app_count, &l->current_page,
-                                    &l->focus, touch_press, dir, enter);
+                                    &l->focus, touch_press, dir, enter,
+                                    l->msg != NULL);
+    if (act == ICON_GRID_NAV_MSG) return TOUCH_MESSAGE;   /* as a tap on it */
     if (act == ICON_GRID_NAV_EXIT) {             /* the X: as a tap on it */
         open_power_dialog();
         return -1;
@@ -811,7 +789,6 @@ int main(int argc, char *argv[]) {
         int old_count    = launcher.app_count;
         bool old_dialog  = modal_dialog_is_active(&power_dialog);
         int  old_focus   = power_dialog.focus;
-        bool old_msg_focus = launcher.msg_focus;
 
         /* Poll touch (non-blocking) */
         touch_poll(&launcher.touch);
@@ -902,7 +879,6 @@ int main(int argc, char *argv[]) {
         /* Detect any visual state changes from input handling */
         if (modal_dialog_is_active(&power_dialog) != old_dialog ||
             power_dialog.focus != old_focus ||
-            launcher.msg_focus != old_msg_focus ||
             launcher.focus.sel   != old_sel.sel   ||
             launcher.focus.shown != old_sel.shown ||
             launcher.current_page != old_page     ||

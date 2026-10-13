@@ -16,7 +16,8 @@
  * key revealing without moving.  Group 2 is the page invariant: whatever
  * flipped the page, the selection is re-anchored onto it, so Enter can never
  * act on a tile that is not shown.  Group 3 is Enter, group 4 the return to
- * home, group 5 the one-direction-per-frame pick, group 6 the dialog focus.
+ * home, group 5 the one-direction-per-frame pick, group 6 the bar's message
+ * as a stop beside the exit X, group 7 the dialog focus.
  *
  * ⚠️ What it cannot see: whether each app feeds these functions the REAL
  * press (not the synthetic tap) and the page its touch handler just flipped,
@@ -53,81 +54,81 @@ int main(void) {
     expect("init: nothing selected", f.sel, -1);
     expect("init: ring hidden", f.shown, 0);
     page = 0;
-    act = icon_grid_focus_frame(&g, 9, &page, &f, false, NONE, false);
+    act = icon_grid_focus_frame(&g, 9, &page, &f, false, NONE, false, false);
     expect("a quiet frame activates nothing", act, -1);
     expect("  and shows nothing", f.shown, 0);
-    act = icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false);
+    act = icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false, false);
     expect("first key reveals the ring", f.shown, 1);
     expect("  on the shown page's first tile, not moved", f.sel, 0);
-    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false);
+    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false, false);
     expect("second key moves: 0 -> 1", f.sel, 1);
-    icon_grid_focus_frame(&g, 9, &page, &f, true, NONE, false);
+    icon_grid_focus_frame(&g, 9, &page, &f, true, NONE, false, false);
     expect("a real press hides the ring", f.shown, 0);
     expect("  and keeps the selection", f.sel, 1);
-    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_DOWN, false);
+    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_DOWN, false, false);
     expect("next key reveals again", f.shown, 1);
     expect("  without moving", f.sel, 1);
     icon_grid_focus_init(&f);
     page = 1;
-    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_LEFT, false);
+    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_LEFT, false, false);
     expect("first key on page 2 lands on its first tile", f.sel, 6);
 
     printf("group 2  the selection follows the shown page\n");
     icon_grid_focus_init(&f);
     page = 0;
-    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false);
-    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false);
+    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false, false);
+    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false, false);
     expect("set-up: tile 1 selected", f.sel, 1);
     page = 1;                                  /* the touch handler flipped it */
-    icon_grid_focus_frame(&g, 9, &page, &f, true, NONE, false);
+    icon_grid_focus_frame(&g, 9, &page, &f, true, NONE, false, false);
     expect("flip re-anchors onto page 2, same slot", f.sel, 7);
     expect("  the page stays where touch put it", page, 1);
     icon_grid_focus_init(&f);
     page = 0;
-    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false);
+    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false, false);
     for (int i = 0; i < 5; i++)
-        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false);
+        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false, false);
     expect("set-up: tile 5 selected", f.sel, 5);
     page = 1;
-    act = icon_grid_focus_frame(&g, 9, &page, &f, false, NONE, true);
+    act = icon_grid_focus_frame(&g, 9, &page, &f, false, NONE, true, false);
     expect("flip clamps slot 5 to page 2's last tile", f.sel, 8);
     expect("  and Enter acts on THAT, the shown tile", act, 8);
-    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false);
+    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false, false);
     expect("Right off the last tile wraps to 0", f.sel, 0);
     expect("  and the page follows the selection", page, 0);
-    icon_grid_focus_frame(&g, 7, &page, &f, false, UI_DIR_LEFT, false);
+    icon_grid_focus_frame(&g, 7, &page, &f, false, UI_DIR_LEFT, false, false);
     expect("Left from 0 wraps to the last of 7", f.sel, 6);
     expect("  page follows", page, 1);
-    icon_grid_focus_frame(&g, 4, &page, &f, false, NONE, false);
+    icon_grid_focus_frame(&g, 4, &page, &f, false, NONE, false, false);
     expect("list shrank under the page: page clamps to the last", page, 0);
     expect("  and the selection to the last item", f.sel, 3);
 
     printf("group 3  Enter\n");
     icon_grid_focus_init(&f);
     page = 0;
-    act = icon_grid_focus_frame(&g, 9, &page, &f, false, NONE, true);
+    act = icon_grid_focus_frame(&g, 9, &page, &f, false, NONE, true, false);
     expect("Enter with the ring hidden activates nothing", act, -1);
     expect("  but reveals it", f.shown, 1);
     expect("  on the first tile", f.sel, 0);
-    act = icon_grid_focus_frame(&g, 9, &page, &f, false, NONE, true);
+    act = icon_grid_focus_frame(&g, 9, &page, &f, false, NONE, true, false);
     expect("Enter with the ring shown activates its tile", act, 0);
-    icon_grid_focus_frame(&g, 9, &page, &f, true, NONE, false);
-    act = icon_grid_focus_frame(&g, 9, &page, &f, false, NONE, true);
+    icon_grid_focus_frame(&g, 9, &page, &f, true, NONE, false, false);
+    act = icon_grid_focus_frame(&g, 9, &page, &f, false, NONE, true, false);
     expect("Enter after a touch hid the ring activates nothing", act, -1);
     icon_grid_focus_init(&f);
-    act = icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_UP, true);
+    act = icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_UP, true, false);
     expect("key + Enter in the revealing frame activates nothing", act, -1);
-    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_UP, false);
+    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_UP, false, false);
     expect("Up from the top row reaches the X", f.sel, ICON_GRID_NAV_EXIT);
-    act = icon_grid_focus_frame(&g, 9, &page, &f, false, NONE, true);
+    act = icon_grid_focus_frame(&g, 9, &page, &f, false, NONE, true, false);
     expect("Enter on the X reports the X", act, ICON_GRID_NAV_EXIT);
-    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_DOWN, false);
+    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_DOWN, false, false);
     expect("Down from the X returns to the tile", f.sel, 0);
     icon_grid_focus_init(&f);
     page = 0;
-    icon_grid_focus_frame(&g, 0, &page, &f, false, UI_DIR_DOWN, false);
+    icon_grid_focus_frame(&g, 0, &page, &f, false, UI_DIR_DOWN, false, false);
     expect("no items: the first key lands on the X", f.sel, ICON_GRID_NAV_EXIT);
-    icon_grid_focus_frame(&g, 0, &page, &f, false, UI_DIR_DOWN, false);
+    icon_grid_focus_frame(&g, 0, &page, &f, false, UI_DIR_DOWN, false, false);
     expect("  and Down cannot leave it for a tile that is not there",
            f.sel, ICON_GRID_NAV_EXIT);
 
@@ -138,7 +139,7 @@ int main(void) {
     expect("land: selection is the used tile", f.sel, 7);
     expect("  its page is shown", page, 1);
     expect("  a tap leaves the ring hidden", f.shown, 0);
-    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false);
+    icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false, false);
     expect("first key reveals ON the used tile", f.sel, 7);
     icon_grid_focus_land(&g, &f, &page, 2);    /* opened by Enter */
     expect("land after Enter: ring still shown", f.shown, 1);
@@ -152,7 +153,49 @@ int main(void) {
     expect("R -> Right",       icon_grid_focus_dir(false, false, false, true), UI_DIR_RIGHT);
     expect("none -> -1",       icon_grid_focus_dir(false, false, false, false), -1);
 
-    printf("group 6  ModalDialog button focus\n");
+    printf("group 6  the bar's message is a stop beside the X\n");
+    {
+        icon_grid_focus_init(&f);
+        page = 0;
+        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false, true);  /* reveal */
+        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_UP, false, true);
+        expect("Up from the top row reaches the X (message present)", f.sel, ICON_GRID_NAV_EXIT);
+        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_LEFT, false, true);
+        expect("Left from the X reaches the message", f.sel, ICON_GRID_NAV_MSG);
+        act = icon_grid_focus_frame(&g, 9, &page, &f, false, NONE, true, true);
+        expect("Enter on the message reports it", act, ICON_GRID_NAV_MSG);
+        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_LEFT, false, true);
+        expect("Left on the message stays", f.sel, ICON_GRID_NAV_MSG);
+        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_UP, false, true);
+        expect("Up on the message stays", f.sel, ICON_GRID_NAV_MSG);
+        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false, true);
+        expect("Right on the message returns to the X", f.sel, ICON_GRID_NAV_EXIT);
+        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_UP, false, true);
+        expect("Up from the X reaches the message too", f.sel, ICON_GRID_NAV_MSG);
+        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_DOWN, false, true);
+        expect("Down on the message returns to the X", f.sel, ICON_GRID_NAV_EXIT);
+        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_DOWN, false, true);
+        expect("  and Down from the X returns to the tile", f.sel, 0);
+
+        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_UP, false, true);
+        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_LEFT, false, true);
+        expect("(back on the message)", f.sel, ICON_GRID_NAV_MSG);
+        act = icon_grid_focus_frame(&g, 9, &page, &f, false, NONE, false, false);
+        expect("message gone while selected: falls back to the X", f.sel, ICON_GRID_NAV_EXIT);
+        expect("  ring state kept", f.shown, 1);
+        expect("  and nothing activated", act, -1);
+
+        icon_grid_focus_init(&f);
+        page = 0;
+        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_RIGHT, false, false);
+        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_UP, false, false);
+        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_LEFT, false, false);
+        expect("no message: Left on the X stays", f.sel, ICON_GRID_NAV_EXIT);
+        icon_grid_focus_frame(&g, 9, &page, &f, false, UI_DIR_UP, false, false);
+        expect("no message: Up on the X stays", f.sel, ICON_GRID_NAV_EXIT);
+    }
+
+    printf("group 7  ModalDialog button focus\n");
     {
         ModalDialog d;
         modal_dialog_init(&d, "T", NULL, 3);

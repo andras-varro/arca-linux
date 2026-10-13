@@ -424,6 +424,7 @@ GamepadManager *cp_gamepad(void) { return &g_pad; }
 static bool           focus_shown;       /* the ring is up */
 static int            focus_idx = -1;    /* into this frame's focusables */
 static UiRect         focus_rect;        /* where it was: re-pick, and the ring */
+static TbHit          focus_bar;         /* the bar target focus_idx is (TB_NONE: not one) */
 static const void    *focus_ctx;         /* the view focus_idx belongs to */
 static int            focus_n;           /* how many focusables it had */
 static int            focus_page_base;   /* index of a page's first focusable
@@ -486,7 +487,7 @@ static void focus_update(AppState *state, int dir, bool activate,
         home_focus.shown = focus_shown;
         int act = icon_grid_focus_frame(&home_grid, HOME_PAGE_COUNT,
                                         &state->home_page, &home_focus,
-                                        real_press, dir, activate);
+                                        real_press, dir, activate, false);
         focus_shown = home_focus.shown;
         n = focus_collect(state, r, &ctx, &n_tiles);   /* the page may move */
         int sel = home_focus.sel;
@@ -535,10 +536,16 @@ static void focus_update(AppState *state, int dir, bool activate,
     focus_n = n;
     if (focus_idx >= 0 && focus_idx < n) {
         focus_rect = r[focus_idx];
+        /* Which of the bar's targets it is, for the ring: home's X is the
+         * last rect, a page's BACK the first. */
+        focus_bar = (ctx == &home_grid && focus_idx == n_tiles) ? TB_EXIT
+                  : (state->page && ctx == state->page && focus_idx == 0) ? TB_BACK
+                  : TB_NONE;
         if (fire)
             ui_tap_begin(&focus_tap, &focus_rect);
     } else {
         focus_idx = -1;
+        focus_bar = TB_NONE;
     }
 }
 
@@ -982,11 +989,16 @@ int main(int argc, char *argv[]) {
                 modal_dialog_draw(&confirm_dialog, &fb);
             }
             /* The focus ring, last: focus_rect is the page's or home's.  Not
-             * over the dialog, which highlights its focused button itself. */
+             * over the dialog, which highlights its focused button itself.
+             * The bar's < and X draw their own ring; the rest take the tile ring. */
             if (focus_shown && focus_idx >= 0 &&
-                state.confirm_action == CONFIRM_NONE)
-                icon_grid_draw_ring(&fb, focus_rect.x, focus_rect.y,
-                                    focus_rect.w, focus_rect.h);
+                state.confirm_action == CONFIRM_NONE) {
+                if (focus_bar != TB_NONE)
+                    top_bar_draw_focus(&fb, &bar.L, focus_bar);
+                else
+                    icon_grid_draw_ring(&fb, focus_rect.x, focus_rect.y,
+                                        focus_rect.w, focus_rect.h);
+            }
 
             fb_swap(&fb);
             needs_redraw = false;

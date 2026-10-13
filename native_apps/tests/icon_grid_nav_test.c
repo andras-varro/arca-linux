@@ -95,30 +95,58 @@ int main(void) {
         IconGrid g = grid_of(3, 2);
         int from = -1;
         expect("Up from page 1 top row -> X",
-               icon_grid_nav_exit(&g, 9, 0, 1, &from, UI_DIR_UP), ICON_GRID_NAV_EXIT);
+               icon_grid_nav_exit(&g, 9, 0, 1, &from, UI_DIR_UP, false), ICON_GRID_NAV_EXIT);
         expect("  and remembers the tile", from, 1);
         expect("Down from the X -> that tile",
-               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_EXIT, &from, UI_DIR_DOWN), 1);
+               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_EXIT, &from, UI_DIR_DOWN, false), 1);
         expect("Left on the X stays",
-               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_EXIT, &from, UI_DIR_LEFT), ICON_GRID_NAV_EXIT);
+               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_EXIT, &from, UI_DIR_LEFT, false), ICON_GRID_NAV_EXIT);
         expect("Right on the X stays",
-               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_EXIT, &from, UI_DIR_RIGHT), ICON_GRID_NAV_EXIT);
+               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_EXIT, &from, UI_DIR_RIGHT, false), ICON_GRID_NAV_EXIT);
         expect("Up on the X stays",
-               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_EXIT, &from, UI_DIR_UP), ICON_GRID_NAV_EXIT);
+               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_EXIT, &from, UI_DIR_UP, false), ICON_GRID_NAV_EXIT);
         expect("Up from page 2 top row (6) -> X, not page 1",
-               icon_grid_nav_exit(&g, 9, 1, 6, &from, UI_DIR_UP), ICON_GRID_NAV_EXIT);
+               icon_grid_nav_exit(&g, 9, 1, 6, &from, UI_DIR_UP, false), ICON_GRID_NAV_EXIT);
         expect("  remembers 6", from, 6);
         expect("Down from the X, page shown is 2 -> 6",
-               icon_grid_nav_exit(&g, 9, 1, ICON_GRID_NAV_EXIT, &from, UI_DIR_DOWN), 6);
+               icon_grid_nav_exit(&g, 9, 1, ICON_GRID_NAV_EXIT, &from, UI_DIR_DOWN, false), 6);
         expect("Down from the X, remembered tile on another page -> page start",
-               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_EXIT, &from, UI_DIR_DOWN), 0);
+               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_EXIT, &from, UI_DIR_DOWN, false), 0);
         from = -1;
         expect("Down from the X with nothing remembered -> page start",
-               icon_grid_nav_exit(&g, 9, 1, ICON_GRID_NAV_EXIT, &from, UI_DIR_DOWN), 6);
+               icon_grid_nav_exit(&g, 9, 1, ICON_GRID_NAV_EXIT, &from, UI_DIR_DOWN, false), 6);
         expect("Up from the bottom row is ordinary: 4 -> 1",
-               icon_grid_nav_exit(&g, 9, 0, 4, &from, UI_DIR_UP), 1);
+               icon_grid_nav_exit(&g, 9, 0, 4, &from, UI_DIR_UP, false), 1);
         expect("Right is the launcher's: 5 -> 6",
-               icon_grid_nav_exit(&g, 9, 0, 5, &from, UI_DIR_RIGHT), 6);
+               icon_grid_nav_exit(&g, 9, 0, 5, &from, UI_DIR_RIGHT, false), 6);
+    }
+
+    printf("group 4  the bar's message beside the X (launcher)\n");
+    {
+        IconGrid g = grid_of(3, 2);
+        int from = -1;
+        expect("Left from the X -> message",
+               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_EXIT, &from, UI_DIR_LEFT, true), ICON_GRID_NAV_MSG);
+        expect("Up from the X -> message",
+               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_EXIT, &from, UI_DIR_UP, true), ICON_GRID_NAV_MSG);
+        expect("Right on the X stays (message present)",
+               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_EXIT, &from, UI_DIR_RIGHT, true), ICON_GRID_NAV_EXIT);
+        expect("Down from the X still goes to the tile",
+               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_EXIT, &from, UI_DIR_DOWN, true), 0);
+        expect("Right on the message -> X",
+               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_MSG, &from, UI_DIR_RIGHT, true), ICON_GRID_NAV_EXIT);
+        expect("Down on the message -> X",
+               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_MSG, &from, UI_DIR_DOWN, true), ICON_GRID_NAV_EXIT);
+        expect("Left on the message stays",
+               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_MSG, &from, UI_DIR_LEFT, true), ICON_GRID_NAV_MSG);
+        expect("Up on the message stays",
+               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_MSG, &from, UI_DIR_UP, true), ICON_GRID_NAV_MSG);
+        expect("Left on the X with no message stays",
+               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_EXIT, &from, UI_DIR_LEFT, false), ICON_GRID_NAV_EXIT);
+        expect("Up on the X with no message stays",
+               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_EXIT, &from, UI_DIR_UP, false), ICON_GRID_NAV_EXIT);
+        expect("a stale message selection with none showing acts as the X: Down -> tile",
+               icon_grid_nav_exit(&g, 9, 0, ICON_GRID_NAV_MSG, &from, UI_DIR_DOWN, false), 0);
     }
 
     printf("\n%s (%d failure%s)\n", fails ? "REGRESSION" : "ALL PASS",

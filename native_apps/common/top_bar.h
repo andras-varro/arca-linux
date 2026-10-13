@@ -39,6 +39,7 @@
 #define TOP_BAR_BTN_W        55     /* back and exit X: the width they always had */
 #define TOP_BAR_PAD          8      /* inside a text target, and between sections */
 #define TOP_BAR_RING_INSET   3      /* focus ring sits inside the target, clear of the screen edge */
+#define TOP_BAR_RING_RADIUS  4      /* the bar's targets are near-square-cornered; the tile radius makes an oval */
 /* back and exit X are DRAWN this far inside their (full-bar-height, bezel-reaching)
  * hit target on every side, so they sit in the bar with a margin instead of
  * filling it edge to edge.  The hit target and the Button's geometry are unchanged;
@@ -112,11 +113,16 @@ void top_bar_layout(TopBar *t);
 typedef enum { TB_NONE = 0, TB_BACK, TB_MSG, TB_EXIT } TbHit;
 TbHit top_bar_hit(const TopBarLayout *L, int x, int y);
 
-/* Paint the bar (lays out first).  The focus ring is the caller's. */
+/* Paint the bar (lays out first).  The focus ring is top_bar_draw_focus(). */
 void top_bar_draw(Framebuffer *fb, TopBar *t);
 
 /* The ring rect for a target, inset so the ring stays inside the screen. */
 UiRect top_bar_ring_rect(const TopBarLayout *L, TbHit which);
+
+/* The keyboard-focus ring on one target (TB_BACK, TB_MSG or TB_EXIT) in the
+ * bar's own corner radius; nothing for TB_NONE or a target the bar lacks.
+ * The one drawer: callers pick the target, never the look. */
+void top_bar_draw_focus(Framebuffer *fb, const TopBarLayout *L, TbHit which);
 
 /* The rectangle a back/exit button is drawn in: its hit target inset by
  * TOP_BAR_BTN_INSET on every side (pure; `which` is TB_BACK or TB_EXIT, else

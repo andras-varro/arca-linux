@@ -14,7 +14,7 @@
 #define DOTS_H          30
 #define MAX_TILE_W      200
 #define MAX_TILE_H      150
-#define TILE_RADIUS     12
+#define TILE_RADIUS     ICON_GRID_RING_RADIUS
 #define PAGE_EDGE_BAND  50
 
 #define TILE_BG         RGB(45, 45, 60)
@@ -128,8 +128,11 @@ void icon_grid_draw_tile(Framebuffer *fb, const IconGrid *g, int tx, int ty,
 }
 
 void icon_grid_draw_ring(Framebuffer *fb, int x, int y, int w, int h) {
+    icon_grid_draw_ring_r(fb, x, y, w, h, TILE_RADIUS);
+}
+
+void icon_grid_draw_ring_r(Framebuffer *fb, int x, int y, int w, int h, int radius) {
     int bw = 3;
-    int radius = TILE_RADIUS;
     if (radius > (h >> 1)) radius = h >> 1;     /* a short widget: no corner overlap */
     for (int b = 0; b < bw; b++)
         fb_draw_rounded_rect(fb, x - bw + b, y - bw + b,
@@ -209,9 +212,13 @@ int icon_grid_nav(const IconGrid *g, int count, int cur, UiDir d) {
 }
 
 int icon_grid_nav_exit(const IconGrid *g, int count, int page, int cur,
-                       int *from, UiDir d) {
+                       int *from, UiDir d, bool has_msg) {
     int base = page * g->per_page;
+    if (cur == ICON_GRID_NAV_MSG && !has_msg) cur = ICON_GRID_NAV_EXIT;
+    if (cur == ICON_GRID_NAV_MSG)
+        return (d == UI_DIR_RIGHT || d == UI_DIR_DOWN) ? ICON_GRID_NAV_EXIT : cur;
     if (cur == ICON_GRID_NAV_EXIT) {
+        if (has_msg && (d == UI_DIR_LEFT || d == UI_DIR_UP)) return ICON_GRID_NAV_MSG;
         if (d != UI_DIR_DOWN) return cur;
         int t = *from;
         return (t >= base && t < base + g->per_page && t < count) ? t : base;
@@ -247,12 +254,15 @@ static int focus_anchor(const IconGrid *g, int count, int page, int slot) {
 
 int icon_grid_focus_frame(const IconGrid *g, int count, int *page,
                           IconGridFocus *f, bool touch_press, int dir,
-                          bool enter) {
+                          bool enter, bool has_msg) {
     int pages = icon_grid_pages(g, count);
     if (*page >= pages) *page = pages - 1;
     if (*page < 0) *page = 0;
 
     if (touch_press) f->shown = false;
+
+    /* The message went while selected: the X, ring state kept. */
+    if (f->sel == ICON_GRID_NAV_MSG && !has_msg) f->sel = ICON_GRID_NAV_EXIT;
 
     /* The page invariant: a list that shrank, then a page flipped under the
      * selection. */
@@ -268,7 +278,7 @@ int icon_grid_focus_frame(const IconGrid *g, int count, int *page,
         } else if (dir >= 0) {
             if (f->sel == -1) f->sel = focus_anchor(g, count, *page, 0);
             int next = icon_grid_nav_exit(g, count, *page, f->sel,
-                                          &f->exit_from, (UiDir)dir);
+                                          &f->exit_from, (UiDir)dir, has_msg);
             if (next < count) {           /* Down from the X with no tiles stays */
                 f->sel = next;
                 if (next >= 0) *page = next / g->per_page;
