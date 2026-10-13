@@ -143,10 +143,6 @@ residues:
 differ in more than the device, so the link is unproven. It needs a joint session (operator confirmed 2026-10-07): the operator replugs while ch6 is read. **Done when** an operator swaps pad and dongle back and forth on the port
 (reading `in_voltage6_input` after each swap, and once with the port empty) and the table says which condition, if any, moves it.
 
-### B58. `tests/provision_online_test.sh` check "C2 the backup was attempted (lister ran)" failed once in a full run — open, intermittent, n=1
-
-Seen 2026-10-12 in one full `./tests/run-all.sh` run in WSL; run alone the same test passed 2/2 straight after. Cause unknown: an ordering or timing dependence between the fake lister and the check, or load from the neighbouring tests, are guesses, not findings. **Done when** the cause is found and the check is deterministic (it passes in a loop of full-gate runs, and fails against a fixture where the lister really does not run).
-
 ### B64. The device-tree `model` string and the U-Boot board name disagree — open, measured 2026-10-12
 
 `kernel/dts/rw20.dts:25` says `model = "Steelcase RoomWizard 20"` (the vendor DT's string; `HARDWARE.md` records it, the kernel prints it as `Machine model:`), while `uboot/rw20-board.patch:42` says `"Steelcase RoomWizard rw20"`. Operator ruling 2026-10-12: the board name stays "Steelcase RoomWizard rw20", because it names the hardware. **Measured by `Grep`:** nothing in the tree reads `/proc/device-tree/model` on the device (the one reader, `vnc_client/setup-vnc-viewer.sh`, checks for a Raspberry Pi host), so the string reaches only the boot log. **Done when** the DT string matches the ruling and `HARDWARE.md` says the vendor's own string was the old one.
@@ -155,14 +151,6 @@ Seen 2026-10-12 in one full `./tests/run-all.sh` run in WSL; run alone the same 
 
 Boot-console errors are defects here. **Measured, `.115` dmesg against `.188`'s:** the only new error lines on the generated card are the first-boot "uninitialized urandom read" ones, from seedrng, udevd, avahi-autoipd and dbus-uuidgen; `.188` has none. `/var/lib/seedrng` now holds `seed.no-credit` on `.115`. **[inferred]** The pool has no seed on a first boot, so early readers see it uninitialised; whether the next boot is quiet has not been measured. **Done when** a first boot prints none of them, or the cause shows they cannot be avoided and that is written down.
 
-### B66. sshd still generates an RSA host key on first boot — open, operator-observed 2026-10-12
-
-The operator expected ed25519 only. `rootfs/board/roomwizard/overlay/etc/init.d/sshd` generates only ed25519, `overlay/etc/ssh/sshd_config` names one `HostKey`, and `rootfs/board/roomwizard/post-build.sh:90` deletes RSA files from the tree, so something else makes the RSA key; not found (those three files were read, nothing more). `rootfs/check-rootfs.sh:150` asserts only that the *tar* has no RSA key file, so a key made at run time passes it. **Done when** a first boot leaves only ed25519 in `/home/root/data/ssh`.
-
-### B67. The launcher clock ignores a timezone change made in the Control Panel — open, operator-reproduced 2026-10-12
-
-The Control Panel and the System applet follow the new timezone; the launcher's clock stays on UTC until the launcher restarts. **[inferred]** Cause: the launcher is a long-running process whose glibc has cached `/etc/localtime`; `control_panel/system_page.c:322` calls `tzset()` in the Control Panel's own process only, and the clock is drawn by `common/top_bar.c:251` with `localtime_r`. The cause and any fix are hypotheses until the symptom is reproduced under `strace`. **Done when** the launcher clock follows a timezone change without a restart.
-
 ### B68. The syslog shows red lines at every boot — open, operator-observed 2026-10-12
 
 Seen in the Control Panel log viewer; boot-console errors are defects here. **Measured in the syslog:** `bluetoothd` `daemon.err` 18 and `warn` 11 ("error updating services: Host is down"); `omap_hwmod`: mcbsp sidetone "broken dt data"; `twl4030` madc: "supply not found"; `twl4030` bci: "battery temperature out of range"; `sr_init`: "No PMIC hook". **[inferred]** The bci line is there because the board has no battery and the DT node from the mainline `omap34xx`/`twl` includes is not disabled in `kernel/dts/rw20.dts`; the others are untraced. Lockdep's trace is its own entry (B47). **Done when** each line is removed at its cause, or recorded as unavoidable with the reason.
@@ -170,6 +158,10 @@ Seen in the Control Panel log viewer; boot-console errors are defects here. **Me
 ### B69. Does the SD slot's card-detect switch work, and is it on the pad the DT names? — open, unverified
 
 `kernel/dts/rw20.dts:550` has `cd-gpios = <&gpio4 31 GPIO_ACTIVE_LOW>` (gpio_127, the vendor's value, kept) while the pad it muxes as a GPIO (`rw20.dts:278`) is `sdmmc1_dat4` = gpio_126. **[unverified]** Whether the switch is read at all has not been checked; the card boots, so nothing observed depends on it. **Done when** a card insert and removal is observed in the kernel log, or the property is shown to be inert.
+
+### B70. Log timestamps stay on the old zone after a timezone change in a long-running app — open, inferred 2026-10-12
+
+`native_apps/common/logger.c:153` calls `localtime_r()` with no `tzset()` before it, and glibc reads the zone only on its first call; the top bar had the same pattern and was measured on `.188` to stay on the old zone until fixed. **[inferred]** No log line has been checked after a zone swap, and other long-running `localtime_r` callers have not been listed. **Done when** a line logged after a zone swap, by a process that was already running, carries the new zone, and `grep -rn localtime_r native_apps` shows no long-running caller without a `tzset()` first.
 
 ## Features
 
@@ -289,7 +281,7 @@ One line of status: messages such as "not calibrated", date/time, CPU, refreshed
 app or page that fixes it (calibration for "not calibrated"). Not designed: which apps show it, and what it costs per frame
 on the software renderer. **Done when** the launcher shows it and a tap on a message opens the right page.
 
-State 2026-10-12: a shared top bar, `native_apps/common/top_bar.c` (commit 624f798), is used by the launcher and every Control Panel page: five sections (back, message tap target, centred title, CPU + clock, exit X). It starts at `SCREEN_VISIBLE_TOP`; its bottom is `max(VISIBLE_TOP+44, SAFE_TOP+40)` (`top_bar_bottom()`), so the targets keep 40 px touchable at any inset. The launcher title is "Arca Launcher" (the big ROOMWIZARD / CONTROL PANEL headings are gone); the exit X moved from `icon_grid` into the bar; NOT CALIBRATED is the message (`common/status_line.c`) and opens `control_panel input`. Host test `native_apps/tests/top_bar_test.c`. **Deployed to `.188`** (`native_apps`, 14/14 md5 verified). **Measured by framebuffer capture:** the launcher bar shows "Arca Launcher", CPU + clock and the X, with layout receipt `grid_top 76 … fits` (safe 790x423 at (5,16)); with the calibration file renamed (restored after) NOT CALIBRATED shows in orange at the left; the Control Panel home bar shows "Control Panel" + CPU/clock + X; the Audio page bar shows back + "Audio" + CPU/clock. **Seen at capture, not yet fixed:** the back button is a white outline while the X is a filled red button; the page content's first section header ("AUDIO") sits almost flush under the bar. **Operator-verified at the panel 2026-10-12:** on `.188` the X closes and `<` goes back in the Control Panel; on `.115` touch calibration started from the NOT CALIBRATED status worked. **Still untested (needs a finger):** the message tap as such, the pad route to the Input page, the 1/s tick by eye, portrait, and the message clearing after calibration.
+State 2026-10-12: the shared top bar (`native_apps/common/top_bar.c`; shape and rules in `native_apps/CLAUDE.md`) is on the launcher and every Control Panel page and deployed to `.188`. The look is operator-verified at the panel ("looks great"), and so are the X (closes) and `<` (goes back) in the Control Panel and touch calibration started from the NOT CALIBRATED status on `.115`. **Still open:** finger checks of the message tap as such, the pad route to the Input page, the 1/s tick by eye, portrait, and the message clearing after calibration; and the games' own exit X, which the operator defers ("we work with the games later").
 
 ### F145. Update a unit from a bundle — open, operator request 2026-10-10, not designed
 

@@ -50,7 +50,7 @@ Everything that builds the **root filesystem we boot instead of the vendor's Yoc
 
 ## Per-unit state (an image carries none)
 
-**`make-card-image.sh` builds one generic image and refuses SSH key material in the rootfs tar, on p6 or from the bundle.** A unit's own
+**`make-card-image.sh` builds one generic image and refuses SSH key material in the rootfs tar, on p6 or from the bundle.** It also refuses a tar that fails `check-rootfs.sh`, before writing any image (measured: a tar older than the ed25519-only commit gives 48/1, "no ssh_host_rsa_key in the image", and is refused; the rebuilt tar gives 49/0). A unit's own
 state travels only through `commissioning/backup.sh` / `restore.sh`, whose list is `RW_STATE_BACKUP` in `lib/rw-state.sh` and nowhere
 else. The unit names itself on first boot (`S04firstboot-hostname`: `arca-<4 hex>` from the kernel's random pool, applied with
 `/usr/sbin/set-hostname`), and sshd generates its host key then; highscores, host keys (`/home/root/data/ssh`) and cron live on p2, which
