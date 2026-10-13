@@ -321,6 +321,17 @@ upgrade or new drivers still ship as an image to flash. Finishing steps, in orde
 **Done when** stock units with spare cards (the operator has six) boot the downloaded image and grow it, the README is the only
 user-facing guide, and no commissioning-only script, test or document is left.
 
+### F150. Every control draws its own keyboard-focus ring — open, operator request 2026-10-13, not designed
+
+Apply the top bar's pattern (`top_bar_draw_focus`, `native_apps/common/top_bar.c:267`; the caller picks only the target) to every
+focusable control. Today the Control Panel draws one generic ring from the selected rectangle alone
+(`control_panel/control_panel.c:994`, `icon_grid_draw_ring`), the launcher grid draws its own selection (`app_launcher.c:335`) and
+the modal dialog highlights its own button (`common/common.c:645`), so a toggle, slider or rounded button gets a ring that does not
+follow its shape. Navigation stays as it is: the pages' `*_page_focusables` rect lists, nearest-in-direction moves in
+`common/ui_focus.c` and Enter as a synthetic tap. Open design question: whether a focus stop carries a kind/shape the ring is drawn
+from, or a draw callback owned by the widget. **Done when** buttons, toggles, sliders, launcher tiles, dialog buttons and the bar draw
+focus through one mechanism, and the Control Panel's generic ring is gone.
+
 ### F106. Support BeagleBone Black boards — open, operator idea 2026-10-01, future
 
 The operator inherited many BeagleBone Black boards (photos: `beaglebone/image/beaglebone-black-board-{1,2}.jpg`). **Measured from the
