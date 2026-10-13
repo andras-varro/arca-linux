@@ -179,6 +179,9 @@ ssh_scan() {
 # The image gate, before any image exists. Symlinks are left out: they carry no key bytes, and the
 # image deliberately links etc/ssh/ssh_host_*_key into the data partition, where each unit makes its own.
 tar -tf "$ROOTTAR" > /dev/null || die "$ROOTTAR does not list"
+# A stale tar from before an overlay fix passes every check below and ships the old behaviour, so
+# the layout check runs here too, not only after a Buildroot build.
+bash "$SCRIPT_DIR/check-rootfs.sh" "$ROOTTAR" > /dev/null || die "$ROOTTAR fails rootfs/check-rootfs.sh (run it for the list)"
 ROOT_LIST=$(tar -tvf "$ROOTTAR" | awk '$1 !~ /^l/ { $1 = $2 = $3 = $4 = $5 = ""; sub(/^ +/, ""); print }')
 if ! KEYS_DENIED=$(printf '%s\n' "$ROOT_LIST" | rw_state_ssh_keys_deny); then
     echo "FAIL: $ROOTTAR carries SSH key material a card image may not hold:" >&2
