@@ -267,14 +267,6 @@ root; normal operation runs as the user; a change such as the SSH settings needs
 root, like `sudo`. That touches `/dev/fb0`, `/dev/input`, `/dev/dsp`, `/dev/watchdog` and the `arca-app` respawn loop. If it
 is too much effort it goes last. The terminal app (`native_apps/terminal/`) runs `/bin/login`, so it grants exactly what the accounts grant. **Done when** it is designed together with the operator and built.
 
-### F143. A status line across the top of the screen — open, operator idea 2026-10-09, future
-
-One line of status: messages such as "not calibrated", date/time, CPU, refreshed once a second. Tapping a message opens the
-app or page that fixes it (calibration for "not calibrated"). Not designed: which apps show it, and what it costs per frame
-on the software renderer. **Done when** the launcher shows it and a tap on a message opens the right page.
-
-State 2026-10-12: the shared top bar (`native_apps/common/top_bar.c`; shape and rules in `native_apps/CLAUDE.md`) is on the launcher and every Control Panel page and deployed to `.188`. The look is operator-verified at the panel ("looks great"), and so are the X (closes) and `<` (goes back) in the Control Panel and touch calibration started from the NOT CALIBRATED status on `.115`; on `.188` tapping "Not Calibrated" opens the Input Control Panel applet and the message clears after calibration (operator, 2026-10-12); portrait looks good and the clock ticks smoothly once a second, the bar's focus ring is a rounded square on the launcher X and the Control Panel X and `<`, and the keyboard route X → Left → "Not Calibrated" → Enter opens the Input page (operator, 2026-10-13, `.188`). **Still open:** the same route on a pad; where messages fit in portrait, whose left side is narrow (operator: later); whether the Control Panel's status line (`control_panel/control_panel.c:285`, drawn in the title slot in green/orange) should move to the bar's message slot so both apps show messages one way; and the games' own exit X, which the operator defers ("we work with the games later").
-
 ### F145. Update a unit from a bundle — open, operator request 2026-10-10, not designed
 
 Two package kinds: a ready-to-use generic card image (`.img`) and a bundle update. The bundle update installs only what changed
@@ -288,7 +280,7 @@ An option for the clocks that print the time (`native_apps/common/top_bar.c:251`
 
 ### F147. Immersive games with no on-screen menu or close button — open, operator wish 2026-10-12, not designed
 
-The operator wants games that show no menu or close button at all. Open design question: how a touch-only player pauses and exits (pad and keyboard keep their keys). **Done when** the question is answered with the operator and one game follows the answer.
+The operator wants games that show no menu or close button at all. Open design question: how a touch-only player pauses and exits (pad and keyboard keep their keys). The games do not carry the shared top bar, so their own exit X is part of the same question. **Done when** the question is answered with the operator and one game follows the answer.
 
 ### F148. A three-partition card: p1 FAT boot, p2 rootfs, p3 data — open, operator-approved 2026-10-12
 
