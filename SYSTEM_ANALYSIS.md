@@ -989,7 +989,10 @@ EEPROM loaded).
   adapters (one empty) and an unpowered hub on its own micro-USB plug each started it at plug-in, a pull
   did nothing, and a plain micro-USB cable did nothing with or without a charger on its USB-A end. So the
   start event is the ID pin going to ground, which the TWL4030 watches from an always-powered register
-  ([§3.6](#36-usb)). **[inferred]** which TWL4030 power-on source bit does it has not been read.
+  ([§3.6](#36-usb)). The cause is in our power-off, read from source: our DT's `ti,system-power-controller`
+  (`kernel/dts/rw20.dts`) makes `poweroff` call `twl4030_power_off()`, which clears `STARTON_VBUS` and
+  `STARTON_CHG` in `CFG_P1_TRANSITION` before `DEVOFF` (`drivers/mfd/twl4030-power.c:667`) and leaves
+  `STARTON_USB` (start on USB host) as it found it. **[inferred]** that bit's value has not been read on a unit.
 - **Class budget is 12.95 W at the PD**, enforced by the TPS23750's class signature. Everything
   added inside the case draws from it — an XBee at ~50 mA is nothing, a bus-powered USB hard disk
   is not going to work.
