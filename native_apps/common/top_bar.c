@@ -248,6 +248,11 @@ bool top_bar_info_sample(TopBar *t) {
     time_t now = time(NULL);
     struct tm tm;
     int hour = -1, min = -1;
+    /* tzset() first: this process may outlive a zone change made by another one
+     * (the Control Panel rewrites /etc/localtime), and glibc's localtime_r() reads
+     * the zone only on its first call.  With TZ unset, tzset() is one stat() of
+     * /etc/localtime and re-reads the file only if it changed. */
+    tzset();
     if (localtime_r(&now, &tm)) { hour = tm.tm_hour; min = tm.tm_min; }
     char right[sizeof(t->right_buf)];
     status_line_format(right, sizeof(right), pct, hour, min);

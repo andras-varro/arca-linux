@@ -28,10 +28,13 @@
  *      characters (portrait, message showing);
  *   E  top_bar_layout() reads the live SCREEN_* macros;
  *   F  top_bar_info_due(): once a second, wrap-safe, first call is due.
+ *   G  top_bar_info_sample() follows a zone change: a long-running app never calls
+ *      tzset() and glibc localtime_r() does not re-read the zone by itself
  */
 #include "common/top_bar.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int fails;
@@ -216,6 +219,29 @@ int main(void) {
     CHECK(top_bar_info_due(&w, 0xFFFFFF00u), "F: wrap: first");
     CHECK(!top_bar_info_due(&w, 0xFFFFFF10u), "F: wrap: before the deadline");
     CHECK(top_bar_info_due(&w, 0x00000300u), "F: wrap: past the deadline across 2^32");
+
+    /* G — the clock follows a zone change without a restart.  A long-running app
+     * (the launcher) never calls tzset() itself, and glibc's localtime_r() does
+     * not re-read the zone after its first call, so the sample must.  Stand-in for
+     * the device's /etc/localtime swap: the TZ variable, which tzset() re-reads
+     * on a changed value (on the device TZ is unset and tzset() stats the file). */
+    {
+        TopBar z;
+        top_bar_init(&z, false, false);
+        setenv("TZ", "UTC0", 1);
+        top_bar_info_sample(&z);
+        int h0 = -1, m0 = -1;
+        const char *clk = strrchr(z.right_buf, ' ');
+        CHECK(clk && sscanf(clk + 1, "%d:%d", &h0, &m0) == 2, "G: parse clock from '%s'", z.right_buf);
+        setenv("TZ", "XXX-5", 1);                 /* five hours east of UTC0 */
+        top_bar_info_sample(&z);
+        int h1 = -1, m1 = -1;
+        clk = strrchr(z.right_buf, ' ');
+        CHECK(clk && sscanf(clk + 1, "%d:%d", &h1, &m1) == 2, "G: parse clock from '%s'", z.right_buf);
+        CHECK(h1 == (h0 + 5) % 24, "G: zone change UTC0 -> UTC+5 must move the clock 5 h (%02d:%02d -> %02d:%02d)",
+              h0, m0, h1, m1);
+        unsetenv("TZ");
+    }
 
     if (fails) { printf("top_bar_test: %d FAILED\n", fails); return 1; }
     printf("top_bar_test: all passed\n");
