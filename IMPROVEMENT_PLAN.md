@@ -367,8 +367,8 @@ cuckoo calling out of a clock-house. The operator accepted it as the working log
 `distro/render.sh` (WSL, `rsvg-convert`) renders it at 512, 96, 32 and 16 px into the untracked `distro/preview/`. It
 reads at 32 px; at 16 px only the house is left, so a favicon needs a simpler variant. On the boot screen it is
 F101's boot-logo row. Host name: `arca-<4 hex>` (`rootfs/board/arca/overlay/etc/init.d/firstboot-hostname`) fits the generic
-card image's random first-boot name; the prompt is `\u@\h:\w`. **[unverified]** The distro name in `/etc/os-release` and the boot
-banner (the defconfig sets the issue text to "Arca"); it stays out of `PS1`.
+card image's random first-boot name; the prompt is `\u@\h:\w`. **Measured on `.188` 2026-10-13: `/etc/os-release` says `NAME=Buildroot`**, not Arca; the boot
+banner is **[unverified]** (the defconfig sets the issue text to "Arca"); the name stays out of `PS1`.
 
 Collision check 2026-10-10 (shallow, WebFetch only, no search engine): DistroWatch lists no Arca, and GitHub shows no Arca
 distro. Outside IT the word is crowded (NYSE Arca and others), which is why the full form is used on the website and repo.
@@ -378,7 +378,7 @@ package-name checks (AUR, Debian, PyPI, npm, Docker Hub) once the `arca-*` ident
 **Done when** a code-only grep (`git ls-files | grep -v '\.md$'`, leaving out the upstream trees `scummvm/`,
 `usb_host/linux-4.14.52/` and `vnc_client/deps/`) for `roomwizard` and `steelcase` finds only the exception classes: the board
 name `rw20` and captured vendor output; a unit re-flashed with a new card boots under the new paths; and the
-manual trademark search is recorded.
+manual trademark search is recorded. **The first two are met (measured on `.188`, card `arca-card-20261013b`, 2026-10-13): ARCABOOT label, `/opt/arca`, `arcamond`, launcher, and Bluetooth once the kernel was rebuilt from the renamed tree** (`device-files/bluetooth` loads modules only when `/proc/version` reads `(arca@build)`; a pre-rename kernel reads `(roomwizard@build)` and Bluetooth silently stays off). Open: the trademark search, and `os-release`.
 
 ## Structural and cleanup
 
