@@ -155,10 +155,6 @@ Seen in the Control Panel log viewer; boot-console errors are defects here. **Me
 
 `kernel/dts/rw20.dts:550` has `cd-gpios = <&gpio4 31 GPIO_ACTIVE_LOW>` (gpio_127, the vendor's value, kept) while the pad it muxes as a GPIO (`rw20.dts:278`) is `sdmmc1_dat4` = gpio_126. **[unverified]** Whether the switch is read at all has not been checked; the card boots, so nothing observed depends on it. **Done when** a card insert and removal is observed in the kernel log, or the property is shown to be inert.
 
-### B70. Log timestamps stay on the old zone after a timezone change in a long-running app — open, inferred 2026-10-12
-
-`native_apps/common/logger.c:153` calls `localtime_r()` with no `tzset()` before it, and glibc reads the zone only on its first call; the top bar had the same pattern and was measured on `.188` to stay on the old zone until fixed. **[inferred]** No log line has been checked after a zone swap, and other long-running `localtime_r` callers have not been listed. **Done when** a line logged after a zone swap, by a process that was already running, carries the new zone, and `grep -rn localtime_r native_apps` shows no long-running caller without a `tzset()` first.
-
 ## Features
 
 Userspace except F101, which is the image build.

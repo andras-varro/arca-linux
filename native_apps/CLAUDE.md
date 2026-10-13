@@ -57,7 +57,7 @@ IP and the mode *before* compiling anything, and `cd`s to its own directory, so 
 | `audio_wav.c` | the one streaming RIFF reader: chunk walk, `(L+R)/2` downmix, the `AudioVoiceFill` adapter | assuming a 44-byte header, or loading a whole file to play it |
 | `config.c` | `/opt/games/arca_config.conf`, and a game's sound set | ad-hoc config files |
 | `keyboard.c` | on-screen keyboard (ALPHA / ALPHANUM / FULL / NUMERIC) | — |
-| `highscore.c`, `ppm.c`, `logger.c` | scores, icons, logging | — |
+| `highscore.c`, `ppm.c`, `logger.c` | scores, icons, logging. **Every `localtime_r()` in a process that can outlive a zone change calls `tzset()` first** — glibc reads the zone once, and the Control Panel rewrites `/etc/localtime` from another process (it calls `tzset()` itself after). `logger_write()`, `wall_hms()` in `audio_out.c` and the top bar do; measured on `.188` 2026-10-13: a launcher started under UTC logged its shutdown in UTC+2 after the swap. Host test `tests/logger_tz_test.c` | a bare `localtime_r()` in a long-running loop |
 
 `keyboard_enter(fb, touch, gm, "Title", buf, max_len, KB_LAYOUT_ALPHA)` — `buf` must hold `max_len + 1` bytes. Pad / keyboard
 drive a focus frame (D-pad or arrows move, JUMP / ACTION press, BACK deletes, PAUSE = OK); touch hides it, the next key shows it.
