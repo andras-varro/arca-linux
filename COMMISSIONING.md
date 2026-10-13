@@ -1,8 +1,8 @@
-# RoomWizard Commissioning
+# Arca Commissioning
 
-How a RoomWizard gets our software, and how it stays up to date. A unit runs **only our own root
-filesystem** (the Buildroot tree in [`rootfs/`](rootfs/CLAUDE.md), marker `/etc/roomwizard-rootfs`);
-nothing here commissions or cleans the Steelcase one. Anyone holding a stock unit can check out the tag
+How a Steelcase RoomWizard gets our software (Arca), and how it stays up to date. A unit runs **only our own root
+filesystem** (the Buildroot tree in [`rootfs/`](rootfs/CLAUDE.md), marker `/etc/arca-rootfs`);
+nothing here commissions or cleans the vendor one. Anyone holding a stock unit can check out the tag
 `last-vendor-rootfs`, the last tree that could.
 
 ## Overview
@@ -15,7 +15,7 @@ Two paths, and a third step that follows either:
 | **Update a unit** | `commissioning/provision.sh <ip>` | SSH | A unit already running our root |
 | **Deploy apps** | `deploy-all.sh` | SSH | Per deploy |
 
-**A menu over all of it is [`roomwizard.sh`](roomwizard.sh)**, which implements nothing of its own and
+**A menu over all of it is [`arca.sh`](arca.sh)**, which implements nothing of its own and
 shells out to the scripts above: build a card image, update a unit, back up, restore, deploy, and *First
 boot of an imaged card* (boot, wait for SSH, deploy). It polls **SSH, not ping**, because ping answers
 while `sshd` is still starting. Every script stays callable directly and non-interactively; `--help` on
@@ -77,7 +77,7 @@ sabotage case; needs root and a staged bundle.
 
 Connect Ethernet and power on. SSH answers after roughly half a minute, and the unit also answers to
 `<hostname>.local` once mDNS is up. sshd policy is the overlay's
-`rootfs/board/roomwizard/overlay/etc/ssh/sshd_config` (key-only), the only one there is. SSH host keys are
+`rootfs/board/arca/overlay/etc/ssh/sshd_config` (key-only), the only one there is. SSH host keys are
 generated on first boot, so a fresh p2 means a slow first boot. Then deploy: `./deploy-all.sh <ip>`, or the
 menu item *First boot of an imaged card*.
 
@@ -87,29 +87,29 @@ A card larger than the image's fixed geometry needs p6 grown:
 ## Finding the card
 
 ⚠️ **A partition is identified by position and content, never by filesystem UUID.** A UUID is
-generated at mkfs time, so it names one *card*, not a model: two RoomWizards running the identical
+generated at mkfs time, so it names one *card*, not a model: two Steelcase RoomWizards running the identical
 firmware build share **none** of their UUIDs. A hardcoded UUID therefore recognises only the unit its
 constant was copied from and rejects every other one. Nothing on the device consumes a UUID either:
 U-Boot passes `root=/dev/mmcblk0p6` and `/etc/fstab` names partitions by position.
 
-[`lib/rw-identify.sh`](lib/rw-identify.sh) holds the two checks:
+[`lib/arca-identify.sh`](lib/arca-identify.sh) holds the two checks:
 
 | Function | Question | How |
 |---|---|---|
-| `rw_is_rootfs` | is this mounted tree our RoomWizard root? | the marker file `/etc/roomwizard-rootfs`. No vendor root is recognised. |
-| `rw_is_card_disk` | is this disk a RoomWizard card? | the partition table: start and size of the fixed partitions, which are byte-identical on every unit. The partitions that absorb the difference in physical card size are **not** pinned. |
+| `arca_is_rootfs` | is this mounted tree our Arca root? | the marker file `/etc/arca-rootfs`. No vendor root is recognised. |
+| `arca_is_card_disk` | is this disk an Arca card? | the partition table: start and size of the fixed partitions, which are byte-identical on every unit. The partitions that absorb the difference in physical card size are **not** pinned. |
 
 Partition roles are root (p6), data (p2) and log (p3). p5 stays in the partition table, unused and never
-mounted. `rw_offline_path` and `rw_offline_base_ok` map a device-absolute path onto the right mounted
+mounted. `arca_offline_path` and `arca_offline_base_ok` map a device-absolute path onto the right mounted
 partition and check that a `<base>` is usable. `/` is never a candidate: selecting it would rewrite this
 host's own `/etc/shadow`.
 
-Regression: [`tests/rw_identify_test.sh`](tests/rw_identify_test.sh) — host-only, no card, no root. It
+Regression: [`tests/arca_identify_test.sh`](tests/arca_identify_test.sh) — host-only, no card, no root. It
 builds synthetic rootfs trees and partition tables (`sfdisk` on sparse files), so the positive and
 negative controls are self-contained.
 
 ```bash
-./tests/rw_identify_test.sh
+./tests/arca_identify_test.sh
 ```
 
 ## Updating a unit
@@ -223,7 +223,7 @@ After imaging or updating, deploy apps to the device.
 ```bash
 cd native_apps       && ./build-and-deploy.sh <ip> set-default
 cd vnc_client        && ./build-and-deploy.sh <ip>
-cd scummvm-roomwizard && ./build-and-deploy.sh <ip>
+cd scummvm-arca && ./build-and-deploy.sh <ip>
 ```
 
 The `set-default` flag makes that app start on boot.
@@ -238,7 +238,7 @@ a cross-compiler (`arm-linux-gnueabi-gcc`; `-gnueabihf-` for `vnc_client`), and 
 ```bash
 ./release.sh --stage-only                                  # on a build host, once
 ./deploy-all.sh --from-bundle build/release <ip>            # anywhere, no compiler
-./deploy-all.sh --from-bundle roomwizard-<tag>.tar.gz <ip>  # or from the tarball
+./deploy-all.sh --from-bundle arca-<tag>.tar.gz <ip>  # or from the tarball
 ```
 
 It stops the running app, installs, md5-verifies every file against the bundle's manifest, asserts `+x`
@@ -275,16 +275,16 @@ cd usb_host && ./build-and-deploy.sh <ip>      # needs bc libssl-dev bison flex 
 To switch which app starts on boot, just set a different default:
 ```bash
 # Switch to VNC client
-ssh root@<ip> 'echo /opt/vnc_client/vnc_client > /opt/roomwizard/default-app'
+ssh root@<ip> 'echo /opt/vnc_client/vnc_client > /opt/arca/default-app'
 
 # Switch to the native launcher
-ssh root@<ip> 'echo /opt/roomwizard/app_launcher > /opt/roomwizard/default-app'
+ssh root@<ip> 'echo /opt/arca/app_launcher > /opt/arca/default-app'
 
 # Check current default
-ssh root@<ip> 'cat /opt/roomwizard/default-app'
+ssh root@<ip> 'cat /opt/arca/default-app'
 ```
 
-Then reboot or restart the service: `ssh root@<ip> /etc/init.d/roomwizard-app restart`
+Then reboot or restart the service: `ssh root@<ip> /etc/init.d/arca-app restart`
 
 ## Architecture
 
@@ -295,11 +295,11 @@ fact rather than an intention.
 ```
 device-files/provision-rules.conf  WHAT IS INSTALLED   <type> <group> <mode> <target> <source> <reason>
 
-lib/rw-provision.sh   parses provision-rules.conf -> a plan, plus BOTH executors
-lib/rw-bundle.sh      the bundle layout, plus the SSH bundle installer
-lib/rw-identify.sh    which card, which partition — by content and POSITION, never by UUID
+lib/arca-provision.sh   parses provision-rules.conf -> a plan, plus BOTH executors
+lib/arca-bundle.sh      the bundle layout, plus the SSH bundle installer
+lib/arca-identify.sh    which card, which partition — by content and POSITION, never by UUID
 
-roomwizard.sh                          Front door: a menu over everything below
+arca.sh                                Front door: a menu over everything below
 rootfs/make-card-image.sh              Whole-card image; --bundle runs the next one over it
 commissioning/commission-offline.sh    The image step: install + verify, offline, no prompts
 commissioning/provision.sh             Online update: backup, install, reboot
@@ -307,20 +307,20 @@ commissioning/backup.sh, restore.sh    Per-unit state off and back onto a unit
 deploy-all.sh                          Build + deploy everything
 deploy-all.sh --from-bundle            Install a release bundle with NO toolchain
 release.sh                             Build all components + stage one offline bundle
-device-files/roomwizard-app            Device payload: installed as /etc/init.d/roomwizard-app
+device-files/arca-app                  Device payload: installed as /etc/init.d/arca-app
 device-files/{enable-usb-host.sh,usb-host,xpad-modules}   Device payload: the usb group
 */build-and-deploy.sh                  One per component
 ```
 
 ### On-device layout
 ```
-/opt/roomwizard/
+/opt/arca/
 ├── apps/*.app                   Launcher manifests (INI: name=, exec=, icon=, args=)
 ├── icons/*.ppm                  Tile icons, PPM P6
-└── default-app                  One line: path to executable (e.g. /opt/roomwizard/app_launcher)
+└── default-app                  One line: path to executable (e.g. /opt/arca/app_launcher)
 
 /etc/init.d/
-├── roomwizard-app               Generic app launcher (S99 in rc2-5.d)
+├── arca-app                     Generic app launcher (S99 in rc2-5.d)
 ├── audio-enable                 Speaker amplifier setup (S29)
 ├── time-sync                    rdate at boot (S28) — the RTC has no battery
 ├── xpad-modules                 insmod -f ff-memless, joydev, xpad (S89)
@@ -335,14 +335,14 @@ device-files/{enable-usb-host.sh,usb-host,xpad-modules}   Device payload: the us
 /opt/scummvm/                    ScummVM, where installed
 ```
 
-⚠️ **p1 is not in the list above and never will be.** `mlo`, `u-boot.bin` and `ctrlblock.bin` are unreachable from every function in `lib/rw-identify.sh` —
-`RW_PART_ROLES` does not contain p1, and a test asserts its absence.
+⚠️ **p1 is not in the list above and never will be.** `mlo`, `u-boot.bin` and `ctrlblock.bin` are unreachable from every function in `lib/arca-identify.sh` —
+`ARCA_PART_ROLES` does not contain p1, and a test asserts its absence.
 
 ## Troubleshooting
 
-### "No RoomWizard rootfs is mounted"
+### "No Arca rootfs is mounted"
 
-Tools that look for a card print the diagnosis themselves — if a disk with the RoomWizard partition
+Tools that look for a card print the diagnosis themselves — if a disk with the Arca partition
 layout is present they name it. If none is found, the card is not visible to Linux at all; on WSL it must
 first be attached from Windows:
 
@@ -352,14 +352,14 @@ lsblk -o NAME,FSTYPE,SIZE,MOUNTPOINT | grep -v loop
 ```
 
 Then **re-run the script**. ⚠️ Do not work out a partition number by hand: whoever is holding a card
-cannot see them, `lib/rw-identify.sh` exists so that nobody has to, and `${dev}6` is the wrong name on an
-`mmcblk` reader anyway (`rw_part_dev` inserts the `p`). **Do not go looking for a particular UUID** — see
+cannot see them, `lib/arca-identify.sh` exists so that nobody has to, and `${dev}6` is the wrong name on an
+`mmcblk` reader anyway (`arca_part_dev` inserts the `p`). **Do not go looking for a particular UUID** — see
 [*Finding the card*](#finding-the-card).
 
 ### No app starts after reboot
 No default app configured. Set one:
 ```bash
-ssh root@<ip> 'echo /opt/roomwizard/app_launcher > /opt/roomwizard/default-app'
+ssh root@<ip> 'echo /opt/arca/app_launcher > /opt/arca/default-app'
 ssh root@<ip> reboot
 ```
 
@@ -418,4 +418,4 @@ any key stops the autoboot. Typed commands are a one-shot experiment: our U-Boot
 - [SYSTEM_ANALYSIS.md](SYSTEM_ANALYSIS.md) — Hardware specs, boot chain, subsystems
 - [native_apps/README.md](native_apps/README.md) — Native apps development docs
 - [vnc_client/README.md](vnc_client/README.md) — VNC client docs
-- [scummvm-roomwizard/README.md](scummvm-roomwizard/README.md) — ScummVM backend docs
+- [scummvm-arca/README.md](scummvm-arca/README.md) — ScummVM backend docs

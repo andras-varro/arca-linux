@@ -1,2 +1,2 @@
-name: ROOMWIZARD
-desc: Root filesystem for the Steelcase RoomWizard (TI OMAP3503, no hardware integer divide)
+name: ARCA
+desc: Root filesystem for Arca (TI OMAP3503, no hardware integer divide)

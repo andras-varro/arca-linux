@@ -3,25 +3,25 @@
 The sourced-not-executed shell libraries. Loaded when you work in `lib/`.
 
 These live at the top level rather than under `commissioning/` because the component build scripts
-source `rw-bundle.sh` on the *write* side while the commissioner reads it, and every SSH-using script sources
-`rw-ssh.sh`. Device facts are in `SYSTEM_ANALYSIS.md`; open work in
+source `arca-bundle.sh` on the *write* side while the commissioner reads it, and every SSH-using script sources
+`arca-ssh.sh`. Device facts are in `SYSTEM_ANALYSIS.md`; open work in
 `IMPROVEMENT_PLAN.md`; how to author the rules file these libraries parse is in
 `device-files/CLAUDE.md`.
 
 | file | job |
 |---|---|
-| `rw-identify.sh` | which disk is a card, which partition holds which tree, and the offline path guards (`rw_offline_path`, `rw_offline_base_ok`) |
-| `rw-provision.sh` | compile `provision-rules.conf` to an install plan, and generate the online executor |
-| `rw-bundle.sh` | the release-bundle layout |
-| `rw-release.sh` | fetch a published release — **the one library here that opens a socket** |
-| `rw-ssh.sh` | the one answer to "can I reach this device" |
-| `rw-state.sh` | the per-unit state lists: the BACKUP set and the SSH-key deny the card-image builder applies; `rootfs/` and `commissioning/backup.sh`/`restore.sh` source it, `tests/rw_state_test.sh` covers it |
+| `arca-identify.sh` | which disk is a card, which partition holds which tree, and the offline path guards (`arca_offline_path`, `arca_offline_base_ok`) |
+| `arca-provision.sh` | compile `provision-rules.conf` to an install plan, and generate the online executor |
+| `arca-bundle.sh` | the release-bundle layout |
+| `arca-release.sh` | fetch a published release — **the one library here that opens a socket** |
+| `arca-ssh.sh` | the one answer to "can I reach this device" |
+| `arca-state.sh` | the per-unit state lists: the BACKUP set and the SSH-key deny the card-image builder applies; `rootfs/` and `commissioning/backup.sh`/`restore.sh` source it, `tests/arca_state_test.sh` covers it |
 
 ## One SSH gate, and BatchMode stays on it
 
-**`rw-ssh.sh` is the only implementation of "can I reach this device".** The scripts that source it
-are listed by `grep -rln 'rw-ssh.sh' -- commissioning deploy-all.sh roomwizard.sh */build-and-deploy.sh`
-and every call goes through `rw_ssh_gate`. They each keep their own
+**`arca-ssh.sh` is the only implementation of "can I reach this device".** The scripts that source it
+are listed by `grep -rln 'arca-ssh.sh' -- commissioning deploy-all.sh arca.sh */build-and-deploy.sh`
+and every call goes through `arca_ssh_gate`. They each keep their own
 gate *call*, because a component script must run standalone; what they must not keep is their own
 probe. There used to be eight, already drifted into three wordings of one message.
 
@@ -30,14 +30,14 @@ probe. There used to be eight, already drifted into three wordings of one messag
   `native_apps/build-and-deploy.sh` makes dozens. The goal is never a password-driven deploy; it is
   to get a key installed once.
 - **"Down" and "up but refusing us" are different answers, and only the second has a remedy.**
-  `rw_ssh_classify` decides, and it matches `Permission denied` — ⚠️ **never the parenthetical method
+  `arca_ssh_classify` decides, and it matches `Permission denied` — ⚠️ **never the parenthetical method
   list.** That list is the *server's*: our key-only root says `(publickey)`,
   and a plain `sshd` says
   `(publickey,keyboard-interactive)`. Keying on one server's list passes against that device and
   calls every other server "down" — which *suppresses* the offer, so nothing looks broken. An
   unrecognised error classifies as `down` on purpose.
-- ⚠️ **`rw_ssh_probe` reports the state twice — printed AND in `RW_SSH_LAST_STATE`/`_LAST_STDERR` —
-  and the gate must use the globals.** `state="$(rw_ssh_probe …)"` runs it in a *subshell*, so the
+- ⚠️ **`arca_ssh_probe` reports the state twice — printed AND in `ARCA_SSH_LAST_STATE`/`_LAST_STDERR` —
+  and the gate must use the globals.** `state="$(arca_ssh_probe …)"` runs it in a *subshell*, so the
   stderr global is discarded and every message shows a blank line where ssh's own complaint belongs.
   That was the first version of the file; it passed every wording assertion, because they grepped for
   the surrounding text rather than for what ssh said.
@@ -45,38 +45,38 @@ probe. There used to be eight, already drifted into three wordings of one messag
   as a batch, so a blocking `read` there would hang a run nobody is watching. A non-TTY caller gets
   the diagnosis plus the exact commands.
 - **No stored password, and no `sshpass`.** `ssh-copy-id` asks once and stores nothing;
-  `rw_ssh_keygen` makes an ed25519 key with no passphrase if the operator has none. `release.sh`
+  `arca_ssh_keygen` makes an ed25519 key with no passphrase if the operator has none. `release.sh`
   already refuses to publish config precisely because one shipped file carries a plaintext password —
   a second one moves toward the thing that check guards. (`sshpass` *is* installed in this WSL,
   measured 2026-08-07; it is rejected on the merits, not for absence.)
 - ⚠️ **A key generated under `sudo` must be chowned back.** A script run as root (for example under
   `sudo`) that calls `ssh-keygen` writes the key root-owned *inside the operator's
-  home* — where `ssh` then needs `sudo` forever. `rw_ssh_key_owner` takes the euid as an **argument**
+  home* — where `ssh` then needs `sudo` forever. `arca_ssh_key_owner` takes the euid as an **argument**
   so both branches are reachable from a non-root test.
 
 ## Partitions: position, never UUID
 
 ⚠️ **Never identify a partition by filesystem UUID.** A UUID is assigned at mkfs time, so it names one
-*card*: units are mkfs'd independently at the factory and two RoomWizards on identical firmware share
+*card*: units are mkfs'd independently at the factory and two Steelcase RoomWizards on identical firmware share
 **none** of their four UUIDs. Nothing on the device consumes one either — `root=/dev/mmcblk0p6` and
 `/etc/fstab`'s `/dev/mmcblk0p{2,3,5,7}` are both by position.
 
-`rw-identify.sh` is the one implementation: **content** for a mounted rootfs (`rw_is_rootfs`), the
-**partition table** for a disk (`rw_is_card_disk`), and **position** for which partition holds which
-tree (`rw_card_partitions` → `RW_PART_ROLES` = p6 root, p2 data, p3 log). It requires our marker
-(`/etc/roomwizard-rootfs`) of a rootfs; no other tree counts. It excludes `/`
+`arca-identify.sh` is the one implementation: **content** for a mounted rootfs (`arca_is_rootfs`), the
+**partition table** for a disk (`arca_is_card_disk`), and **position** for which partition holds which
+tree (`arca_card_partitions` → `ARCA_PART_ROLES` = p6 root, p2 data, p3 log). It requires our marker
+(`/etc/arca-rootfs`) of a rootfs; no other tree counts. It excludes `/`
 from its scan on purpose — a content scan that selected the dev host's root would rewrite this host's
-`/etc/shadow`; `rw_host_root_disk` / `rw_is_host_root_disk` are the resolved veto for the disk-level
+`/etc/shadow`; `arca_host_root_disk` / `arca_is_host_root_disk` are the resolved veto for the disk-level
 equivalent.
 
-⚠️ **p1 is deliberately absent from `RW_PART_ROLES`, and a test asserts its absence.** Nothing can
+⚠️ **p1 is deliberately absent from `ARCA_PART_ROLES`, and a test asserts its absence.** Nothing can
 reach `mlo`, `u-boot.bin` or `ctrlblock.bin` through those functions — a stronger guarantee than every
 caller remembering not to. p4 (extended container), p5 (kept in the partition table, unused) and p7
 (swap) are absent for the same reason: nothing to mount. No function in this directory mounts p1 at all.
 
 ⚠️ **A rootfs mounted offline shows `/home/root/{data,log}` as EMPTY directories** — they are mount
 points for p2/p3. An offline tool that mounts only p6 sees none of the per-unit state (p2) or logs
-(p3), and would report success having touched neither. Use `rw_mount_card` / `rw_check_card_mounts`; the latter's negative half —
+(p3), and would report success having touched neither. Use `arca_mount_card` / `arca_check_card_mounts`; the latter's negative half —
 "a rootfs where `data` was expected means the partitions are in the wrong order" — is the half that
 catches the mistake that makes every later path resolve under the wrong tree.
 
@@ -103,53 +103,53 @@ Observe all of the above and JTAG never comes up. Detail and recovery procedure:
 
 ## The plan compiler
 
-`rw-provision.sh` parses the tab-separated `provision-rules.conf`, compiles it to a plan, and lets each
+`arca-provision.sh` parses the tab-separated `provision-rules.conf`, compiles it to a plan, and lets each
 consumer keep its own **executor** — because `/` is the correct prefix on a device and a refused one
 offline.
 
 - **Order is emitted by the compiler, not read from the file**: unlink → install → link. Unlink before
   link (a glob would eat the link just made), install before link (a link to a not-yet-written file
   dangles on a card).
-- ⚠️ **The online executor is generated, not written twice.** `rw_provision_online_script` emits a
+- ⚠️ **The online executor is generated, not written twice.** `arca_provision_online_script` emits a
   POSIX `sh` interpreter that `commissioning/provision.sh` pipes to the device; `install` is the one
   verb it cannot do alone, because the source bytes are on the host, so the caller `scp`s them first
   and the interpreter only sets the declared mode. Check it with `dash -n`, not `bash -n` — it runs
   under BusyBox ash.
-- ⚠️ **That `scp` step is `rw_provision_push_installs`, and it reads the plan on fd 3.** `ssh` reads
+- ⚠️ **That `scp` step is `arca_provision_push_installs`, and it reads the plan on fd 3.** `ssh` reads
   its own stdin and forwards it to the remote command, so a `while read … done < "$PLAN"` loop with an
   `ssh` in the body loses the whole rest of the plan to the *first* `ssh`: **one file installed of
   eight**, the `link` records then dangling, and the executor correctly refusing on the seven — which
   read as an executor bug. `ssh -n` fixes one body and not the next; fd 3 is a property of the loop.
   The function also **counts** — install records in versus files copied out, refusing on a mismatch —
   because the old shape was silent exactly where the copying happened. It lives here with
-  `$RW_SSH`/`$RW_SCP` indirection because `commissioning/provision.sh` and
+  `$ARCA_SSH`/`$ARCA_SCP` indirection because `commissioning/provision.sh` and
   `usb_host/build-and-deploy.sh` each had a verbatim copy of the loop, i.e. the defect twice, and
   because indirection is what makes the copy step reachable from a test with no device. **Never inline
   it again.**
-- **A plan-summary line is computed, never hand-rolled.** `rw_provision_plan_summary` counts every
+- **A plan-summary line is computed, never hand-rolled.** `arca_provision_plan_summary` counts every
   record type present, including one its ordered list does not know about. Hand-rolled arithmetic in
   the callers left whole record types out of the breakdown.
 - ⚠️ **`usb` is a provision group, and a component script compiles it through
-  `rw_provision_plan_component`, not through its own `scp`/`ln -sf`.** `rw_provision_plan_component
+  `arca_provision_plan_component`, not through its own `scp`/`ln -sf`.** `arca_provision_plan_component
   FILE GROUP` compiles one optional group's records for `usb_host/build-and-deploy.sh` (`usb`) and `bluetooth/build-and-deploy.sh` (`bluetooth`) — a separate
-  entry point rather than a flag on `rw_provision_plan`, and it refuses `base`, so a commissioning
+  entry point rather than a flag on `arca_provision_plan`, and it refuses `base`, so a commissioning
   path cannot reach a base-less plan by mistyping a group list.
 
 ## Bundles: one layout, declared modes, no configs
 
 `release.sh` exists so that putting apps on a device does not require reproducing the toolchain.
 It calls `build-and-deploy.sh --bundle <dir>` on all five components. The
-layout lives in **`rw-bundle.sh`** and nowhere else: `<dir>/root/<device-path>` plus
+layout lives in **`arca-bundle.sh`** and nowhere else: `<dir>/root/<device-path>` plus
 `<dir>/manifest.d/<component>.{list,md5}`.
 
 - ⚠️ **Modes are *declared* by the caller, never read off disk.** `/mnt/c` reports every file 0777 and
-  discards `chmod`, so `stat -c %a` here is a constant, not a measurement. `rw_bundle_add` takes the
+  discards `chmod`, so `stat -c %a` here is a constant, not a measurement. `arca_bundle_add` takes the
   mode as an argument and `.list` is the authority.
-- **`rw_bundle_check` asserts both directions** — no manifest entry without a staged file, *and* no
+- **`arca_bundle_check` asserts both directions** — no manifest entry without a staged file, *and* no
   staged file without an entry. The second is the one that catches a file added by hand that nothing
   will ever `chmod`.
 - **`release.sh` greps the staged manifest and refuses to publish config** (`*.conf`, `/etc/hosts`,
-  `/etc/hostname`, `rw_config`, `touch_calibration`, `input_config`). Not a rule each component is
+  `/etc/hostname`, `arca_config`, `touch_calibration`, `input_config`). Not a rule each component is
   trusted to remember — the negative control for the one that forgets. Device config carries
   the per-unit host name and
   `vnc_client`'s plaintext VNC password.
@@ -159,9 +159,9 @@ layout lives in **`rw-bundle.sh`** and nowhere else: `<dir>/root/<device-path>` 
   binary and this repo is meant to be published. `usb_host`'s `--bundle` carries its *built*
   artifacts only.
 - ⚠️ **A new staged file is a licence decision, and `LICENSE.md` is where it is recorded.** Ask whether
-  the file is *ours*: `scummremastered.zip`, `gui-icons.dat` and `vkeybd_roomwizard.zip` are all
+  the file is *ours*: `scummremastered.zip`, `gui-icons.dat` and `vkeybd_arca.zip` are all
   GPL-3.0+ ScummVM data and were being published with no licence line until someone looked, and
-  `vkeybd_roomwizard.zip`, the Realtek firmware and `device-files/bluetooth.conf` are the non-MIT files committed here. `LICENSE.md` is the
+  `vkeybd_arca.zip`, the Realtek firmware and `device-files/bluetooth.conf` are the non-MIT files committed here. `LICENSE.md` is the
   repo-level half of `release.sh`'s per-release `NOTICE`; **the two must agree**, and MIT governs our
   *source* — it does not decide the licence of a binary it links into (`scummvm` is GPL-3.0+ as a
   whole, `vnc_client` GPL-2.0+). Measure a dependency's licence *version* rather than carrying it
@@ -171,14 +171,14 @@ layout lives in **`rw-bundle.sh`** and nowhere else: `<dir>/root/<device-path>` 
   against the digest GitHub reports. `gh` 2.86.0 is installed in WSL (from the release `.deb`: focal's
   apt has no `gh`, and the snap links against a glibc newer than 2.31).
 
-## `rw-release.sh` fetches, and it is the only file here that opens a socket
+## `arca-release.sh` fetches, and it is the only file here that opens a socket
 
 The fetch is thin by construction: `deploy-all.sh --from-bundle` and `commission-offline.sh --bundle`
 both already accept a tarball *or* an unpacked directory, so it resolves, downloads, verifies and hands
-over a path. It installs nothing and never touches a device. `rw-bundle.sh` stays network-free so that
+over a path. It installs nothing and never touches a device. `arca-bundle.sh` stays network-free so that
 "does this code reach the network" is answerable from the source list alone.
 
-- ⚠️ **There is ONE owner/repo derivation, `rw_release_repo`, and `release.sh` sources it.** A fork must
+- ⚠️ **There is ONE owner/repo derivation, `arca_release_repo`, and `release.sh` sources it.** A fork must
   fetch from the fork it published to. `gh` cannot resolve this repository from its remote at all —
   `origin` is an SSH host **alias**, and `gh` refuses the repository outright with "none of the git
   remotes configured for this repository point to a known GitHub host" — so `--repo` is mandatory on
@@ -204,15 +204,15 @@ over a path. It installs nothing and never touches a device. `rw-bundle.sh` stay
   parses with `grep`/`sed`. ⚠️ **It splits on commas, not braces**: every asset object nests an
   `uploader` object, and a brace split cuts one asset in half, separating its name from its digest. With
   more than one tarball asset that fallback **refuses** rather than pairing a digest by guesswork.
-- ⚠️ **stdout carries the path and nothing else.** Callers do `p="$(rw_release_fetch …)"`, which is a
-  subshell — the same trap as `rw_ssh_probe`, avoided here by having no globals to lose. Every
+- ⚠️ **stdout carries the path and nothing else.** Callers do `p="$(arca_release_fetch …)"`, which is a
+  subshell — the same trap as `arca_ssh_probe`, avoided here by having no globals to lose. Every
   diagnostic and every progress line goes to stderr.
 - **A fetch under `sudo` hands the cached file back to `$SUDO_UID`**, for the reason
-  `rw_ssh_key_owner` exists: otherwise the operator needs `sudo` to touch their own `build/`.
+  `arca_ssh_key_owner` exists: otherwise the operator needs `sudo` to touch their own `build/`.
 
 ## Regressions
 
-Host-only, no device, no root: `tests/rw_ssh_test.sh`, `tests/rw_provision_test.sh`,
-`tests/provision_online_test.sh`, `tests/rw_identify_test.sh`, `tests/rw_state_test.sh`, plus the
+Host-only, no device, no root: `tests/arca_ssh_test.sh`, `tests/arca_provision_test.sh`,
+`tests/provision_online_test.sh`, `tests/arca_identify_test.sh`, `tests/arca_state_test.sh`, plus the
 `tests/measure_*_sabotage.sh` harnesses that re-measure them. What each one can and cannot see, and
 the traps in extending them, are in `tests/CLAUDE.md`.

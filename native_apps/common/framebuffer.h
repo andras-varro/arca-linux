@@ -221,7 +221,7 @@ void fb_swap(Framebuffer *fb);
 void fb_swap_rect(Framebuffer *fb, int x, int y, int w, int h);
 
 // The over-temperature square (common/overtemp.h): a 16x16 red square at the
-// visible area's top-right, painted on the front buffer while rwmond's ring
+// visible area's top-right, painted on the front buffer while arcamond's ring
 // carries MON_FLAG_OVERTEMP; the ring is read at most once a second.  fb_swap()
 // and fb_swap_rect() call it; a loop that can idle without presenting (the
 // launcher, control_panel) calls it once per iteration so the square still

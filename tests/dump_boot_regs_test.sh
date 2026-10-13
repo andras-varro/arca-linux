@@ -106,8 +106,8 @@ b3() {
 check "B3 the script text has no devmem form except 'devmem \$a 32'" b3 "$SUBJECT"
 
 echo "C  decoys: each assertion must fail on a script that breaks its rule"
-# decoys sit at the same depth as the subject so that their ../../lib/rw-ssh.sh resolves
-DECOY="$TMP/d/uboot/tools"; mkdir -p "$DECOY" "$TMP/d/lib"; cp "$REPO_DIR/lib/rw-ssh.sh" "$TMP/d/lib/"
+# decoys sit at the same depth as the subject so that their ../../lib/arca-ssh.sh resolves
+DECOY="$TMP/d/uboot/tools"; mkdir -p "$DECOY" "$TMP/d/lib"; cp "$REPO_DIR/lib/arca-ssh.sh" "$TMP/d/lib/"
 # C1: the remote command writes (three operands)
 sed 's|devmem \\\$a 32 2>/dev/null|devmem \\$a 32 0 2>/dev/null|' "$SUBJECT" > "$DECOY/decoy-write.sh"
 cmp -s "$SUBJECT" "$DECOY/decoy-write.sh" && bad "C0 the write decoy differs from the subject"

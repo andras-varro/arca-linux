@@ -589,7 +589,7 @@ int touch_save_calibration(TouchInput *touch, const char *filename) {
         return -1;
     }
 
-    fprintf(f, "# RoomWizard screen configuration\n");
+    fprintf(f, "# Arca screen configuration\n");
     fprintf(f, "# Line 1: touch calibration — the raw→panel curve, per axis the raw\n");
     fprintf(f, "#         readings at panel 0, dim/4, 3*dim/4 and dim-1:\n");
     fprintf(f, "#           x0 x_knot_lo x_knot_hi x1   y0 y_knot_lo y_knot_hi y1\n");

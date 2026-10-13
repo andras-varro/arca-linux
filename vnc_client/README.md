@@ -1,8 +1,8 @@
-# VNC Client for RoomWizard
+# VNC Client for Arca
 
 A lightweight VNC client for the Steelcase RoomWizard embedded device.
 Displays a remote desktop (e.g. Raspberry Pi weather/clock display) on the
-RoomWizard's 800×480 screen with touch pass-through.
+the Steelcase RoomWizard's 800×480 screen with touch pass-through.
 
 ## Features
 
@@ -195,7 +195,7 @@ RPi3 VNC Server (192.168.50.56:5900)
 ## RPi VNC Server Setup
 
 The RPi runs **x11vnc** on port 5900 (standard VncAuth), compatible with both
-LibVNCClient (RoomWizard) and RealVNC Viewer (other clients). The proprietary
+LibVNCClient (Arca) and RealVNC Viewer (other clients). The proprietary
 RealVNC Server is disabled.
 
 ```bash
@@ -210,7 +210,7 @@ python3 rpi_setup.py <rpi_host> <rpi_user> <rpi_password> [action]
 | `verify` | Check x11vnc service status |
 | `inspect` | Inspect RPi display environment |
 
-This creates a systemd service (`x11vnc-roomwizard`) on port 5900 with
+This creates a systemd service (`x11vnc-arca`) on port 5900 with
 password authentication. The setup script disables RealVNC Server if present.
 
 ---
@@ -218,7 +218,7 @@ password authentication. The setup script disables RealVNC Server if present.
 ## RPi VNC Viewer Setup
 
 To use another Raspberry Pi as a dedicated VNC viewer/display that connects to the
-RoomWizard RPi VNC server, use `setup-vnc-viewer.sh`. It installs **Remmina** as
+Arca RPi VNC server, use `setup-vnc-viewer.sh`. It installs **Remmina** as
 the VNC viewer with fullscreen auto-scaling and auto-connect on boot.
 
 ### Prerequisites
@@ -269,16 +269,16 @@ Remmina's encrypted format — never saved in plaintext.
 |------|-------------|
 | Remove RealVNC Viewer | Uninstalls proprietary viewer if present |
 | Install Remmina | Installs Remmina + VNC plugin via apt |
-| Create profile | `~/.local/share/remmina/roomwizard.remmina` with scaled fullscreen |
+| Create profile | `~/.local/share/remmina/arca.remmina` with scaled fullscreen |
 | Autostart | `~/.config/autostart/vnc-viewer.desktop` — connects on login |
 | Desktop shortcut | `~/Desktop/vnc-viewer.desktop` — manual launch |
 | Nightly reboot | `/etc/cron.d/nightly-reboot` — reboots at 3am daily |
 
 ### Manual Remmina Launch
 
-Double-click the "VNC to RoomWizard" icon on the desktop, or from a terminal:
+Double-click the "VNC to Arca" icon on the desktop, or from a terminal:
 
-    remmina -c ~/.local/share/remmina/roomwizard.remmina
+    remmina -c ~/.local/share/remmina/arca.remmina
 
 ---
 
@@ -387,7 +387,7 @@ See [native_apps/README.md](../native_apps/README.md#input-configuration) for th
 
 ## Optimizations
 
-Key techniques adopted from the ScummVM RoomWizard backend:
+Key techniques adopted from the ScummVM Arca backend:
 
 | ID | Technique | Impact |
 |----|-----------|--------|
@@ -427,7 +427,7 @@ Built as static libraries by `build-deps.sh` using the ARM cross-compiler.
 ## Troubleshooting
 
 ### Connection Failed
-- Verify x11vnc is running: `ssh pi@<rpi> 'systemctl status x11vnc-roomwizard'`
+- Verify x11vnc is running: `ssh pi@<rpi> 'systemctl status x11vnc-arca'`
 - Check port: `nmap -p 5900 <rpi_ip>`
 - Check password in `/opt/vnc_client/vnc_client.conf`
 
@@ -452,8 +452,8 @@ Built as static libraries by `build-deps.sh` using the ARM cross-compiler.
 
 ## Auto-Start on Boot
 
-**Do not write a second init script.** Boot is owned by `/etc/init.d/roomwizard-app`, which respawns
-whatever `/opt/roomwizard/default-app` points at — so a private `S99vnc-client` gives you two things
+**Do not write a second init script.** Boot is owned by `/etc/init.d/arca-app`, which respawns
+whatever `/opt/arca/default-app` points at — so a private `S99vnc-client` gives you two things
 starting apps and two different ideas of how to stop them, which is the defect the project spent a
 session chasing. The supported route is one command:
 
@@ -464,17 +464,17 @@ session chasing. The supported route is one command:
 To go back to the launcher grid:
 
 ```bash
-ssh root@<ip> 'echo /opt/roomwizard/app_launcher > /opt/roomwizard/default-app'
-ssh root@<ip> '/etc/init.d/roomwizard-app restart'
+ssh root@<ip> 'echo /opt/arca/app_launcher > /opt/arca/default-app'
+ssh root@<ip> '/etc/init.d/arca-app restart'
 ```
 
 Stopping and starting by hand, and seeing what is actually running:
 
 ```bash
-ssh root@<ip> '/etc/init.d/roomwizard-app stop'      # matches on the executable, so it
+ssh root@<ip> '/etc/init.d/arca-app stop'      # matches on the executable, so it
                                                      # catches a client the launcher started
-ssh root@<ip> '/etc/init.d/roomwizard-app start'
-ssh root@<ip> '/etc/init.d/roomwizard-app status'    # use this, not `ps w` — see
+ssh root@<ip> '/etc/init.d/arca-app start'
+ssh root@<ip> '/etc/init.d/arca-app status'    # use this, not `ps w` — see
                                                      # ../SYSTEM_ANALYSIS.md section 5.3
 ```
 
@@ -495,4 +495,4 @@ ssh root@<ip> '/etc/init.d/roomwizard-app status'    # use this, not `ps w` — 
 ## License
 
 Custom code (`vnc_client.c`, `vnc_renderer.c`, `vnc_input.c`) is provided as-is
-for use with the RoomWizard device. Dependencies carry their own licenses (see above).
+for use with the Steelcase RoomWizard device. Dependencies carry their own licenses (see above).

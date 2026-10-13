@@ -60,7 +60,7 @@ set -u
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=/dev/null  # not followed: shellcheck resolves ../../ against the repo root in the gate
-. "$REPO_ROOT/lib/rw-ssh.sh"
+. "$REPO_ROOT/lib/arca-ssh.sh"
 
 
 # add <name> <base> <offset> ...  -- appends "name addr" rows (addr as 0x%08x)
@@ -203,8 +203,8 @@ REMOTE="for a in$ADDRS; do v=\$(devmem \$a 32 2>/dev/null); if [ \$? -eq 0 ] && 
 
 # shellcheck disable=SC2029  # REMOTE is built here on purpose: the address list is client-side data
 # Reachability and auth through the one gate (a probe: it never offers to install a key).
-rw_ssh_probe "root@$IP" >/dev/null || { echo "dump-boot-regs.sh: cannot reach root@$IP over key-authenticated ssh" >&2; exit 1; }
-OUT="$(ssh -o ConnectTimeout="$RW_SSH_CONNECT_TIMEOUT" "root@$IP" "$REMOTE")" || {
+arca_ssh_probe "root@$IP" >/dev/null || { echo "dump-boot-regs.sh: cannot reach root@$IP over key-authenticated ssh" >&2; exit 1; }
+OUT="$(ssh -o ConnectTimeout="$ARCA_SSH_CONNECT_TIMEOUT" "root@$IP" "$REMOTE")" || {
     echo "dump-boot-regs.sh: ssh to $IP failed" >&2
     exit 1
 }

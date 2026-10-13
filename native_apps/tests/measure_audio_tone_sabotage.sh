@@ -12,7 +12,7 @@
 # Group I is the RAM-resident clip; group J is the device preference the unchecked
 # init must resolve.  Both live here because both compile the same binary and the
 # run() below is the only copy of that build line outside tests/run-all.sh.
-cd /mnt/c/work/roomwizard/native_apps || exit 1
+cd /mnt/c/work/arca/native_apps || exit 1
 W=$(mktemp -d /tmp/clip.XXXXXX)
 HARNESS_ERR=0
 SRC="common/audio.c common/audio.h common/audio_gen.c common/audio_gen.h
@@ -72,7 +72,7 @@ run "6 the rate check is dropped, so a clip is pitch-shifted" \
 # where a zero is not a hole.  Measured 2026-09-10.  It swaps the unchecked init for
 # the config-gated audio_init(), which would abolish the bypass — and group J cannot
 # see it, because CONFIG_FILE_PATH is absolute and no host test can put an
-# `audio_enabled=false` file at /opt/games/rw_config.conf.  With no file, audio_init()
+# `audio_enabled=false` file at /opt/games/arca_config.conf.  With no file, audio_init()
 # defaults the gate OPEN and the two paths are indistinguishable from here.  The same
 # absence makes every "resolved the wrong value" variant unreachable: the stored value
 # on this host is always the default.  So group J's host-reachable content is exactly

@@ -1,5 +1,5 @@
 #!/bin/sh
-# enable-usb-host.sh — Enable USB host mode on RoomWizard via /dev/mem patching
+# enable-usb-host.sh — Enable USB host mode on Arca via /dev/mem patching
 #
 # This script patches the omap2430_ops struct in kernel memory to fix a broken
 # MUSB configuration in the OEM kernel (4.14.52). The kernel has DMA mode enabled
@@ -10,7 +10,7 @@
 # function pointers, calls the stubs (which return NULL DMA controller), and
 # falls back to PIO mode — which works perfectly for USB host operations.
 #
-# Must run as root on the RoomWizard device.
+# Must run as root on the Arca device.
 # Requires: devmem_write binary in /usr/local/bin/ or /tmp/
 #
 # This script is idempotent — safe to run multiple times.
@@ -51,7 +51,7 @@ for path in /usr/local/bin/devmem_write /tmp/devmem_write; do
     fi
 done
 
-echo "=== RoomWizard USB Host Mode Enabler ==="
+echo "=== Arca USB Host Mode Enabler ==="
 
 # ============================================================================
 # Check if already enabled (idempotent)

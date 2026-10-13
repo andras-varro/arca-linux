@@ -1,5 +1,5 @@
 /**
- * Logger implementation for RoomWizard native apps
+ * Logger implementation for Arca native apps
  *
  * See logger.h for usage documentation.
  */
@@ -103,7 +103,7 @@ int logger_init(Logger *log, const char *app_name,
     if (!lib_sink)
         lib_sink = log;
 
-    /* Build path: /var/log/roomwizard/<app_name>.log */
+    /* Build path: /var/log/arca/<app_name>.log */
     snprintf(log->path, sizeof(log->path), "%s/%s.log", LOG_DIR, app_name);
 
     /* Ensure directory exists */

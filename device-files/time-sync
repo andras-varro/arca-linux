@@ -1,5 +1,5 @@
 #!/bin/sh
-# Simple time synchronization for RoomWizard
+# Simple time synchronization for Arca
 # Syncs time with time server if network is available.
 # Try multiple time servers in order using rdate (RFC 868 Time Protocol).
 

@@ -22,7 +22,7 @@
 # committed .wav files, and a clean `git status` after a run is NOT expected now.
 # The effects this script installs are deployed by ../build-and-deploy.sh.
 # Run from WSL (this host has no gcc in Git Bash — root ../../CLAUDE.md):
-#   wsl.exe -e bash -lc "cd /mnt/c/work/roomwizard/native_apps/sounds && ./gen-sounds.sh"
+#   wsl.exe -e bash -lc "cd /mnt/c/work/arca/native_apps/sounds && ./gen-sounds.sh"
 
 set -euo pipefail
 

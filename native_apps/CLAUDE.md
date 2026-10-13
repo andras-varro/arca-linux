@@ -55,7 +55,7 @@ IP and the mode *before* compiling anything, and `cd`s to its own directory, so 
 | `audio.c` | beeps, tones, streaming, the per-frame mix pump | opening `/dev/dsp` yourself |
 | `audio_gen.c` | the audio logic with no device in it: frame/byte arithmetic, the tone envelope, the one gliding oscillator, the mix bus, mono→interleaved, the frame-aligned write loop | a second sine loop, a `frames * 4` with the channel count spelled into the constant, or an audio thread |
 | `audio_wav.c` | the one streaming RIFF reader: chunk walk, `(L+R)/2` downmix, the `AudioVoiceFill` adapter | assuming a 44-byte header, or loading a whole file to play it |
-| `config.c` | `/opt/games/rw_config.conf`, and a game's sound set | ad-hoc config files |
+| `config.c` | `/opt/games/arca_config.conf`, and a game's sound set | ad-hoc config files |
 | `keyboard.c` | on-screen keyboard (ALPHA / ALPHANUM / FULL / NUMERIC) | — |
 | `highscore.c`, `ppm.c`, `logger.c` | scores, icons, logging | — |
 
@@ -130,7 +130,7 @@ int main(int argc, char *argv[]) {
 Three rules in there are load-bearing, and every one has been violated in shipped code:
 
 - ⚠️ **`setvbuf(stdout, NULL, _IOLBF, 0)` FIRST, or a printf receipt never arrives.** At boot stdout is
-  `/var/log/roomwizard/app_stdout.log`, so glibc block-buffers 4 KB: `compute_grid_layout()`'s layout
+  `/var/log/arca/app_stdout.log`, so glibc block-buffers 4 KB: `compute_grid_layout()`'s layout
   receipt was absent from that log while `grep -ac 'launcher: safe'` on the deployed binary returned 1.
   `common/logger.c` line-buffers its OWN file, which is why this reads as a missing printf rather than a
   buffering one. The seven games, `app_launcher` and `control_panel` have it; ⚠️ the OTHER tools do not.
@@ -375,7 +375,7 @@ per-unit and per-calibration.** What belongs here is what an app must do about t
   `touch_init()` — the documented lifecycle anyway — and re-run it after any `fb_set_bezel()`.
 - The band **stays fully drawable and is good screen area** — a status bar, score row, title or background
   belongs there. Do not shrink the drawing surface or grow the bezel to make visible == touchable. **This
-  is a native_apps policy, not a device-wide one:** `scummvm-roomwizard` and `vnc_client` display
+  is a native_apps policy, not a device-wide one:** `scummvm-arca` and `vnc_client` display
   third-party content nobody can audit for what must be pressable, so they confine the *content rectangle
   itself* to `SCREEN_SAFE_*` and leave the band black. See their own `CLAUDE.md` files.
 - Not every playfield can move: Tetris' board and Brick Breaker's play area are drawn and collided
@@ -526,11 +526,11 @@ icons come from `gen_cp_icons.py`. Settings "apps" never become launcher tiles; 
   is empty, kept by operator decision; RESCAN keeps three attempts. Disabled controls refuse input in the widget (`Widget.disabled`).
 - **Rejected:** one executable per page (init respawns the launcher, so the return path breaks, and every tap re-inits fb, touch and config). `dlopen`'d pages are deferred — an ABI version field refused on mismatch,
   exported helpers and `check-arm-safe.sh` over the `.so` would all be required.
-- **`control_panel <page>` opens one page directly, so a page can be captured over SSH** (`cp_page_find()` in `control_panel/cp_page_name.c`, host test `tests/cp_page_name_test.c`). Names are the page-table names in lowercase (`audio display led usb bluetooth input network monitor information system`), case-insensitive, a unique prefix accepted; arguments starting with `/` (the launcher's fb/touch paths) are skipped; `--list-pages` and `--help` exist; an unknown name exits 2; BACK returns to the home grid. Capture: `/etc/init.d/roomwizard-app stop`, then `/opt/games/control_panel /dev/fb0 /dev/input/event0 monitor &`, then `cat /dev/fb0` (measured on `.188`, 2026-10-06). It reaches the page only, not a state inside it.
+- **`control_panel <page>` opens one page directly, so a page can be captured over SSH** (`cp_page_find()` in `control_panel/cp_page_name.c`, host test `tests/cp_page_name_test.c`). Names are the page-table names in lowercase (`audio display led usb bluetooth input network monitor information system`), case-insensitive, a unique prefix accepted; arguments starting with `/` (the launcher's fb/touch paths) are skipped; `--list-pages` and `--help` exist; an unknown name exits 2; BACK returns to the home grid. Capture: `/etc/init.d/arca-app stop`, then `/opt/games/control_panel /dev/fb0 /dev/input/event0 monitor &`, then `cat /dev/fb0` (measured on `.188`, 2026-10-06). It reaches the page only, not a state inside it.
 
 **The Log page and the terminal.** The Log page (`control_panel/log_page.c`) is read-only by design: no export, no delete, no login; longer reading stays with SSH or `commissioning/backup.sh`. The terminal (`native_apps/terminal/`, its own launcher tile) runs `/bin/login` in a pty, not a shell, and carries no security logic: a user gets what the account grants. **Operator-verified at the panel 2026-10-12:** the Log page's tabs and ERRORS ONLY filter; terminal login with the on-screen keyboard and with a USB keyboard, and exit. **Not verified:** the terminal's toolbar keys, the pad route, `vi`/`top`, the `xterm` terminfo entry on our root `[inferred]`, and a launch from the Control Panel (not implemented).
 
-**`rwmond` is the Monitor page's history source** (`native_apps/sysmon/rwmond.c`, `/opt/games/rwmond`, in `GAMES_BINARIES`): at nice 19 it samples CPU, memory and SoC temperature once a second and publishes a 120-sample ring at `/var/run/rwmond.ring` (tmpfs; text, atomic rename; format in `sysmon/mon_ring.h`). The page seeds its graph from the ring when it is at most 3 s old. `roomwizard-app stop` kills it with `/opt/games`, and `native_apps/build-and-deploy.sh` restarts it. The Monitor graphs' pure scaling lives in `control_panel/mon_graph.c` (host test `tests/mon_graph_test.c`); the layout receipt reads "N graphs WxH beside|under". `rwmond` also owns the over-temperature flag (latch 85/80 °C, `common/overtemp.h`, `red_led`) and links `common/hardware.c` and `config.c`; `fb_swap()`/`fb_swap_rect()` paint the red square via `fb_overtemp_poll()`, so **a loop that can idle without presenting must call `fb_overtemp_poll()` itself** (launcher and control_panel do). Test: `touch /var/run/rwmond.force_overtemp`. Measured on `.188`: 0.27 % CPU, VmRSS 1.1 MB. The RAM text row is total-free-buffers-cached while the graph is MemTotal-MemAvailable, so the two differ.
+**`arcamond` is the Monitor page's history source** (`native_apps/sysmon/arcamond.c`, `/opt/games/arcamond`, in `GAMES_BINARIES`): at nice 19 it samples CPU, memory and SoC temperature once a second and publishes a 120-sample ring at `/var/run/arcamond.ring` (tmpfs; text, atomic rename; format in `sysmon/mon_ring.h`). The page seeds its graph from the ring when it is at most 3 s old. `arca-app stop` kills it with `/opt/games`, and `native_apps/build-and-deploy.sh` restarts it. The Monitor graphs' pure scaling lives in `control_panel/mon_graph.c` (host test `tests/mon_graph_test.c`); the layout receipt reads "N graphs WxH beside|under". `arcamond` also owns the over-temperature flag (latch 85/80 °C, `common/overtemp.h`, `red_led`) and links `common/hardware.c` and `config.c`; `fb_swap()`/`fb_swap_rect()` paint the red square via `fb_overtemp_poll()`, so **a loop that can idle without presenting must call `fb_overtemp_poll()` itself** (launcher and control_panel do). Test: `touch /var/run/arcamond.force_overtemp`. Measured on `.188`: 0.27 % CPU, VmRSS 1.1 MB. The RAM text row is total-free-buffers-cached while the graph is MemTotal-MemAvailable, so the two differ.
 
 ## Input
 
@@ -725,7 +725,7 @@ and the retired generated set would have PASSED it. That half stays ear-only, on
 
 - ⚠️ **Every effect's path is already overridable per name — do NOT build a second mechanism for it.**
   `fx_config_apply()` in `common/audio.c` reads one `fx_<name>=` key per `AudioFxId` from
-  `/opt/games/rw_config.conf` over `FX_DEFAULT_PATH`: an absent key keeps the stock clip, a **present but
+  `/opt/games/arca_config.conf` over `FX_DEFAULT_PATH`: an absent key keeps the stock clip, a **present but
   empty** one selects the note table. A per-GAME variant was declined.
 
 ### Mixing: the per-frame pump
@@ -836,13 +836,13 @@ These rules, each of which is a way to get this wrong:
   is `want_hold` (so the fail effect plays over near-silence and a respawn continues the same track), and
   only game over stops it. A game supplies a **tag** and those two predicates, ⚠️ **never its own copy of
   the machine**. ⚠️ **The pump must keep running while a bed is held**, or no resume is accepted. ⚠️ **The
-  paths are the SET FILE's and C derives none of them** — `/opt/roomwizard/soundsets/<tag>.sound`, whose
+  paths are the SET FILE's and C derives none of them** — `/opt/arca/soundsets/<tag>.sound`, whose
   one generator is `sound-sets.sh`; no file means no music, and `./check-bed-files.sh` gates both
   directions plus that the C and shell install paths agree. ⚠️ **A missing bed is NORMAL**: a refusal is
   permanent **per track** (`tests/audio_tone_test.c` G, H; resolution in `tests/audio_bed_test.c`).
 - **`audio_close()` prints the counters — one line, from the library, for every app that ran a bus**, and
   it is what lets an operator’s own play session be measured with no mic — from the launcher it lands in
-  `/var/log/roomwizard/app_stdout.log`. ⚠️ **Validate before believing a zero**: `kill -STOP` the game
+  `/var/log/arca/app_stdout.log`. ⚠️ **Validate before believing a zero**: `kill -STOP` the game
   for a second, three times, and `starve` reads exactly 3. A dry queue is counted even while the bus is
   SILENT, so a small `starve` is not automatically audible.
 - **`check-audio-pacing.sh` is the gate, and it runs from `build-and-deploy.sh`.** It enforces every
@@ -890,7 +890,7 @@ delivers it — and `audio_close()` on the exit paths only: `control_panel`'s Au
 wrong shape — `audio_init*` → tones → `audio_close()` inside one button handler — costs a stream open
 **and** a stream stop per press, and freezes the UI while the handler holds the tones.
 
-**Measured on `.188` 2026-09-05**, on that wrong shape, from `/var/log/roomwizard/app_stdout.log`: one
+**Measured on `.188` 2026-09-05**, on that wrong shape, from `/var/log/arca/app_stdout.log`: one
 `control_panel` process logged fifteen `bus closed` lines — six at `services=28` and nine at
 `services=80` — against one line per whole game session (`services=123` Tap-a-Theremin, `services=142` SameGame, the latter the only
 `starve=1` seen). Every diagnostic line read `starve=0 lost=0 drop=0 lim=0 clip=0`, so the cost is the

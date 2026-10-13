@@ -1,9 +1,9 @@
 #!/bin/bash
-# Servlet Compilation Script for RoomWizard LED Control
+# Servlet Compilation Script for Arca LED Control
 
 set -e  # Exit on error
 
-echo "=== RoomWizard LED Control Servlet Compilation ==="
+echo "=== Arca LED Control Servlet Compilation ==="
 echo ""
 
 # Define paths

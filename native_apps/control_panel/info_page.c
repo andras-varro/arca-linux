@@ -98,7 +98,7 @@ static void info_read(void) {
     read_kernel();
     if (read_file_line("/etc/hostname", info.hostname, sizeof(info.hostname)) < 0)
         snprintf(info.hostname, sizeof(info.hostname), "N/A");
-    if (read_file_line("/opt/roomwizard/default-app", info.default_app,
+    if (read_file_line("/opt/arca/default-app", info.default_app,
                        sizeof(info.default_app)) < 0)
         snprintf(info.default_app, sizeof(info.default_app), "(NOT SET)");
     cpuinfo_field("model name", info.cpu, sizeof(info.cpu));

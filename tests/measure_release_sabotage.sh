@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Measure tests/rw_release_test.sh against deliberately broken copies of
+# Measure tests/arca_release_test.sh against deliberately broken copies of
 # release.sh, and print the counts that suite's header rests on.
 #
 #   wsl.exe -e bash -lc "cd /mnt/c/work/roomwizard && bash tests/measure_release_sabotage.sh"
@@ -24,7 +24,7 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
-BAK=/tmp/rw-release.orig.$$
+BAK=/tmp/arca-release.orig.$$
 HARNESS_ERR=0
 cp release.sh "$BAK"
 restore() { cp "$BAK" release.sh; }
@@ -33,7 +33,7 @@ trap 'restore; rm -f "$BAK"' EXIT INT TERM
 run() {
     if [ "${1:-}" = sab ] && cmp -s release.sh "$BAK"; then
         echo "SABOTAGE DID NOT APPLY - release.sh is byte-identical to the shipped one"; HARNESS_ERR=1; return; fi
-    ./tests/rw_release_test.sh 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -oE '[0-9]+ passed, [0-9]+ failed'; }
+    ./tests/arca_release_test.sh 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -oE '[0-9]+ passed, [0-9]+ failed'; }
 
 echo ""
 echo -n "  baseline (nothing broken)             "; run
@@ -102,7 +102,7 @@ restore
 echo ""
 echo "  (no case here can exercise a real four-component build: release.sh has no"
 echo "   --no-build flag, and the suite stubs the component script. That hole is"
-echo "   named in tests/rw_release_test.sh's header and in tests/CLAUDE.md.)"
+echo "   named in tests/arca_release_test.sh's header and in tests/CLAUDE.md.)"
 echo ""
 # A stanza that edited nothing is a harness error, not a verdict: fail the run.
 [ "$HARNESS_ERR" -eq 0 ] || { echo "HARNESS ERROR: a sabotage matched nothing"; exit 1; }

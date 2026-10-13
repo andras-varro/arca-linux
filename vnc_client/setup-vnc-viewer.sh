@@ -130,7 +130,7 @@ check_display() {
 
 # ── Remmina Profile Paths ──────────────────────────────────────────────────
 REMMINA_DIR="${HOME}/.local/share/remmina"
-REMMINA_PROFILE="${REMMINA_DIR}/roomwizard.remmina"
+REMMINA_PROFILE="${REMMINA_DIR}/arca.remmina"
 AUTOSTART_DIR="${HOME}/.config/autostart"
 AUTOSTART_ENTRY="${AUTOSTART_DIR}/vnc-viewer.desktop"
 DESKTOP_SHORTCUT="${HOME}/Desktop/vnc-viewer.desktop"
@@ -176,7 +176,7 @@ do_install() {
     mkdir -p "${REMMINA_DIR}"
     cat > "${REMMINA_PROFILE}" <<REMMINA_EOF
 [remmina]
-name=RoomWizard VNC
+name=Arca VNC
 protocol=VNC
 server=${VNC_SERVER}:${VNC_PORT}
 password=${ENCRYPTED_PW}
@@ -195,10 +195,10 @@ REMMINA_EOF
     cat > "${AUTOSTART_ENTRY}" <<'AUTOSTART_EOF'
 [Desktop Entry]
 Type=Application
-Name=VNC to RoomWizard
-Comment=Connect to RoomWizard RPi via VNC (Remmina, fullscreen, scaled)
+Name=VNC to Arca
+Comment=Connect to Arca RPi via VNC (Remmina, fullscreen, scaled)
 Icon=org.remmina.Remmina
-Exec=/bin/bash -c 'sleep 5 && remmina -c ~/.local/share/remmina/roomwizard.remmina'
+Exec=/bin/bash -c 'sleep 5 && remmina -c ~/.local/share/remmina/arca.remmina'
 Terminal=false
 Categories=Network;RemoteAccess;
 X-GNOME-Autostart-enabled=true
@@ -212,10 +212,10 @@ AUTOSTART_EOF
     cat > "${DESKTOP_SHORTCUT}" <<'DESKTOP_EOF'
 [Desktop Entry]
 Type=Application
-Name=VNC to RoomWizard
-Comment=Connect to RoomWizard RPi via VNC (Remmina, fullscreen, scaled)
+Name=VNC to Arca
+Comment=Connect to Arca RPi via VNC (Remmina, fullscreen, scaled)
 Icon=org.remmina.Remmina
-Exec=/bin/bash -c 'sleep 5 && remmina -c ~/.local/share/remmina/roomwizard.remmina'
+Exec=/bin/bash -c 'sleep 5 && remmina -c ~/.local/share/remmina/arca.remmina'
 Terminal=false
 Categories=Network;RemoteAccess;
 DESKTOP_EOF

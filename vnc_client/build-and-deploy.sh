@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build and deploy the VNC client to a RoomWizard device.
+# Build and deploy the VNC client to a Arca device.
 #
 # Usage:
 #   ./build-and-deploy.sh                        # build only
@@ -27,13 +27,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# The two shared libraries every path needs. The SSH gate (../lib/rw-ssh.sh) because
-# every deploy goes through it; ../lib/rw-bundle.sh because --bundle stages through it
+# The two shared libraries every path needs. The SSH gate (../lib/arca-ssh.sh) because
+# every deploy goes through it; ../lib/arca-bundle.sh because --bundle stages through it
 # AND a deploy clears the provenance stamp through it.
-# shellcheck source=../lib/rw-ssh.sh
-. "$REPO_ROOT/lib/rw-ssh.sh"
-# shellcheck source=../lib/rw-bundle.sh
-. "$REPO_ROOT/lib/rw-bundle.sh"
+# shellcheck source=../lib/arca-ssh.sh
+. "$REPO_ROOT/lib/arca-ssh.sh"
+# shellcheck source=../lib/arca-bundle.sh
+. "$REPO_ROOT/lib/arca-bundle.sh"
 
 BUNDLE_DIR=""
 if [[ "${1:-}" == "--bundle" ]]; then
@@ -147,7 +147,7 @@ trap 'rm -rf "$STAGE"' EXIT INT TERM
 cat > "$STAGE/vnc_client.app" <<'APP'
 name=VNC Client
 exec=/opt/vnc_client/vnc_client
-icon=/opt/roomwizard/icons/vnc_client.ppm
+icon=/opt/arca/icons/vnc_client.ppm
 args=none
 APP
 
@@ -159,18 +159,18 @@ if [[ -n "$BUNDLE_DIR" ]]; then
     echo " Staging bundle → $BUNDLE_DIR"
     echo "════════════════════════════════════════"
 
-    rw_bundle_init "$BUNDLE_DIR" vnc_client || err "could not prepare $BUNDLE_DIR"
+    arca_bundle_init "$BUNDLE_DIR" vnc_client || err "could not prepare $BUNDLE_DIR"
 
     # The STRIPPED binary is what gets deployed and therefore what gets bundled.
     # (The ARM gate above ran against the unstripped one on purpose — see its
     # comment; the two are the same code.)
-    rw_bundle_add "$BUNDLE_DIR" vnc_client 0755 vnc_client_stripped "$REMOTE_DIR/vnc_client" \
+    arca_bundle_add "$BUNDLE_DIR" vnc_client 0755 vnc_client_stripped "$REMOTE_DIR/vnc_client" \
         || err "staging failed: vnc_client"
-    rw_bundle_add "$BUNDLE_DIR" vnc_client 0644 "$STAGE/vnc_client.app" \
-        /opt/roomwizard/apps/vnc_client.app || err "staging failed: vnc_client.app"
+    arca_bundle_add "$BUNDLE_DIR" vnc_client 0644 "$STAGE/vnc_client.app" \
+        /opt/arca/apps/vnc_client.app || err "staging failed: vnc_client.app"
     if [ -f vnc_client.ppm ]; then
-        rw_bundle_add "$BUNDLE_DIR" vnc_client 0644 vnc_client.ppm \
-            /opt/roomwizard/icons/vnc_client.ppm || err "staging failed: icon"
+        arca_bundle_add "$BUNDLE_DIR" vnc_client 0644 vnc_client.ppm \
+            /opt/arca/icons/vnc_client.ppm || err "staging failed: icon"
     else
         warn "vnc_client.ppm not found — the launcher tile will have no icon"
     fi
@@ -181,7 +181,7 @@ if [[ -n "$BUNDLE_DIR" ]]; then
     # anywhere without one.
     warn "vnc_client.conf deliberately NOT bundled (plaintext password)"
 
-    ok "Staged $(rw_bundle_finish "$BUNDLE_DIR" vnc_client) file(s)"
+    ok "Staged $(arca_bundle_finish "$BUNDLE_DIR" vnc_client) file(s)"
     echo ""
     exit 0
 fi
@@ -202,15 +202,15 @@ echo "════════════════════════�
 
 # Check SSH reachable
 info "Testing SSH connection..."
-# The shared gate (../lib/rw-ssh.sh): "down" and "up but refusing our key" are
+# The shared gate (../lib/arca-ssh.sh): "down" and "up but refusing our key" are
 # different answers, and only the second has a remedy worth offering.
-rw_ssh_gate "$DEVICE" || err "Cannot continue without SSH to $DEVICE"
+arca_ssh_gate "$DEVICE" || err "Cannot continue without SSH to $DEVICE"
 ok "SSH OK"
 
 # Locally built binaries, so any provenance stamp on the unit is about to stop being
-# true. One shared writer (../lib/rw-bundle.sh), before the first file goes out.
-rw_bundle_clear_stamp "$DEVICE" \
-    || warn "could not clear /opt/roomwizard/bundle.info — it may still name an older release"
+# true. One shared writer (../lib/arca-bundle.sh), before the first file goes out.
+arca_bundle_clear_stamp "$DEVICE" \
+    || warn "could not clear /opt/arca/bundle.info — it may still name an older release"
 
 # Stop whatever is running (avoids "Text file busy").
 #
@@ -219,10 +219,10 @@ rw_bundle_clear_stamp "$DEVICE" \
 # be here could not reliably do.  Do not re-add
 # a killall here.
 info "Stopping running apps (device init script)..."
-ssh "$DEVICE" 'if [ -x /etc/init.d/roomwizard-app ]; then
-    /etc/init.d/roomwizard-app stop
+ssh "$DEVICE" 'if [ -x /etc/init.d/arca-app ]; then
+    /etc/init.d/arca-app stop
 else
-    echo "  /etc/init.d/roomwizard-app not installed - run ../commissioning/provision.sh <ip>"
+    echo "  /etc/init.d/arca-app not installed - run ../commissioning/provision.sh <ip>"
 fi' || warn "stop reported a failure - a surviving process may hold the binary"
 ok "Stopped"
 
@@ -258,12 +258,12 @@ fi
 # Install app manifest (for app launcher).  The manifest was written to $STAGE
 # above, from the one heredoc this script has; --bundle copies the same file.
 info "Installing app manifest and icon..."
-ssh "$DEVICE" "mkdir -p /opt/roomwizard/apps /opt/roomwizard/icons"
+ssh "$DEVICE" "mkdir -p /opt/arca/apps /opt/arca/icons"
 if [ -f vnc_client.ppm ]; then
-    scp vnc_client.ppm "$DEVICE:/opt/roomwizard/icons/vnc_client.ppm"
+    scp vnc_client.ppm "$DEVICE:/opt/arca/icons/vnc_client.ppm"
 fi
-scp "$STAGE/vnc_client.app" "$DEVICE:/opt/roomwizard/apps/vnc_client.app"
-ssh "$DEVICE" "chmod 644 /opt/roomwizard/apps/vnc_client.app"
+scp "$STAGE/vnc_client.app" "$DEVICE:/opt/arca/apps/vnc_client.app"
+ssh "$DEVICE" "chmod 644 /opt/arca/apps/vnc_client.app"
 ok "App manifest installed"
 
 echo ""
@@ -279,19 +279,19 @@ if [[ "$MODE" == "run" ]]; then
     ssh -t "$DEVICE" "$REMOTE_DIR/vnc_client 2>&1"
 elif [[ "$MODE" == "set-default" ]]; then
     info "Setting VNC client as default app..."
-    ssh "$DEVICE" "mkdir -p /opt/roomwizard && echo '$REMOTE_DIR/vnc_client' > /opt/roomwizard/default-app"
+    ssh "$DEVICE" "mkdir -p /opt/arca && echo '$REMOTE_DIR/vnc_client' > /opt/arca/default-app"
     ok "Default app → $REMOTE_DIR/vnc_client"
     # Restart init service
-    if ssh "$DEVICE" '[ -f /etc/init.d/roomwizard-app ]' 2>/dev/null; then
+    if ssh "$DEVICE" '[ -f /etc/init.d/arca-app ]' 2>/dev/null; then
         info "Restarting launcher..."
-        ssh "$DEVICE" '/etc/init.d/roomwizard-app start' 2>&1 | grep -v '^$'
+        ssh "$DEVICE" '/etc/init.d/arca-app start' 2>&1 | grep -v '^$'
         ok "Launcher running"
     fi
 else
     # Restart init service (launcher will pick up updated manifest)
-    if ssh "$DEVICE" '[ -f /etc/init.d/roomwizard-app ]' 2>/dev/null; then
+    if ssh "$DEVICE" '[ -f /etc/init.d/arca-app ]' 2>/dev/null; then
         info "Restarting launcher..."
-        ssh "$DEVICE" '/etc/init.d/roomwizard-app start' 2>&1 | grep -v '^$'
+        ssh "$DEVICE" '/etc/init.d/arca-app start' 2>&1 | grep -v '^$'
         ok "Launcher running"
     else
         echo "  Deployed. To run interactively:"

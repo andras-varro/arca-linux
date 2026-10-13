@@ -39,8 +39,8 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Everything committed in this repository **except the files named in the next section**: the C sources
 and shared library under `native_apps/`, `vnc_client/`'s client and its renderer/input/settings, the
-ScummVM backend port under `scummvm-roomwizard/backend-files/`, `usb_host/`'s `devmem_write.c` and Python
-tooling, every shell script (`roomwizard.sh`, `deploy-all.sh`, `release.sh`, `lib/`, `commissioning/`,
+ScummVM backend port under `scummvm-arca/backend-files/`, `usb_host/`'s `devmem_write.c` and Python
+tooling, every shell script (`arca.sh`, `deploy-all.sh`, `release.sh`, `lib/`, `commissioning/`,
 `device-files/`, `tests/`), `kernel/`'s `build-image.sh`, `build-modules.sh` and `tools/*.c`, `uboot/BUILD.md` and `gen-mux.py`, the `.ppm`
 launcher icons, and the documentation. `kernel/dts/rw20.dts` is **not** MIT: its SPDX line says GPL-2.0-only and it includes the kernel
 tree's own `.dtsi` files; it carries the vendor panel's timing
@@ -53,7 +53,7 @@ beds are third-party content with their own terms — next section. `fx_gen.c` a
 committed and still MIT, but nothing that ships comes out of them.
 
 ⚠️ **MIT covers the *source*; it does not decide the licence of a *binary* it is linked into.** The
-backend port under `scummvm-roomwizard/backend-files/` is MIT as source and is compiled into ScummVM, so
+backend port under `scummvm-arca/backend-files/` is MIT as source and is compiled into ScummVM, so
 the resulting `scummvm` binary is GPL-3.0-or-later as a whole. Same for `vnc_client`, which links
 LibVNCClient. Both are listed under *Distributed binaries* below. Taking the backend port's source and
 using it elsewhere is governed by MIT alone.
@@ -67,7 +67,7 @@ repository that is not free for any use**, so read them before packaging a relea
 
 | File | Licence | What it is |
 |---|---|---|
-| `scummvm-roomwizard/vkeybd_roomwizard.zip` | **GPL-3.0-or-later** | A 2× scaled derivative of ScummVM's own `vkeybd_small.zip` virtual-keyboard pack, produced by the committed `make_vkeybd_scaled.py`. Derived from ScummVM, so it carries ScummVM's licence, not this project's. |
+| `scummvm-arca/vkeybd_arca.zip` | **GPL-3.0-or-later** | A 2× scaled derivative of ScummVM's own `vkeybd_small.zip` virtual-keyboard pack, produced by the committed `make_vkeybd_scaled.py`. Derived from ScummVM, so it carries ScummVM's licence, not this project's. |
 | `kernel/patches/*.patch` | **GPL-2.0-only** | Patches to Linux 4.14.52 source, authored in this project. A patch is a derivative of the file it edits, so it carries the kernel's licence, not this project's. They apply to the **kernel image** only; the three modules below are built from the unpatched tree. |
 | `kernel/drivers/*/` | **GPL-2.0-only** | Out-of-tree kernel drivers; `cy8ctmg120_ts.c` is adapted from the kernel's `drivers/input/touchscreen/cy8ctmg110_ts.c`, so it carries the kernel's licence, not this project's. |
 | `uboot/rw20-board.patch` | **GPL-2.0-or-later** (the `.dts` hunk is **GPL-2.0-only**, per its SPDX line) | Adds board `rw20` to U-Boot v2026.10, authored in this project. A patch is a derivative of the tree it edits, so it carries U-Boot's licence, not this project's. `uboot/BUILD.md` beside it is our own documentation. |
@@ -109,11 +109,11 @@ actually pin, because "current upstream" is not a fact anyone can check later.
 
 | Component | Version | Licence | Fetched by |
 |---|---|---|---|
-| ScummVM | whatever the developer clones into `scummvm/` (gitignored) | **GPL-3.0-or-later** | manual `git clone`; `scummvm-roomwizard/build-and-deploy.sh` builds it |
+| ScummVM | whatever the developer clones into `scummvm/` (gitignored) | **GPL-3.0-or-later** | manual `git clone`; `scummvm-arca/build-and-deploy.sh` builds it |
 | LibVNCServer / LibVNCClient | 0.9.14 | **GPL-2.0-or-later** | `vnc_client/build-deps.sh` |
 | libjpeg-turbo | 2.1.5.1 | IJG · BSD-3-Clause · zlib | `vnc_client/build-deps.sh` |
 | zlib | 1.2.13 (`vnc_client`), 1.3.1 (ScummVM) | zlib licence | both build scripts |
-| libpng | 1.6.43 | PNG Reference Library License v2 | `scummvm-roomwizard/build-and-deploy.sh` |
+| libpng | 1.6.43 | PNG Reference Library License v2 | `scummvm-arca/build-and-deploy.sh` |
 | BlueZ | 5.66 (sha256-pinned tarball) | **GPL-2.0-or-later** (SPDX lines of `src/`, `lib/`, `client/`; `COPYING` is GPLv2) | `bluetooth/build-bluez.sh` |
 | BlueALSA (bluez-alsa) | 4.3.1 (sha256-pinned tarball) | **MIT** (`LICENSE`; sources say "licensed under the terms of the MIT license") | `bluetooth/build-bluealsa.sh` |
 | sbc (SBC codec library) | 2.0 (sha256-pinned tarball), linked statically into `bluealsa` | **LGPL-2.1-or-later** (library sources `sbc/*.c`, `sbc/*.h`: "version 2.1 of the License, or (at your option) any later version"; `COPYING.LIB` is LGPL 2.1). `COPYING` is GPLv2 and covers only `src/` tools, which are built `--disable-tools` | `bluetooth/build-bluealsa.sh` |
@@ -130,7 +130,7 @@ is that *nothing here is redistributed as source by this repository* — the obl
 
 ### The root filesystem (`rootfs/`, Buildroot 2025.02.18)
 
-Every package in the card's p6 comes from one Buildroot build (`rootfs/configs/roomwizard_defconfig`,
+Every package in the card's p6 comes from one Buildroot build (`rootfs/configs/arca_defconfig`,
 pinned and sha256-checked by `rootfs/build-rootfs.sh`). **Measured 2026-10-10** by running Buildroot's
 `make -k legal-info` over that tree in WSL: its `manifest.csv` lists the 25 target packages below, and
 the licence strings are Buildroot's own `<PKG>_LICENSE` for that version, not ours. Buildroot itself
@@ -187,9 +187,9 @@ release published from it is available**, because the offer is honoured for the 
 
 | Published artifact | Effective licence of the binary | Obligation |
 |---|---|---|
-| `scummvm` | **GPL-3.0-or-later** | Corresponding source: upstream ScummVM plus `scummvm-roomwizard/backend-files/`. Written offer in `NOTICE`. |
+| `scummvm` | **GPL-3.0-or-later** | Corresponding source: upstream ScummVM plus `scummvm-arca/backend-files/`. Written offer in `NOTICE`. |
 | `scummremastered.zip`, `gui-icons.dat` | **GPL-3.0-or-later** | ScummVM's own theme and GUI data, staged verbatim from the ScummVM tree. Same offer. |
-| `vkeybd_roomwizard.zip` | **GPL-3.0-or-later** | Derivative of ScummVM's `vkeybd_small.zip` (see above). Same offer. |
+| `vkeybd_arca.zip` | **GPL-3.0-or-later** | Derivative of ScummVM's `vkeybd_small.zip` (see above). Same offer. |
 | `vnc_client` | **GPL-2.0-or-later** | Links LibVNCClient. Corresponding source: LibVNCServer 0.9.14, zlib, libjpeg-turbo, plus this repository. |
 | `xpad.ko`, `joydev.ko`, `ff-memless.ko` | **GPL-2.0-only** | Kernel modules. ⚠️ **Written source offer required**, and it is in `NOTICE`: unmodified upstream Linux 4.14.52 from kernel.org, plus `usb_host/build-kernel-modules.sh` and the device's own kernel configuration. No kernel source is modified — these are upstream drivers rebuilt for this kernel's config. |
 | `bluetoothd`, `bluetoothctl`, `libbluetooth.so.3` | **GPL-2.0-or-later** | BlueZ 5.66. Written offer in `NOTICE`: the upstream tarball plus `bluetooth/build-bluez.sh`. They link the device's own glib, dbus and readline dynamically. |

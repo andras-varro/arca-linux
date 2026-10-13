@@ -1,5 +1,5 @@
 /**
- * Control Panel — Unified Hardware App for RoomWizard
+ * Control Panel — Unified Hardware App for Arca
  *
  * Two views: the home icon grid, and one open page (a CpPage module, cp_page.h)
  * under a bar carrying BACK and the page's name.  Each tile opens a page:
@@ -337,7 +337,7 @@ static void home_load_icons(void) {
         const char *icon = home_pages[i]->icon;
         if (!icon) continue;
         char path[128];
-        snprintf(path, sizeof(path), "/opt/roomwizard/icons/%s.ppm", icon);
+        snprintf(path, sizeof(path), "/opt/arca/icons/%s.ppm", icon);
         home_icons[i] = icon_grid_load_icon(path);
     }
 }
@@ -858,7 +858,7 @@ static void run_current_fullscreen_mode(Framebuffer *fb, TouchInput *touch,
 
 int main(int argc, char *argv[]) {
     /* ⚠️ FIRST, before any printf. Launched from the launcher, stdout is
-     * /var/log/roomwizard/app_stdout.log — a FILE, so glibc block-buffers 4 KB
+     * /var/log/arca/app_stdout.log — a FILE, so glibc block-buffers 4 KB
      * and a receipt printed by a process that is then killed never arrives at
      * all.  Every page's layout receipt is exactly that shape.
      * ../CLAUDE.md → App lifecycle carries the measurement. */

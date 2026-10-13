@@ -1,4 +1,4 @@
-# RoomWizard Device Reference
+# Steelcase RoomWizard Device Reference
 
 Everything known to be true about the Steelcase RoomWizard as a hardware and software platform:
 the silicon, the board, the boot chain, the OS, and the traps. Verified on real units — where
@@ -1317,7 +1317,7 @@ C implementation: `native_apps/common/hardware.c`. Vendor scripts that still exi
 
 **The backlight ceiling is 100, and a unit without the vendor stack is already sitting on it.** `max_brightness` is 100
 and a write above it does not raise the duty — `echo 150` reads back `100`. Measured on `rwtest`
-2026-08-06 before `sshd` and long before `roomwizard-app`: a freshly booted unit with the vendor stack removed reads
+2026-08-06 before `sshd` and long before `arca-app`: a freshly booted unit with the vendor stack removed reads
 **100 of 100** with nothing in our stack having written it — `app_launcher` makes no `hw_set_backlight()`
 call at all. The vendor's own mechanism (`adjustbklight.sh` → `setbacklight.sh` / `backlight.sh -1`)
 writes this one node from `websign/brightness.conf` and **defaults to 100** when that file is missing,
@@ -1749,7 +1749,7 @@ units are mkfs'd independently at the factory, so two RoomWizards on identical f
 **Nothing on the device consumes a UUID.** U-Boot passes `root=/dev/mmcblk0p6` (compiled in, and
 there is no `saveenv` — §4.4), and `/etc/fstab` names `/dev/mmcblk0p{2,3,5,7}`. Both are by position,
 so p6 *is* the rootfs and cannot be renumbered. Host tooling identifies a card by layout and a rootfs
-by content — `lib/rw-identify.sh`, and `COMMISSIONING.md` → *Finding the card*. A hardcoded UUID
+by content — `lib/arca-identify.sh`, and `COMMISSIONING.md` → *Finding the card*. A hardcoded UUID
 recognises exactly one unit, and assigning it to a second card so it "matches" produces two cards
 claiming one UUID.
 
@@ -1932,8 +1932,10 @@ from it ([§3.13](#313-watchdogs) for what that watchdog does on a stock unit).
 
 ⚠️ **On our own Buildroot root, OpenSSH `sshd` does not listen until the kernel's crng is initialised, and with
 no seed that takes ~2 min after boot.** Measured twice on `.188`: 09:20:34 to 09:22:42, and rc 5 at 09:43:44
-to sshd listening at 09:45:50. BusyBox `seedrng` (`rootfs/board/roomwizard/overlay/etc/init.d/seedrng`, link
+to sshd listening at 09:45:50. BusyBox `seedrng` (`rootfs/board/arca/overlay/etc/init.d/seedrng`, link
 `S01seedrng`) cut it to 1 s (rc 5 10:02:17, sshd 10:02:18). The first boot of a new card has no seed and stays slow.
+
+⚠️ **A first boot with no seed prints a handful of "uninitialized urandom read" lines; the second boot prints none, bar one different line.** Measured on `.188`, 2026-10-12, card `arca-card-20261012b`: the first boot's dmesg held 7 lines (`seedrng` 256 B, `udevd` 16 B twice, `tr` 8192 B twice, `avahi-daemon` 4 B, plus "4 callbacks suppressed"), and `/var/lib/seedrng` held `seed.no-credit`. The second boot, read at 1 min uptime with `udevd` and `avahi-daemon` running, printed 0: `seed.credit`, "fast init done", "crng init done". One line remains on it: `random: get_random_u32 called from bucket_table_alloc+0xf8/0x24c with crng_init=0`. **[inferred]** The first-boot lines cannot be avoided: a fresh card has no seed, and a seed baked into the image would be shared by every card made from it. **Operator-observed:** none of these lines shows on the console or in the Control Panel log viewer.
 
 ⚠️ **`/var/log` is a symlink to `/home/root/log`, i.e. p3, and `syslogd` holds three files there
 open.** Measured from `/proc/<pid>/fd` on a unit in service, 2026-08-05: `messages` (its target per
@@ -1951,10 +1953,10 @@ neither read nor write the crontab. The mounts of [§4.2](#42-partitions) are no
 
 ### 5.3 App launcher and manifests
 
-`/etc/init.d/roomwizard-app` reads `/opt/roomwizard/default-app` and **respawns that binary
+`/etc/init.d/arca-app` reads `/opt/arca/default-app` and **respawns that binary
 whenever it exits** — which is how quitting a game returns you to the launcher.
 
-`app_launcher` scans `/opt/roomwizard/apps/*.app` manifests and renders them as a touch grid.
+`app_launcher` scans `/opt/arca/apps/*.app` manifests and renders them as a touch grid.
 Manifest format is INI: `name=`, `exec=`, `icon=` (PPM P6), `args=` (one of `fb,touch` / `fb` /
 `touch` / `none`). **Each component's deploy script writes its own manifests and icons** — that is
 how projects plug into the launcher with no central registry.
@@ -1962,10 +1964,10 @@ how projects plug into the launcher with no central registry.
 Device paths worth knowing:
 
 ```
-/opt/games/                  native binaries
-/opt/roomwizard/apps/        .app manifests
-/opt/roomwizard/icons/       PPM icons
-/opt/roomwizard/default-app  boot target
+/opt/games/                       native binaries
+/opt/arca/apps/             .app manifests
+/opt/arca/icons/            PPM icons
+/opt/arca/default-app       boot target
 ```
 
 **Seeing what is running: use `ps`, never `ps w`.** This busybox (v1.31.1) treats `ps w` as "processes
@@ -1975,7 +1977,7 @@ app started at boot or by the launcher has no TTY, so `ps w` shows nothing and t
 | Want | Command |
 |---|---|
 | everything | `ps` (shows `comm`, i.e. the **executable's** basename) |
-| the RoomWizard apps, with exe and cmdline | `/etc/init.d/roomwizard-app status` |
+| the Arca apps, with exe and cmdline | `/etc/init.d/arca-app status` |
 | find one by name | `pidof <basename>` — matches `comm` **or** `basename(argv[0])` |
 | what a PID really is | `readlink /proc/<pid>/exe` |
 
@@ -2050,7 +2052,7 @@ shared libraries are the vendor's and run.
 
 **Measured (March 2026):** a static hard-float ScummVM build died with **SIGSEGV before `main()`**,
 no output and no log; `dmesg` showed `PC is at 0x40` with `r0 : ffffffda` (capture:
-`scummvm-roomwizard/SCUMMVM_DEV.md`). Its link line was not recorded beyond `--whole-archive -lpthread`.
+`scummvm-arca/SCUMMVM_DEV.md`). Its link line was not recorded beyond `--whole-archive -lpthread`.
 **Hypothesis, unproven:** glibc 2.31's pthread init calls `clock_gettime64` (syscall 403, kernel 5.1+),
 gets `-ENOSYS` on 4.14.52, then dereferences a NULL VDSO pointer. Against it: glibc falls back to
 syscall 263 on `-ENOSYS` (inferred), and `vnc_client` links `-static` with plain `-lpthread`, calls

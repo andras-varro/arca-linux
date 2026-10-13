@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# measure_ssh_sabotage.sh — measure tests/rw_ssh_test.sh against deliberately broken
-# copies of lib/rw-ssh.sh and of the call sites. The counts in that file's header come
+# measure_ssh_sabotage.sh — measure tests/arca_ssh_test.sh against deliberately broken
+# copies of lib/arca-ssh.sh and of the call sites. The counts in that file's header come
 # from here.
 #
 #   wsl.exe -e bash -lc "cd /mnt/c/work/roomwizard && bash tests/measure_ssh_sabotage.sh"
@@ -19,18 +19,18 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
-LIB=lib/rw-ssh.sh
-BAK=/tmp/rw-ssh.orig.$$
+LIB=lib/arca-ssh.sh
+BAK=/tmp/arca-ssh.orig.$$
 cp "$LIB" "$BAK"
 HARNESS_ERR=0
 
 # The seven files whose gate F16 rewired. Restoring them all from HEAD~ is how the
 # pre-fix measurement is taken without unstaging anything.
-SITES="commissioning/provision.sh deploy-all.sh roomwizard.sh
+SITES="commissioning/provision.sh deploy-all.sh arca.sh
        native_apps/build-and-deploy.sh vnc_client/build-and-deploy.sh
-       usb_host/build-and-deploy.sh scummvm-roomwizard/build-and-deploy.sh"
+       usb_host/build-and-deploy.sh scummvm-arca/build-and-deploy.sh"
 
-SITEBAK=/tmp/rw-ssh-sites.$$
+SITEBAK=/tmp/arca-ssh-sites.$$
 mkdir -p "$SITEBAK"
 for f in $SITES; do
     mkdir -p "$SITEBAK/$(dirname "$f")"
@@ -44,7 +44,7 @@ restore() {
 trap 'restore; rm -rf "$BAK" "$SITEBAK"' EXIT INT TERM
 
 run() {
-    bash ./tests/rw_ssh_test.sh 2>&1 | sed 's/\x1b\[[0-9;]*m//g' \
+    bash ./tests/arca_ssh_test.sh 2>&1 | sed 's/\x1b\[[0-9;]*m//g' \
         | grep -oE '[0-9]+ passed, [0-9]+ failed' | tail -1
 }
 
@@ -88,7 +88,7 @@ sab() {
 
 # ⚠️ THE sabotage this file exists for: the classifier keyed on the parenthetical
 # method list, which is the signature this repo had written down. It passes against a
-# RoomWizard (PasswordAuthentication yes → "publickey,password") and calls every other
+# vendor-root unit (PasswordAuthentication yes → "publickey,password") and calls every other
 # server "down", so the offer is SUPPRESSED and nothing looks broken.
 sab "classify: auth keyed on (publickey,password)" \
     's|\*"Permission denied"\*|*"Permission denied (publickey,password)"*|'
@@ -101,12 +101,12 @@ sab "classify: unknown text falls through to auth" \
 # The TTY guard removed. This is the one that hangs deploy-all.sh, and the reason
 # every case in group C runs under `timeout`.
 sab "the non-TTY guard removed (can_prompt true)" \
-    's|^rw_ssh_can_prompt() { \[ -t 0 \]; }$|rw_ssh_can_prompt() { true; }|'
+    's|^arca_ssh_can_prompt() { \[ -t 0 \]; }$|arca_ssh_can_prompt() { true; }|'
 
 # The re-probe after ssh-copy-id dropped, i.e. trusting its exit status. Only
 # reachable because the sshd in group D is real.
 sab "the re-probe after ssh-copy-id dropped" \
-    's|^    rw_ssh_probe "\$target" "\$@" >/dev/null \&\& {$|    true \&\& {|'
+    's|^    arca_ssh_probe "\$target" "\$@" >/dev/null \&\& {$|    true \&\& {|'
 
 # A passphrase on the generated key: it would then need an agent in the dependency
 # list of every build script.
@@ -123,10 +123,10 @@ sab "key_owner chowns when not root" \
     's#^    \[ "\$euid" = "0" \] || return 0$#    [ "$euid" != "0" ] || return 0#'
 
 # The subshell defect the first version of this library had: the gate reads
-# RW_SSH_LAST_STDERR set inside a `$(...)`, so ssh's own complaint is replaced by a
+# ARCA_SSH_LAST_STDERR set inside a `$(...)`, so ssh's own complaint is replaced by a
 # blank line. Every wording assertion still passes; only C3a/C5a see it.
 sab "the gate reads the stderr from a subshell" \
-    's|^    rw_ssh_probe "\$target" "\$@" >/dev/null \&\& return 0$|    [ "$(rw_ssh_probe "$target" "$@")" = ok ] \&\& return 0|'
+    's|^    arca_ssh_probe "\$target" "\$@" >/dev/null \&\& return 0$|    [ "$(arca_ssh_probe "$target" "$@")" = ok ] \&\& return 0|'
 
 restore
 echo ""

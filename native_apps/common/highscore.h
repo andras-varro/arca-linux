@@ -1,5 +1,5 @@
 /*
- * High Score System — central component for RoomWizard native games.
+ * High Score System — central component for Arca native games.
  *
  * Provides persistent top-5 leaderboards per game, touch-driven name entry
  * with an on-screen keyboard, and gold/silver/bronze ranking display.

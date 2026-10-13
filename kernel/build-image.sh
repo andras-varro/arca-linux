@@ -1,5 +1,5 @@
 #!/bin/bash
-# build-image.sh - Build a bootable uImage from the vanilla 4.14.52 tree for RoomWizard
+# build-image.sh - Build a bootable uImage from the vanilla 4.14.52 tree for Arca
 # Run this script in WSL (Linux). The recipe and the reasoning behind each step are in
 # kernel/README.md.
 #
@@ -97,7 +97,7 @@ mapfile -t PATCHES < <(find "$PATCH_DIR" -maxdepth 1 -name '*.patch' | sort)
 EPOCH=$(git -C "$REPO_DIR" log -1 --format=%ct 2>/dev/null || stat -c %Y "$KERNEL_TARBALL")
 KBUILD_BUILD_TIMESTAMP="$(date -u -d "@${EPOCH}")"
 export SOURCE_DATE_EPOCH="$EPOCH" KBUILD_BUILD_TIMESTAMP KBUILD_BUILD_VERSION=1
-export KBUILD_BUILD_USER=roomwizard KBUILD_BUILD_HOST=build
+export KBUILD_BUILD_USER=arca KBUILD_BUILD_HOST=build
 echo "  Cross compiler: $(${CROSS_COMPILE}gcc --version | head -1)"
 echo "  Build epoch:    ${EPOCH} (${KBUILD_BUILD_TIMESTAMP})"
 

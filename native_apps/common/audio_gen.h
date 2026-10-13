@@ -56,7 +56,7 @@
  *  shift are not interchangeable even though they cancel acoustically.
  *
  *  `AUDIO_MASTER_SHIFT` is this SPEAKER'S CEILING, spent once per device in
- *  `audio_out` — the same `>>1` `scummvm-roomwizard/backend-files/oss-mixer.cpp`
+ *  `audio_out` — the same `>>1` `scummvm-arca/backend-files/oss-mixer.cpp`
  *  applies immediately before `write()`.  At 96 and 1 a lone voice reaches 6144
  *  after it, which is the peak a 440 Hz sine is measured clean at here
  *  (../SYSTEM_ANALYSIS.md#34-audio); 18000 was measured as a near-square.

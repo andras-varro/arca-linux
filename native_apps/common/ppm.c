@@ -1,5 +1,5 @@
 /**
- * PPM Image Loader for RoomWizard
+ * PPM Image Loader for Arca
  *
  * Supports P6 (binary RGB) format only.  Maxval must be 255.
  * Images larger than 4096×4096 are rejected as a safety limit.

@@ -15,7 +15,7 @@
 #   3. shellcheck          every tracked *.sh, in two tiers (see PHASE 3)
 #
 # MEASURED COST, this host, 2026-09-08, warm cache:
-#   phase 1  185 s   — rw_ssh_test.sh alone is 121 s (it starts a real sshd
+#   phase 1  185 s   — arca_ssh_test.sh alone is 121 s (it starts a real sshd
 #                      and probes TEST-NET-1, so most of that is timeouts);
 #                      doc_check.sh 36 s; the other ten total 28 s
 #   phase 2   14 s   — ten builds plus ten runs
@@ -44,8 +44,8 @@
 # NEGATIVE CONTROLS: --self-test.  Each drives this script and asserts the exit
 # code it must produce; the run itself says how many there are.  Every one has
 # been seen to fire, and two of them first passed VACUOUSLY — see the notes at
-# controls 5 and 7.  The four overrides they use (RW_SUITE_DIR, RW_CTEST_DIR,
-# RW_SC_BASELINE, RW_SC_FILES) exist for that and nothing else.
+# controls 5 and 7.  The four overrides they use (ARCA_SUITE_DIR, ARCA_CTEST_DIR,
+# ARCA_SC_BASELINE, ARCA_SC_FILES) exist for that and nothing else.
 #
 # WHAT THIS GATE CANNOT SEE
 #   Anything that needs the panel.  No screen is drawn, no touch is read, no
@@ -90,13 +90,13 @@ SUITE_ROWS=(
     "check_arm_safe_test.sh|deploy"
     "commission_offline_test.sh|deploy"
     "provision_online_test.sh|deploy"
-    "rw_bundle_ssh_test.sh|deploy"
-    "rw_identify_test.sh|deploy"
-    "rw_provision_test.sh|deploy"
-    "rw_release_test.sh|deploy"
-    "rw_ssh_test.sh|deploy"
-    "rw_state_test.sh|deploy"
-    "rw_hostname_test.sh|deploy"
+    "arca_bundle_ssh_test.sh|deploy"
+    "arca_identify_test.sh|deploy"
+    "arca_provision_test.sh|deploy"
+    "arca_release_test.sh|deploy"
+    "arca_ssh_test.sh|deploy"
+    "arca_state_test.sh|deploy"
+    "arca_hostname_test.sh|deploy"
     "dump_boot_regs_test.sh|deploy"
     "setup_build_env_test.sh|deploy"
     "smoke_first_screen_test.sh|deploy"
@@ -176,9 +176,9 @@ CTEST_NOT_HOST=(
 
 SCOPE="all"
 ONLY=""
-SUITE_DIR="${RW_SUITE_DIR:-$REPO_ROOT/tests}"
-CTEST_DIR="${RW_CTEST_DIR:-$REPO_ROOT/native_apps/tests}"
-SC_BASELINE="${RW_SC_BASELINE:-$REPO_ROOT/tests/shellcheck-baseline.txt}"
+SUITE_DIR="${ARCA_SUITE_DIR:-$REPO_ROOT/tests}"
+CTEST_DIR="${ARCA_CTEST_DIR:-$REPO_ROOT/native_apps/tests}"
+SC_BASELINE="${ARCA_SC_BASELINE:-$REPO_ROOT/tests/shellcheck-baseline.txt}"
 LOGDIR=""
 
 usage() {
@@ -242,27 +242,27 @@ if [ "$ONLY" = "selftest" ]; then
 
     mkdir -p "$T/empty_suites" "$T/empty_ctests"
     control "1 an empty suite directory is a HARNESS ERROR, not a pass" 2 \
-        env RW_SUITE_DIR="$T/empty_suites" bash "$ME" --only=suites --scope=deploy
+        env ARCA_SUITE_DIR="$T/empty_suites" bash "$ME" --only=suites --scope=deploy
 
     mkdir -p "$T/decoy_ctests"
     : > "$T/decoy_ctests/zz_decoy_test.c"
     control "2 an unclassified *_test.c is a HARNESS ERROR" 2 \
-        env RW_CTEST_DIR="$T/decoy_ctests" bash "$ME" --only=ctests
+        env ARCA_CTEST_DIR="$T/decoy_ctests" bash "$ME" --only=ctests
 
     mkdir -p "$T/failing"
-    printf '#!/bin/bash\necho "3 passed, 1 failed"\nexit 1\n' > "$T/failing/rw_identify_test.sh"
-    for n in check_arm_safe commission_offline provision_online rw_bundle_ssh \
-             rw_provision rw_release rw_ssh rw_state setup_build_env smoke_first_screen; do
+    printf '#!/bin/bash\necho "3 passed, 1 failed"\nexit 1\n' > "$T/failing/arca_identify_test.sh"
+    for n in check_arm_safe commission_offline provision_online arca_bundle_ssh \
+             arca_provision arca_release arca_ssh arca_state setup_build_env smoke_first_screen; do
         printf '#!/bin/bash\necho "1 passed, 0 failed"\n' > "$T/failing/${n}_test.sh"
     done
     printf '#!/bin/bash\necho ok\n' > "$T/failing/doc_check.sh"
     control "3 a suite that exits 1 fails the gate" 1 \
-        env RW_SUITE_DIR="$T/failing" bash "$ME" --only=suites --scope=deploy
+        env ARCA_SUITE_DIR="$T/failing" bash "$ME" --only=suites --scope=deploy
 
     cp -a "$T/failing" "$T/harness"
-    printf '#!/bin/bash\necho "HARNESS ERROR"\nexit 2\n' > "$T/harness/rw_identify_test.sh"
+    printf '#!/bin/bash\necho "HARNESS ERROR"\nexit 2\n' > "$T/harness/arca_identify_test.sh"
     control "4 a suite that exits 2 is a HARNESS ERROR, not a failure" 2 \
-        env RW_SUITE_DIR="$T/harness" bash "$ME" --only=suites --scope=deploy
+        env ARCA_SUITE_DIR="$T/harness" bash "$ME" --only=suites --scope=deploy
 
     cp -a "$T/failing" "$T/skipping"
     # ⚠️ The fixture COLOURS the word, exactly as commission_offline_test.sh
@@ -270,10 +270,10 @@ if [ "$ONLY" = "selftest" ]; then
     # made this control pass while the real suite's skip was being counted as a
     # pass — measured 2026-09-08. The ESC[1;33m prefix is the whole point.
     printf '#!/bin/bash\nprintf "  \\033[1;33mskip\\033[0m  needs root\\n"\nexit 0\n' \
-        > "$T/skipping/rw_identify_test.sh"
+        > "$T/skipping/arca_identify_test.sh"
     control "5 a suite that skips passes the gate but is NOT counted as passed" 0 \
-        env RW_SUITE_DIR="$T/skipping" bash "$ME" --only=suites --scope=deploy
-    if grep -q 'skipped: rw_identify_test.sh' "$T/out"; then
+        env ARCA_SUITE_DIR="$T/skipping" bash "$ME" --only=suites --scope=deploy
+    if grep -q 'skipped: arca_identify_test.sh' "$T/out"; then
         sc_pass=$((sc_pass+1)); ok "5b   …and the summary names it as skipped"
     else
         sc_fail=$((sc_fail+1)); bad "5b   the skip was absorbed into the pass count"
@@ -311,7 +311,7 @@ CTSTUB
 int main(void) { printf("  \033[1;33mskip\033[0m  no /dev/uinput\n"); return 0; }
 CTSKIP
     control "8 a C regression that skips passes the gate but is NOT counted as passed" 0 \
-        env RW_CTEST_DIR="$T/ct_skip/tests" bash "$ME" --only=ctests
+        env ARCA_CTEST_DIR="$T/ct_skip/tests" bash "$ME" --only=ctests
     if grep -q 'skipped: gamepad_announce_test' "$T/out"; then
         sc_pass=$((sc_pass+1)); ok "8b   …and the summary names it as skipped"
     else
@@ -325,12 +325,12 @@ CTSKIP
 int main(void) { printf("Refusing to grade\n"); return 2; }
 CTUNDEC
     control "9 a C regression that exits 2 is a HARNESS ERROR, not a failure" 2 \
-        env RW_CTEST_DIR="$T/ct_undec/tests" bash "$ME" --only=ctests
+        env ARCA_CTEST_DIR="$T/ct_undec/tests" bash "$ME" --only=ctests
 
     # And the control for the control: the same fixture with no stub replaced
     # must be plain green, or controls 8 and 9 are measuring the fixture.
     control "10 the unmodified phase-2 fixture passes" 0 \
-        env RW_CTEST_DIR="$T/ct/tests" bash "$ME" --only=ctests
+        env ARCA_CTEST_DIR="$T/ct/tests" bash "$ME" --only=ctests
 
     # ⚠️ The other direction, which fired for real: three of these tests name a
     # CASE with the word "skipped", so a detector matching the word alone
@@ -347,7 +347,7 @@ int main(void) {
 }
 CTWORDY
     control "11 a PASSING test that says \"skipped\" in a case name is not a skip" 0 \
-        env RW_CTEST_DIR="$T/ct_wordy/tests" bash "$ME" --only=ctests
+        env ARCA_CTEST_DIR="$T/ct_wordy/tests" bash "$ME" --only=ctests
     if grep -q 'skipped: config_test' "$T/out"; then
         sc_fail=$((sc_fail+1)); bad "11b   its case name was read as a skip"
     else
@@ -358,7 +358,7 @@ CTWORDY
     printf '#!/bin/bash\n# shellcheck disable-typo=SC2086\ntrue\n' > "$T/scfiles/broken.sh"
     : > "$T/sc_empty_baseline.txt"
     control "6 a malformed shellcheck directive fails tier 1" 1 \
-        env RW_SC_BASELINE="$T/sc_empty_baseline.txt" RW_SC_FILES="$T/scfiles/broken.sh" \
+        env ARCA_SC_BASELINE="$T/sc_empty_baseline.txt" ARCA_SC_FILES="$T/scfiles/broken.sh" \
             bash "$ME" --only=shellcheck
 
     mkdir -p "$T/scratchet"
@@ -376,7 +376,7 @@ echo $2
 RATCHET
     printf '%s SC2086 1\n' "$T/scratchet/ratchet.sh" > "$T/sc_low_baseline.txt"
     control "7 a finding count above the baseline fails tier 2" 1 \
-        env RW_SC_BASELINE="$T/sc_low_baseline.txt" RW_SC_FILES="$T/scratchet/ratchet.sh" \
+        env ARCA_SC_BASELINE="$T/sc_low_baseline.txt" ARCA_SC_FILES="$T/scratchet/ratchet.sh" \
             bash "$ME" --only=shellcheck
 
     printf '\n%s%d controls fired, %d did not%s\n' "$BLD" "$sc_pass" "$sc_fail" "$RST"
@@ -421,7 +421,7 @@ phase_suites() {
         log="$LOGDIR/$name.log"
         t0=$(date +%s)
         rc=0
-        # stdin from /dev/null: rw_provision_test's ssh stub runs `cat` on fd 0
+        # stdin from /dev/null: arca_provision_test's ssh stub runs `cat` on fd 0
         # on purpose, and under a caller whose stdin never reaches EOF (a tool
         # or background shell) it blocked until the 420 s cap -- measured.
         timeout 420 bash "$path" </dev/null >"$log" 2>&1 || rc=$?
@@ -481,7 +481,7 @@ phase_ctests() {
     [ "$harness_n" -eq 0 ] || return
 
     # The tree the rows compile in is the PARENT of the subject directory, so
-    # that RW_CTEST_DIR redirects the build as well as the scan.  Without this
+    # that ARCA_CTEST_DIR redirects the build as well as the scan.  Without this
     # the self-test can point phase 2 at a fixture and still compile the real
     # sources, which is how a control for this phase would pass while measuring
     # the repo instead of the fixture.
@@ -558,12 +558,12 @@ phase_ctests() {
 # read from the `control_panel` step of native_apps/build-and-deploy.sh, the
 # one place that names them, so a page added there is covered here.  Warnings
 # do not fail it, matching the ARM build (WARN=-Wall -Wextra, no -Werror); the
-# count is printed so a rise is visible.  RW_APPS_DIR redirects the tree, for
+# count is printed so a rise is visible.  ARCA_APPS_DIR redirects the tree, for
 # the negative control.
 phase_apps() {
     head2 "PHASE 2b  control_panel syntax check  (host gcc, no device)"
     command -v gcc >/dev/null 2>&1 || { harness "gcc is absent — this must run in WSL, not Git Bash"; return; }
-    local na="${RW_APPS_DIR:-$REPO_ROOT/native_apps}" script srcs s rc=0 t0 t1 log
+    local na="${ARCA_APPS_DIR:-$REPO_ROOT/native_apps}" script srcs s rc=0 t0 t1 log
     script="$na/build-and-deploy.sh"
     [ -f "$script" ] || { harness "$script is missing — the source list has no home"; return; }
     srcs="$(awk '/^step "[0-9]+\/[0-9]+" "control_panel"/ {f=1; next} f && /\$CC/ {print; exit}' "$script" \
@@ -617,8 +617,8 @@ phase_shellcheck() {
     [ -f "$SC_BASELINE" ] || { harness "baseline missing: $SC_BASELINE"; return; }
 
     local files
-    if [ -n "${RW_SC_FILES:-}" ]; then
-        files="$RW_SC_FILES"
+    if [ -n "${ARCA_SC_FILES:-}" ]; then
+        files="$ARCA_SC_FILES"
     else
         files="$(cd "$REPO_ROOT" && git ls-files -- '*.sh')"
     fi
@@ -696,7 +696,7 @@ phase_baseline() {
 }
 
 # ── main ───────────────────────────────────────────────────────────────────
-printf '%s%sRoomWizard host gate%s  —  scope %s, repo %s\n' "$BLD" "$CYA" "$RST" "$SCOPE" "$REPO_ROOT"
+printf '%s%sArca host gate%s  —  scope %s, repo %s\n' "$BLD" "$CYA" "$RST" "$SCOPE" "$REPO_ROOT"
 
 case "$ONLY" in
     "")                  phase_suites; phase_ctests; phase_apps; phase_shellcheck ;;

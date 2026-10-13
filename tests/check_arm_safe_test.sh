@@ -17,11 +17,11 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-# RW_GATE lets measure_arm_gate_sabotage.sh aim this same suite at a deliberately
+# ARCA_GATE lets measure_arm_gate_sabotage.sh aim this same suite at a deliberately
 # broken copy of the gate. The assertions must never be restated over there — a
 # harness that re-implements what it is checking can repair the sabotage it was
 # written to catch (a harness that restates the check can repair the sabotage).
-GATE="${RW_GATE:-$REPO/native_apps/check-arm-safe.sh}"
+GATE="${ARCA_GATE:-$REPO/native_apps/check-arm-safe.sh}"
 
 CC=arm-linux-gnueabihf-gcc
 STRIP=arm-linux-gnueabihf-strip
@@ -41,7 +41,7 @@ for t in "$CC" "$STRIP" "$OBJDUMP"; do
 done
 [[ -x "$GATE" ]] || { echo -e "${RED}REFUSING TO RUN: $GATE is not executable${NC}" >&2; exit 1; }
 
-WORK="$(mktemp -d /tmp/rw-armgate.XXXXXX)"
+WORK="$(mktemp -d /tmp/arca-armgate.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 
 ok()   { passed=$((passed + 1)); echo -e "  ${GREEN}pass${NC}  $1"; }

@@ -1,14 +1,14 @@
 /*
- * App Launcher for RoomWizard
+ * App Launcher for Arca
  *
- * Visual grid launcher that scans the .app manifest files in /opt/roomwizard/apps
+ * Visual grid launcher that scans the .app manifest files in /opt/arca/apps
  * and displays them as icon tiles.  Acts as the system shell — respawned
  * by the init script when an app exits.
  *
  * Manifest format (key=value text, one per line):
  *   name=Snake
  *   exec=/opt/games/snake
- *   icon=/opt/roomwizard/icons/snake.ppm   (optional — PPM P6 format)
+ *   icon=/opt/arca/icons/snake.ppm   (optional — PPM P6 format)
  *   args=fb,touch                           (optional — default: fb,touch)
  *
  * Recognized args values:
@@ -50,7 +50,7 @@
 /* ── Limits ─────────────────────────────────────────────────────────────── */
 
 #define MAX_APPS        24
-#define APPS_DIR        "/opt/roomwizard/apps"
+#define APPS_DIR        "/opt/arca/apps"
 
 /* Post-launch cooldown: ignore ALL input (gamepad, touch, mouse) for this
  * many milliseconds after returning from a child process.  This prevents
@@ -724,8 +724,8 @@ static void on_sigterm(int sig) { (void)sig; quit_flag = 1; }
 
 int main(int argc, char *argv[]) {
     /* ⚠️ **stdout is a FILE at boot, so it is block-buffered and the receipt below
-     * does not arrive.** `/etc/init.d/roomwizard-app` redirects us into
-     * /var/log/roomwizard/app_stdout.log; glibc then buffers 4 KB and the
+     * does not arrive.** `/etc/init.d/arca-app` redirects us into
+     * /var/log/arca/app_stdout.log; glibc then buffers 4 KB and the
      * compute_grid_layout() receipt — the one thing that has to be read BEFORE a
      * screenshot is trusted — sits in that buffer until the app exits or the
      * buffer fills.  Measured 2026-08-22 on `.188`: the log ended mid-word in
@@ -739,7 +739,7 @@ int main(int argc, char *argv[]) {
     if (argc > 1) fb_dev    = argv[1];
     if (argc > 2) touch_dev = argv[2];
 
-    printf("RoomWizard App Launcher\n");
+    printf("Arca App Launcher\n");
     printf("=======================\n");
 
     /* Singleton guard — exit immediately if another instance is running */

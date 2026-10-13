@@ -4,7 +4,7 @@
 /*
  * VNC Renderer - Phase 2 Optimized + Bilinear Interpolation
  *
- * Performance optimizations adopted from ScummVM RoomWizard backend:
+ * Performance optimizations adopted from ScummVM Arca backend:
  *   O2:  Precomputed X-coordinate LUT (eliminates per-pixel division)
  *   O3:  Border-only clearing (not full screen every frame)
  *   O8:  16bpp RGB565 framebuffer (halves memory bandwidth)

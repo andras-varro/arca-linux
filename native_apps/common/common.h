@@ -1,5 +1,5 @@
 /**
- * Common UI Library for RoomWizard
+ * Common UI Library for Arca
  * 
  * Unified button system combining best features from game_common and ui_button.
  * Provides text truncation, auto-sizing, icon support, and screen templates.

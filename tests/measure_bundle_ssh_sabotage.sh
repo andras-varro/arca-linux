@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# measure_bundle_ssh_sabotage.sh — measure tests/rw_bundle_ssh_test.sh against
-# deliberately broken copies of rw_bundle_install_ssh. The counts in that file's
+# measure_bundle_ssh_sabotage.sh — measure tests/arca_bundle_ssh_test.sh against
+# deliberately broken copies of arca_bundle_install_ssh. The counts in that file's
 # header come from here.
 #
 #   wsl.exe -e bash -lc "cd /mnt/c/work/roomwizard && bash tests/measure_bundle_ssh_sabotage.sh"
@@ -14,25 +14,25 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
-BAK=/tmp/rw-bundle.orig.$$
+BAK=/tmp/arca-bundle.orig.$$
 HARNESS_ERR=0
-cp lib/rw-bundle.sh "$BAK"
-trap 'cp "$BAK" lib/rw-bundle.sh; rm -f "$BAK"' EXIT INT TERM
+cp lib/arca-bundle.sh "$BAK"
+trap 'cp "$BAK" lib/arca-bundle.sh; rm -f "$BAK"' EXIT INT TERM
 
-run() { ./tests/rw_bundle_ssh_test.sh 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -oE '[0-9]+ passed, [0-9]+ failed'; }
+run() { ./tests/arca_bundle_ssh_test.sh 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -oE '[0-9]+ passed, [0-9]+ failed'; }
 
 # sab <label> <sed-expression>
 sab() {
     local label="$1" expr="$2" before after
-    cp "$BAK" lib/rw-bundle.sh
-    before=$(md5sum lib/rw-bundle.sh | cut -d' ' -f1)
-    sed -i "$expr" lib/rw-bundle.sh
-    after=$(md5sum lib/rw-bundle.sh | cut -d' ' -f1)
+    cp "$BAK" lib/arca-bundle.sh
+    before=$(md5sum lib/arca-bundle.sh | cut -d' ' -f1)
+    sed -i "$expr" lib/arca-bundle.sh
+    after=$(md5sum lib/arca-bundle.sh | cut -d' ' -f1)
     if [ "$before" = "$after" ]; then
         printf '  %-34s DID NOT APPLY — the count below would be a lie\n' "$label"
         HARNESS_ERR=1; return
     fi
-    if ! bash -n lib/rw-bundle.sh 2>/dev/null; then
+    if ! bash -n lib/arca-bundle.sh 2>/dev/null; then
         printf '  %-34s broke the syntax — not a usable sabotage\n' "$label"
         HARNESS_ERR=1; return
     fi
@@ -40,7 +40,7 @@ sab() {
 }
 
 echo ""
-cp "$BAK" lib/rw-bundle.sh
+cp "$BAK" lib/arca-bundle.sh
 printf '  %-34s %s\n' "baseline (nothing broken)" "$(run)"
 
 # The +x measurement, which is the only check that can see a missing chmod on a
@@ -51,7 +51,7 @@ sab "the +x check removed" 's|^    if \[ -n "\$xlist" \]; then$|    if false; th
 sab "md5 mismatch no longer reported" 's|^            elif \[ "\$got" != "\$want" \]; then$|            elif false; then|'
 
 # The both-directions structural check, run BEFORE anything is written.
-sab "rw_bundle_check skipped" 's|^    if ! rw_bundle_check "\$dir"; then$|    if false; then|'
+sab "arca_bundle_check skipped" 's|^    if ! arca_bundle_check "\$dir"; then$|    if false; then|'
 
 # Modes taken from the transfer instead of the manifest. THE bug the declared-mode
 # rule exists for: the staging tree lives on /mnt/c, where every file reads 0777 and
@@ -68,7 +68,7 @@ sab "owner digit read from the end" 's|o = (length(m) == 4) ? substr(m, 2, 1) : 
 # `; true` to the echo and changed nothing, then reported 0 failed.
 sab "failed transfer not fatal" 's|^        return 1$|        :|'
 
-cp "$BAK" lib/rw-bundle.sh
+cp "$BAK" lib/arca-bundle.sh
 echo ""
 printf '  %-34s %s\n' "restored" "$(run)"
 echo ""

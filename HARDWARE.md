@@ -1,4 +1,4 @@
-# RoomWizard Hardware
+# Steelcase RoomWizard Hardware
 
 The Steelcase RoomWizard board as a physical object: what is on it, what each connector goes to, what
 is unpopulated, and how the case comes apart without breaking anything.

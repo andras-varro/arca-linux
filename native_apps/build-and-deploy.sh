@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build all native games and optionally deploy to a RoomWizard device.
+# Build all native games and optionally deploy to a Arca device.
 #
 # Usage:
 #   ./build-and-deploy.sh                      # build only
@@ -21,7 +21,7 @@
 # A source-path directive, not a disable: it ENABLES analysis of the four libraries
 # sourced below.  shellcheck 0.7.0 resolves a `source=` path against its OWN working
 # directory rather than the script's, and the host gate runs it from the repo root,
-# where neither app-manifests.sh nor ../lib/rw-ssh.sh exists.  It is file-wide ONLY
+# where neither app-manifests.sh nor ../lib/arca-ssh.sh exists.  It is file-wide ONLY
 # here, before the first command: below `set -e` it scopes to the next command alone
 # and all four SC1091 findings come back.  Measured both ways.
 # ⚠️ Do not begin any of these explanatory lines with the checker's own name — a
@@ -50,12 +50,12 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 . "$SCRIPT_DIR/sound-sets.sh"
 
 # The two shared libraries every path needs. The SSH gate because every deploy goes
-# through it; ../lib/rw-bundle.sh because --bundle stages through it AND a deploy
+# through it; ../lib/arca-bundle.sh because --bundle stages through it AND a deploy
 # clears the provenance stamp through it, so it can no longer be sourced in one branch.
-# shellcheck source=../lib/rw-ssh.sh
-. "$REPO_ROOT/lib/rw-ssh.sh"
-# shellcheck source=../lib/rw-bundle.sh
-. "$REPO_ROOT/lib/rw-bundle.sh"
+# shellcheck source=../lib/arca-ssh.sh
+. "$REPO_ROOT/lib/arca-ssh.sh"
+# shellcheck source=../lib/arca-bundle.sh
+. "$REPO_ROOT/lib/arca-bundle.sh"
 
 # ── argument shapes ─────────────────────────────────────────────────────────
 # Two, and they do not mix: `--bundle <dir>` needs no device, and every deploy
@@ -105,7 +105,7 @@ usage() {
     echo "  $0                          # build only"
     echo "  $0 192.168.50.73            # build + deploy"
     echo "  $0 192.168.50.73 set-default"
-    echo "  $0 --bundle /tmp/rw-bundle"
+    echo "  $0 --bundle /tmp/arca-bundle"
     exit 1
 }
 
@@ -126,12 +126,12 @@ esac
 # ── 1. cross-compiler check ─────────────────────────────────────────────────
 echo ""
 echo "════════════════════════════════════════"
-echo " RoomWizard Build + Deploy"
+echo " Arca Build + Deploy"
 echo "════════════════════════════════════════"
 info "Started — $(date '+%Y-%m-%d %H:%M:%S')"
 
 # Toolchain and link mode: soft-float ABI, DYNAMIC against the device's own soft-float
-# glibc userspace — the same settings as scummvm-roomwizard/build-and-deploy.sh, whose
+# glibc userspace — the same settings as scummvm-arca/build-and-deploy.sh, whose
 # comment carries the loader/glibc mechanism and why armv7-a is still divide-free.  The
 # flags ride inside CC so every compile and link line below gets them.
 #
@@ -305,11 +305,11 @@ $CC "${WARN[@]}" -O2 -I. tests/touch_raw.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}
 step "29/31" "audio_mix_test"
 $CC "${WARN[@]}" -O2 -I. tests/audio_mix_test.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/audio_mix_test -lm "${AUDIO_LIBS[@]}"
 
-# The Monitor page's history daemon, started at boot by /etc/init.d/rwmond.
+# The Monitor page's history daemon, started at boot by /etc/init.d/arcamond.
 # From common/ it links only hardware.c (+ config.c), for the over-temperature
 # red LED; it opens no framebuffer or input.
-step "30/31" "rwmond"
-$CC "${WARN[@]}" -O2 -I. sysmon/rwmond.c sysmon/mon_ring.c control_panel/cpu_load.c control_panel/soc_temp.c common/hardware.c common/config.c -o build/rwmond
+step "30/31" "arcamond"
+$CC "${WARN[@]}" -O2 -I. sysmon/arcamond.c sysmon/mon_ring.c control_panel/cpu_load.c control_panel/soc_temp.c common/hardware.c common/config.c -o build/arcamond
 
 # The terminal: /bin/login in a pty, drawn with libvterm.  The one binary with
 # VTERM_CFLAGS / VTERM_LIBS; term_keymap.c is its pure key table (host test
@@ -319,7 +319,7 @@ $CC "${WARN[@]}" -O2 -I. "${VTERM_CFLAGS[@]}" terminal/terminal.c terminal/term_
 
 # Collect icon files from source dirs → build/icons/.  control_panel/icons/ holds
 # the control panel's home-grid icons (gen_cp_icons.py); control_panel reads them
-# from /opt/roomwizard/icons/ like the launcher reads a manifest's icon=.
+# from /opt/arca/icons/ like the launcher reads a manifest's icon=.
 #
 # ⚠️ Emptied first, as build/apps/ is below: build/ is never cleaned, and both
 # directories are copied by GLOB — to the device and into --bundle — so an icon
@@ -339,15 +339,15 @@ done
 # deploy path and --bundle copy these exact files, which is the point of having
 # them on disk rather than in an ssh heredoc.
 rm -f build/apps/*.app
-rw_write_app_manifests build/apps
+arca_write_app_manifests build/apps
 echo "  Wrote $(find build/apps -maxdepth 1 -type f -name '*.app' 2>/dev/null | wc -l) app manifest(s) → build/apps/"
 
 # The per-game sound sets, from sound-sets.sh's data and for the same reason: that
 # table is the ONE home for every game's music paths, and a path
 # that drifted between this path and --bundle would install a game that plays
-# nothing.  ⚠️ Checked rather than assumed — rw_write_sound_sets counts what it
+# nothing.  ⚠️ Checked rather than assumed — arca_write_sound_sets counts what it
 # wrote, because its writer loop runs in a subshell and cannot report itself.
-rw_write_sound_sets build/soundsets || err "could not write the sound sets"
+arca_write_sound_sets build/soundsets || err "could not write the sound sets"
 echo "  Wrote $(find build/soundsets -maxdepth 1 -type f -name '*.sound' 2>/dev/null | wc -l) sound set(s) → build/soundsets/"
 
 # ── deployed artifacts ──────────────────────────────────────────────────────
@@ -358,7 +358,7 @@ echo "  Wrote $(find build/soundsets -maxdepth 1 -type f -name '*.sound' 2>/dev/
 # have recreated exactly that bug, and a fourth for
 # --bundle would recreate it again.
 GAMES_BINARIES=(snake tetris pong brick_breaker samegame frogger platformer
-                theremin audio_mix_test control_panel rwmond
+                theremin audio_mix_test control_panel arcamond
                 touch_raw terminal)
 
 echo ""
@@ -432,27 +432,27 @@ if [[ -n "$BUNDLE_DIR" ]]; then
     echo " Staging bundle → $BUNDLE_DIR"
     echo "════════════════════════════════════════"
 
-    rw_bundle_init "$BUNDLE_DIR" native_apps || err "could not prepare $BUNDLE_DIR"
+    arca_bundle_init "$BUNDLE_DIR" native_apps || err "could not prepare $BUNDLE_DIR"
 
     # 0755 for everything executable, 0644 for data.  Stated here, not read off
     # disk — /mnt/c reports 0777 for every file and discards chmod, so a mode
-    # measured on this host is a constant (../CLAUDE.md, ../lib/rw-bundle.sh).
+    # measured on this host is a constant (../CLAUDE.md, ../lib/arca-bundle.sh).
     for b in "${GAMES_BINARIES[@]}"; do
-        rw_bundle_add "$BUNDLE_DIR" native_apps 0755 "build/$b" "$GAMES_DIR/$b" \
+        arca_bundle_add "$BUNDLE_DIR" native_apps 0755 "build/$b" "$GAMES_DIR/$b" \
             || err "staging failed: $b"
     done
-    rw_bundle_add "$BUNDLE_DIR" native_apps 0755 build/app_launcher /opt/roomwizard/app_launcher \
+    arca_bundle_add "$BUNDLE_DIR" native_apps 0755 build/app_launcher /opt/arca/app_launcher \
         || err "staging failed: app_launcher"
 
     for f in build/apps/*.app; do
         [ -f "$f" ] || continue
-        rw_bundle_add "$BUNDLE_DIR" native_apps 0644 "$f" "/opt/roomwizard/apps/$(basename "$f")" \
+        arca_bundle_add "$BUNDLE_DIR" native_apps 0644 "$f" "/opt/arca/apps/$(basename "$f")" \
             || err "staging failed: $f"
     done
 
     for f in build/icons/*.ppm; do
         [ -f "$f" ] || continue
-        rw_bundle_add "$BUNDLE_DIR" native_apps 0644 "$f" "/opt/roomwizard/icons/$(basename "$f")" \
+        arca_bundle_add "$BUNDLE_DIR" native_apps 0644 "$f" "/opt/arca/icons/$(basename "$f")" \
             || err "staging failed: $f"
     done
 
@@ -461,7 +461,7 @@ if [[ -n "$BUNDLE_DIR" ]]; then
     # seven games that play their effects in silence and log one line each.
     for f in build/soundsets/*.sound; do
         [ -f "$f" ] || continue
-        rw_bundle_add "$BUNDLE_DIR" native_apps 0644 "$f" "$RW_SOUND_SET_DIR/$(basename "$f")" \
+        arca_bundle_add "$BUNDLE_DIR" native_apps 0644 "$f" "$ARCA_SOUND_SET_DIR/$(basename "$f")" \
             || err "staging failed: $f"
     done
 
@@ -470,7 +470,7 @@ if [[ -n "$BUNDLE_DIR" ]]; then
     # data, read by audio.c, never executed.
     for f in sounds/fx_*.wav; do
         [ -f "$f" ] || continue
-        rw_bundle_add "$BUNDLE_DIR" native_apps 0644 "$f" "/opt/sound/$(basename "$f")" \
+        arca_bundle_add "$BUNDLE_DIR" native_apps 0644 "$f" "/opt/sound/$(basename "$f")" \
             || err "staging failed: $f"
     done
 
@@ -490,18 +490,18 @@ if [[ -n "$BUNDLE_DIR" ]]; then
         if head -c 40 "$f" | grep -q 'version https://git-lfs'; then
             err "$f is an unfetched Git LFS pointer, not audio — run: git lfs install && git lfs pull"
         fi
-        rw_bundle_add "$BUNDLE_DIR" native_apps 0644 "$f" "/opt/sound/$(basename "$f")" \
+        arca_bundle_add "$BUNDLE_DIR" native_apps 0644 "$f" "/opt/sound/$(basename "$f")" \
             || err "staging failed: $f"
     done
 
     # app_launcher is this component's boot target, and the only component that
     # has one — the launcher is what makes every other .app reachable.  0644:
-    # /opt/roomwizard/default-app is read, never executed.
-    echo '/opt/roomwizard/app_launcher' > build/default-app
-    rw_bundle_add "$BUNDLE_DIR" native_apps 0644 build/default-app /opt/roomwizard/default-app \
+    # /opt/arca/default-app is read, never executed.
+    echo '/opt/arca/app_launcher' > build/default-app
+    arca_bundle_add "$BUNDLE_DIR" native_apps 0644 build/default-app /opt/arca/default-app \
         || err "staging failed: default-app"
 
-    ok "Staged $(rw_bundle_finish "$BUNDLE_DIR" native_apps) file(s)"
+    ok "Staged $(arca_bundle_finish "$BUNDLE_DIR" native_apps) file(s)"
     echo ""
     exit 0
 fi
@@ -520,20 +520,20 @@ echo "════════════════════════�
 
 # Check SSH reachable
 info "Testing SSH connection..."
-# The shared gate (lib/rw-ssh.sh): "down" and "up but refusing our key" are different
+# The shared gate (lib/arca-ssh.sh): "down" and "up but refusing our key" are different
 # answers, and only the second one has a remedy worth offering.
-rw_ssh_gate "$DEVICE" || err "Cannot continue without SSH to $DEVICE"
+arca_ssh_gate "$DEVICE" || err "Cannot continue without SSH to $DEVICE"
 ok "SSH OK"
 
 # These are locally built binaries, so any provenance stamp on the unit is about to
-# stop being true. One shared writer (../lib/rw-bundle.sh), called before the first
+# stop being true. One shared writer (../lib/arca-bundle.sh), called before the first
 # file goes out rather than after the last one.
-rw_bundle_clear_stamp "$DEVICE" \
-    || warn "could not clear /opt/roomwizard/bundle.info — it may still name an older release"
+arca_bundle_clear_stamp "$DEVICE" \
+    || warn "could not clear /opt/arca/bundle.info — it may still name an older release"
 
 # Verify system setup has been done: the respawn loop that provision installs is what
 # starts the launcher this deploy is about to replace.
-if ! ssh "$DEVICE" "[ -x /etc/init.d/roomwizard-app ]" 2>/dev/null; then
+if ! ssh "$DEVICE" "[ -x /etc/init.d/arca-app ]" 2>/dev/null; then
     warn "System setup not detected on device."
     warn "Run commissioning/provision.sh first:  ../commissioning/provision.sh $DEVICE_IP"
     echo ""
@@ -544,21 +544,21 @@ fi
 # Stop whatever is running (avoids "Text file busy" on scp).
 #
 # There is exactly one stop implementation and it lives on the device, in
-# /etc/init.d/roomwizard-app — it matches processes on their executable, so it
+# /etc/init.d/arca-app — it matches processes on their executable, so it
 # also catches an app that app_launcher started.  Do NOT re-add a `killall` here:
 # a per-script copy only knows the basenames whoever wrote it thought of, which
 # is how a vnc_client survived a full deploy and repainted over the launcher.
 info "Stopping running apps (device init script)..."
-ssh "$DEVICE" 'if [ -x /etc/init.d/roomwizard-app ]; then
-    /etc/init.d/roomwizard-app stop
+ssh "$DEVICE" 'if [ -x /etc/init.d/arca-app ]; then
+    /etc/init.d/arca-app stop
 else
-    echo "  /etc/init.d/roomwizard-app not installed - run ../commissioning/provision.sh <ip>"
+    echo "  /etc/init.d/arca-app not installed - run ../commissioning/provision.sh <ip>"
 fi' || warn "stop reported a failure - a surviving process may hold the binaries"
 ok "Launcher stopped"
 
 # Ensure target directory exists
 info "Ensuring target directories exist..."
-ssh "$DEVICE" "mkdir -p $GAMES_DIR /var/log/roomwizard"
+ssh "$DEVICE" "mkdir -p $GAMES_DIR /var/log/arca"
 ok "Target directories ready"
 
 # ── deployed artifacts ──────────────────────────────────────────────────────
@@ -571,15 +571,15 @@ scp "${GAMES_BINARIES[@]/#/build/}" "$DEVICE:$GAMES_DIR/"
 ok "Game binaries uploaded"
 
 # Upload app launcher
-info "Uploading app launcher → /opt/roomwizard/"
-scp build/app_launcher "$DEVICE:/opt/roomwizard/"
+info "Uploading app launcher → /opt/arca/"
+scp build/app_launcher "$DEVICE:/opt/arca/"
 ok "App launcher uploaded"
 
 # Upload icons (if any)
 if ls build/icons/*.ppm &>/dev/null; then
-    info "Uploading icons → /opt/roomwizard/icons/"
-    ssh "$DEVICE" "mkdir -p /opt/roomwizard/icons"
-    scp build/icons/*.ppm "$DEVICE:/opt/roomwizard/icons/"
+    info "Uploading icons → /opt/arca/icons/"
+    ssh "$DEVICE" "mkdir -p /opt/arca/icons"
+    scp build/icons/*.ppm "$DEVICE:/opt/arca/icons/"
     ok "Icons uploaded ($(ls build/icons/*.ppm | wc -l) file(s))"
 fi
 
@@ -644,7 +644,7 @@ if ls music/*.wav &>/dev/null; then
 fi
 
 # Every executable this script put on the device, as the device sees it.
-DEPLOYED_EXECUTABLES=("${GAMES_BINARIES[@]/#/$GAMES_DIR/}" /opt/roomwizard/app_launcher)
+DEPLOYED_EXECUTABLES=("${GAMES_BINARIES[@]/#/$GAMES_DIR/}" /opt/arca/app_launcher)
 
 # Set permissions.  The chmod list is passed in as "$@" rather than written out
 # again, so it cannot drift from what was uploaded.
@@ -656,9 +656,9 @@ shift "$nexe"
 
 # Retired names: the binary that was folded into control_panel's Display tab,
 # the theremin's old test-shaped name (its manifest goes with
-# RW_APP_MANIFESTS_RETIRED, or the launcher shows two tiles), the retired
+# ARCA_APP_MANIFESTS_RETIRED, or the launcher shows two tiles), the retired
 # launcher prototype, two icons no manifest names, and the control panel's old
-# name device_tools (manifest via RW_APP_MANIFESTS_RETIRED), and the icon of
+# name device_tools (manifest via ARCA_APP_MANIFESTS_RETIRED), and the icon of
 # audio_mix_test's retired tile (the binary stays: the Audio page runs it).
 # The .hidden and .noargs marker files go by glob: nothing reads them, so
 # nothing writes them.
@@ -666,7 +666,7 @@ shift "$nexe"
 # cannot inject on this device (no /dev/uinput).
 # hardware_test, hardware_config, hardware_diag, usb_test and the backlight CLI
 # are the diagnostic binaries control_panel replaced; their manifests go with
-# RW_APP_MANIFESTS_RETIRED.
+# ARCA_APP_MANIFESTS_RETIRED.
 rm -f /opt/games/*.hidden /opt/games/*.noargs \
       /opt/games/touch_inject \
       /opt/games/hardware_test \
@@ -675,14 +675,14 @@ rm -f /opt/games/*.hidden /opt/games/*.noargs \
       /opt/games/usb_test \
       /opt/games/backlight \
       /opt/games/game_selector \
-      /opt/roomwizard/icons/hardware_test.ppm \
-      /opt/roomwizard/icons/usb_test.ppm \
+      /opt/arca/icons/hardware_test.ppm \
+      /opt/arca/icons/usb_test.ppm \
       /opt/games/unified_calibrate \
       /opt/games/audio_touch_test \
-      /opt/roomwizard/icons/audio_touch_test.ppm \
+      /opt/arca/icons/audio_touch_test.ppm \
       /opt/games/device_tools \
-      /opt/roomwizard/icons/device_tools.ppm \
-      /opt/roomwizard/icons/audio_mix_test.ppm
+      /opt/arca/icons/device_tools.ppm \
+      /opt/arca/icons/audio_mix_test.ppm
 REMOTE
 ok "Permissions set"
 
@@ -706,7 +706,7 @@ else
     echo "  built (local)                        vs  deployed (device):"
     diff <(printf '%s\n' "$LOCAL_SUMS") <(printf '%s\n' "$REMOTE_SUMS") | sed 's/^/    /' || true
     echo ""
-    err "md5 mismatch — what is on the device is NOT what was built.\n     A process may still hold an old binary: ssh $DEVICE /etc/init.d/roomwizard-app status"
+    err "md5 mismatch — what is on the device is NOT what was built.\n     A process may still hold an old binary: ssh $DEVICE /etc/init.d/arca-app status"
 fi
 
 # Deploy app manifests
@@ -717,15 +717,15 @@ fi
 # ../commissioning/commission-offline.sh could not produce the same bytes
 # without a second copy of them.
 info "Installing app manifests..."
-ssh "$DEVICE" "mkdir -p /opt/roomwizard/apps"
-scp build/apps/*.app "$DEVICE:/opt/roomwizard/apps/"
-ssh "$DEVICE" bash -s -- $RW_APP_MANIFESTS_RETIRED <<'REMOTE'
-chmod 644 /opt/roomwizard/apps/*.app
+ssh "$DEVICE" "mkdir -p /opt/arca/apps"
+scp build/apps/*.app "$DEVICE:/opt/arca/apps/"
+ssh "$DEVICE" bash -s -- $ARCA_APP_MANIFESTS_RETIRED <<'REMOTE'
+chmod 644 /opt/arca/apps/*.app
 
 # Manifests this component used to install: their tools were folded into
 # control_panel's tabs, and a stale manifest renders a tile whose exec= is gone.
 for name in "$@"; do
-    rm -f "/opt/roomwizard/apps/$name.app"
+    rm -f "/opt/arca/apps/$name.app"
 done
 REMOTE
 ok "App manifests installed ($(ls build/apps/*.app | wc -l) file(s))"
@@ -738,33 +738,33 @@ echo ""
 # copied by --bundle.  ⚠️ These are not optional — the C side derives no bed
 # path, so a device without them has seven games with no music.
 info "Installing sound sets..."
-ssh "$DEVICE" "mkdir -p $RW_SOUND_SET_DIR"
-scp build/soundsets/*.sound "$DEVICE:$RW_SOUND_SET_DIR/"
-ssh "$DEVICE" "chmod 644 $RW_SOUND_SET_DIR/*.sound"
+ssh "$DEVICE" "mkdir -p $ARCA_SOUND_SET_DIR"
+scp build/soundsets/*.sound "$DEVICE:$ARCA_SOUND_SET_DIR/"
+ssh "$DEVICE" "chmod 644 $ARCA_SOUND_SET_DIR/*.sound"
 ok "Sound sets installed ($(ls build/soundsets/*.sound | wc -l) file(s))"
 echo ""
 
 # ── 4. set-default mode? ────────────────────────────────────────────────────
 if [[ "$MODE" == "set-default" ]]; then
     info "Setting app launcher as default app..."
-    ssh "$DEVICE" "mkdir -p /opt/roomwizard && echo '/opt/roomwizard/app_launcher' > /opt/roomwizard/default-app"
-    ok "Default app → /opt/roomwizard/app_launcher"
+    ssh "$DEVICE" "mkdir -p /opt/arca && echo '/opt/arca/app_launcher' > /opt/arca/default-app"
+    ok "Default app → /opt/arca/app_launcher"
 fi
 
 # ── 5. restart launcher ─────────────────────────────────────────────────────
 # If the init service is installed, restart it (re-creates respawn wrapper).
 # Otherwise just tell the user how to start manually.
-if ssh "$DEVICE" '[ -f /etc/init.d/roomwizard-app ]' 2>/dev/null; then
+if ssh "$DEVICE" '[ -f /etc/init.d/arca-app ]' 2>/dev/null; then
     info "Restarting app launcher..."
-    ssh "$DEVICE" '/etc/init.d/roomwizard-app start' 2>&1 | grep -v '^$'
+    ssh "$DEVICE" '/etc/init.d/arca-app start' 2>&1 | grep -v '^$'
     ok "Launcher running"
-    # roomwizard-app stop ends every process running out of $GAMES_DIR, rwmond
+    # arca-app stop ends every process running out of $GAMES_DIR, arcamond
     # included (it has to, or scp could not replace the binary), so restart it.
-    ssh "$DEVICE" 'if [ -x /etc/init.d/rwmond ]; then /etc/init.d/rwmond start; fi' 2>&1 | grep -v '^$' || true
+    ssh "$DEVICE" 'if [ -x /etc/init.d/arcamond ]; then /etc/init.d/arcamond start; fi' 2>&1 | grep -v '^$' || true
 else
     echo ""
     echo "  To start app launcher:"
-    echo "    ssh $DEVICE '/opt/roomwizard/app_launcher'"
+    echo "    ssh $DEVICE '/opt/arca/app_launcher'"
 fi
 
 _END_SECONDS=$(date +%s)

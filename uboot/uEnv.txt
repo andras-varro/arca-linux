@@ -1,4 +1,4 @@
-# uEnv.txt -- optional settings for the RoomWizard U-Boot.
+# uEnv.txt -- optional settings for the Arca U-Boot.
 #
 # Put this file in the root of the FAT partition (p1), next to MLO and u-boot.img.
 # It is optional: a missing or empty file means the built-in defaults, and deleting
@@ -14,7 +14,7 @@
 # built-in one is used:
 #   console=ttyO1,115200n8 vram=12M initcall_blacklist=fb_logo_late_init
 #   consoleblank=0 mpurate=auto root=/dev/mmcblk0p6 rw rootfstype=ext4 rootwait
-#bootargs=console=ttyO1,115200n8 root=/dev/mmcblk0p6 rw rootfstype=ext4 rootwait
+#bootargs=console=ttyO1,115200n8 vram=12M initcall_blacklist=fb_logo_late_init consoleblank=0 mpurate=auto root=/dev/mmcblk0p6 rw rootfstype=ext4 rootwait
 
 # Extra kernel arguments, appended to the command line (the built-in one, or bootargs above).
 #optargs=quiet

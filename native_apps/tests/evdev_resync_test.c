@@ -96,7 +96,7 @@ static FakeDev *dev_for_fd(int fd) {
 }
 
 static int fake_fd(void) {
-    char path[] = "/tmp/rw_evdev_resync_XXXXXX";
+    char path[] = "/tmp/arca_evdev_resync_XXXXXX";
     int fd = mkstemp(path);
     if (fd < 0) { perror("mkstemp"); exit(2); }
     unlink(path);
@@ -302,7 +302,7 @@ static void test_pad_release_lost(void) {
 static void test_touch_release_lost(void) {
     printf("\n6. touch: finger lift lost to an overflow\n");
     devs_reset();
-    char path[] = "/tmp/rw_evdev_resync_touch_XXXXXX";
+    char path[] = "/tmp/arca_evdev_resync_touch_XXXXXX";
     int tmp = mkstemp(path);
     if (tmp < 0) { perror("mkstemp"); exit(2); }
     close(tmp);

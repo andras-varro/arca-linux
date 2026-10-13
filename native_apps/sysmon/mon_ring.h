@@ -1,13 +1,13 @@
-/* mon_ring.h — the history ring rwmond publishes and the Monitor page reads.
+/* mon_ring.h — the history ring arcamond publishes and the Monitor page reads.
  *
  * Pure: no file or /proc access, so a host test drives it with strings.
- * rwmond.c owns the sampling and the file; monitor_page.c the reading.
+ * arcamond.c owns the sampling and the file; monitor_page.c the reading.
  *
  * The published file (MON_RING_PATH) is text, rewritten whole once a second
  * and renamed into place, so a reader sees either the previous or the next
  * version, never a half-written one:
  *
- *   rwmond 1 <wall_cs> <flags> <count>
+ *   arcamond 1 <wall_cs> <flags> <count>
  *   <cpu_pm> <mem_kb> <temp_mc>        count lines, oldest first
  *
  * wall_cs is /proc/uptime in centiseconds when the file was written, which is
@@ -22,7 +22,7 @@
 
 #include <stddef.h>
 
-#define MON_RING_PATH  "/var/run/rwmond.ring"   /* tmpfs: /var/volatile/run */
+#define MON_RING_PATH  "/var/run/arcamond.ring"   /* tmpfs: /var/volatile/run */
 #define MON_RING_N     120                      /* 2 minutes at 1 Hz */
 #define MON_ABSENT     (-2147483647 - 1)        /* a "-" field */
 #define MON_FLAG_OVERTEMP 1u                    /* over-temperature warning */

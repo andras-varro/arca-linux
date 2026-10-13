@@ -13,7 +13,7 @@
 # -I cannot override.  So the copy reproduces the two directories rather than one
 # flat dir, or the suite would compile against the REAL header while linking the
 # sabotaged .c — a mismatch that reads as a pass.
-cd /mnt/c/work/roomwizard/native_apps || exit 1
+cd /mnt/c/work/arca/native_apps || exit 1
 W=$(mktemp -d /tmp/aout.XXXXXX)
 HARNESS_ERR=0
 run() {

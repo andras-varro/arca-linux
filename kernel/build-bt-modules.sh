@@ -117,7 +117,7 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 EPOCH=$(git -C "$REPO_DIR" log -1 --format=%ct 2>/dev/null || date +%s)
 KBUILD_BUILD_TIMESTAMP="$(date -u -d "@${EPOCH}")"
 export SOURCE_DATE_EPOCH="$EPOCH" KBUILD_BUILD_TIMESTAMP KBUILD_BUILD_VERSION=1
-export KBUILD_BUILD_USER=roomwizard KBUILD_BUILD_HOST=build
+export KBUILD_BUILD_USER=arca KBUILD_BUILD_HOST=build
 
 echo "[1/7] Copying the image tree..."
 if [ "$REUSE" -eq 1 ] && [ -f "${KDIR}/Makefile" ]; then

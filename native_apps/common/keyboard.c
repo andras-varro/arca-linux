@@ -1,5 +1,5 @@
 /*
- * Generic on-screen keyboard module for RoomWizard native apps.
+ * Generic on-screen keyboard module for Arca native apps.
  * Uses the 32bpp native_apps drawing API (framebuffer.h / common.h).
  *
  * See keyboard.h for the public API.

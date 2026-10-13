@@ -22,8 +22,8 @@
 # What it does:
 #   0. Backs the unit's per-unit state up to this host (commissioning/backup.sh)
 #      BEFORE the first write; a failed backup aborts the run.
-#   1. Installs the provision plan: device-files/roomwizard-app as
-#      /etc/init.d/roomwizard-app, the audio-enable + time-sync boot scripts, avahi
+#   1. Installs the provision plan: device-files/arca-app as
+#      /etc/init.d/arca-app, the audio-enable + time-sync boot scripts, avahi
 #      (mDNS), the USB host-mode scripts and their boot links (--no-usb skips), the
 #      Bluetooth boot script and dbus policy (--no-bluetooth skips)
 #   2. Applies kernel/sysctl security settings (ASLR, no ip_forward, etc.)
@@ -46,17 +46,17 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # What is INSTALLED is DATA in one file, device-files/provision-rules.conf, shared
 # with commissioning/commission-offline.sh so that the live and offline passes cannot
-# drift. lib/rw-provision.sh is the parser and the plan compiler; the executors
+# drift. lib/arca-provision.sh is the parser and the plan compiler; the executors
 # differ ("/" is the correct prefix on a device and a refused one offline, and on
 # this path the work happens on the far side of an ssh pipe), but there is one
-# implementation of each, and rw_provision_online_script is the one this script
+# implementation of each, and arca_provision_online_script is the one this script
 # ships to the device.
-# shellcheck source=../lib/rw-identify.sh
-. "$REPO_ROOT/lib/rw-identify.sh"
-# shellcheck source=../lib/rw-provision.sh
-. "$REPO_ROOT/lib/rw-provision.sh"
-# shellcheck source=../lib/rw-ssh.sh
-. "$REPO_ROOT/lib/rw-ssh.sh"
+# shellcheck source=../lib/arca-identify.sh
+. "$REPO_ROOT/lib/arca-identify.sh"
+# shellcheck source=../lib/arca-provision.sh
+. "$REPO_ROOT/lib/arca-provision.sh"
+# shellcheck source=../lib/arca-ssh.sh
+. "$REPO_ROOT/lib/arca-ssh.sh"
 
 # ── the non-positional flags are extracted before positional parsing ────────
 #
@@ -75,10 +75,10 @@ for _a in "$@"; do
             exit 1 ;;
         --no-*)
             _g="${_a#--no-}"
-            case " $(rw_provision_optional_groups) " in
+            case " $(arca_provision_optional_groups) " in
                 *" $_g "*) NO_PROV_GROUPS="$NO_PROV_GROUPS $_g" ;;
                 *) echo "Unknown provision group: $_g"
-                   echo "  --no- accepts: $(rw_provision_optional_groups)"
+                   echo "  --no- accepts: $(arca_provision_optional_groups)"
                    exit 1 ;;
             esac
             ;;
@@ -90,7 +90,7 @@ set -- "${_ARGS[@]}"
 DEVICE_IP="${1:-}"
 FLAG="${2:-}"
 DEVICE="root@${DEVICE_IP}"
-INIT_SCRIPT="/etc/init.d/roomwizard-app"
+INIT_SCRIPT="/etc/init.d/arca-app"
 # Files installed onto the device verbatim. They live in device-files/ rather
 # than in a heredoc here so that the offline installer writes the same bytes —
 # two copies of an init script is two things to keep in step, and the one that
@@ -119,7 +119,7 @@ usage() {
     echo "  --dry-run         Print the provision plan this run would apply; change"
     echo "                    nothing, take no backup, do not reboot."
     echo "  --no-<group>      Skip one group of the provision plan. Groups:"
-    echo "                    $(rw_provision_optional_groups)"
+    echo "                    $(arca_provision_optional_groups)"
     echo "                    --no-mdns leaves <name>.local unresolvable;"
     echo "                    --no-usb installs no USB host"
     echo "                    mode; --no-bluetooth installs no BT boot script or dbus"
@@ -172,7 +172,7 @@ fi
 # working tree is LF even on this Windows host and scp copies it unchanged.
 report_script_versions() {
     local pairs=(
-        "$REPO_ROOT/device-files/roomwizard-app:$INIT_SCRIPT"
+        "$REPO_ROOT/device-files/arca-app:$INIT_SCRIPT"
     )
     local pair local_path remote_path local_md5 remote_md5 drift=0
     for pair in "${pairs[@]}"; do
@@ -250,15 +250,15 @@ fi
 # ── SSH check ───────────────────────────────────────────────────────────────
 echo ""
 echo "════════════════════════════════════════"
-echo " RoomWizard System Setup"
+echo " Arca System Setup"
 echo "════════════════════════════════════════"
 
 info "Testing SSH connection to $DEVICE_IP..."
-# One gate, in lib/rw-ssh.sh: it tells "down" from "up and refusing us" and, on a
+# One gate, in lib/arca-ssh.sh: it tells "down" from "up and refusing us" and, on a
 # terminal, offers to generate a key and ssh-copy-id it. This is FIRST contact for
 # anyone who did not prep the card, so a bare `check IP and SSH key` — advice about
 # a key nothing offered to make — is not enough here.
-rw_ssh_gate "$DEVICE" || err "Cannot continue without SSH to $DEVICE"
+arca_ssh_gate "$DEVICE" || err "Cannot continue without SSH to $DEVICE"
 ok "SSH OK"
 
 # apply_plan PLANFILE
@@ -268,9 +268,9 @@ ok "SSH OK"
 # here edits it, snapshots it or reloads sshd.
 apply_plan() {
     local plan="$1"
-    ssh "$DEVICE" "cat > /tmp/rw-provision-plan" < "$plan"
-    rw_provision_online_script | ssh "$DEVICE" "cat > /tmp/rw-provision.sh"
-    ssh "$DEVICE" "sh /tmp/rw-provision.sh /tmp/rw-provision-plan; rc=\$?; rm -f /tmp/rw-provision.sh /tmp/rw-provision-plan; exit \$rc" \
+    ssh "$DEVICE" "cat > /tmp/arca-provision-plan" < "$plan"
+    arca_provision_online_script | ssh "$DEVICE" "cat > /tmp/arca-provision.sh"
+    ssh "$DEVICE" "sh /tmp/arca-provision.sh /tmp/arca-provision-plan; rc=\$?; rm -f /tmp/arca-provision.sh /tmp/arca-provision-plan; exit \$rc" \
         || err "the provision step failed on the device"
 }
 
@@ -316,7 +316,7 @@ echo ""
 echo "Disk:    $(df -h / | tail -1 | awk '{print $3 " used, " $4 " free (" $5 " used)"}')"
 echo "Memory:  $(free -h | grep Mem | awk '{print $3 " used, " $7 " available"}')"
 echo "HW watchdog:      $([ -c /dev/watchdog ] && echo 'active (fed by /usr/sbin/watchdog)' || echo 'n/a')"
-echo "Default app:      $(cat /opt/roomwizard/default-app 2>/dev/null || echo '(not set)')"
+echo "Default app:      $(cat /opt/arca/default-app 2>/dev/null || echo '(not set)')"
 echo ""
 echo "Active cron jobs:"
 crontab -l 2>/dev/null | grep -v '^#' | grep -v '^$' | sed 's/^/  /'
@@ -349,17 +349,17 @@ echo "════════════════════════�
 #
 # The plan is compiled HERE, where the parser lives, and shipped as data the device
 # only interprets. The interpreter itself comes
-# from rw_provision_online_script, so there is one implementation of each verb and
+# from arca_provision_online_script, so there is one implementation of each verb and
 # `--dry-run` on either path prints the same resolved set.
 PROV_RULES="$DEVICE_FILES/provision-rules.conf"
 [[ -f "$PROV_RULES" ]] || err "missing $PROV_RULES"
-if ! PCHECK="$(rw_provision_validate "$PROV_RULES" "$REPO_ROOT")"; then
+if ! PCHECK="$(arca_provision_validate "$PROV_RULES" "$REPO_ROOT")"; then
     echo "$PCHECK"
     err "device-files/provision-rules.conf does not validate — refusing to provision"
 fi
 
 PROV_GROUPS="base"
-for _g in $(rw_provision_optional_groups); do
+for _g in $(arca_provision_optional_groups); do
     case " $NO_PROV_GROUPS " in
         *" $_g "*) ;;
         *) PROV_GROUPS="$PROV_GROUPS $_g" ;;
@@ -368,9 +368,9 @@ done
 [[ -n "$NO_PROV_GROUPS" ]] && info "Skipping:$NO_PROV_GROUPS"
 
 PROV_PLAN=$(mktemp)
-rw_provision_plan "$PROV_RULES" "$PROV_GROUPS" > "$PROV_PLAN" \
+arca_provision_plan "$PROV_RULES" "$PROV_GROUPS" > "$PROV_PLAN" \
     || { rm -f "$PROV_PLAN"; err "could not compile the provision plan"; }
-info "Provision plan: $(rw_provision_plan_summary "$PROV_PLAN")"
+info "Provision plan: $(arca_provision_plan_summary "$PROV_PLAN")"
 
 # ── dry-run: print the plan and stop, before anything is written ────────────
 #
@@ -405,11 +405,11 @@ ok "Backup taken"
 # the remote interpreter only sets the declared mode. That asymmetry is the whole
 # reason the two executors exist; everything else about them is shared.
 #
-# ⚠️ The loop lives in lib/rw-provision.sh, not here. It was written out in full in
+# ⚠️ The loop lives in lib/arca-provision.sh, not here. It was written out in full in
 # this script and again in usb_host/build-and-deploy.sh, both reading the plan on
 # stdin with an `ssh` in the body — so the first ssh ate the rest of the plan and
 # both installed exactly one file. Do not inline it again.
-rw_provision_push_installs "$PROV_PLAN" "$REPO_ROOT" "$DEVICE" \
+arca_provision_push_installs "$PROV_PLAN" "$REPO_ROOT" "$DEVICE" \
     || { rm -f "$PROV_PLAN"; err "could not copy the provision sources to the device"; }
 
 apply_plan "$PROV_PLAN"
@@ -442,7 +442,7 @@ echo ""
 echo "Disk:    $(df -h / | tail -1 | awk '{print $3 " used, " $4 " free (" $5 " used)"}')"
 echo "Memory:  $(free -h | grep Mem | awk '{print $3 " used, " $7 " available"}')"
 echo "HW watchdog:      $([ -c /dev/watchdog ] && echo 'active (fed by /usr/sbin/watchdog)' || echo 'n/a')"
-echo "Default app:      $(cat /opt/roomwizard/default-app 2>/dev/null || echo '(not set)')"
+echo "Default app:      $(cat /opt/arca/default-app 2>/dev/null || echo '(not set)')"
 echo ""
 echo "Active cron jobs:"
 crontab -l 2>/dev/null | grep -v '^#' | grep -v '^$' | sed 's/^/  /'
@@ -474,5 +474,5 @@ echo ""
 echo "  Or deploy individually:"
 echo "    cd native_apps      && ./build-and-deploy.sh $DEVICE_IP set-default"
 echo "    cd vnc_client        && ./build-and-deploy.sh $DEVICE_IP"
-echo "    cd scummvm-roomwizard && ./build-and-deploy.sh $DEVICE_IP"
+echo "    cd scummvm-arca && ./build-and-deploy.sh $DEVICE_IP"
 echo ""

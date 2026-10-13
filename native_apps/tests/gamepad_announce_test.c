@@ -16,7 +16,7 @@
  * the announcement behaviour was never measured at all.  To actually reach it,
  * run THIS test as root rather than the whole gate:
  *
- *   wsl.exe -u root -e bash -lc "cd /mnt/c/work/roomwizard/native_apps && \
+ *   wsl.exe -u root -e bash -lc "cd /mnt/c/work/arca/native_apps && \
  *       gcc -Wall -Wextra -Wno-unused-parameter -I common \
  *       -o build/gamepad_announce_test tests/gamepad_announce_test.c \
  *       common/gamepad.c common/input_slots.c common/input_scan.c common/framebuffer.c common/hardware.c \
@@ -215,7 +215,7 @@ int main(void) {
     int n, rc;
 
     printf("gamepad announcement volume\n");
-    snprintf(capture_path, sizeof(capture_path), "/tmp/rw_gp_announce_%d", (int)getpid());
+    snprintf(capture_path, sizeof(capture_path), "/tmp/arca_gp_announce_%d", (int)getpid());
 
     uinput_fd = pad_create();
     if (uinput_fd < 0) {

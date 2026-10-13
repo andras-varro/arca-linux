@@ -2,7 +2,7 @@
 #define AUDIO_H
 
 /**
- * Audio Library for RoomWizard native games
+ * Audio Library for Arca native games
  *
  * Hardware path:
  *   TWL4030 HiFi DAC  →  HandsfreeL/R class-D amp  →  SPKR1
@@ -99,7 +99,7 @@ typedef struct {
                                *   for the process on purpose: the files can
                                *   legitimately be absent, and retrying per
                                *   trigger would put one refusal per tap into
-                               *   /var/log/roomwizard/app_stdout.log            */
+                               *   /var/log/arca/app_stdout.log            */
     bool     reload;          /**< the path changed under it: `pcm` is the OLD
                                *   file's and must be freed before the next load.
                                *   ⚠️ Deferred to the next TRIGGER rather than done

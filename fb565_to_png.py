@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Convert a RoomWizard /dev/fb0 framebuffer dump to PNG.
+Convert an Arca /dev/fb0 framebuffer dump to PNG.
 
 CONFIRMED HARDWARE (RW09 / .73, fbset): /dev/fb0 is 800x480, **32bpp**,
 XRGB8888 little-endian (rgba 8/16,8/8,8/0,0/0 -> byte order B,G,R,X),

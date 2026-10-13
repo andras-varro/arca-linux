@@ -27,7 +27,7 @@
  * the only thing in the tree that can see that.
  *
  * ⚠️ This drives audio_bed_set_playlist(), not audio_bed_init(): the latter reads
- * CONFIG_SOUND_SET_DIR, which is /opt/roomwizard/soundsets and does not exist on
+ * CONFIG_SOUND_SET_DIR, which is /opt/arca/soundsets and does not exist on
  * a dev host.  The split is deliberate and audio_bed.h says so.  bed_load() below
  * reproduces exactly what audio_bed_init() does around the call, and group F
  * asserts the path half separately — so the two together cover the function.

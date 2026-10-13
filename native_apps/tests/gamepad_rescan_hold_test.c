@@ -97,7 +97,7 @@ static FakeDev *dev_for_fd(int fd) {
 }
 
 static int fake_fd(void) {
-    char path[] = "/tmp/rw_rescan_hold_XXXXXX";
+    char path[] = "/tmp/arca_rescan_hold_XXXXXX";
     int fd = mkstemp(path);
     if (fd < 0) { perror("mkstemp"); exit(2); }
     unlink(path);

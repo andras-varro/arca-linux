@@ -4,7 +4,7 @@
 # AUDIO_MIX_CEIL became derived and the default limiter became HARD — a stanza
 # that no longer matches prints "NO-OP EDIT" rather than "0 failed", which is the
 # whole reason that guard exists.  Read the output; do not just count it.
-cd /mnt/c/work/roomwizard/native_apps || exit 1
+cd /mnt/c/work/arca/native_apps || exit 1
 W=$(mktemp -d /tmp/lim.XXXXXX)
 HARNESS_ERR=0
 run() {

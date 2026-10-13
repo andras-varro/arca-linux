@@ -7,7 +7,7 @@
 # "NO-OP EDIT" rather than "0 failed", and "0 failed" from a real edit is a HOLE
 # in the suite, not a pass.  Case 3 is the one that found one: nothing in the
 # suite reached the odd-size chunk pad until a fixture was added for it.
-cd /mnt/c/work/roomwizard/native_apps || exit 1
+cd /mnt/c/work/arca/native_apps || exit 1
 W=$(mktemp -d /tmp/samp.XXXXXX)
 HARNESS_ERR=0
 run() {

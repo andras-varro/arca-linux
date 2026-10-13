@@ -116,8 +116,8 @@ file and the reader cannot tell which is current. The old sentence goes.
   ID to be read; then delete the entry. Nothing outside the plan cites an ID, so there is no citation to
   repair and a deletion can never move group B — a gate demanding that citations resolve would instead
   make keeping dead entries alive the cheapest way to stay green.
-- ⚠️ **The ID namespace collides with the shell suites' own case labels** — `rw_provision_test.sh`,
-  `rw_ssh_test.sh` and the sabotage harnesses all label cases in exactly the plan's shape. Those are
+- ⚠️ **The ID namespace collides with the shell suites' own case labels** — `arca_provision_test.sh`,
+  `arca_ssh_test.sh` and the sabotage harnesses all label cases in exactly the plan's shape. Those are
   working pointers, not citations: **disambiguate the sentence** ("that suite's cases B6/C3a/C5a") rather
   than deleting one.
 - **A fact that moves needs a group C receipt row in `tests/doc_check.sh`, written BEFORE the deletion** —

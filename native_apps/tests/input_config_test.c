@@ -171,7 +171,7 @@ static void test_load(void) {
     int fd = mkstemp(path);
     if (fd < 0) { check(0, "load: temp file created"); return; }
     static const char body[] =
-        "# RoomWizard Input Configuration\r\n"
+        "# Arca Input Configuration\r\n"
         "mouse_sensitivity=3.5\r\n"
         "gamepad_btn_a=1\n"
         "gamepad_deadzone=\n"

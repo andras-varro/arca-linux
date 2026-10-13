@@ -32,7 +32,7 @@
 #
 # ── Stopping and restoring the running app ─────────────────────────────────
 #
-# `/etc/init.d/roomwizard-app stop` is the only implementation of "stop what is
+# `/etc/init.d/arca-app stop` is the only implementation of "stop what is
 # running" (it also stops the respawn loop); this script never killalls. The one
 # process it kills is the PID it launched itself. `start` is run on every exit
 # path once `stop` has been issued — normal end, failure, Ctrl-C, TERM.
@@ -94,7 +94,7 @@ smoke_argmode() {
 # smoke_targets  →  one "name|exec|argv" line per in-scope binary
 smoke_targets() {
     local base exec args mode argv w t
-    echo "app_launcher|/opt/roomwizard/app_launcher|"
+    echo "app_launcher|/opt/arca/app_launcher|"
     # shellcheck source=app-manifests.sh
     . "$SMOKE_NATIVE_DIR/app-manifests.sh"
     while IFS="|" read -r base _ exec _ args; do
@@ -107,7 +107,7 @@ smoke_targets() {
             esac
         done
         echo "$base|$exec|$argv"
-    done <<< "$RW_APP_MANIFESTS"
+    done <<< "$ARCA_APP_MANIFESTS"
     for t in $SMOKE_EXTRA_TOOLS; do
         echo "$t|/opt/games/$t|$SMOKE_FB_DEV $SMOKE_TOUCH_DEV"
     done
@@ -250,8 +250,8 @@ SMOKE_TARGET_HOST=""
 SMOKE_STOPPED=0
 SMOKE_LIVE_PID=""
 
-# rw_ssh_gate has already proved key auth; like every other caller behind that gate
-# this sets no BatchMode (lib/rw-ssh.sh: only the probes do).
+# arca_ssh_gate has already proved key auth; like every other caller behind that gate
+# this sets no BatchMode (lib/arca-ssh.sh: only the probes do).
 # ⚠️ -n is load-bearing: smoke_main calls this inside `while read … <<< "$lines"`, and
 # an ssh reading its stdin would swallow every remaining target after the first.
 smoke_ssh() { ssh -n -o ConnectTimeout=5 "$SMOKE_TARGET_HOST" "$@"; }
@@ -275,9 +275,9 @@ smoke_restore() {
         SMOKE_LIVE_PID=""
     fi
     if [ "$SMOKE_STOPPED" = 1 ]; then
-        echo "  restoring: /etc/init.d/roomwizard-app start"
-        smoke_ssh "/etc/init.d/roomwizard-app start" >/dev/null 2>&1 \
-            || echo "  ⚠️  restore failed — run: ssh $SMOKE_TARGET_HOST /etc/init.d/roomwizard-app start" >&2
+        echo "  restoring: /etc/init.d/arca-app start"
+        smoke_ssh "/etc/init.d/arca-app start" >/dev/null 2>&1 \
+            || echo "  ⚠️  restore failed — run: ssh $SMOKE_TARGET_HOST /etc/init.d/arca-app start" >&2
         SMOKE_STOPPED=0
     fi
 }
@@ -338,7 +338,7 @@ smoke_usage() {
 Usage: native_apps/smoke-first-screen.sh <ip> [binary ...]
        native_apps/smoke-first-screen.sh --list
 
-Stops the running app (/etc/init.d/roomwizard-app stop), launches each binary
+Stops the running app (/etc/init.d/arca-app stop), launches each binary
 with its production argv, checks it is alive after SMOKE_SETTLE_SECS (default 2),
 captures /dev/fb0, grades the visible page by its count of distinct pixel values
 (SMOKE_MIN_DISTINCT, default 3), and restarts the app on every exit path.
@@ -382,16 +382,16 @@ smoke_main() {
     [ -n "$out" ] || out=$(mktemp -d)
     mkdir -p "$out" || return 2
 
-    # shellcheck source=../lib/rw-ssh.sh
-    . "$SMOKE_REPO_DIR/lib/rw-ssh.sh"
-    rw_ssh_gate "$SMOKE_TARGET_HOST" || return 2
+    # shellcheck source=../lib/arca-ssh.sh
+    . "$SMOKE_REPO_DIR/lib/arca-ssh.sh"
+    arca_ssh_gate "$SMOKE_TARGET_HOST" || return 2
 
     trap 'smoke_restore' EXIT
     trap 'smoke_restore; exit 130' INT
     trap 'smoke_restore; exit 143' TERM
     SMOKE_STOPPED=1
-    echo "  stopping: /etc/init.d/roomwizard-app stop"
-    smoke_ssh "/etc/init.d/roomwizard-app stop" >/dev/null 2>&1 \
+    echo "  stopping: /etc/init.d/arca-app stop"
+    smoke_ssh "/etc/init.d/arca-app stop" >/dev/null 2>&1 \
         || echo "  ⚠️  stop reported failure; continuing — verdicts may be could-not-tell" >&2
 
     while IFS='|' read -r name exe argv; do

@@ -1,6 +1,6 @@
 /* overtemp.h — the over-temperature warning's pure decisions.
  *
- * rwmond (sysmon/rwmond.c) latches the state and publishes it as
+ * arcamond (sysmon/arcamond.c) latches the state and publishes it as
  * MON_FLAG_OVERTEMP in the ring header; framebuffer.c reads that header at
  * most once a second and paints a red square on every present while it is
  * set.  Header-only and static inline, so framebuffer.c — which ScummVM and
@@ -36,7 +36,7 @@ static inline int overtemp_latch(int on, int temp_mc) {
 static inline int overtemp_ring_flag(const char *text) {
     unsigned long long cs;
     unsigned flags;
-    if (!text || sscanf(text, "rwmond 1 %llu %u", &cs, &flags) != 2) return -1;
+    if (!text || sscanf(text, "arcamond 1 %llu %u", &cs, &flags) != 2) return -1;
     return (flags & MON_FLAG_OVERTEMP) ? 1 : 0;
 }
 

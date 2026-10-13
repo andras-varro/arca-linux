@@ -1,5 +1,5 @@
 #!/bin/bash
-# build-and-deploy.sh — USB host mode, Xbox controller and USB audio support for the RoomWizard
+# build-and-deploy.sh — USB host mode, Xbox controller and USB audio support for the Arca
 #
 # Usage:
 #   ./build-and-deploy.sh                          # build the eight artifacts only
@@ -19,7 +19,7 @@
 #      device-files/provision-rules.conf's `usb` group.
 #   2. xpad.ko / joydev.ko / ff-memless.ko and the USB-audio set, force-loaded
 #      -> THE CONTROLLER AS /dev/input/event*. Build artifacts, so they travel in
-#      the bundle (../lib/rw-bundle.sh) to /lib/modules/4.14.52/extra on p6.
+#      the bundle (../lib/arca-bundle.sh) to /lib/modules/4.14.52/extra on p6.
 #
 # So this script restates neither. It BUILDS the eight artifacts, runs the ARM
 # gate over them, and then drives the same implementations every other path
@@ -36,12 +36,12 @@ KERNEL_VERSION="4.14.52"
 MODULES_DIR="$SCRIPT_DIR/modules"
 
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-# The two shared libraries every path needs: the SSH gate, and ../lib/rw-bundle.sh —
+# The two shared libraries every path needs: the SSH gate, and ../lib/arca-bundle.sh —
 # --bundle stages through it AND a deploy clears the provenance stamp through it.
-# shellcheck source=../lib/rw-ssh.sh
-. "$REPO_ROOT/lib/rw-ssh.sh"
-# shellcheck source=../lib/rw-bundle.sh
-. "$REPO_ROOT/lib/rw-bundle.sh"
+# shellcheck source=../lib/arca-ssh.sh
+. "$REPO_ROOT/lib/arca-ssh.sh"
+# shellcheck source=../lib/arca-bundle.sh
+. "$REPO_ROOT/lib/arca-bundle.sh"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 ok()   { echo -e "[$(date '+%H:%M:%S')] ${GREEN}  ✓ $*${NC}"; }
@@ -117,7 +117,7 @@ unset _mod
 
 echo ""
 echo "════════════════════════════════════════"
-echo " RoomWizard USB Host + Controller + Audio"
+echo " Arca USB Host + Controller + Audio"
 echo "════════════════════════════════════════"
 ts "Started — $(date '+%Y-%m-%d %H:%M:%S')"
 [[ -n "$BUNDLE_DIR" ]] && info "Staging a bundle: $BUNDLE_DIR"
@@ -131,15 +131,15 @@ command -v arm-linux-gnueabihf-gcc >/dev/null 2>&1 \
 ok "arm-linux-gnueabihf-gcc"
 
 if [[ -n "$DEVICE_IP" ]]; then
-    # The shared gate (../lib/rw-ssh.sh): it tells "down" from "up and
+    # The shared gate (../lib/arca-ssh.sh): it tells "down" from "up and
     # refusing us" and, on a terminal, offers to install a key.
-    rw_ssh_gate "$DEVICE" || err "Cannot continue without SSH to $DEVICE"
+    arca_ssh_gate "$DEVICE" || err "Cannot continue without SSH to $DEVICE"
     ok "SSH to $DEVICE"
 
     # Locally built modules, so any provenance stamp on the unit is about to stop
-    # being true. One shared writer (../lib/rw-bundle.sh), before anything goes out.
-    rw_bundle_clear_stamp "$DEVICE" \
-        || warn "could not clear /opt/roomwizard/bundle.info — it may still name an older release"
+    # being true. One shared writer (../lib/arca-bundle.sh), before anything goes out.
+    arca_bundle_clear_stamp "$DEVICE" \
+        || warn "could not clear /opt/arca/bundle.info — it may still name an older release"
 fi
 echo ""
 
@@ -230,14 +230,14 @@ echo ""
 # ── 4. --bundle: stage and stop ─────────────────────────────────────────────
 if [[ -n "$BUNDLE_DIR" ]]; then
     ts "[4/7] Staging → $BUNDLE_DIR"
-    rw_bundle_init "$BUNDLE_DIR" usb_host || err "could not prepare $BUNDLE_DIR"
+    arca_bundle_init "$BUNDLE_DIR" usb_host || err "could not prepare $BUNDLE_DIR"
     for a in "${USB_ARTIFACTS[@]}"; do
         mode="${a%%|*}"; rest="${a#*|}"; src="${rest%%|*}"; dev="${rest#*|}"
-        rw_bundle_add "$BUNDLE_DIR" usb_host "$mode" "$src" "$dev" \
+        arca_bundle_add "$BUNDLE_DIR" usb_host "$mode" "$src" "$dev" \
             || err "staging failed: $dev"
     done
     warn "The three device scripts are provision-rules.conf's, not the bundle's"
-    ok "Staged $(rw_bundle_finish "$BUNDLE_DIR" usb_host) file(s)"
+    ok "Staged $(arca_bundle_finish "$BUNDLE_DIR" usb_host) file(s)"
     echo ""
     exit 0
 fi
@@ -259,34 +259,34 @@ fi
 # What used to be here: three scp calls, three chmod +x, two `ln -sf` and an
 # /etc/init.d name (S89xpad-modules) that matched nothing else in the repo.
 ts "[4/7] Device scripts and boot links (provision-rules.conf, group usb)"
-# shellcheck source=../lib/rw-identify.sh
-. "$REPO_ROOT/lib/rw-identify.sh"
-# shellcheck source=../lib/rw-provision.sh
-. "$REPO_ROOT/lib/rw-provision.sh"
+# shellcheck source=../lib/arca-identify.sh
+. "$REPO_ROOT/lib/arca-identify.sh"
+# shellcheck source=../lib/arca-provision.sh
+. "$REPO_ROOT/lib/arca-provision.sh"
 
 PROV_RULES="$REPO_ROOT/device-files/provision-rules.conf"
 [[ -f "$PROV_RULES" ]] || err "missing $PROV_RULES"
-if ! PCHECK="$(rw_provision_validate "$PROV_RULES" "$REPO_ROOT")"; then
+if ! PCHECK="$(arca_provision_validate "$PROV_RULES" "$REPO_ROOT")"; then
     echo "$PCHECK"; err "provision-rules.conf does not validate"
 fi
 
 USB_PLAN=$(mktemp)
 trap 'rm -f "$USB_PLAN"' EXIT INT TERM
-rw_provision_plan_component "$PROV_RULES" usb > "$USB_PLAN" \
+arca_provision_plan_component "$PROV_RULES" usb > "$USB_PLAN" \
     || err "could not compile the usb provision plan"
-info "$(rw_provision_plan_summary "$USB_PLAN")"
+info "$(arca_provision_plan_summary "$USB_PLAN")"
 
 # `install` is the one verb the remote interpreter cannot do alone: the source
 # bytes are on this host, so they go over scp first and it only sets the mode.
-# ⚠️ The loop is lib/rw-provision.sh's, not a copy, and history says why: this script and
+# ⚠️ The loop is lib/arca-provision.sh's, not a copy, and history says why: this script and
 # commissioning/provision.sh each had one, both reading the plan on stdin with an
 # `ssh` in the body, and both therefore installed exactly one file.
-rw_provision_push_installs "$USB_PLAN" "$REPO_ROOT" "$DEVICE" \
+arca_provision_push_installs "$USB_PLAN" "$REPO_ROOT" "$DEVICE" \
     || err "could not copy the usb provision sources to the device"
 
-ssh "$DEVICE" "cat > /tmp/rw-usb-plan" < "$USB_PLAN"
-rw_provision_online_script | ssh "$DEVICE" "cat > /tmp/rw-usb-provision.sh"
-ssh "$DEVICE" "sh /tmp/rw-usb-provision.sh /tmp/rw-usb-plan; rc=\$?; rm -f /tmp/rw-usb-provision.sh /tmp/rw-usb-plan; exit \$rc" \
+ssh "$DEVICE" "cat > /tmp/arca-usb-plan" < "$USB_PLAN"
+arca_provision_online_script | ssh "$DEVICE" "cat > /tmp/arca-usb-provision.sh"
+ssh "$DEVICE" "sh /tmp/arca-usb-provision.sh /tmp/arca-usb-plan; rc=\$?; rm -f /tmp/arca-usb-provision.sh /tmp/arca-usb-plan; exit \$rc" \
     || err "the usb provision step failed on the device"
 ok "scripts installed, S89xpad-modules and S90usb-host linked"
 echo ""

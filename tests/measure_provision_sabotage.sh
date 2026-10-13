@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# measure_provision_sabotage.sh — re-measure tests/rw_provision_test.sh group F
-# against deliberately broken copies of lib/rw-provision.sh.
+# measure_provision_sabotage.sh — re-measure tests/arca_provision_test.sh group F
+# against deliberately broken copies of lib/arca-provision.sh.
 #
 #   wsl.exe -e bash -lc "cd /mnt/c/work/roomwizard && bash tests/measure_provision_sabotage.sh"
 #
@@ -9,14 +9,14 @@
 #
 # ── Why this file exists ────────────────────────────────────────────────────
 #
-# A one-of-eight install defect shipped past 94 passing cases in rw_provision_test.sh:
-# `rw_provision_online_script` installed the first file of the eight and silently
+# A one-of-eight install defect shipped past 94 passing cases in arca_provision_test.sh:
+# `arca_provision_online_script` installed the first file of the eight and silently
 # dropped the rest. Group F is the answer,
 # and a group that has only ever been seen passing is not evidence that it can
 # fail — which is exactly the property that defect disproved about the suite it was added
 # to. So every case below breaks one thing and names which assertions notice.
 #
-# ⚠️ It stages ONE FILE, via $RW_PROVISION_LIB. `cp -a` of a directory out of
+# ⚠️ It stages ONE FILE, via $ARCA_PROVISION_LIB. `cp -a` of a directory out of
 # /mnt/c into WSL /tmp can exceed a 300 s budget and looks indistinguishable from a
 # hung suite (that is measured, not feared). Sabotage 5 is the exception: it patches
 # the SUITE, so it stages a copy of it under tests/ — the suite resolves REPO_DIR
@@ -81,21 +81,21 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-SUITE="$REPO/tests/rw_provision_test.sh"
-LIB_REL="lib/rw-provision.sh"
+SUITE="$REPO/tests/arca_provision_test.sh"
+LIB_REL="lib/arca-provision.sh"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
 [ -f "$SUITE" ] || { echo "no suite at $SUITE"; exit 1; }
 [ -f "$REPO/$LIB_REL" ] || { echo "no library at $REPO/$LIB_REL"; exit 1; }
 
-WORK="$(mktemp -d /tmp/rw-provsab.XXXXXX)"
-# ⚠️ The staged copy lives in $REPO/lib/, not in /tmp. rw_provision_validate derives
+WORK="$(mktemp -d /tmp/arca-provsab.XXXXXX)"
+# ⚠️ The staged copy lives in $REPO/lib/, not in /tmp. arca_provision_validate derives
 # the repo root from its own BASH_SOURCE/.. in order to check that every install
 # source exists — so a library staged under /tmp reports the whole rules file
 # invalid and the baseline fails for a reason no sabotage produced. Dot-prefixed and
 # gitignored, and removed on every exit path.
-STAGED="$REPO/lib/.rw-provision.sab.sh"
+STAGED="$REPO/lib/.arca-provision.sab.sh"
 SAB_SUITE=""
 cleanup() { rm -rf "$WORK"; rm -f "$STAGED"; [ -n "$SAB_SUITE" ] && rm -f "$SAB_SUITE"; }
 trap cleanup EXIT INT TERM
@@ -106,8 +106,8 @@ fail=0
 # uncommitted, and a checkout here would silently restore the defect.
 stage() { cp "$REPO/$LIB_REL" "$STAGED"; }
 
-run_suite() { RW_PROVISION_LIB="$STAGED" timeout 240 bash "$SUITE" 2>&1; }
-run_suite_file() { RW_PROVISION_LIB="$STAGED" timeout 240 bash "$1" 2>&1; }
+run_suite() { ARCA_PROVISION_LIB="$STAGED" timeout 240 bash "$SUITE" 2>&1; }
+run_suite_file() { ARCA_PROVISION_LIB="$STAGED" timeout 240 bash "$1" 2>&1; }
 counts()   { grep -oE '[0-9]+ passed, [0-9]+ failed' <<<"$1" | tail -1; }
 failed_n() { local n; n="$(grep -oE '[0-9]+ failed' <<<"$1" | tail -1 | grep -oE '[0-9]+')"; echo "${n:-0}"; }
 names()    { grep -oE 'FAIL[^ ]*  [A-Z][0-9]+' <<<"$1" | grep -oE '[A-Z][0-9]+' | tr '\n' ' '; }

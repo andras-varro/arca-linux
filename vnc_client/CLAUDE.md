@@ -19,8 +19,8 @@ touch, USB keyboard and USB mouse back to the server.
 binary and the config; it skips the `.app` manifest and PPM icon, so the app silently disappears
 from the launcher grid. The Makefile is fine for compiling.
 
-**Do not add a boot init script.** Boot is owned by `/etc/init.d/roomwizard-app`, which respawns
-whatever `/opt/roomwizard/default-app` points at. `./build-and-deploy.sh <ip> set-default` is the
+**Do not add a boot init script.** Boot is owned by `/etc/init.d/arca-app`, which respawns
+whatever `/opt/arca/default-app` points at. `./build-and-deploy.sh <ip> set-default` is the
 supported way to make this the boot app.
 
 `vnc_client.conf` is gitignored because it holds a plaintext password; `vnc_client.conf.example`

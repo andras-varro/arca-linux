@@ -8,7 +8,7 @@
 # Description:       Enable USB host mode via MUSB /dev/mem patching
 ### END INIT INFO
 #
-# SysV init script for USB host mode on RoomWizard.
+# SysV init script for USB host mode on Arca.
 # Installed to /etc/init.d/usb-host, symlinked from /etc/rc5.d/S90usb-host.
 #
 # The kernel reloads with original (broken) struct values on each boot,

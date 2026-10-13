@@ -1,7 +1,7 @@
 @echo off
-REM Servlet Compilation Script for RoomWizard LED Control (Windows)
+REM Servlet Compilation Script for Arca LED Control (Windows)
 
-echo === RoomWizard LED Control Servlet Compilation ===
+echo === Arca LED Control Servlet Compilation ===
 echo.
 
 REM Define paths

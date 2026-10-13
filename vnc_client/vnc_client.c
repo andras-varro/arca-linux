@@ -1,5 +1,5 @@
 /*
- * VNC Client for RoomWizard - v2.2 (Auto-Reconnect)
+ * VNC Client for Arca - v2.2 (Auto-Reconnect)
  *
  * v2.2 changes:
  *   - Auto-reconnect with exponential backoff on connection drop
@@ -1056,7 +1056,7 @@ static int run_vnc_client(const char *host, int port) {
 int main(int argc, char *argv[]) {
     /* --help */
     if (argc == 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
-        printf("RoomWizard VNC Client v2.2\n\n");
+        printf("Arca VNC Client v2.2\n\n");
         printf("Usage: vnc_client [OPTIONS] [host [port]]\n\n");
         printf("Options:\n");
         printf("  --config <path>   Config file (default: %s)\n", VNC_CONFIG_FILE);
@@ -1073,7 +1073,7 @@ int main(int argc, char *argv[]) {
     }
 
     printf("╔═══════════════════════════════════════╗\n");
-    printf("║  RoomWizard VNC Client v2.2           ║\n");
+    printf("║  Arca VNC Client v2.2           ║\n");
     printf("║  Auto-Reconnect + Bilinear            ║\n");
     printf("╚═══════════════════════════════════════╝\n\n");
 

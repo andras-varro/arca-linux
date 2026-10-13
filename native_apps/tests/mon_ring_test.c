@@ -1,4 +1,4 @@
-/* Host-side regression for the history ring rwmond publishes and the Monitor
+/* Host-side regression for the history ring arcamond publishes and the Monitor
  * page reads (sysmon/mon_ring.c).
  *
  *   cd native_apps && gcc -Wall -Wextra -I. -o build/mon_ring_test \
@@ -47,7 +47,7 @@ int main(void) {
     { MonSample s = mk(1000, MON_ABSENT, -3500);    mon_ring_push(&r, &s); }
     int n = mon_ring_format(&r, 123456789ULL, 0u, buf, sizeof(buf));
     CHECK(n > 0 && (size_t)n == strlen(buf), "B: format returns the length (%d)", n);
-    CHECK(strncmp(buf, "rwmond 1 123456789 0 3\n", 23) == 0, "B: header, got \"%.30s\"", buf);
+    CHECK(strncmp(buf, "arcamond 1 123456789 0 3\n", 25) == 0, "B: header, got \"%.30s\"", buf);
     CHECK(mon_ring_parse(buf, &q, &cs, &flags) == 0, "B: own output parses");
     CHECK(cs == 123456789ULL && flags == 0 && q.count == 3, "B: header fields round-trip");
     CHECK(q.count == 3 && mon_ring_get(&q, 0)->cpu_pm == MON_ABSENT && mon_ring_get(&q, 0)->mem_kb == 61234
@@ -66,18 +66,18 @@ int main(void) {
     /* C */
     CHECK(mon_ring_parse("", &q, &cs, &flags) == -1, "C: empty text");
     CHECK(mon_ring_parse("rwmonx 1 5 0 0\n", &q, &cs, &flags) == -1, "C: wrong magic");
-    CHECK(mon_ring_parse("rwmond 2 5 0 0\n", &q, &cs, &flags) == -1, "C: wrong version");
+    CHECK(mon_ring_parse("arcamond 2 5 0 0\n", &q, &cs, &flags) == -1, "C: wrong version");
     {   /* well-formed in every line, so only the count can refuse it */
-        int at = snprintf(buf, sizeof(buf), "rwmond 1 5 0 %d\n", MON_RING_N + 1);
+        int at = snprintf(buf, sizeof(buf), "arcamond 1 5 0 %d\n", MON_RING_N + 1);
         for (int i = 0; i <= MON_RING_N; i++) at += snprintf(buf + at, sizeof(buf) - (size_t)at, "1 2 3\n");
         CHECK(mon_ring_parse(buf, &q, &cs, &flags) == -1, "C: count above MON_RING_N");
     }
-    CHECK(mon_ring_parse("rwmond 1 5 0 -1\n", &q, &cs, &flags) == -1, "C: negative count");
-    CHECK(mon_ring_parse("rwmond 1 5 0 2\n10 20 30\n", &q, &cs, &flags) == -1, "C: fewer lines than count");
-    CHECK(mon_ring_parse("rwmond 1 5 0 1\n10 20\n", &q, &cs, &flags) == -1, "C: a line short of a field");
-    CHECK(mon_ring_parse("rwmond 1 5 0 1\n10 2x 30\n", &q, &cs, &flags) == -1, "C: a non-numeric field");
-    CHECK(mon_ring_parse("rwmond 1 5 0 1\n10 20 30 40\n", &q, &cs, &flags) == -1, "C: an extra field");
-    CHECK(mon_ring_parse("rwmond 1 5 0 1\n10 20 30\n", &q, &cs, &flags) == 0 && q.count == 1,
+    CHECK(mon_ring_parse("arcamond 1 5 0 -1\n", &q, &cs, &flags) == -1, "C: negative count");
+    CHECK(mon_ring_parse("arcamond 1 5 0 2\n10 20 30\n", &q, &cs, &flags) == -1, "C: fewer lines than count");
+    CHECK(mon_ring_parse("arcamond 1 5 0 1\n10 20\n", &q, &cs, &flags) == -1, "C: a line short of a field");
+    CHECK(mon_ring_parse("arcamond 1 5 0 1\n10 2x 30\n", &q, &cs, &flags) == -1, "C: a non-numeric field");
+    CHECK(mon_ring_parse("arcamond 1 5 0 1\n10 20 30 40\n", &q, &cs, &flags) == -1, "C: an extra field");
+    CHECK(mon_ring_parse("arcamond 1 5 0 1\n10 20 30\n", &q, &cs, &flags) == 0 && q.count == 1,
           "C: the minimal good file parses");
 
     /* D */

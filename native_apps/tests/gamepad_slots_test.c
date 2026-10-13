@@ -116,7 +116,7 @@ static FakeDev *dev_for_fd(int fd) {
 }
 
 static int fake_fd(void) {
-    char path[] = "/tmp/rw_slots_XXXXXX";
+    char path[] = "/tmp/arca_slots_XXXXXX";
     int fd = mkstemp(path);
     if (fd < 0) { perror("mkstemp"); exit(2); }
     unlink(path);
@@ -241,7 +241,7 @@ static void expect_str(const char *what, const char *got, const char *want) {
 
 static void pin_tests(void) {
     GamepadManager gm; InputState st; Config mem;
-    char path[] = "/tmp/rw_slots_cfg_XXXXXX";
+    char path[] = "/tmp/arca_slots_cfg_XXXXXX";
     int fd = mkstemp(path);
     if (fd < 0) { perror("mkstemp"); exit(2); }
     close(fd);
@@ -350,7 +350,7 @@ static void pin_tests(void) {
  * mouse beside it stays unlisted and takes no slot (the negative control). */
 static void combo_tests(void) {
     GamepadManager gm; InputState st;
-    char path[] = "/tmp/rw_slots_combo_XXXXXX";
+    char path[] = "/tmp/arca_slots_combo_XXXXXX";
     int fd = mkstemp(path);
     if (fd < 0) { perror("mkstemp"); exit(2); }
     close(fd);

@@ -5,7 +5,7 @@
 #
 # The only caller is rootfs/make-card-image.sh --bundle, which loop-mounts the four
 # partitions of a card IMAGE it is building (our own Buildroot root on p6, marker
-# etc/roomwizard-rootfs) and hands them over with --base. Nothing here reads a
+# etc/arca-rootfs) and hands them over with --base. Nothing here reads a
 # terminal, scans a disk or mounts anything; it needs no root of its own and no network.
 # A unit already in service is updated online with commissioning/provision.sh.
 #
@@ -31,13 +31,13 @@
 #
 # Nothing here restates a decision that lives somewhere else:
 #
-#   which mount is which       lib/rw-identify.sh, by content and by POSITION, never
+#   which mount is which       lib/arca-identify.sh, by content and by POSITION, never
 #                              by UUID. p1 is not reachable from there at all.
 #   what to install            device-files/provision-rules.conf — the boot scripts,
 #                              the rc*.d links and the config fix-ups, shared with
 #                              commissioning/provision.sh so the two cannot drift.
 #                              Modes are DECLARED there, never read off disk.
-#   which binaries             the bundle's own manifest (lib/rw-bundle.sh). Modes are
+#   which binaries             the bundle's own manifest (lib/arca-bundle.sh). Modes are
 #                              DECLARED there too.
 #
 # Host name, password and ssh identity are not set here: they are whatever the caller's
@@ -51,12 +51,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-# shellcheck source=../lib/rw-identify.sh
-. "$REPO_ROOT/lib/rw-identify.sh"
-# shellcheck source=../lib/rw-provision.sh
-. "$REPO_ROOT/lib/rw-provision.sh"
-# shellcheck source=../lib/rw-bundle.sh
-. "$REPO_ROOT/lib/rw-bundle.sh"
+# shellcheck source=../lib/arca-identify.sh
+. "$REPO_ROOT/lib/arca-identify.sh"
+# shellcheck source=../lib/arca-provision.sh
+. "$REPO_ROOT/lib/arca-provision.sh"
+# shellcheck source=../lib/arca-bundle.sh
+. "$REPO_ROOT/lib/arca-bundle.sh"
 
 DEVICE_FILES="$REPO_ROOT/device-files"
 
@@ -95,10 +95,10 @@ needs no network. A unit in service is updated with commissioning/provision.sh.
 
   --bundle <path>    Release tarball or staged bundle directory (REQUIRED)
   --base <dir>       The card, already mounted as <dir>/{root,data,log}
-                     (REQUIRED). p6 must carry our root's marker, etc/roomwizard-rootfs.
+                     (REQUIRED). p6 must carry our root's marker, etc/arca-rootfs.
   --dry-run          Resolve and print everything, change nothing.
   --no-<group>       Skip one group of the provision plan. Groups:
-                     $(rw_provision_optional_groups)
+                     $(arca_provision_optional_groups)
                      --no-mdns leaves <name>.local unresolvable. The reason for each
                      is in device-files/provision-rules.conf.
   --arm-check=skip   Install binaries this host cannot verify. Say why to
@@ -139,9 +139,9 @@ while [[ $# -gt 0 ]]; do
                           retired "$1" "sshd_config is the root image's overlay alone (key-only); this script never edits it." ;;
         --no-*)
             g="${1#--no-}"
-            case " $(rw_provision_optional_groups) " in
+            case " $(arca_provision_optional_groups) " in
                 *" $g "*) NO_PROV_GROUPS="$NO_PROV_GROUPS $g" ;;
-                *) echo "Unknown provision group: $g"; echo "  --no- accepts: $(rw_provision_optional_groups)"; exit 1 ;;
+                *) echo "Unknown provision group: $g"; echo "  --no- accepts: $(arca_provision_optional_groups)"; exit 1 ;;
             esac
             shift ;;
         --help|-h) usage ;;
@@ -155,7 +155,7 @@ done
 
 echo ""
 echo "════════════════════════════════════════"
-echo " RoomWizard image step"
+echo " Arca image step"
 echo "════════════════════════════════════════"
 [[ -z "$DRY" ]] || warn "DRY RUN — every path is resolved and printed; nothing is written."
 
@@ -170,16 +170,16 @@ BASE="${BASE%/}"
 # ⚠️ The negative half is the half that earns its keep: a rootfs where p2 was
 # expected means the partitions are in the wrong order, which would make every
 # path below resolve under the wrong tree.
-if ! CHECK="$(rw_check_card_mounts "$BASE")"; then
+if ! CHECK="$(arca_check_card_mounts "$BASE")"; then
     echo "$CHECK"
     err "the three mounts do not look right"
 fi
-# Our own root only (rw_is_rootfs requires the marker too; this names it in the refusal). A vendor tree
+# Our own root only (arca_is_rootfs requires the marker too; this names it in the refusal). A vendor tree
 # would have its software left running beside ours, since nothing cleans one any more.
-[[ -f "$BASE/root/$RW_ROOTFS_OURS" ]] \
-    || err "$BASE/root has no /$RW_ROOTFS_OURS — this installs into OUR root filesystem (rootfs/) only"
-ok "p6 is our root ($(head -1 "$BASE/root/$RW_ROOTFS_OURS")); p2/p3 are not rootfs trees"
-rw_is_rootfs_writable "$BASE/root" || err "$BASE/root is mounted read-only"
+[[ -f "$BASE/root/$ARCA_ROOTFS_OURS" ]] \
+    || err "$BASE/root has no /$ARCA_ROOTFS_OURS — this installs into OUR root filesystem (rootfs/) only"
+ok "p6 is our root ($(head -1 "$BASE/root/$ARCA_ROOTFS_OURS")); p2/p3 are not rootfs trees"
+arca_is_rootfs_writable "$BASE/root" || err "$BASE/root is mounted read-only"
 
 # ── 2. the bundle ───────────────────────────────────────────────────────────
 echo ""
@@ -191,23 +191,23 @@ if [[ -d "$BUNDLE" ]]; then
     BUNDLE_DIR="$(cd "$BUNDLE" && pwd)"
     info "Staged bundle directory: $BUNDLE_DIR"
 else
-    TMPROOT=$(mktemp -d /tmp/rw-bundle.XXXXXX)
+    TMPROOT=$(mktemp -d /tmp/arca-bundle.XXXXXX)
     BUNDLE_DIR="$TMPROOT/bundle"
     mkdir -p "$BUNDLE_DIR"
     info "Unpacking $BUNDLE"
     tar -xzf "$BUNDLE" -C "$BUNDLE_DIR" || err "could not unpack $BUNDLE"
 fi
 
-if ! CHECK="$(rw_bundle_check "$BUNDLE_DIR")"; then
+if ! CHECK="$(arca_bundle_check "$BUNDLE_DIR")"; then
     echo "$CHECK"
     err "the bundle is not self-consistent — do not install it"
 fi
 ok "Every manifest entry is staged, and every staged file is in a manifest"
 
 [[ -f "$BUNDLE_DIR/manifest.d/bundle.info" ]] && sed 's/^/    /' "$BUNDLE_DIR/manifest.d/bundle.info"
-BUNDLE_FILES=$(rw_bundle_entries "$BUNDLE_DIR" | grep -c . || true)
+BUNDLE_FILES=$(arca_bundle_entries "$BUNDLE_DIR" | grep -c . || true)
 [[ "$BUNDLE_FILES" -gt 0 ]] || err "the bundle contains no files at all"
-info "$BUNDLE_FILES file(s), components: $(rw_bundle_components "$BUNDLE_DIR" | tr '\n' ' ')"
+info "$BUNDLE_FILES file(s), components: $(arca_bundle_components "$BUNDLE_DIR" | tr '\n' ' ')"
 
 # ── ARM safety, on the DOWNLOADED binaries ──────────────────────────────────
 #
@@ -221,7 +221,7 @@ info "$BUNDLE_FILES file(s), components: $(rw_bundle_components "$BUNDLE_DIR" | 
 # pass over nothing, and that is the failure this block exists to make impossible.
 info "Checking the bundle's ARM binaries..."
 ELF_LIST="$TMPROOT/elf.list"
-[[ -n "$TMPROOT" ]] || { TMPROOT=$(mktemp -d /tmp/rw-bundle.XXXXXX); ELF_LIST="$TMPROOT/elf.list"; }
+[[ -n "$TMPROOT" ]] || { TMPROOT=$(mktemp -d /tmp/arca-bundle.XXXXXX); ELF_LIST="$TMPROOT/elf.list"; }
 : > "$ELF_LIST"
 while read -r _mode dev; do
     [[ -n "$dev" ]] || continue
@@ -232,10 +232,10 @@ while read -r _mode dev; do
     # rather than passing it through, is what keeps the count honest.
     [[ "$(head -c 4 "$f" | od -An -tx1 | tr -d ' \n')" == "7f454c46" ]] || continue
     printf '%s\n' "$f" >> "$ELF_LIST"
-done < <(rw_bundle_entries "$BUNDLE_DIR")
+done < <(arca_bundle_entries "$BUNDLE_DIR")
 
 ELF_COUNT=$(grep -c . "$ELF_LIST" || true)
-[[ "$ELF_COUNT" -gt 0 ]] || err "the bundle contains no ELF binaries — it cannot be a RoomWizard app bundle"
+[[ "$ELF_COUNT" -gt 0 ]] || err "the bundle contains no ELF binaries — it cannot be an Arca app bundle"
 
 OBJDUMP="${OBJDUMP:-arm-linux-gnueabihf-objdump}"
 if ! command -v "$OBJDUMP" >/dev/null 2>&1; then
@@ -325,7 +325,7 @@ echo "────────────────────────�
 INSTALLED=()
 put() {
     local mode="$1" dev="$2" src="$3" dest
-    dest=$(rw_offline_path "$BASE" "$dev") || { err "cannot resolve $dev"; }
+    dest=$(arca_offline_path "$BASE" "$dev") || { err "cannot resolve $dev"; }
     case "$dest/" in
         "${BASE%/}"/*) ;;
         *) err "$dev resolved to $dest, outside $BASE — refusing" ;;
@@ -346,17 +346,17 @@ put() {
 # device-files/provision-rules.conf with a reason per entry, read by BOTH this
 # script and commissioning/provision.sh, so the two cannot drift.
 # They HAD drifted: the online path removed stale rc*.d links before relinking and
-# this one did not, so a card carrying an old S50roomwizard-app came out of offline
+# this one did not, so a card carrying an old S50arca-app came out of offline
 # commissioning with two links to one init script at two priorities.
 PROV_RULES="$DEVICE_FILES/provision-rules.conf"
 [[ -f "$PROV_RULES" ]] || err "missing $PROV_RULES"
-if ! PCHECK="$(rw_provision_validate "$PROV_RULES" "$REPO_ROOT")"; then
+if ! PCHECK="$(arca_provision_validate "$PROV_RULES" "$REPO_ROOT")"; then
     echo "$PCHECK"
     err "device-files/provision-rules.conf does not validate — refusing to install"
 fi
 
 PROV_GROUPS="base"
-for g in $(rw_provision_optional_groups); do
+for g in $(arca_provision_optional_groups); do
     case " $NO_PROV_GROUPS " in
         *" $g "*) ;;
         *) PROV_GROUPS="$PROV_GROUPS $g" ;;
@@ -365,12 +365,12 @@ done
 [[ -n "$NO_PROV_GROUPS" ]] && info "Skipping:$NO_PROV_GROUPS"
 
 PROV_PLAN="$TMPROOT/provision.plan"
-[[ -n "$TMPROOT" ]] || { TMPROOT=$(mktemp -d /tmp/rw-bundle.XXXXXX); PROV_PLAN="$TMPROOT/provision.plan"; }
-rw_provision_plan "$PROV_RULES" "$PROV_GROUPS" > "$PROV_PLAN" \
+[[ -n "$TMPROOT" ]] || { TMPROOT=$(mktemp -d /tmp/arca-bundle.XXXXXX); PROV_PLAN="$TMPROOT/provision.plan"; }
+arca_provision_plan "$PROV_RULES" "$PROV_GROUPS" > "$PROV_PLAN" \
     || err "could not compile the provision plan"
-info "Provision plan: $(rw_provision_plan_summary "$PROV_PLAN")"
+info "Provision plan: $(arca_provision_plan_summary "$PROV_PLAN")"
 
-if ! RW_PROVISION_DRY="$DRY" rw_provision_apply_offline "$BASE" "$PROV_PLAN" "$REPO_ROOT"; then
+if ! ARCA_PROVISION_DRY="$DRY" arca_provision_apply_offline "$BASE" "$PROV_PLAN" "$REPO_ROOT"; then
     err "the provision step failed"
 fi
 
@@ -380,7 +380,7 @@ fi
 if [[ -z "$DRY" ]]; then
     while IFS=$'\t' read -r pkind pmode ptarget psrc; do
         case "$pkind" in install) ;; *) continue ;; esac
-        pdest=$(rw_offline_path "$BASE" "$ptarget") || continue
+        pdest=$(arca_offline_path "$BASE" "$ptarget") || continue
         INSTALLED+=("$pmode|$ptarget|$pdest")
     done < "$PROV_PLAN"
 fi
@@ -391,7 +391,7 @@ info "Bundle: $BUNDLE_FILES file(s)"
 while read -r mode dev; do
     [[ -n "$dev" ]] || continue
     put "$mode" "$dev" "$BUNDLE_DIR/root$dev"
-done < <(rw_bundle_entries "$BUNDLE_DIR")
+done < <(arca_bundle_entries "$BUNDLE_DIR")
 ok "Installed"
 
 # ── 4. verify ────────────────────────────────────────────────────────────────
@@ -417,7 +417,7 @@ for m in "$BUNDLE_DIR"/manifest.d/*.md5; do
     [[ -f "$m" ]] || continue
     while read -r want dev; do
         [[ -n "$dev" ]] || continue
-        dest=$(rw_offline_path "$BASE" "$dev")
+        dest=$(arca_offline_path "$BASE" "$dev")
         if [[ ! -f "$dest" ]]; then
             vfail "not installed: $dev"
             continue
@@ -452,7 +452,7 @@ done
 # ── every .app's exec= exists and is executable ────────────────────────────
 # A manifest whose exec= names a binary that is not there renders a launcher tile
 # that does nothing when tapped — which looks exactly like a broken touch panel.
-APPS_DIR="$BASE/root/opt/roomwizard/apps"
+APPS_DIR="$BASE/root/opt/arca/apps"
 APPCOUNT=0
 EXECS=""
 if [[ -d "$APPS_DIR" ]]; then
@@ -465,7 +465,7 @@ if [[ -d "$APPS_DIR" ]]; then
             continue
         fi
         EXECS="$EXECS $e"
-        d=$(rw_offline_path "$BASE" "$e")
+        d=$(arca_offline_path "$BASE" "$e")
         if [[ ! -f "$d" ]]; then
             vfail "$(basename "$a"): exec=$e is not installed"
         elif [[ ! -x "$d" ]]; then
@@ -474,7 +474,7 @@ if [[ -d "$APPS_DIR" ]]; then
         # icon= too: a tile with no icon renders, but as a hole in the grid.
         i=$(sed -n 's/^icon=//p' "$a" | head -1 | tr -d '\r')
         if [[ -n "$i" ]]; then
-            di=$(rw_offline_path "$BASE" "$i")
+            di=$(arca_offline_path "$BASE" "$i")
             [[ -f "$di" ]] || vfail "$(basename "$a"): icon=$i is not installed"
         fi
     done
@@ -486,12 +486,12 @@ else
 fi
 
 # ── default-app names one of them ──────────────────────────────────────────
-DEFAULT_APP_FILE="$BASE/root/opt/roomwizard/default-app"
+DEFAULT_APP_FILE="$BASE/root/opt/arca/default-app"
 if [[ ! -f "$DEFAULT_APP_FILE" ]]; then
-    vfail "no /opt/roomwizard/default-app — /etc/init.d/roomwizard-app would start nothing"
+    vfail "no /opt/arca/default-app — /etc/init.d/arca-app would start nothing"
 else
     da=$(head -1 "$DEFAULT_APP_FILE" | tr -d ' \t\r\n')
-    dad=$(rw_offline_path "$BASE" "$da")
+    dad=$(arca_offline_path "$BASE" "$da")
     if [[ ! -x "$dad" ]]; then
         vfail "default-app is '$da', which is not installed or not executable"
     else
@@ -541,7 +541,7 @@ fi
 # ── the boot links resolve ─────────────────────────────────────────────────
 LINKBAD=0
 BOOT_LINKS=("$BASE/root/etc/rc5.d/S28time-sync" "$BASE/root/etc/rc5.d/S29audio-enable" \
-            "$BASE/root/etc/rc5.d/S99roomwizard-app")
+            "$BASE/root/etc/rc5.d/S99arca-app")
 LINK_NAMES="S28, S29, S99"
 # ⚠️ The usb group's two links are asserted too, but only when the group ran.
 # --no-usb leaves them uninstalled on purpose, so an unconditional list would

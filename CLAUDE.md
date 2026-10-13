@@ -4,7 +4,7 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## What this is
 
-Projects that repurpose the **Steelcase RoomWizard** — a wall-mounted meeting-room display — into a
+**Arca** (full name "Arca Linux") repurposes the **Steelcase RoomWizard** — a wall-mounted meeting-room display — into a
 games/apps platform. The device is an embedded Linux box: **TI OMAP3503** ARM Cortex-A8 @ 600 MHz,
 234 MB RAM, 800×480 framebuffer, projected-capacitive touch, kernel 4.14.52, SysVinit. No GPU, no
 DSP — all rendering is software. Display is legacy **omapfb/omapdss**; there is no DRM/KMS.
@@ -54,7 +54,7 @@ don't copy.
 | `commissioning/CLAUDE.md` | the bring-up scripts, the consent gate, offline verification, host naming |
 | `device-files/CLAUDE.md` | what is installed verbatim, and how to author the two rules files |
 | `tests/CLAUDE.md` | the host regressions, what each cannot see, sabotage-harness discipline |
-| `scummvm-roomwizard/CLAUDE.md`, `vnc_client/CLAUDE.md` | those ports |
+| `scummvm-arca/CLAUDE.md`, `vnc_client/CLAUDE.md` | those ports |
 | `rootfs/CLAUDE.md` | our own p6 root filesystem: Buildroot tree, ABI, rc links, the generic card image |
 | `kernel/CLAUDE.md` | our 4.14.52 image: its patches, DT changes, build script and missing drivers — notes in `kernel/README.md` |
 
@@ -121,7 +121,7 @@ the annotated walkthrough.
 ```bash
 ./setup-build-env.sh                # host prerequisites; --install-deps, --scummvm
 ./tests/run-all.sh                  # the host gate; --list, --scope=deploy, --self-test
-./roomwizard.sh                     # front door: a menu over everything below
+./arca.sh                     # front door: a menu over everything below
 ./deploy-all.sh <ip>                # build + deploy everything (native_apps first)
 ./deploy-all.sh <ip> <component>    # one component;  --list  to see them
 ./commissioning/provision.sh <ip>   # update a unit: backup, install, reboot; --dry-run, --status
@@ -136,7 +136,7 @@ installed **only** by the provision rules — never by a component script. All o
 `commissioning/CLAUDE.md`.
 
 **Components** (each a subdir with a `build-and-deploy.sh`): `native_apps` (C games + launcher +
-tools), `scummvm-roomwizard` (ScummVM backend port), `vnc_client`, `usb_host` (USB host-mode
+tools), `scummvm-arca` (ScummVM backend port), `vnc_client`, `usb_host` (USB host-mode
 enablement + Xbox controller modules), `bluetooth` (BlueZ, BT modules, dongle firmware, boot start).
 
 **Toolchain:** `./setup-build-env.sh` is the one home for the host package set — it probes what is
@@ -149,7 +149,7 @@ the only build path. A **new** binary goes in `GAMES_BINARIES` there and nowhere
 drives the upload, the remote `chmod +x` and the md5 verification. Details: `native_apps/CLAUDE.md`.
 
 **`.app` manifests: one generator per component, on disk.** The ten `native_apps` manifests are data in
-`native_apps/app-manifests.sh`; `vnc_client` and `scummvm-roomwizard` each write theirs from **one**
+`native_apps/app-manifests.sh`; `vnc_client` and `scummvm-arca` each write theirs from **one**
 heredoc into a file. They used to be `cat > … << APP` blocks inside an `ssh "$DEVICE" bash <<'REMOTE'`
 heredoc, i.e. they existed only when a device was reachable — so the offline installer could not
 produce the same bytes without a second copy, and an `exec=` path drifting between the two renders a
@@ -167,9 +167,9 @@ misparses. When in doubt, over-deploy — the failure mode is silent.
 | an app's own source, `common/common.c`, `common/gamepad.c`, `common/pointer.c` | `native_apps` |
 | `common/audio.c`, `common/audio_wav.c`, `common/audio_bed.c`, `common/audio.h` | `native_apps` only — **measured**: neither `vnc_client` (`Makefile` `SRCS`) nor ScummVM links `audio.o`; ScummVM reaches the device half through `audio_out.o` and never the mix-bus client layer |
 | `common/logger.c`, `common/ui_focus.c` | `native_apps` + `vnc_client` — **measured** for `ui_focus.c`: `vnc_client/Makefile` `SRCS` links `ui_focus.o`, `configure.patch` does not name it |
-| `common/framebuffer.c`, `common/touch_input.c`, `common/hardware.c`, `common/config.c`, `common/input_scan.c`, `common/overtemp.h`, `common/blank_decide.h` (read by `hardware.c`), `native_apps/sysmon/mon_ring.h` (both read by `framebuffer.c`) | **all three** — `./deploy-all.sh <ip>`; ScummVM is the slow one. ⚠️ **Measured from `scummvm-roomwizard/backend-files/configure.patch`, which is the list** — it appends each of these `.o` to ScummVM's `OBJS`, so a header in that chain counts too |
+| `common/framebuffer.c`, `common/touch_input.c`, `common/hardware.c`, `common/config.c`, `common/input_scan.c`, `common/overtemp.h`, `common/blank_decide.h` (read by `hardware.c`), `native_apps/sysmon/mon_ring.h` (both read by `framebuffer.c`) | **all three** — `./deploy-all.sh <ip>`; ScummVM is the slow one. ⚠️ **Measured from `scummvm-arca/backend-files/configure.patch`, which is the list** — it appends each of these `.o` to ScummVM's `OBJS`, so a header in that chain counts too |
 | `common/audio_out.c`, `common/audio_gen.c` (+ `audio_out.h`, `audio_gen.h`) | `native_apps` + **ScummVM** — ⚠️ **two, not three: measured 2026-09-09**, `vnc_client/Makefile`'s `SRCS` names neither, and no `audio_out` symbol appears anywhere in that tree. They are on ScummVM's `OBJS` via `configure.patch`, which is why the row above cannot speak for them |
-| anything in `device-files/` (`roomwizard-app`, the rules files, …) | neither — **only** `./commissioning/provision.sh <ip>`, which ends in a reboot (or a new `make-card-image.sh` image, offline) |
+| anything in `device-files/` (`arca-app`, the rules files, …) | neither — **only** `./commissioning/provision.sh <ip>`, which ends in a reboot (or a new `make-card-image.sh` image, offline) |
 | the four **`usb`-group** device files (`usb-host`, `enable-usb-host.sh`, `xpad-modules`, `usb-audio-modules`) | either of the above, **or** `cd usb_host && ./build-and-deploy.sh <ip>` — it compiles the `usb` group itself and, unlike them, needs no reboot. Same for the **`bluetooth`** group (`bluetooth`, `bluetooth.conf`, `bluetooth-main.conf`, `bluetooth-input.conf`) with `cd bluetooth && ./build-and-deploy.sh <ip>` |
 | `usb_host/devmem_write.c`, `build-kernel-modules.sh` | `cd usb_host && ./build-and-deploy.sh <ip>` |
 
@@ -209,7 +209,7 @@ tool-level traps rather than device facts, and each has cost real time.
   Read `${PIPESTATUS[0]}`, or redirect to a file and `Read` it — which is what `./tests/doc_check.sh`
   needs anyway: it takes 9 s in WSL and minutes in Git Bash (measured 2026-09-27), it emits NUL bytes that make the output unreadable
   (`| tr -d '\000'`), and its destination — like EVERY scratch file — must be **outside** the repo:
-  group D counts a receipt inside; a scratch copy of a source made `rw_ssh_test` FAIL (measured).
+  group D counts a receipt inside; a scratch copy of a source made `arca_ssh_test` FAIL (measured).
 - ⚠️ **Git Bash `sed` does not expand `\n` in a REPLACEMENT** — it inserts a literal `n`, silently, and
   the corruption lands in the middle of a line you are no longer looking at. Use `Edit` for any
   multi-line splice, and ⚠️ **never splice into the middle of an existing comment block**: the result
@@ -245,7 +245,7 @@ tool-level traps rather than device facts, and each has cost real time.
 - **`shellcheck` IS installed in this WSL — re-measured 2026-09-06, version 0.7.0.** Use it; `bash -n`
   and `dash -n` (the latter on anything carrying a `/bin/sh` shebang) remain the cheaper first pass.
 - **Never run a ScummVM build concurrently with a `native_apps` build.**
-  `scummvm-roomwizard/build-and-deploy.sh` does `rm -f native_apps/common/*.o` at two points —
+  `scummvm-arca/build-and-deploy.sh` does `rm -f native_apps/common/*.o` at two points —
   deliberately, because a stale x86 `.o` there fails the cross-build with "file format not recognized".
   It takes ~1m35s–2m20s; wait it out.
 - **Fixtures, card captures and what a test suite cannot observe from here:** `tests/CLAUDE.md`.
@@ -328,22 +328,22 @@ Full detail, measurements and the flags each component uses:
 
 | Layer | Script | When |
 |---|---|---|
-| Front door (menu over everything below) | `roomwizard.sh` | whenever you'd rather not remember the flags |
+| Front door (menu over everything below) | `arca.sh` | whenever you'd rather not remember the flags |
 | Whole-card image; `--bundle` adds the no-prompt installer `commissioning/commission-offline.sh` | `rootfs/make-card-image.sh` | once per card, offline |
 | Update a running unit (backup, install, reboot) | `commissioning/provision.sh` | per update, over SSH |
 | Build + deploy all components | `deploy-all.sh` | per deploy |
 | Per-component build/deploy/manifest | `*/build-and-deploy.sh` | per component |
 | Build + stage + publish an offline bundle | `release.sh` | per release |
-| App respawn loop at boot | `device-files/roomwizard-app` | every boot |
+| App respawn loop at boot | `device-files/arca-app` | every boot |
 
-`roomwizard.sh` is a **composition layer with no logic of its own** except `wait_for_ssh` — which polls
+`arca.sh` is a **composition layer with no logic of its own** except `wait_for_ssh` — which polls
 **SSH, not ping**, because ping answers while `sshd` is still starting. Every item execs one of the
 scripts below it, and all of them stay non-interactive when called directly.
 
 ⚠️ **Never identify a partition by filesystem UUID** — a UUID names one *card*, and two units on
-identical firmware share none of their four. `lib/rw-identify.sh` is the one implementation: content
+identical firmware share none of their four. `lib/arca-identify.sh` is the one implementation: content
 for a mounted rootfs, the partition table for a disk, **position** for which partition holds which
-tree. ⚠️ **p1 is deliberately absent from `RW_PART_ROLES`, and a test asserts its absence**, so nothing
+tree. ⚠️ **p1 is deliberately absent from `ARCA_PART_ROLES`, and a test asserts its absence**, so nothing
 can reach `mlo`/`u-boot.bin`/`ctrlblock.bin` through those functions. ⚠️ **And a rootfs mounted offline
 shows `/home/root/{data,log}` as EMPTY directories** — they are mount points for p2/p3 (p5 stays in
 the table, unused and unmounted), so a tool that mounts only p6 can report success having touched
@@ -352,17 +352,17 @@ neither. All three:
 
 **A script's executable bit lives in the git index, so one bad commit breaks every fresh clone.** All
 `*.sh` are `100755` there — check with `git ls-files -s -- '*.sh'` after adding one. Belt and braces:
-`roomwizard.sh` and `deploy-all.sh` invoke their children as `bash <script>`, never `./<script>`.
+`arca.sh` and `deploy-all.sh` invoke their children as `bash <script>`, never `./<script>`.
 
 **Stopping what is running belongs to the init script, and it matches on the executable.**
-`/etc/init.d/roomwizard-app stop` is the only implementation; the three component scripts call it and
+`/etc/init.d/arca-app stop` is the only implementation; the three component scripts call it and
 **must not carry a `killall` of their own** — a name-based rule cannot see the app that `app_launcher`
 *started*, and that grandchild is normally the process holding `/dev/fb0`. Detail:
 `device-files/CLAUDE.md`.
 
-**App launcher + manifests.** The boot init script reads `/opt/roomwizard/default-app` and respawns that
+**App launcher + manifests.** The boot init script reads `/opt/arca/default-app` and respawns that
 binary whenever it exits (so exiting a game returns to the launcher). `app_launcher` scans
-`/opt/roomwizard/apps/*.app` manifests (INI: `name=`, `exec=`, `icon=` PPM P6, `args=` one of
+`/opt/arca/apps/*.app` manifests (INI: `name=`, `exec=`, `icon=` PPM P6, `args=` one of
 `fb,touch`/`fb`/`touch`/`none`) and renders them as a touch grid. Each component's deploy script writes
 its own manifests + PPM icons — this is how projects plug into the launcher without a central registry.
 `SYSTEM_ANALYSIS.md#53-app-launcher-and-manifests`.
@@ -374,13 +374,13 @@ reading evdev directly), `touch_input.c`, `touch_calib.c`, `hardware.c`, `common
 `audio.c`, `audio_gen.c`, `config.c`, `keyboard.c`, `highscore.c`, `ppm.c`, `logger.c`, `ui_focus.c`, `pointer.c`, `start_menu.c`. The
 per-function table and what never to do instead: `native_apps/CLAUDE.md`.
 
-ScummVM has its own evdev reader (`roomwizard-events.cpp`, on the shared `input_scan.c`) but **not its own audio**: `oss-mixer.cpp` opens no `/dev/dsp` and drives the device through `common/audio_out.o` (`configure.patch`; measured by grep of `backend-files/`); it never links `audio.o`.
+ScummVM has its own evdev reader (`arca-events.cpp`, on the shared `input_scan.c`) but **not its own audio**: `oss-mixer.cpp` opens no `/dev/dsp` and drives the device through `common/audio_out.o` (`configure.patch`; measured by grep of `backend-files/`); it never links `audio.o`.
 It shares the Cortex-A8 / OSS fixes through that library.
 
 ## Device paths worth knowing
 
-- `/opt/games/` — native binaries · `/opt/roomwizard/apps/` — `.app` manifests ·
-  `/opt/roomwizard/icons/` — PPM icons · `/opt/roomwizard/default-app` — boot target
+- `/opt/games/` — native binaries · `/opt/arca/apps/` — `.app` manifests ·
+  `/opt/arca/icons/` — PPM icons · `/opt/arca/default-app` — boot target
 - `/dev/fb0` (framebuffer) · `/dev/input/event*` (evdev) ·
   `/sys/class/leds/{red_led,green_led,backlight}/brightness` (0–100)
 - `/dev/dsp` (OSS audio, GPIO12 must be HIGH to unmute the speaker) · `/dev/watchdog` (60 s HW)

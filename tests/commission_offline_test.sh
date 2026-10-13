@@ -60,17 +60,17 @@ if [ ! -d "$BUNDLE_SRC" ]; then
     exit 1
 fi
 
-TMP=$(mktemp -d /tmp/rw-comm-test.XXXXXX)
+TMP=$(mktemp -d /tmp/arca-comm-test.XXXXXX)
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
 # A copy of only what commissioning/commission-offline.sh reads. `cp -a` on device-files/ so the
-# init scripts keep their bytes — that copy is also what brings roomwizard-app and the
+# init scripts keep their bytes — that copy is also what brings arca-app and the
 # other files the provision plan installs from there; nothing here needs the 4 GB card
 # images.
 REPO="$TMP/repo"
 mkdir -p "$REPO/native_apps" "$REPO/commissioning" "$REPO/lib"
 for f in commissioning/commission-offline.sh \
-         lib/rw-identify.sh lib/rw-provision.sh lib/rw-bundle.sh; do
+         lib/arca-identify.sh lib/arca-provision.sh lib/arca-bundle.sh; do
     cp "$REPO_DIR/$f" "$REPO/$f"
 done
 cp -a "$REPO_DIR/device-files" "$REPO/device-files"
@@ -208,7 +208,7 @@ echo "2. sabotage: one check each"
 # ── md5. Change a staged file's bytes and leave the manifest alone: this is a
 # truncated or corrupted write, which is what a failing card looks like.
 B="$TMP/b-md5"; cp -a "$BUNDLE_SRC" "$B"
-printf 'corrupted\n' >> "$B/root/opt/roomwizard/apps/snake.app"
+printf 'corrupted\n' >> "$B/root/opt/arca/apps/snake.app"
 run "$B" "$REPO"
 expect_fires 'md5 mismatch' "2a a corrupted staged file is caught by md5"
 
@@ -232,23 +232,23 @@ expect_fires 'declared mode .* not executable' "2b an installer that skips chmod
 # tile that does nothing when tapped, which looks exactly like broken touch.
 # The .md5 line is regenerated so that ONLY this check fires.
 B="$TMP/b-app"; cp -a "$BUNDLE_SRC" "$B"
-sed -i 's|^exec=.*|exec=/opt/games/no_such_game|' "$B/root/opt/roomwizard/apps/snake.app"
-newmd5=$(md5sum "$B/root/opt/roomwizard/apps/snake.app" | cut -d' ' -f1)
-sed -i "s|^[0-9a-f]*  /opt/roomwizard/apps/snake.app$|$newmd5  /opt/roomwizard/apps/snake.app|" \
+sed -i 's|^exec=.*|exec=/opt/games/no_such_game|' "$B/root/opt/arca/apps/snake.app"
+newmd5=$(md5sum "$B/root/opt/arca/apps/snake.app" | cut -d' ' -f1)
+sed -i "s|^[0-9a-f]*  /opt/arca/apps/snake.app$|$newmd5  /opt/arca/apps/snake.app|" \
     "$B/manifest.d/native_apps.md5"
 run "$B" "$REPO"
 expect_fires 'exec=/opt/games/no_such_game is not installed' \
     "2c a manifest naming an absent binary is caught"
 
-# ── default-app. /etc/init.d/roomwizard-app respawns whatever this names, so a
+# ── default-app. /etc/init.d/arca-app respawns whatever this names, so a
 # wrong value is a device that boots to a black screen and stays there.
 B="$TMP/b-default"; cp -a "$BUNDLE_SRC" "$B"
-printf '/opt/roomwizard/not_a_launcher\n' > "$B/root/opt/roomwizard/default-app"
-newmd5=$(md5sum "$B/root/opt/roomwizard/default-app" | cut -d' ' -f1)
-sed -i "s|^[0-9a-f]*  /opt/roomwizard/default-app$|$newmd5  /opt/roomwizard/default-app|" \
+printf '/opt/arca/not_a_launcher\n' > "$B/root/opt/arca/default-app"
+newmd5=$(md5sum "$B/root/opt/arca/default-app" | cut -d' ' -f1)
+sed -i "s|^[0-9a-f]*  /opt/arca/default-app$|$newmd5  /opt/arca/default-app|" \
     "$B/manifest.d/native_apps.md5"
 run "$B" "$REPO"
-expect_fires "default-app is '/opt/roomwizard/not_a_launcher'" \
+expect_fires "default-app is '/opt/arca/not_a_launcher'" \
     "2d a default-app that names nothing installed is caught"
 
 # ── dash -n. A parse error in an init script does not fail at install time; it
@@ -281,11 +281,11 @@ expect_fires 'CRLF shebang' "2f a CRLF shebang is caught"
 
 # ── the ARM gate's zero-artifact case. "no hardware divide in 0 binaries" is a
 # pass over nothing, and it is the failure the plan warns about by name.
-B="$TMP/b-noelf"; mkdir -p "$B/root/opt/roomwizard/apps" "$B/manifest.d"
-printf 'name=X\nexec=/opt/games/x\nicon=\nargs=\n' > "$B/root/opt/roomwizard/apps/x.app"
-printf '0644 /opt/roomwizard/apps/x.app\n' > "$B/manifest.d/only.list"
-printf '%s  /opt/roomwizard/apps/x.app\n' \
-    "$(md5sum "$B/root/opt/roomwizard/apps/x.app" | cut -d' ' -f1)" > "$B/manifest.d/only.md5"
+B="$TMP/b-noelf"; mkdir -p "$B/root/opt/arca/apps" "$B/manifest.d"
+printf 'name=X\nexec=/opt/games/x\nicon=\nargs=\n' > "$B/root/opt/arca/apps/x.app"
+printf '0644 /opt/arca/apps/x.app\n' > "$B/manifest.d/only.list"
+printf '%s  /opt/arca/apps/x.app\n' \
+    "$(md5sum "$B/root/opt/arca/apps/x.app" | cut -d' ' -f1)" > "$B/manifest.d/only.md5"
 run "$B" "$REPO"
 expect_fires 'no ELF binaries' "2g a bundle with no ARM binaries is refused, not silently passed"
 
@@ -431,12 +431,12 @@ fi
 # A root without our marker (a vendor tree, or p2 mounted as p6) is not ours to install
 # into: with no clean, the vendor stack would keep running beside the bundle.
 bash "$SCRIPT_DIR/make-fake-card.sh" "$TMP/card" >/dev/null
-rm -f "$TMP/card/root/etc/roomwizard-rootfs"
+rm -f "$TMP/card/root/etc/arca-rootfs"
 printf 'SteelCase RW20 Embedded Platform (Yocto) 3.1.4 \\n \\l\n' > "$TMP/card/root/etc/issue"
 set +e
 OUT=$(bash "$REPO/commissioning/commission-offline.sh" --bundle "$BUNDLE" --base "$TMP/card" 2>&1 < /dev/null); ST=$?
 set -e
-expect_fires 'etc/roomwizard-rootfs' "6e a root without our marker is refused, naming the marker"
+expect_fires 'etc/arca-rootfs' "6e a root without our marker is refused, naming the marker"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo ""

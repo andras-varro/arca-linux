@@ -85,7 +85,7 @@ typedef enum {
 #define VNC_QUALITY_LEVEL 5     // 1-9 (JPEG quality for Tight encoding)
 
 // Framebuffer format - 16bpp RGB565 halves memory bandwidth
-// (Same approach as ScummVM RoomWizard backend)
+// (Same approach as ScummVM Arca backend)
 #define USE_16BPP 1
 
 // Frame interval derived from TARGET_FPS
@@ -106,8 +106,8 @@ typedef enum {
 #define RECONNECT_CONNECT_TIMEOUT    5   // seconds TCP connect timeout during reconnect
 
 // Respawn integration: on exit gesture, switch default-app back to launcher
-#define RESPAWN_CONFIG_FILE    "/opt/roomwizard/default-app"
-#define APP_LAUNCHER_PATH     "/opt/roomwizard/app_launcher"
+#define RESPAWN_CONFIG_FILE    "/opt/arca/default-app"
+#define APP_LAUNCHER_PATH     "/opt/arca/app_launcher"
 
 // Reconnect UI button geometry.  The row is anchored to the bottom of the
 // TOUCH-SAFE rectangle at runtime (SCREEN_SAFE_BOTTOM - RECONNECT_BTN_H -

@@ -97,7 +97,7 @@
  *
  * ⚠️ **And that control does NOT fire from this host — measured 2026-09-10, sabotage
  * stanza 10 prints `0 failed`.**  `CONFIG_FILE_PATH` is absolute, so no host test can
- * put an `audio_enabled=false` file at `/opt/games/rw_config.conf`; with no file at
+ * put an `audio_enabled=false` file at `/opt/games/arca_config.conf`; with no file at
  * all `audio_init()` defaults the gate OPEN and the two paths are indistinguishable
  * here.  The same absence makes "resolved the WRONG value" unreachable, because the
  * stored value on this host is always the default.  So what group J really holds is

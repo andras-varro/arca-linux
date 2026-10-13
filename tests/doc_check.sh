@@ -100,7 +100,7 @@ scan_files() {
         -o -name scummvm-icons \
         -o -name partitions \
         -o -name partitions.new \
-        -o -name 'roomwizard.new*' \
+        -o -name 'arca.new*' \
         -o -name HardwarePhotos \
         -o -name 'arm-deps*' \
         -o -name deps \
@@ -235,7 +235,7 @@ norm_path() {
 }
 
 # ⚠️ The path resolves relative to the citing file and then, failing that, from the repo
-# root — because most of these anchors are not links. A comment in `lib/rw-identify.sh` or a
+# root — because most of these anchors are not links. A comment in `lib/arca-identify.sh` or a
 # backticked pointer in `lib/CLAUDE.md` writes the doc's plain filename and means the one at
 # the root; requiring `../` there would put path arithmetic into 25 human-readable comments
 # to satisfy a checker. The invariant worth having is that the **fragment** names a real
@@ -362,7 +362,7 @@ audio_stream_start	native_apps/CLAUDE.md	IMPROVEMENT_PLAN.md
 1486	SYSTEM_ANALYSIS.md	IMPROVEMENT_PLAN.md
 22,317	SYSTEM_ANALYSIS.md	IMPROVEMENT_PLAN.md
 button_check_tap	native_apps/CLAUDE.md	-
-rw_provision_push_installs	lib/CLAUDE.md	-
+arca_provision_push_installs	lib/CLAUDE.md	-
 TouchCalibSweep	native_apps/CLAUDE.md	SYSTEM_ANALYSIS.md
 clamp_to_hw	native_apps/CLAUDE.md	SYSTEM_ANALYSIS.md
 11.4 MB/s	SYSTEM_ANALYSIS.md	IMPROVEMENT_PLAN.md
@@ -382,8 +382,8 @@ static-only-last	SYSTEM_ANALYSIS.md	IMPROVEMENT_PLAN.md
 screen_true_panel_width	native_apps/CLAUDE.md	IMPROVEMENT_PLAN.md
 fb_scale_bezel_to_surface	native_apps/CLAUDE.md	IMPROVEMENT_PLAN.md
 fb_to_game_ppm	SYSTEM_ANALYSIS.md	IMPROVEMENT_PLAN.md
-kFeatureCursorPalette	scummvm-roomwizard/CLAUDE.md	IMPROVEMENT_PLAN.md
-drawCursor()	scummvm-roomwizard/CLAUDE.md	IMPROVEMENT_PLAN.md
+kFeatureCursorPalette	scummvm-arca/CLAUDE.md	IMPROVEMENT_PLAN.md
+drawCursor()	scummvm-arca/CLAUDE.md	IMPROVEMENT_PLAN.md
 publish_safe_area	native_apps/CLAUDE.md	SYSTEM_ANALYSIS.md
 X 10..4076	SYSTEM_ANALYSIS.md	native_apps/CLAUDE.md
 1,536,000	SYSTEM_ANALYSIS.md	native_apps/CLAUDE.md
@@ -423,7 +423,7 @@ binutils-arm-linux-gnueabihf	setup-build-env.sh	IMPROVEMENT_PLAN.md
 python3-pil	setup-build-env.sh	IMPROVEMENT_PLAN.md
 run-all.sh	tests/CLAUDE.md	-
 shellcheck-baseline.txt	tests/CLAUDE.md	-
-harness-error channel	tests/rw_provision_test.sh	IMPROVEMENT_PLAN.md
+harness-error channel	tests/arca_provision_test.sh	IMPROVEMENT_PLAN.md
 musb_debug.h:38-41	SYSTEM_ANALYSIS.md	IMPROVEMENT_PLAN.md
 omap2430.c:171-181	SYSTEM_ANALYSIS.md	IMPROVEMENT_PLAN.md
 BUSYBOX_SHOW_OTHERS	rootfs/CLAUDE.md	IMPROVEMENT_PLAN.md
@@ -431,7 +431,7 @@ S01seedrng	rootfs/CLAUDE.md	IMPROVEMENT_PLAN.md
 GLIBC_2.28	rootfs/CLAUDE.md	IMPROVEMENT_PLAN.md
 config.c:65	rootfs/CLAUDE.md	IMPROVEMENT_PLAN.md
 nothing from Steelcase on the card, at all	rootfs/CLAUDE.md	IMPROVEMENT_PLAN.md
-rw-spare	rootfs/CLAUDE.md	IMPROVEMENT_PLAN.md
+arca-spare	rootfs/CLAUDE.md	IMPROVEMENT_PLAN.md
 EOF
 }
 
@@ -677,7 +677,7 @@ group_c() {
 # it lives in native_apps/sound-sets.sh, the one home for it, and at both consumers of that table.
 # ⚠️ **No headroom is granted: 708 is the measurement, and the next addition pays by deleting.**
 # ⚠️ 2026-09-01, NINTH raise, deliberate and argued: lib/CLAUDE.md 214 → 232 (measured post-edit count).
-# A new subsystem landed in this directory — lib/rw-release.sh, the release fetch — and its rules have no
+# A new subsystem landed in this directory — lib/arca-release.sh, the release fetch — and its rules have no
 # other home: they are about how to call these libraries, not device facts and not open work. The raise buys
 # the four that cost real time to establish and would each be re-derived from scratch otherwise: gh release
 # download prints NOTHING for a 125 MB asset (which is why the library carries its own progress), GitHub
@@ -687,7 +687,7 @@ group_c() {
 # entries were DELETED from IMPROVEMENT_PLAN.md and a third compressed to its open remainder, taking that
 # document ~1081 → ~1040 non-blank while it GAINED two newly-recorded open items. Net documentation change
 # across the repo is ~23 lines SMALLER. Two stale claims were CORRECTED rather than appended to, per the
-# overwrite rule: this file's "--tag has never run" (it has, v1.0.0) and rw-bundle.sh's "ScummVM is GPLv2+"
+# overwrite rule: this file's "--tag has never run" (it has, v1.0.0) and arca-bundle.sh's "ScummVM is GPLv2+"
 # (the tree is GPL-3.0-or-later).
 # ⚠️ **No headroom is granted: 232 is the measurement, and the next addition pays by deleting.**
 # ⚠️ 2026-09-01, a deliberate raise: SYSTEM_ANALYSIS.md 1599 -> 1610, and NOT paid for by a deletion.
@@ -940,7 +940,7 @@ ceilings() {
 120	commissioning/CLAUDE.md
 106	device-files/CLAUDE.md
 324	tests/CLAUDE.md
-215	scummvm-roomwizard/CLAUDE.md
+215	scummvm-arca/CLAUDE.md
 162	vnc_client/CLAUDE.md
 137	.claude/skills/doc-update/SKILL.md
 180	kernel/README.md

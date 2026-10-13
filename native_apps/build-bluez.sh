@@ -86,7 +86,7 @@ CPPFLAGS_ARM="-I$SYSROOT/usr/include"
 LDFLAGS_ARM="-L$SYSROOT/usr/lib -Wl,-rpath-link,$SYSROOT/usr/lib"
 
 # Build on the Linux side: configure + make over /mnt/c DrvFs is several times slower.
-BUILD_ROOT="${RW_BLUEZ_BUILD_DIR:-$HOME/rw-bluez-build}"
+BUILD_ROOT="${ARCA_BLUEZ_BUILD_DIR:-$HOME/rw-bluez-build}"
 mkdir -p "$BUILD_ROOT" "$SRC"
 LOG="$BUILD_ROOT/build.log"
 : >"$LOG"

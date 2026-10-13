@@ -20,7 +20,7 @@
 #   wsl.exe -e bash -lc /mnt/c/work/rw-scratch/c6/measure_touch_map_sabotage.sh
 set -u
 
-REPO=/mnt/c/work/roomwizard/native_apps
+REPO=/mnt/c/work/arca/native_apps
 TEST=/mnt/c/work/rw-scratch/c6/touch_map_test.c
 WORK=/mnt/c/work/rw-scratch/c6/sab
 

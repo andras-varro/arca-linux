@@ -1002,7 +1002,7 @@ void draw_game() {
 }
 
 int main(int argc, char *argv[]) {
-    /* Line-buffer stdout FIRST: at boot it is /var/log/roomwizard/app_stdout.log,
+    /* Line-buffer stdout FIRST: at boot it is /var/log/arca/app_stdout.log,
      * not a tty, so glibc block-buffers 4 KB and audio_bed_init()'s playlist
      * receipt never arrives — which reads as a printf that was never reached.
      * common/logger.c line-buffers its own file, which is why only the printf
@@ -1044,7 +1044,7 @@ int main(int argc, char *argv[]) {
     hw_set_backlight(100);
     audio_init(&audio);  // Initialize audio (non-fatal if unavailable)
 
-    /* The music bed: the playlist named by /opt/roomwizard/soundsets/tetris.sound,
+    /* The music bed: the playlist named by /opt/arca/soundsets/tetris.sound,
      * with the four states and the hold/resume rules in common/audio_bed.c.
      * ⚠️ That file is the ONLY home for the paths — no set file means no music,
      * and tetris_music present but EMPTY is the off switch. */

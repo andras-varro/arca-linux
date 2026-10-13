@@ -9,8 +9,8 @@
 # machine, from one package set in one place.
 #
 # ⚠️ It installs HOST packages only. The CROSS-COMPILED dependencies already install
-# themselves and are deliberately not listed here: scummvm-roomwizard/build-and-deploy.sh's
-# build_arm_deps fetches and builds zlib + libpng into scummvm-roomwizard/arm-deps-softfp/,
+# themselves and are deliberately not listed here: scummvm-arca/build-and-deploy.sh's
+# build_arm_deps fetches and builds zlib + libpng into scummvm-arca/arm-deps-softfp/,
 # native_apps/build-alsa-lib.sh builds alsa-lib into native_apps/arm-deps-softfp/, and
 # vnc_client/build-deps.sh does zlib / libjpeg-turbo / LibVNCServer into vnc_client/deps/.
 # All three are idempotent and none needs sudo, so none belongs in an apt line.
@@ -44,7 +44,7 @@ of these tools is absent and the report would be about the shell, not the host.
   --install-deps   Install without asking. For scripted use, or a fresh clone.
   --scummvm        Also set up the upstream ScummVM tree, which is not an apt
                    package: clone it, check out branch-2-8, and restore our
-                   backend files. Needed only to build scummvm-roomwizard.
+                   backend files. Needed only to build scummvm-arca.
   --group <g>      Probe only these groups; repeatable. Default: all four.
                      core    every component needs these
                      decode  python3 + PIL, for fb565_to_png.py screenshots
@@ -274,7 +274,7 @@ fi
 # ⚠️ This is the actual blocker on a fresh clone, and an installer that skipped it would
 # not have solved the problem it exists to solve. The upstream tree at the repo root is
 # gitignored (/scummvm/ in .gitignore), so a clone has no scummvm/ at all and
-# scummvm-roomwizard/build-and-deploy.sh refuses. vkeybd_roomwizard.zip and scummvm.ppm ARE
+# scummvm-arca/build-and-deploy.sh refuses. vkeybd_arca.zip and scummvm.ppm ARE
 # tracked, so those do come with the clone.
 #
 # Opt-in rather than part of the default run because it is a large clone over the network,
@@ -302,8 +302,8 @@ setup_scummvm() {
 
     # Our backend is not in upstream. `restore` copies backend-files/ into the tree and
     # sets the skip-worktree bits that keep our edits out of upstream's git status.
-    info "restoring the RoomWizard backend into the tree"
-    ( cd "$REPO/scummvm-roomwizard" && bash manage-scummvm-changes.sh restore ) \
+    info "restoring the Arca backend into the tree"
+    ( cd "$REPO/scummvm-arca" && bash manage-scummvm-changes.sh restore ) \
         || { miss "manage-scummvm-changes.sh restore failed"; return 1; }
     ok "backend restored"
     return 0
@@ -313,7 +313,7 @@ if [ "$DO_SCUMMVM" -eq 1 ]; then
     setup_scummvm || RC=1
 elif [ ! -d "$REPO/scummvm/.git" ]; then
     hdr "ScummVM upstream tree"
-    warn "absent — scummvm-roomwizard cannot build. Pass --scummvm to set it up."
+    warn "absent — scummvm-arca cannot build. Pass --scummvm to set it up."
     info "The other three components do not need it."
 fi
 

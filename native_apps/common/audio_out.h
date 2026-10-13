@@ -11,7 +11,7 @@
  * at a transition too, so no userspace API avoids it — only not stopping the
  * stream does.
  *
- * This is not a design.  `scummvm-roomwizard/backend-files/oss-mixer.cpp` has
+ * This is not a design.  `scummvm-arca/backend-files/oss-mixer.cpp` has
  * run exactly this — one open, prefill, deadline pacing, an arithmetic-shift
  * attenuation immediately before `write()`, no reset — on this device since
  * 2026-08-03, and Full Throttle's video, MIDI, speech and effects all play well

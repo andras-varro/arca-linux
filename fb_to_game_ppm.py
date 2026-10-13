@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Recover a ScummVM game surface from a RoomWizard /dev/fb0 grab.
+Recover a ScummVM game surface from an Arca /dev/fb0 grab.
 
-The RoomWizard ScummVM backend blits the game surface to the panel with a
+The Arca ScummVM backend blits the game surface to the panel with a
 nearest-neighbour integer upscale. That map is SURJECTIVE: every source pixel
 lands on at least one destination pixel whenever the scale is >= 1, so it can be
 inverted exactly, with no filtering and no guessing, by reading one
 representative destination pixel per source pixel.
 
-FORWARD MAP (measured in scummvm-roomwizard/backend-files/roomwizard-graphics.cpp,
+FORWARD MAP (measured in scummvm-arca/backend-files/arca-graphics.cpp,
 the upscale loop at 440-573). Integer, TRUNCATING:
 
     srcX = (dx * srcW) // scaledW      clamped to srcW - 1
@@ -25,7 +25,7 @@ DOWNSCALE on that axis and is not invertible; this tool refuses (exit 2) rather
 than inventing pixels.
 
 WHERE --rect COMES FROM. It is (offsetX, offsetY, scaledWidth, scaledHeight) as
-getScalingInfo() computes them - roomwizard-graphics.cpp:138-172. Run that same
+getScalingInfo() computes them - arca-graphics.cpp:138-172. Run that same
 integer chain with the unit's own bezel and touch insets; do not guess it and do
 not let a bounding box stand in for it.
 
@@ -57,7 +57,7 @@ aspect (1.6267) is nevertheless only 1.7% off the 320x200 source aspect (1.6), s
 it sails through the 2% aspect gate below while being wrong. Use --auto-rect only
 to confirm that a computed rect is not absurd.
 
-CURSOR. drawCursor() (roomwizard-graphics.cpp:575-642) writes destructively at
+CURSOR. drawCursor() (arca-graphics.cpp:575-642) writes destructively at
 OUTPUT resolution, after the scale. Pixels under a visible mouse cursor are not
 game-surface pixels and this tool cannot tell the difference. Grab a frame with
 the cursor hidden, or ignore that region.
@@ -73,7 +73,7 @@ tool will not trust).
 
 Typical capture (no scripted input is needed - passing the game id skips the
 ScummVM launcher menu, and one PID must be verified before and after the grab):
-  ssh root@<ip> /etc/init.d/roomwizard-app stop
+  ssh root@<ip> /etc/init.d/arca-app stop
   ssh root@<ip> "nohup /opt/games/scummvm kq2 >/tmp/svm.log 2>&1 </dev/null &"
   ssh root@<ip> dd if=/dev/fb0 bs=768000 count=1 > fb.raw
   python3 fb_to_game_ppm.py fb.raw kq2.ppm --rect 39,0,722,451 --src 320x200 --view 0,15

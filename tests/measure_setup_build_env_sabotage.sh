@@ -29,7 +29,7 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 [ -f "$SUITE" ] || { echo "no $SUITE" >&2; exit 1; }
 [ "$(uname -s)" = "Linux" ] || { echo "REFUSING: needs Linux (WSL)" >&2; exit 1; }
 
-WORK="$(mktemp -d /tmp/rw-setupenv-sab.XXXXXX)"
+WORK="$(mktemp -d /tmp/arca-setupenv-sab.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 
 # ── the baseline ────────────────────────────────────────────────────────────
@@ -41,7 +41,7 @@ echo "════════════════════════�
 echo " baseline: the unmodified script"
 echo "════════════════════════════════════════"
 cp "$SRC" "$WORK/baseline.sh"; chmod +x "$WORK/baseline.sh"
-base_out="$(RW_SETUP="$WORK/baseline.sh" bash "$SUITE" 2>&1)"; base_rc=$?
+base_out="$(ARCA_SETUP="$WORK/baseline.sh" bash "$SUITE" 2>&1)"; base_rc=$?
 base_n="$(grep -cE '^  .{0,20}FAIL' <<<"$base_out")"
 if [ "$base_rc" -eq 0 ] && [ "$base_n" -eq 0 ]; then
     echo -e "  ${GREEN}green${NC} — $(grep -oE '[0-9]+ passed' <<<"$base_out" | tail -1), 0 failed"
@@ -82,7 +82,7 @@ sabotage() {
     fi
 
     local out n
-    out="$(RW_SETUP="$f" bash "$SUITE" 2>&1)"
+    out="$(ARCA_SETUP="$f" bash "$SUITE" 2>&1)"
     n="$(grep -cE '^  .{0,20}FAIL' <<<"$out")"
     if [ "$n" -gt 0 ]; then
         echo -e "  ${GREEN}caught${NC} — $n case(s) failed; expected $expect"

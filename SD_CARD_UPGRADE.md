@@ -44,7 +44,7 @@ reaches only Windows is not one; that case is unverified here and is not covered
 | p6 | ext3 | ~981 MB | our root filesystem; grown |
 | p7 | swap | ~259 MB | dropped |
 
-The script checks the start and size of p1, p2, p3, p5 and p6 (`RW_LAYOUT` in `lib/rw-identify.sh`) and
+The script checks the start and size of p1, p2, p3, p5 and p6 (`ARCA_LAYOUT` in `lib/arca-identify.sh`) and
 deliberately not p4 or p7, which absorb the difference in card size. It expects seven partitions. A
 mismatch is a warning with a confirmation, not a refusal; a card that has already been grown also
 mismatches, and re-running on it achieves nothing.

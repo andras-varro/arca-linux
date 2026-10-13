@@ -18,10 +18,10 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-# RW_SETUP lets a sabotage harness aim this same suite at a deliberately broken copy of the
+# ARCA_SETUP lets a sabotage harness aim this same suite at a deliberately broken copy of the
 # script. The assertions must never be restated over there — a harness that re-implements
 # what it is checking can repair the sabotage it was written to catch.
-SETUP="${RW_SETUP:-$REPO/setup-build-env.sh}"
+SETUP="${ARCA_SETUP:-$REPO/setup-build-env.sh}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 passed=0; failed=0
@@ -38,7 +38,7 @@ passed=0; failed=0
     exit 1
 }
 
-WORK="$(mktemp -d /tmp/rw-setupenv.XXXXXX)"
+WORK="$(mktemp -d /tmp/arca-setupenv.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 
 ok()  { passed=$((passed + 1)); echo -e "  ${GREEN}pass${NC}  $1"; }
@@ -73,23 +73,23 @@ dump_on_fail()    { [ "${VERBOSE:-0}" = 1 ] && printf '%s\n' "$OUT" | sed 's/^/ 
 
 # Everything present. `sh` and `/etc/hostname` exist on any Linux.
 cat > "$WORK/all-present" <<'EOF'
-core|cmd|sh|rw-fake-sh
-core|file|/etc/hostname|rw-fake-hostname
+core|cmd|sh|arca-fake-sh
+core|file|/etc/hostname|arca-fake-hostname
 EOF
 
 # One absent subject per probe KIND. Each kind has its own way of being wrong, and a
 # single-kind fixture would leave three of the four branches unexercised.
 cat > "$WORK/all-absent" <<'EOF'
-core|cmd|rw-absent-tool|rw-pkg-cmd
-decode|run|rw-absent-tool --version|rw-pkg-run
-decode|py|rw_absent_module|rw-pkg-py
-kmod|file|/usr/include/rw-absent-header.h|rw-pkg-file
+core|cmd|arca-absent-tool|arca-pkg-cmd
+decode|run|arca-absent-tool --version|arca-pkg-run
+decode|py|arca_absent_module|arca-pkg-py
+kmod|file|/usr/include/arca-absent-header.h|arca-pkg-file
 EOF
 
 # A mix, to check the counts are not just "all" or "none".
 cat > "$WORK/mixed" <<'EOF'
-core|cmd|sh|rw-fake-sh
-core|cmd|rw-absent-tool|rw-pkg-cmd
+core|cmd|sh|arca-fake-sh
+core|cmd|arca-absent-tool|arca-pkg-cmd
 EOF
 
 # The tripwire. `sudo` records its argv and installs nothing, so --install-deps is safe to
@@ -127,10 +127,10 @@ echo ""
 echo "2. each probe kind can actually detect an absence"
 # Without this, three of the four branches could be dead and every case above still pass.
 run PACKAGES_FILE="$WORK/all-absent" --
-expect_match 'rw-absent-tool +core — rw-pkg-cmd' "2a cmd: a missing program"
-expect_match 'rw-absent-tool --version +decode — rw-pkg-run' "2b run: a program that cannot execute"
-expect_match 'rw_absent_module +decode — rw-pkg-py' "2c py: a missing python module"
-expect_match 'rw-absent-header.h +kmod — rw-pkg-file' "2d file: a missing -dev header"
+expect_match 'arca-absent-tool +core — arca-pkg-cmd' "2a cmd: a missing program"
+expect_match 'arca-absent-tool --version +decode — arca-pkg-run' "2b run: a program that cannot execute"
+expect_match 'arca_absent_module +decode — arca-pkg-py' "2c py: a missing python module"
+expect_match 'arca-absent-header.h +kmod — arca-pkg-file' "2d file: a missing -dev header"
 
 echo ""
 echo "3. zero subjects probed is a FAILURE, not a pass"
@@ -166,7 +166,7 @@ if [ ! -f "$WORK/argv" ]; then
     bad "5b the tripwire did NOT fire — sudo was never reached, so nothing here is measured"
 else
     ARGV="$(cat "$WORK/argv")"
-    if [ "$ARGV" = "SUDO-ARGV: apt-get install -y rw-pkg-cmd rw-pkg-run rw-pkg-py rw-pkg-file" ]; then
+    if [ "$ARGV" = "SUDO-ARGV: apt-get install -y arca-pkg-cmd arca-pkg-run arca-pkg-py arca-pkg-file" ]; then
         ok "5b sudo received exactly the four packages, in table order"
     else
         bad "5b sudo argv wrong — got: $ARGV"
@@ -188,7 +188,7 @@ OUT="$(env PACKAGES_FILE="$WORK/all-absent" PATH="$WORK/noapt" \
         "$SETUP" --install-deps < /dev/null 2>&1)"; RC=$?
 expect_rc 2 "6a no apt-get exits 2"
 expect_match 'Not a Debian/Ubuntu host' "6b ...naming the reason"
-expect_match 'rw-pkg-cmd' "6c ...and still listing what to install by hand"
+expect_match 'arca-pkg-cmd' "6c ...and still listing what to install by hand"
 
 echo ""
 echo "7. argument handling"

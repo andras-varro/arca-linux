@@ -104,7 +104,7 @@ run() {
 # line number of the first log line matching ERE $2 in run $1 (empty if none)
 first() { grep -nE "$2" "$TMP/$1.log" | head -1 | cut -d: -f1; }
 # a line that WRITES to the device: an scp, a plan/script upload, a mkdir, sysctl, reboot
-WRITE_RE='^SCP|cat > /tmp/rw-|mkdir -p|sysctl|reboot'
+WRITE_RE='^SCP|cat > /tmp/arca-|mkdir -p|sysctl|reboot'
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo ""
@@ -112,12 +112,12 @@ echo "A. a full run — backup first, no clean, reboot last"
 # ═══════════════════════════════════════════════════════════════════════════
 run full 192.168.50.99
 [ "$RC" -eq 0 ]; chk "A1 exits 0"
-TAR=$(first full 'tar -cf -'); WR=$(first full "$WRITE_RE"); PL=$(first full 'cat > /tmp/rw-provision-plan')
+TAR=$(first full 'tar -cf -'); WR=$(first full "$WRITE_RE"); PL=$(first full 'cat > /tmp/arca-provision-plan')
 [ -n "$TAR" ]; chk "A2 the backup fetch happened"
 [ -n "$WR" ] && [ -n "$PL" ]; chk "A3 a write happened (witness for A4)"
 [ -n "$TAR" ] && [ -n "$WR" ] && [ "$TAR" -lt "$WR" ]; chk "A4 the backup fetch precedes the first write"
-! grep -q "rw-clean-plan" "$TMP/full.log"; chk "A5 no rw-clean-plan is ever sent"
-! grep -qP "^SSH	/opt/roomwizard/disable-steelcase" "$TMP/full.log"; chk "A6 disable-steelcase.sh is never RUN"
+! grep -q "arca-clean-plan" "$TMP/full.log"; chk "A5 no arca-clean-plan is ever sent"
+! grep -qP "^SSH	/opt/arca/disable-steelcase" "$TMP/full.log"; chk "A6 disable-steelcase.sh is never RUN"
 ! grep -qP "^SCP	.*disable-steelcase" "$TMP/full.log"; chk "A6b disable-steelcase.sh is never PUSHED"
 LAST=$(grep '^SSH' "$TMP/full.log" | tail -1 | cut -f2)
 [ "$LAST" = "reboot" ]; chk "A7 the reboot is the last remote command"
@@ -153,7 +153,7 @@ FAKE_LISTER_FAIL=1 run nobk 192.168.50.99
 [ "$RC" -ne 0 ]; chk "C1 exits non-zero"
 grep -q "cd / || exit 1" "$TMP/nobk.log"; chk "C2 the backup was attempted (lister ran)"
 ! grep -qE "$WRITE_RE" "$TMP/nobk.log"; chk "C3 no write reached the device"
-! grep -q "rw-provision-plan" "$TMP/nobk.log"; chk "C4 no plan was written"
+! grep -q "arca-provision-plan" "$TMP/nobk.log"; chk "C4 no plan was written"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo ""

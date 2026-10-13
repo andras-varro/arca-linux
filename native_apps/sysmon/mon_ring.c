@@ -31,7 +31,7 @@ static int put_field(char *p, size_t room, int v, char sep) {
 int mon_ring_format(const MonRing *r, unsigned long long wall_cs,
                     unsigned flags, char *buf, size_t len) {
     size_t at = 0;
-    int n = snprintf(buf, len, "rwmond 1 %llu %u %d\n", wall_cs, flags, r->count);
+    int n = snprintf(buf, len, "arcamond 1 %llu %u %d\n", wall_cs, flags, r->count);
     if (n < 0 || (size_t)n >= len) return -1;
     at = (size_t)n;
     for (int i = 0; i < r->count; i++) {
@@ -77,7 +77,7 @@ int mon_ring_parse(const char *text, MonRing *r,
     unsigned fl;
     int count, used = 0;
     mon_ring_clear(r);
-    if (!text || sscanf(text, "rwmond 1 %llu %u %d\n%n", &cs, &fl, &count, &used) != 3
+    if (!text || sscanf(text, "arcamond 1 %llu %u %d\n%n", &cs, &fl, &count, &used) != 3
         || used == 0 || text[used - 1] != '\n')
         return -1;
     if (count < 0 || count > MON_RING_N) return -1;

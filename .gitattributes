@@ -14,7 +14,7 @@
 *.bat text eol=crlf
 # Shell scripts MUST stay LF.
 #
-# device-files/roomwizard-app and the other device scripts are scp'd
+# device-files/arca-app and the other device scripts are scp'd
 # byte-for-byte onto the device and run by BusyBox sh. A CRLF line ending turns
 # the shebang into `#!/bin/sh\r`, which BusyBox rejects with a misleading "no
 # such file or directory" - the device then boots to a black screen with no

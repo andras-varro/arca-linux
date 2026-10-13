@@ -1,5 +1,5 @@
 /**
- * Common UI Library Implementation for RoomWizard
+ * Common UI Library Implementation for Arca
  */
 
 #include "common.h"

@@ -4,12 +4,12 @@
 ## Get latest from `dotnet new gitignore`
 
 # Upstream ScummVM asset used as input to make_vkeybd_scaled.py — not owned by this repo
-scummvm-roomwizard/vkeybd_small_source.zip
+scummvm-arca/vkeybd_small_source.zip
 
 # ScummVM build artifacts
-scummvm-roomwizard/gui-icons-roomwizard.dat
+scummvm-arca/gui-icons-arca.dat
 scummvm-icons/
-scummvm-roomwizard/arm-deps*/
+scummvm-arca/arm-deps*/
 native_apps/arm-deps*/
 bluetooth/arm-deps*/
 bluetooth/staging/
@@ -17,7 +17,7 @@ bluetooth/staging-bluealsa/
 bluetooth/modules/
 
 # Upstream ScummVM source tree, configured in place for the cross-build. Not
-# owned by this repo - scummvm-roomwizard/ holds our backend port.
+# owned by this repo - scummvm-arca/ holds our backend port.
 /scummvm/
 
 # dotenv files
@@ -530,22 +530,22 @@ dumpwav/
 !scummvm-patches/*.tar.gz
 build
 usb_host/linux-4.14.52.tar.xz
-vnc_client/roomwizard.remmina
+vnc_client/*.remmina
 
 # Local VNC config (contains a plaintext password) - use vnc_client.conf.example
 vnc_client/vnc_client.conf
 .claude/settings.json
 # Offline card dumps and the partition trees extracted from them.  A whole-card
-# .img is ~4 GB and the extracted trees are Steelcase firmware, so neither may
-# ever be committed.  ⚠️ A GLOB rather than another literal name: roomwizard.img,
+# .img is ~4 GB and the extracted trees are vendor firmware, so neither may
+# ever be committed.  ⚠️ A GLOB rather than another literal name: arca.img,
 # roomvizard_new.img and partitions.new/ were each added one at a time as a new
 # card got dumped, and the next dump landed as 4 GB of UNTRACKED files that a
 # `git add -A` would have taken.
 *.img
-roomwizard.new*/
+arca.new*/
 partitions.new/
 # Sabotage staging by tests/measure_provision_sabotage.sh (removed on every exit path)
-lib/.rw-provision.sab.sh
+lib/.arca-provision.sab.sh
 tests/.sab-*
 
 # Build/deploy transcript redirects (a0ff5a8 committed one by accident)
@@ -566,3 +566,4 @@ backups/
 
 # Logo preview renders, rebuilt by distro/render.sh
 distro/preview/
+roomwizard.new.2/

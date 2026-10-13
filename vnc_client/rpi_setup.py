@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-RPi Setup for RoomWizard VNC Client
+RPi Setup for Arca VNC Client
 
-Configures a Raspberry Pi as a VNC server for the RoomWizard display.
+Configures a Raspberry Pi as a VNC server for the Arca display.
 Installs x11vnc on port 5900 (RealVNC is disabled).
 
 Handles Raspbian Buster EOL repository migration automatically.
@@ -167,11 +167,11 @@ def configure_x11vnc(client):
     print("\n=== Configuring x11vnc ===")
     
     # Create password file
-    out, err = ssh_exec(client, "mkdir -p /home/pi/.vnc && x11vnc -storepasswd roomwizard /home/pi/.vnc/x11vnc_passwd 2>&1")
+    out, err = ssh_exec(client, "mkdir -p /home/pi/.vnc && x11vnc -storepasswd arca /home/pi/.vnc/x11vnc_passwd 2>&1")
     print(f"Password: {out or err}")
     
     # Stop the broken service first
-    ssh_exec(client, "sudo systemctl stop x11vnc-roomwizard 2>/dev/null")
+    ssh_exec(client, "sudo systemctl stop x11vnc-arca 2>/dev/null")
     
     # Disable RealVNC to free port 5900
     print("Disabling RealVNC server...")
@@ -179,7 +179,7 @@ def configure_x11vnc(client):
     
     # Create systemd service
     service = r"""[Unit]
-Description=x11vnc VNC Server for RoomWizard
+Description=x11vnc VNC Server for Arca
 After=multi-user.target graphical.target
 Wants=graphical.target
 
@@ -195,7 +195,7 @@ WantedBy=graphical.target
 """
     
     # Write and enable
-    cmd = f"cat > /tmp/x11vnc-rw.service << 'SERVICEEOF'\n{service}\nSERVICEEOF\nsudo cp /tmp/x11vnc-rw.service /etc/systemd/system/x11vnc-roomwizard.service && sudo systemctl daemon-reload && sudo systemctl enable x11vnc-roomwizard && sudo systemctl restart x11vnc-roomwizard && echo 'Service started'"
+    cmd = f"cat > /tmp/x11vnc-arca.service << 'SERVICEEOF'\n{service}\nSERVICEEOF\nsudo cp /tmp/x11vnc-arca.service /etc/systemd/system/x11vnc-arca.service && sudo systemctl daemon-reload && sudo systemctl enable x11vnc-arca && sudo systemctl restart x11vnc-arca && echo 'Service started'"
     out, err = ssh_exec(client, cmd)
     print(out)
     if err:
@@ -208,7 +208,7 @@ WantedBy=graphical.target
 def verify(client):
     """Verify x11vnc is running."""
     print("\n=== Verification ===")
-    out, _ = ssh_exec(client, "sudo systemctl status x11vnc-roomwizard --no-pager 2>&1 | head -12")
+    out, _ = ssh_exec(client, "sudo systemctl status x11vnc-arca --no-pager 2>&1 | head -12")
     print(out)
     
     out, _ = ssh_exec(client, "ss -tlnp | grep 5900 || echo 'Port 5900 NOT listening'")
@@ -218,9 +218,9 @@ def verify(client):
     print(f"Process: {out}")
 
 def setup_ssh_key(client):
-    """Set up SSH key auth from RoomWizard to RPi."""
+    """Set up SSH key auth from Arca to RPi."""
     print("=== SSH Key Setup ===")
-    # This would be called from the RoomWizard side
+    # This would be called from the Arca side
     pass
 
 def inspect(client):
@@ -235,7 +235,7 @@ def inspect(client):
         ("RealVNC config",   "sudo cat /root/.vnc/config.d/vncserver-x11 2>/dev/null | head -10 || echo 'not readable'"),
         ("Screen resolution","DISPLAY=:0 xrandr 2>/dev/null | head -5 || echo 'xrandr unavailable'"),
         ("X displays",       "ls /tmp/.X11-unix/ 2>/dev/null || echo 'none'"),
-        ("x11vnc service",   "sudo systemctl status x11vnc-roomwizard --no-pager 2>&1 | head -8"),
+        ("x11vnc service",   "sudo systemctl status x11vnc-arca --no-pager 2>&1 | head -8"),
     ]
 
     for name, cmd in checks:

@@ -1,5 +1,5 @@
 #!/bin/bash
-# build-and-deploy.sh — Bluetooth for the RoomWizard: kernel modules, RTL8761CU firmware,
+# build-and-deploy.sh — Bluetooth for the Arca: kernel modules, RTL8761CU firmware,
 # bluetoothd + bluetoothctl, and the boot start.
 #
 # Usage:
@@ -46,10 +46,10 @@ MODULES_DIR="$SCRIPT_DIR/modules"
 STAGING="$SCRIPT_DIR/staging"
 FW_DIR="$REPO_ROOT/kernel/3rdparty/realtek/bluetooth"
 
-# shellcheck source=../lib/rw-ssh.sh
-. "$REPO_ROOT/lib/rw-ssh.sh"
-# shellcheck source=../lib/rw-bundle.sh
-. "$REPO_ROOT/lib/rw-bundle.sh"
+# shellcheck source=../lib/arca-ssh.sh
+. "$REPO_ROOT/lib/arca-ssh.sh"
+# shellcheck source=../lib/arca-bundle.sh
+. "$REPO_ROOT/lib/arca-bundle.sh"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 ok()   { echo -e "[$(date '+%H:%M:%S')] ${GREEN}  ✓ $*${NC}"; }
@@ -100,7 +100,7 @@ DEVICE="root@$DEVICE_IP"
 
 echo ""
 echo "════════════════════════════════════════"
-echo " RoomWizard Bluetooth"
+echo " Arca Bluetooth"
 echo "════════════════════════════════════════"
 ts "Started — $(date '+%Y-%m-%d %H:%M:%S')"
 [[ -n "$BUNDLE_DIR" ]] && info "Staging a bundle: $BUNDLE_DIR"
@@ -110,10 +110,10 @@ echo ""
 # ── 0. SSH, before any build ────────────────────────────────────────────────
 ts "[0/6] Prerequisites"
 if [[ -n "$DEVICE_IP" ]]; then
-    rw_ssh_gate "$DEVICE" || err "Cannot continue without SSH to $DEVICE"
+    arca_ssh_gate "$DEVICE" || err "Cannot continue without SSH to $DEVICE"
     ok "SSH to $DEVICE"
-    rw_bundle_clear_stamp "$DEVICE" \
-        || warn "could not clear /opt/roomwizard/bundle.info — it may still name an older release"
+    arca_bundle_clear_stamp "$DEVICE" \
+        || warn "could not clear /opt/arca/bundle.info — it may still name an older release"
 fi
 echo ""
 
@@ -229,13 +229,13 @@ echo ""
 # ── 4. --bundle: stage and stop ─────────────────────────────────────────────
 if [[ -n "$BUNDLE_DIR" ]]; then
     ts "[4/6] Staging → $BUNDLE_DIR"
-    rw_bundle_init "$BUNDLE_DIR" bluetooth || err "could not prepare $BUNDLE_DIR"
+    arca_bundle_init "$BUNDLE_DIR" bluetooth || err "could not prepare $BUNDLE_DIR"
     for a in "${BT_ARTIFACTS[@]}"; do
         mode="${a%%|*}"; rest="${a#*|}"; src="${rest%%|*}"; dev="${rest#*|}"
-        rw_bundle_add "$BUNDLE_DIR" bluetooth "$mode" "$src" "$dev" || err "staging failed: $dev"
+        arca_bundle_add "$BUNDLE_DIR" bluetooth "$mode" "$src" "$dev" || err "staging failed: $dev"
     done
     warn "The init script and the two .conf files are provision-rules.conf's, not the bundle's"
-    ok "Staged $(rw_bundle_finish "$BUNDLE_DIR" bluetooth) file(s)"
+    ok "Staged $(arca_bundle_finish "$BUNDLE_DIR" bluetooth) file(s)"
     echo ""
     exit 0
 fi
@@ -249,26 +249,26 @@ fi
 # ── 4. the `bluetooth` group of the provision plan ──────────────────────────
 # The same records and the same generated executor commissioning/provision.sh uses.
 ts "[4/6] Init script, boot link, dbus policies, main.conf, input.conf (provision-rules.conf, group bluetooth)"
-# shellcheck source=../lib/rw-identify.sh
-. "$REPO_ROOT/lib/rw-identify.sh"
-# shellcheck source=../lib/rw-provision.sh
-. "$REPO_ROOT/lib/rw-provision.sh"
+# shellcheck source=../lib/arca-identify.sh
+. "$REPO_ROOT/lib/arca-identify.sh"
+# shellcheck source=../lib/arca-provision.sh
+. "$REPO_ROOT/lib/arca-provision.sh"
 
 PROV_RULES="$REPO_ROOT/device-files/provision-rules.conf"
-if ! PCHECK="$(rw_provision_validate "$PROV_RULES" "$REPO_ROOT")"; then
+if ! PCHECK="$(arca_provision_validate "$PROV_RULES" "$REPO_ROOT")"; then
     echo "$PCHECK"; err "provision-rules.conf does not validate"
 fi
 
 BT_PLAN=$(mktemp)
 trap 'rm -f "$BT_PLAN"' EXIT INT TERM
-rw_provision_plan_component "$PROV_RULES" bluetooth > "$BT_PLAN" \
+arca_provision_plan_component "$PROV_RULES" bluetooth > "$BT_PLAN" \
     || err "could not compile the bluetooth provision plan"
-info "$(rw_provision_plan_summary "$BT_PLAN")"
-rw_provision_push_installs "$BT_PLAN" "$REPO_ROOT" "$DEVICE" \
+info "$(arca_provision_plan_summary "$BT_PLAN")"
+arca_provision_push_installs "$BT_PLAN" "$REPO_ROOT" "$DEVICE" \
     || err "could not copy the bluetooth provision sources to the device"
-ssh "$DEVICE" "cat > /tmp/rw-bt-plan" < "$BT_PLAN"
-rw_provision_online_script | ssh "$DEVICE" "cat > /tmp/rw-bt-provision.sh"
-ssh "$DEVICE" "sh /tmp/rw-bt-provision.sh /tmp/rw-bt-plan; rc=\$?; rm -f /tmp/rw-bt-provision.sh /tmp/rw-bt-plan; exit \$rc" \
+ssh "$DEVICE" "cat > /tmp/arca-bt-plan" < "$BT_PLAN"
+arca_provision_online_script | ssh "$DEVICE" "cat > /tmp/arca-bt-provision.sh"
+ssh "$DEVICE" "sh /tmp/arca-bt-provision.sh /tmp/arca-bt-plan; rc=\$?; rm -f /tmp/arca-bt-provision.sh /tmp/arca-bt-plan; exit \$rc" \
     || err "the bluetooth provision step failed on the device"
 ok "init script, dbus policies, main.conf and input.conf installed, S91bluetooth linked"
 echo ""
@@ -286,9 +286,9 @@ for a in "${BT_ARTIFACTS[@]}"; do
     mode="${a%%|*}"; rest="${a#*|}"; src="${rest%%|*}"; dev="${rest#*|}"
     # Beside the target, then a rename: a running btmon (which stop does not end) makes a
     # write over /usr/bin/btmon fail with "Text file busy"; replacing the entry does not.
-    scp -q "$src" "$DEVICE:$dev.rw-new" || err "could not copy $src to $dev"
+    scp -q "$src" "$DEVICE:$dev.arca-new" || err "could not copy $src to $dev"
     # shellcheck disable=SC2029
-    ssh "$DEVICE" "chmod $mode '$dev.rw-new' && mv -f '$dev.rw-new' '$dev'" \
+    ssh "$DEVICE" "chmod $mode '$dev.arca-new' && mv -f '$dev.arca-new' '$dev'" \
         || err "could not install $dev"
 done
 ok "${#BT_ARTIFACTS[@]} file(s) copied"

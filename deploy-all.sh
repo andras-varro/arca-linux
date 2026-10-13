@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# deploy-all.sh — Build and deploy all components to a RoomWizard device
+# deploy-all.sh — Build and deploy all components to an Arca device
 #
 # Scans the workspace for build-and-deploy.sh scripts and runs them in
 # order.  After all components are deployed, sets the app launcher as the
@@ -26,13 +26,13 @@
 # binaries on a unit even for someone who already had SSH to it.
 #
 # It is the SSH twin of commissioning/commission-offline.sh's install loop and shares its
-# authority: rw_bundle_install_ssh in lib/rw-bundle.sh, one implementation, modes
+# authority: arca_bundle_install_ssh in lib/arca-bundle.sh, one implementation, modes
 # DECLARED by the manifest rather than carried by the transfer.
 #
 # ── --from-release: the same mode, over the network ─────────────────────────
 #
 # Identical downstream — it resolves a published release to a local tarball and
-# then IS --from-bundle.  The fetch lives in lib/rw-release.sh, the one library
+# then IS --from-bundle.  The fetch lives in lib/arca-release.sh, the one library
 # here that opens a socket, and it happens AFTER the SSH gate below: a device that
 # cannot be reached is worth finding out about before 126 MB, not after.
 #
@@ -48,12 +48,12 @@ _START_SECONDS=$(date +%s)
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# shellcheck source=lib/rw-bundle.sh
-. "$SCRIPT_DIR/lib/rw-bundle.sh"
-# shellcheck source=lib/rw-release.sh
-. "$SCRIPT_DIR/lib/rw-release.sh"
-# shellcheck source=lib/rw-ssh.sh
-. "$SCRIPT_DIR/lib/rw-ssh.sh"
+# shellcheck source=lib/arca-bundle.sh
+. "$SCRIPT_DIR/lib/arca-bundle.sh"
+# shellcheck source=lib/arca-release.sh
+. "$SCRIPT_DIR/lib/arca-release.sh"
+# shellcheck source=lib/arca-ssh.sh
+. "$SCRIPT_DIR/lib/arca-ssh.sh"
 
 DEVICE_IP="${1:-}"
 
@@ -206,7 +206,7 @@ fi
 # ── main ────────────────────────────────────────────────────────────────────
 echo ""
 echo "╔═══════════════════════════════════════╗"
-echo "║  RoomWizard Deploy All                ║"
+echo "║  Arca Deploy All                ║"
 echo "╚═══════════════════════════════════════╝"
 info "Started — $(date '+%Y-%m-%d %H:%M:%S')"
 echo ""
@@ -214,17 +214,17 @@ echo ""
 # ── --from-bundle: install and stop. No component loop, no compiler. ────────
 if [[ -n "$FROM_BUNDLE" || -n "$FROM_RELEASE" ]]; then
     DEVICE="root@${DEVICE_IP}"
-    rw_ssh_gate "$DEVICE" || err "Cannot continue without SSH to $DEVICE"
+    arca_ssh_gate "$DEVICE" || err "Cannot continue without SSH to $DEVICE"
     ok "SSH OK"
 
     # --from-release becomes --from-bundle here, and deliberately not sooner: the
     # gate above is cheap and the download is 126 MB.
     if [[ -n "$FROM_RELEASE" ]]; then
-        GH_REPO="$(rw_release_repo "$SCRIPT_DIR")" \
+        GH_REPO="$(arca_release_repo "$SCRIPT_DIR")" \
             || err "could not work out which GitHub repo to fetch from — see above"
         info "Fetching release $FROM_RELEASE from $GH_REPO"
-        FROM_BUNDLE="$(rw_release_fetch "$GH_REPO" "$FROM_RELEASE" \
-                          "$(rw_release_cache_dir "$SCRIPT_DIR")")" \
+        FROM_BUNDLE="$(arca_release_fetch "$GH_REPO" "$FROM_RELEASE" \
+                          "$(arca_release_cache_dir "$SCRIPT_DIR")")" \
             || err "could not fetch release $FROM_RELEASE — nothing was installed"
     fi
 
@@ -250,21 +250,21 @@ if [[ -n "$FROM_BUNDLE" || -n "$FROM_RELEASE" ]]; then
         err "no such bundle: $FROM_BUNDLE"
     fi
 
-    info "Components in the bundle: $(rw_bundle_components "$BUNDLE_DIR" | tr '\n' ' ')"
+    info "Components in the bundle: $(arca_bundle_components "$BUNDLE_DIR" | tr '\n' ' ')"
 
     # Stop whatever holds /dev/fb0 before overwriting the binary behind it. The init
     # script is the only implementation of "what is running" — it walks /proc/*/exe
     # rather than matching a name, because the process holding the framebuffer is
     # usually the grandchild app_launcher started and its basename is in no config.
-    if ssh "$DEVICE" '[ -x /etc/init.d/roomwizard-app ]' 2>/dev/null; then
+    if ssh "$DEVICE" '[ -x /etc/init.d/arca-app ]' 2>/dev/null; then
         info "Stopping the running app"
-        ssh "$DEVICE" '/etc/init.d/roomwizard-app stop' 2>&1 | sed 's/^/    /' || true
+        ssh "$DEVICE" '/etc/init.d/arca-app stop' 2>&1 | sed 's/^/    /' || true
     else
-        warn "no /etc/init.d/roomwizard-app — run ./commissioning/provision.sh $DEVICE_IP first"
+        warn "no /etc/init.d/arca-app — run ./commissioning/provision.sh $DEVICE_IP first"
     fi
 
     echo ""
-    if rw_bundle_install_ssh "$DEVICE" "$BUNDLE_DIR"; then
+    if arca_bundle_install_ssh "$DEVICE" "$BUNDLE_DIR"; then
         ok "Bundle installed"
     else
         err "the bundle install failed — see the messages above"
@@ -272,17 +272,17 @@ if [[ -n "$FROM_BUNDLE" || -n "$FROM_RELEASE" ]]; then
 
     # default-app, then restart, exactly as the build path does below.
     echo ""
-    info "Default → /opt/roomwizard/app_launcher"
-    ssh "$DEVICE" "mkdir -p /opt/roomwizard && echo '/opt/roomwizard/app_launcher' > /opt/roomwizard/default-app"
-    if ssh "$DEVICE" '[ -x /opt/roomwizard/app_launcher ]' 2>/dev/null; then
+    info "Default → /opt/arca/app_launcher"
+    ssh "$DEVICE" "mkdir -p /opt/arca && echo '/opt/arca/app_launcher' > /opt/arca/default-app"
+    if ssh "$DEVICE" '[ -x /opt/arca/app_launcher ]' 2>/dev/null; then
         ok "Default app set and present"
     else
-        warn "default-app names /opt/roomwizard/app_launcher, which is NOT installed"
+        warn "default-app names /opt/arca/app_launcher, which is NOT installed"
         warn "  the init script would respawn nothing — check the bundle's components"
     fi
-    if ssh "$DEVICE" '[ -f /etc/init.d/roomwizard-app ]' 2>/dev/null; then
+    if ssh "$DEVICE" '[ -f /etc/init.d/arca-app ]' 2>/dev/null; then
         info "Starting the launcher"
-        ssh "$DEVICE" '/etc/init.d/roomwizard-app start' 2>&1 | grep -v '^$' | sed 's/^/    /'
+        ssh "$DEVICE" '/etc/init.d/arca-app start' 2>&1 | grep -v '^$' | sed 's/^/    /'
         ok "Launcher running"
     fi
 
@@ -302,7 +302,7 @@ fi
 # once instead of once per component, and the loop below never stops to prompt.
 # Nothing else here needs a device, so this is also the earliest point a wrong IP can
 # be reported.
-rw_ssh_gate "root@${DEVICE_IP}" || err "Cannot continue without SSH to root@${DEVICE_IP}"
+arca_ssh_gate "root@${DEVICE_IP}" || err "Cannot continue without SSH to root@${DEVICE_IP}"
 ok "SSH OK"
 echo ""
 
@@ -391,12 +391,12 @@ for comp in "${ALL_COMPONENTS[@]}"; do
 done
 
 # ── the provenance stamp is cleared by the COMPONENT scripts, not here ──────
-# /opt/roomwizard/bundle.info names the release a unit was installed from, so a SOURCE
+# /opt/arca/bundle.info names the release a unit was installed from, so a SOURCE
 # deploy — which overwrites the binaries it describes — must not leave it standing.
 # This used to be one `ssh rm -f` here, after the loop, which meant `deploy-all.sh <ip>`
 # cleared the stamp and a single component's build-and-deploy.sh did not: a unit could
 # carry a stamp naming a release whose bytes had been overwritten one component at a
-# time. Each component now calls rw_bundle_clear_stamp right after its own SSH gate, so
+# time. Each component now calls arca_bundle_clear_stamp right after its own SSH gate, so
 # every path into the device is covered by one writer and this needs nothing.
 #
 # ── set default app (native_apps/app_launcher) ─────────────────────────────
@@ -414,14 +414,14 @@ if $set_default; then
     echo "════════════════════════════════════════"
     echo ""
 
-    info "Default → /opt/roomwizard/app_launcher"
-    ssh "$DEVICE" "mkdir -p /opt/roomwizard && echo '/opt/roomwizard/app_launcher' > /opt/roomwizard/default-app"
+    info "Default → /opt/arca/app_launcher"
+    ssh "$DEVICE" "mkdir -p /opt/arca && echo '/opt/arca/app_launcher' > /opt/arca/default-app"
     ok "Default app set"
 
     # Restart the init service so it picks up the new default
-    if ssh "$DEVICE" '[ -f /etc/init.d/roomwizard-app ]' 2>/dev/null; then
+    if ssh "$DEVICE" '[ -f /etc/init.d/arca-app ]' 2>/dev/null; then
         info "Restarting app launcher..."
-        ssh "$DEVICE" '/etc/init.d/roomwizard-app start' 2>&1 | grep -v '^$'
+        ssh "$DEVICE" '/etc/init.d/arca-app start' 2>&1 | grep -v '^$'
         ok "Launcher running"
     fi
     echo ""

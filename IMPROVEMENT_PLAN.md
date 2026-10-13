@@ -147,10 +147,6 @@ differ in more than the device, so the link is unproven. It needs a joint sessio
 
 `kernel/dts/rw20.dts:25` says `model = "Steelcase RoomWizard 20"` (the vendor DT's string; `HARDWARE.md` records it, the kernel prints it as `Machine model:`), while `uboot/rw20-board.patch:42` says `"Steelcase RoomWizard rw20"`. Operator ruling 2026-10-12: the board name stays "Steelcase RoomWizard rw20", because it names the hardware. **Measured by `Grep`:** nothing in the tree reads `/proc/device-tree/model` on the device (the one reader, `vnc_client/setup-vnc-viewer.sh`, checks for a Raspberry Pi host), so the string reaches only the boot log. **Done when** the DT string matches the ruling and `HARDWARE.md` says the vendor's own string was the old one.
 
-### B65. A first boot of a generated card prints "uninitialized urandom read" lines — open, measured 2026-10-12
-
-Boot-console errors are defects here. **Measured, `.115` dmesg against `.188`'s:** the only new error lines on the generated card are the first-boot "uninitialized urandom read" ones, from seedrng, udevd, avahi-autoipd and dbus-uuidgen; `.188` has none. `/var/lib/seedrng` now holds `seed.no-credit` on `.115`. **[inferred]** The pool has no seed on a first boot, so early readers see it uninitialised; whether the next boot is quiet has not been measured. **Done when** a first boot prints none of them, or the cause shows they cannot be avoided and that is written down.
-
 ### B68. The syslog shows red lines at every boot — open, operator-observed 2026-10-12
 
 Seen in the Control Panel log viewer; boot-console errors are defects here. **Measured in the syslog:** `bluetoothd` `daemon.err` 18 and `warn` 11 ("error updating services: Host is down"); `omap_hwmod`: mcbsp sidetone "broken dt data"; `twl4030` madc: "supply not found"; `twl4030` bci: "battery temperature out of range"; `sr_init`: "No PMIC hook". **[inferred]** The bci line is there because the board has no battery and the DT node from the mainline `omap34xx`/`twl` includes is not disabled in `kernel/dts/rw20.dts`; the others are untraced. Lockdep's trace is its own entry (B47). **Done when** each line is removed at its cause, or recorded as unavoidable with the reason.
@@ -272,7 +268,7 @@ a yes to both.
 
 The operator wants root not to be the default user on our root filesystem. Operator's answer, 2026-10-10: a normal user and
 root; normal operation runs as the user; a change such as the SSH settings needs root (type the root password) and then runs as
-root, like `sudo`. That touches `/dev/fb0`, `/dev/input`, `/dev/dsp`, `/dev/watchdog` and the `roomwizard-app` respawn loop. If it
+root, like `sudo`. That touches `/dev/fb0`, `/dev/input`, `/dev/dsp`, `/dev/watchdog` and the `arca-app` respawn loop. If it
 is too much effort it goes last. The terminal app (`native_apps/terminal/`) runs `/bin/login`, so it grants exactly what the accounts grant. **Done when** it is designed together with the operator and built.
 
 ### F143. A status line across the top of the screen — open, operator idea 2026-10-09, future
@@ -281,7 +277,7 @@ One line of status: messages such as "not calibrated", date/time, CPU, refreshed
 app or page that fixes it (calibration for "not calibrated"). Not designed: which apps show it, and what it costs per frame
 on the software renderer. **Done when** the launcher shows it and a tap on a message opens the right page.
 
-State 2026-10-12: the shared top bar (`native_apps/common/top_bar.c`; shape and rules in `native_apps/CLAUDE.md`) is on the launcher and every Control Panel page and deployed to `.188`. The look is operator-verified at the panel ("looks great"), and so are the X (closes) and `<` (goes back) in the Control Panel and touch calibration started from the NOT CALIBRATED status on `.115`. **Still open:** finger checks of the message tap as such, the pad route to the Input page, the 1/s tick by eye, portrait, and the message clearing after calibration; and the games' own exit X, which the operator defers ("we work with the games later").
+State 2026-10-12: the shared top bar (`native_apps/common/top_bar.c`; shape and rules in `native_apps/CLAUDE.md`) is on the launcher and every Control Panel page and deployed to `.188`. The look is operator-verified at the panel ("looks great"), and so are the X (closes) and `<` (goes back) in the Control Panel and touch calibration started from the NOT CALIBRATED status on `.115`; on `.188` tapping "Not Calibrated" opens the Input Control Panel applet and the message clears after calibration (operator, 2026-10-12). **Still open:** finger checks of the pad route to the Input page, the 1/s tick by eye and portrait; and the games' own exit X, which the operator defers ("we work with the games later").
 
 ### F145. Update a unit from a bundle — open, operator request 2026-10-10, not designed
 
@@ -298,6 +294,33 @@ An option for the clocks that print the time (`native_apps/common/top_bar.c:251`
 
 The operator wants games that show no menu or close button at all. Open design question: how a touch-only player pauses and exits (pad and keyboard keep their keys). **Done when** the question is answered with the operator and one game follows the answer.
 
+### F148. A three-partition card: p1 FAT boot, p2 rootfs, p3 data — open, operator-approved 2026-10-12
+
+With our own U-Boot, only p1 must stay the FAT boot partition (ROM/NAND shim, MLO, u-boot.img, kernels, `uEnv.txt`) **[inferred]**. The logical partitions, the 63-sector EBR offsets and p4/p5/p7 exist only because `make-card-image.sh` copies the vendor table. Logs go on p3 (or tmpfs). Two partitions were rejected: a full log could fill root, and a rootfs rewrite should keep data. Scope: U-Boot's compiled-in `root=` (`mmcblk0p6` becomes p2) and the full commented `bootargs` line in `uboot/uEnv.txt`; `fstab`; the position roles in `lib/arca-identify.sh`; the backup and provision roles; the `make-card-image.sh` layout and its tests. Deployed units are re-flashed, never repartitioned in place (F149). **Done when** a fresh card boots with three partitions and its data and logs land on p3.
+
+### F149. Flash the card and use it: a downloadable image replaces commissioning — open, operator-approved 2026-10-12
+
+Operator ruling 2026-10-12: nobody outside the lab runs this, so units are re-flashed and never migrated. A kernel
+upgrade or new drivers still ship as an image to flash. Finishing steps, in order:
+
+1. **A downloadable image:** compressed with a checksum on a release page, flashable with any card writer. D18's source
+   offer and F117's trademark search are both prerequisites for publishing it.
+2. **The first boot grows the card:** the image is minimal, and the first boot extends the last partition (p3 data,
+   after F148) plus its filesystem to the end of the card, for example with sfdisk and online resize2fs, as the
+   Raspberry Pi image does. Whether `resize2fs`/`sfdisk` are in our rootfs is **[unverified]**.
+3. **What an image ships:** no secrets and no copyrighted data (the existing rule). It runs as root, as the vendor
+   system did. Operator 2026-10-12: SSH needs no image change, only a README paragraph: set a root password, allow
+   password login, copy a public key, then switch to key-only. Where a user first sets that password is **[unverified]**.
+   Version identity (agreed): the image version in `/etc/os-release` and in the Control Panel **[unverified]**.
+4. **A user README:** keep the vendor card and flash a spare; flash, insert, use; configure (Control Panel, VNC client);
+   the apps; updating (F145 once it exists); troubleshooting. A re-flash wipes scores, calibration and settings.
+   Developers get one `DEVELOPING.md` (`deploy-all.sh` and the component scripts over SSH stay as the dev loop).
+5. **Retire commissioning:** first inventory which scripts, tests and doc sections only commissioning uses. The bundle
+   installer's rules compiler is the likely seed of F145 and moves there. Then delete the rest and `COMMISSIONING.md`.
+
+**Done when** stock units with spare cards (the operator has six) boot the downloaded image and grow it, the README is the only
+user-facing guide, and no commissioning-only script, test or document is left.
+
 ### F106. Support BeagleBone Black boards — open, operator idea 2026-10-01, future
 
 The operator inherited many BeagleBone Black boards (photos: `beaglebone/image/beaglebone-black-board-{1,2}.jpg`). **Measured from the
@@ -307,9 +330,9 @@ eMMC, SMSC LAN8710A PHY, an NXP HDMI framer to micro-HDMI, USB-A host, mini-USB,
 **Inferred, not built:** our apps need only `/dev/fb0`, evdev and ALSA, so the differences are board-specific —
 no touch panel, other LED/backlight/watchdog paths, no speaker GPIO or bezel, 5 V power. That points to a
 **board-profile layer** under `common/hardware.c`, `common/touch_input.c` and `commissioning/` rather than
-`#ifdef`s. Our binaries are soft-float against the RoomWizard rootfs while stock BBB Debian is hard-float, so
+`#ifdef`s. Our binaries are soft-float against the Arca rootfs while stock BBB Debian is hard-float, so
 this ties to our own root filesystem (`rootfs/`; one rootfs for both boards). A BBB wants a mainline kernel with DRM fbdev emulation; the
-RoomWizard stays on 4.14.52 omapfb. **Done when** the first question is answered: which board-specific
+Steelcase RoomWizard stays on 4.14.52 omapfb. **Done when** the first question is answered: which board-specific
 paths a launcher plus one game actually touch, listed from a BBB boot.
 
 **Future scope, operator-agreed, not scheduled:** mouse-only operation of the launcher, Control Panel and games, for a unit with no touch and no keyboard or pad. The operator has a RoomWizard whose touch is broken, and a BeagleBone has no touch. The mouse pointer in the launcher and the Control Panel exists and is operator-verified; the games still take no mouse pointer.
@@ -329,31 +352,33 @@ rest committed as bare PPMs with no generator — and collected by the `*//*.ppm
 the style of `gen_cp_icons.py` for all ten apps, so every PPM has a source, then delete the three old scripts.
 **Done when** the launcher grid on the panel reads as the same family as the Control Panel's. Operator 2026-10-07 also wants a better icon for the Control Panel's System page, done with this rework: its page has `.icon = NULL` (`system_page.c:563`) and `ICONS` in `gen_cp_icons.py:178` has no System entry.
 
-### F117. Rename the project to **Arca** — open, name chosen by the operator 2026-10-10, not started
+### F117. Rename the project to **Arca** — open, name chosen by the operator 2026-10-10, implemented in the tree 2026-10-12
 
-"RoomWizard" is likely a Steelcase trademark **[unchecked]**, so it leaves the code, identifiers, paths and product name.
-One descriptive README line ("runs on Steelcase RoomWizard hardware") may stay, so people can find the project; that is
-general understanding of descriptive use, not legal advice. **Name: Arca** (Latin for chest or box, and it sounds like
+"RoomWizard" is likely a Steelcase trademark **[unchecked]**, so it has left the code, identifiers, paths, file names and product
+name. Implemented in the tree: all of those. Deployed units are not migrated; they are re-flashed with a new card.
+Operator rule 2026-10-12: "Steelcase RoomWizard rw20" is allowed
+as the motherboard name in software; it is gone everywhere else in code; the docs keep discussing what was learned about the
+Steelcase RoomWizard. One descriptive README line ("runs on Steelcase RoomWizard hardware") may stay, so people can find the
+project; that is general understanding of descriptive use, not legal advice. **Name: Arca** (Latin for chest or box, and it sounds like
 "arcade"), full form **"Arca Linux"**. **Never "ArcaOS"**: that name belongs to Arca Noae's active OS/2-derived system
 (arcanoae.com). **Logo: a cuckoo**, because it moved into Steelcase's nest and pushed the original out. It is our own bird,
 nothing like the dead Cuckoo Sandbox's (`github.com/cuckoosandbox`, archived 2021): `distro/arca-logo.svg`, a
 cuckoo calling out of a clock-house. The operator accepted it as the working logo on 2026-10-10, open to change.
 `distro/render.sh` (WSL, `rsvg-convert`) renders it at 512, 96, 32 and 16 px into the untracked `distro/preview/`. It
 reads at 32 px; at 16 px only the house is left, so a favicon needs a simpler variant. On the boot screen it is
-F101's boot-logo row. Host name and prompt: `arca-<per-unit part>`
-replaces `rw20`, and it fits the generic card image's random first-boot name. The distro name goes in `/etc/os-release` and the boot banner,
-not in `PS1`.
+F101's boot-logo row. Host name: `arca-<4 hex>` (`rootfs/board/arca/overlay/etc/init.d/firstboot-hostname`) fits the generic
+card image's random first-boot name; the prompt is `\u@\h:\w`. **[unverified]** The distro name in `/etc/os-release` and the boot
+banner (the defconfig sets the issue text to "Arca"); it stays out of `PS1`.
 
 Collision check 2026-10-10 (shallow, WebFetch only, no search engine): DistroWatch lists no Arca, and GitHub shows no Arca
 distro. Outside IT the word is crowded (NYSE Arca and others), which is why the full form is used on the website and repo.
 **Still open before publishing:** a manual "ARCA" trademark search in classes 9 and 42 (USPTO, EUIPO, WIPO Brand DB), and
 package-name checks (AUR, Debian, PyPI, npm, Docker Hub) once the `arca-*` identifiers are picked.
 
-Scope: the device paths (`/opt/roomwizard/`, `/var/log/roomwizard/`, the `roomwizard-app` init script) need a
-migration step for units already deployed. The identifiers in code (`lib/rw-*.sh`, `RW_*`, `rw_*` tests, the U-Boot board
-name), the scripts (`roomwizard.sh`), the docs and `LICENSE.md` follow separately. **Done when** the trademark search is
-recorded, `grep -ri roomwizard` outside that README line and `LICENSE.md`'s provenance rows finds nothing, and a migrated
-unit boots under the new paths.
+**Done when** a code-only grep (`git ls-files | grep -v '\.md$'`, leaving out the upstream trees `scummvm/`,
+`usb_host/linux-4.14.52/` and `vnc_client/deps/`) for `roomwizard` and `steelcase` finds only the exception classes: the board
+name `rw20` and captured vendor output; a unit re-flashed with a new card boots under the new paths; and the
+manual trademark search is recorded.
 
 ## Structural and cleanup
 

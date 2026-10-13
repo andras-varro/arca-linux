@@ -215,7 +215,7 @@ static int stall_cases(void)
     AudioOut out;
     const char *path = NULL;
 
-    snprintf(bt_dir, sizeof(bt_dir), "/tmp/rw_alsa_stall_XXXXXX");
+    snprintf(bt_dir, sizeof(bt_dir), "/tmp/arca_alsa_stall_XXXXXX");
     if (!mkdtemp(bt_dir)) { printf("FAILED  mkdtemp\n"); return 1; }
     bt_link("hci0:11");                         /* one ACL link: the headset */
     audio_out_set_device_pref("auto");

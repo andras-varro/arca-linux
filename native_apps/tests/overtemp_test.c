@@ -1,5 +1,5 @@
 /* Host-side regression for the over-temperature warning's decisions
- * (common/overtemp.h), which rwmond and framebuffer.c both use.
+ * (common/overtemp.h), which arcamond and framebuffer.c both use.
  *
  *   cd native_apps && gcc -Wall -Wextra -I. -o build/overtemp_test \
  *       tests/overtemp_test.c sysmon/mon_ring.c && ./build/overtemp_test
@@ -61,10 +61,10 @@ int main(void) {
     CHECK("D", ring_flag_of(MON_FLAG_OVERTEMP | 6u) == 1, "flag set with other bits");
     CHECK("D", ring_flag_of(0u) == 0, "flag clear reads %d", ring_flag_of(0u));
     CHECK("D", ring_flag_of(6u) == 0, "other bits only must read clear");
-    CHECK("D", overtemp_ring_flag("rwmond 1 99 1 0\n") == 1, "bare header, flag set");
-    CHECK("D", overtemp_ring_flag("rwmond 2 99 1 0\n") == -1, "wrong version must refuse");
+    CHECK("D", overtemp_ring_flag("arcamond 1 99 1 0\n") == 1, "bare header, flag set");
+    CHECK("D", overtemp_ring_flag("arcamond 2 99 1 0\n") == -1, "wrong version must refuse");
     CHECK("D", overtemp_ring_flag("") == -1, "empty must refuse");
-    CHECK("D", overtemp_ring_flag("rwmond 1 99\n") == -1, "truncated header must refuse");
+    CHECK("D", overtemp_ring_flag("arcamond 1 99\n") == -1, "truncated header must refuse");
     CHECK("D", overtemp_ring_flag(NULL) == -1, "NULL must refuse");
 
     /* E */

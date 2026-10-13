@@ -125,7 +125,7 @@ void config_init_path(Config *cfg, const char *path) {
 }
 
 int config_load_sound_set(Config *cfg, const char *tag) {
-    /* The longest real path is /opt/roomwizard/soundsets/brick_breaker.sound at
+    /* The longest real path is /opt/arca/soundsets/brick_breaker.sound at
      * 45 bytes against Config::filepath's 128, so this cannot truncate for any
      * tag a game passes — but snprintf bounds it anyway, because a truncated
      * path would open a DIFFERENT file rather than fail. */
@@ -186,7 +186,7 @@ int config_save(const Config *cfg) {
     FILE *f = file_write_atomic_open(cfg->filepath, tmp_path, sizeof(tmp_path));
     if (!f) return -1;
 
-    if (fprintf(f, "# RoomWizard Configuration\n") < 0 ||
+    if (fprintf(f, "# Arca Configuration\n") < 0 ||
         fprintf(f, "# Auto-generated — edit with control_panel\n\n") < 0) {
         file_write_atomic_abort(f, tmp_path);
         return -1;

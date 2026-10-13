@@ -12,8 +12,8 @@
  * this build with an implicit-declaration error, which is the intended signal:
  * add it here and give it an answer in the test.
  */
-#ifndef RW_TEST_ALSA_STUB_H
-#define RW_TEST_ALSA_STUB_H
+#ifndef ARCA_TEST_ALSA_STUB_H
+#define ARCA_TEST_ALSA_STUB_H
 
 #include <stddef.h>
 #include <sys/types.h>
@@ -37,9 +37,9 @@ typedef enum {
 
 /* Stack storage in the real header; a static block is enough for one caller. */
 #define snd_pcm_hw_params_alloca(p) \
-    do { static long rw_hw_blk[16]; *(p) = (snd_pcm_hw_params_t *)rw_hw_blk; } while (0)
+    do { static long arca_hw_blk[16]; *(p) = (snd_pcm_hw_params_t *)arca_hw_blk; } while (0)
 #define snd_pcm_sw_params_alloca(p) \
-    do { static long rw_sw_blk[16]; *(p) = (snd_pcm_sw_params_t *)rw_sw_blk; } while (0)
+    do { static long arca_sw_blk[16]; *(p) = (snd_pcm_sw_params_t *)arca_sw_blk; } while (0)
 
 int  snd_pcm_open(snd_pcm_t **pcm, const char *name, snd_pcm_stream_t stream, int mode);
 int  snd_pcm_close(snd_pcm_t *pcm);
@@ -76,4 +76,4 @@ int  snd_pcm_sw_params_set_start_threshold(snd_pcm_t *pcm, snd_pcm_sw_params_t *
                                            snd_pcm_uframes_t val);
 int  snd_pcm_sw_params(snd_pcm_t *pcm, snd_pcm_sw_params_t *p);
 
-#endif /* RW_TEST_ALSA_STUB_H */
+#endif /* ARCA_TEST_ALSA_STUB_H */

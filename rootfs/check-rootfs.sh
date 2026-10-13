@@ -157,7 +157,7 @@ check "root's password is locked" $?
 member etc/group | grep -q '^tty:x:5:'
 check "group tty is gid 5 (devpts gid=5)" $?
 
-for mp in home/root/data home/root/log opt/games opt/roomwizard media; do
+for mp in home/root/data home/root/log opt/games opt/arca media; do
     has "$mp"
     check "mount point /$mp exists" $?
 done

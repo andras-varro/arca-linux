@@ -1,5 +1,5 @@
 /**
- * UI Layout Manager for RoomWizard
+ * UI Layout Manager for Arca
  * 
  * Provides layout managers for:
  * - Grid layout (auto-calculate positions, handle overflow)

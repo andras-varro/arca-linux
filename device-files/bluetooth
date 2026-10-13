@@ -3,8 +3,8 @@
 #
 # The modules come from kernel/build-bt-modules.sh, built against OUR kernel image's symbol
 # CRCs, so they load only on a unit that boots that image. It is built with
-# KBUILD_BUILD_USER=roomwizard and KBUILD_BUILD_HOST=build, which /proc/version carries as
-# "(roomwizard@build)"; on any other kernel this prints one line and loads nothing.
+# KBUILD_BUILD_USER=arca and KBUILD_BUILD_HOST=build, which /proc/version carries as
+# "(arca@build)"; on any other kernel this prints one line and loads nothing.
 #
 # load-order.txt is written by that same build -- dependencies first, and the crypto the
 # SMP code allocates when btusb probes an adapter ahead of btusb -- so this script reads the
@@ -54,7 +54,7 @@ STORAGE=${BT_STORAGE:-/var/lib/bluetooth}
 CONF=/etc/bluetooth/main.conf
 RUNCONF=/var/run/bluetooth-main.conf
 
-our_kernel() { grep -q '(roomwizard@build)' /proc/version 2>/dev/null; }
+our_kernel() { grep -q '(arca@build)' /proc/version 2>/dev/null; }
 
 # PIDs of every running process whose executable is named $1, whichever path it was started from.
 exe_pids() {

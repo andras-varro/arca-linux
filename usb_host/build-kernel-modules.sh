@@ -1,5 +1,5 @@
 #!/bin/bash
-# build-kernel-modules.sh - Cross-compile the out-of-tree kernel modules for RoomWizard
+# build-kernel-modules.sh - Cross-compile the out-of-tree kernel modules for Arca
 # Run this script in WSL (Linux), from the usb_host/ directory or its parent.
 #
 # Prerequisites: every host package this needs comes from ../setup-build-env.sh, the one

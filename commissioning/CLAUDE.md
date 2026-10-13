@@ -2,12 +2,12 @@
 
 The bring-up scripts. Loaded when you work in `commissioning/`.
 
-None of these is an answer to "what do I run" except through `roomwizard.sh` at the repo root. The
+None of these is an answer to "what do I run" except through `arca.sh` at the repo root. The
 libraries they drive are documented in `lib/CLAUDE.md`; the rules file they read in
 `device-files/CLAUDE.md`; the operator-facing walkthrough and the argument for the phase split in
 `COMMISSIONING.md`.
 
-Every unit runs **our own root filesystem** (`rootfs/`, marker `/etc/roomwizard-rootfs`). Nothing here
+Every unit runs **our own root filesystem** (`rootfs/`, marker `/etc/arca-rootfs`). Nothing here
 cleans, removes or edits a vendor stack, and neither installer mounts or writes p1.
 
 | script | when |
@@ -16,12 +16,12 @@ cleans, removes or edits a vendor stack, and neither installer mounts or writes 
 | `commission-offline.sh --bundle <tar.gz\|dir> --base <dir>` | the image step: installs a release bundle and the provision plan into a card's partitions mounted by the caller — `rootfs/make-card-image.sh --bundle` is the only caller |
 | `set-hostname.sh` | the one writer of the name files |
 | `clone-to-32gb.sh` | grows p6 onto a larger card (`SD_CARD_UPGRADE.md`) |
-| `backup.sh <ip> [<out>]` | before an update or reflash: the unit's BACKUP set (`lib/rw-state.sh`) to `backups/` — read-only on the unit, archive holds secrets |
-| `restore.sh <ip> <tar.gz> [--dry-run]` | after: refuses unsafe or non-BACKUP paths, `roomwizard-app stop`, `tar -o` over `/`, SSH modes, `start` |
+| `backup.sh <ip> [<out>]` | before an update or reflash: the unit's BACKUP set (`lib/arca-state.sh`) to `backups/` — read-only on the unit, archive holds secrets |
+| `restore.sh <ip> <tar.gz> [--dry-run]` | after: refuses unsafe or non-BACKUP paths, `arca-app stop`, `tar -o` over `/`, SSH modes, `start` |
 
 ## `provision.sh` updates; it deletes nothing
 
-The SSH gate (`lib/rw-ssh.sh`), then the plan compiled from `device-files/provision-rules.conf`.
+The SSH gate (`lib/arca-ssh.sh`), then the plan compiled from `device-files/provision-rules.conf`.
 `--dry-run` prints the plan and exits without touching the unit; `--status` and `--hostname` are the
 other non-installing modes and never back up or reboot. Before the **first write** it runs `backup.sh`,
 and a failed backup aborts the run. An unknown flag is refused, and `--ssh-auth` / `--sshd-only` are
@@ -34,7 +34,7 @@ Regression: `tests/provision_online_test.sh` (fake `ssh`/`scp`; no device). Rule
 ## `commission-offline.sh` has no prompt, no clean and no disk scan
 
 It reads no terminal, needs no root of its own and mounts nothing: `--base` is required and names a
-directory already holding `{root,data,log}`, and `lib/rw-identify.sh` refuses a `root` that lacks our
+directory already holding `{root,data,log}`, and `lib/arca-identify.sh` refuses a `root` that lacks our
 marker. The retired flags (`--no-clean`, `--keep-<group>`, `--delete-factory`, `--unattended`, `--disk`,
 `--release`, `--ssh-auth=*`, `--sshd-only`) are **refused by name with a non-zero exit** — a flag
 accepted and ignored reads as a choice honoured. Host name, password and ssh identity are not set here;
@@ -67,7 +67,7 @@ is the only home of the name.
 
 ## A device can run an older copy than the repo's
 
-`init.d/roomwizard-app` reaches a unit **only** through `provision.sh` (or the offline installer).
+`init.d/arca-app` reaches a unit **only** through `provision.sh` (or the offline installer).
 `./commissioning/provision.sh <ip> --status` md5s the deployed copy against the repo's and says
 `matches repo` or `DRIFTED` (read-only, no reboot). **Check that before reproducing anything against
 a device**, or you will draw conclusions about code the device is not running. The software watchdog
@@ -76,6 +76,6 @@ that this once also covered is not on our root; the hardware watchdog is fed by 
 
 ## Regressions
 
-`tests/provision_online_test.sh` (host-only, fake `ssh`/`scp`), `tests/rw_provision_test.sh` (the plan
+`tests/provision_online_test.sh` (host-only, fake `ssh`/`scp`), `tests/arca_provision_test.sh` (the plan
 compiler and offline executor) and `tests/commission_offline_test.sh` (needs root and a staged
 bundle), plus `tests/measure_provision_sabotage.sh`. Rules for all: `tests/CLAUDE.md`.

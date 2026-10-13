@@ -1,5 +1,5 @@
 /*
- * i2c_touch_read — userspace burst reader for the RoomWizard touch controller.
+ * i2c_touch_read — userspace burst reader for the Arca touch controller.
  *
  * Reads a register window from the touch controller over /dev/i2c-N and prints
  * every change while a human touches the glass.
@@ -42,20 +42,20 @@
  * so this compiles against any cross toolchain whether or not it ships the
  * kernel's i2c uapi headers.  Verified against the 4.14.52 tree.
  */
-struct rw_i2c_msg {
+struct arca_i2c_msg {
 	uint16_t addr;
 	uint16_t flags;
 	uint16_t len;
 	uint8_t *buf;
 };
 
-struct rw_i2c_rdwr_ioctl_data {
-	struct rw_i2c_msg *msgs;
+struct arca_i2c_rdwr_ioctl_data {
+	struct arca_i2c_msg *msgs;
 	uint32_t nmsgs;
 };
 
-#define RW_I2C_M_RD 0x0001
-#define RW_I2C_RDWR 0x0707
+#define ARCA_I2C_M_RD 0x0001
+#define ARCA_I2C_RDWR 0x0707
 
 #define MAX_LEN 32
 
@@ -64,7 +64,7 @@ struct rw_i2c_rdwr_ioctl_data {
  * two 4-byte longs here, so the whole record is 16 bytes.  Self-declared for the
  * same reason as the i2c structs above.
  */
-struct rw_input_event {
+struct arca_input_event {
 	long tv_sec;
 	long tv_usec;
 	uint16_t type;
@@ -72,11 +72,11 @@ struct rw_input_event {
 	int32_t value;
 };
 
-#define RW_EV_KEY 0x01
-#define RW_EV_ABS 0x03
-#define RW_ABS_X 0x00
-#define RW_ABS_Y 0x01
-#define RW_BTN_TOUCH 0x14a
+#define ARCA_EV_KEY 0x01
+#define ARCA_EV_ABS 0x03
+#define ARCA_ABS_X 0x00
+#define ARCA_ABS_Y 0x01
+#define ARCA_BTN_TOUCH 0x14a
 
 static long long now_ms(void)
 {
@@ -90,8 +90,8 @@ static long long now_ms(void)
 static int burst_read(int fd, int addr, int reg, uint8_t *out, int len)
 {
 	uint8_t cmd = (uint8_t)reg;
-	struct rw_i2c_msg msgs[2];
-	struct rw_i2c_rdwr_ioctl_data arg;
+	struct arca_i2c_msg msgs[2];
+	struct arca_i2c_rdwr_ioctl_data arg;
 
 	memset(msgs, 0, sizeof(msgs));
 	msgs[0].addr = (uint16_t)addr;
@@ -100,14 +100,14 @@ static int burst_read(int fd, int addr, int reg, uint8_t *out, int len)
 	msgs[0].buf = &cmd;
 
 	msgs[1].addr = (uint16_t)addr;
-	msgs[1].flags = RW_I2C_M_RD;
+	msgs[1].flags = ARCA_I2C_M_RD;
 	msgs[1].len = (uint16_t)len;
 	msgs[1].buf = out;
 
 	arg.msgs = msgs;
 	arg.nmsgs = 2;
 
-	if (ioctl(fd, RW_I2C_RDWR, &arg) < 0)
+	if (ioctl(fd, ARCA_I2C_RDWR, &arg) < 0)
 		return -errno;
 	return 0;
 }
@@ -209,19 +209,19 @@ int main(int argc, char **argv)
 	if (do_scan) {
 		int a, found = 0;
 		uint8_t one;
-		struct rw_i2c_msg m;
-		struct rw_i2c_rdwr_ioctl_data sa;
+		struct arca_i2c_msg m;
+		struct arca_i2c_rdwr_ioctl_data sa;
 
 		printf("scanning %s for responding addresses (read-only probe)\n", path);
 		for (a = 0x03; a <= 0x77; a++) {
 			memset(&m, 0, sizeof(m));
 			m.addr = (uint16_t)a;
-			m.flags = RW_I2C_M_RD;
+			m.flags = ARCA_I2C_M_RD;
 			m.len = 1;
 			m.buf = &one;
 			sa.msgs = &m;
 			sa.nmsgs = 1;
-			if (ioctl(fd, RW_I2C_RDWR, &sa) >= 0) {
+			if (ioctl(fd, ARCA_I2C_RDWR, &sa) >= 0) {
 				printf("  0x%02x responds (first byte 0x%02x)\n", a, one);
 				found++;
 			}
@@ -300,18 +300,18 @@ int main(int argc, char **argv)
 
 		/* Drain whatever evdev has, so touch events land beside the samples. */
 		if (evfd >= 0) {
-			struct rw_input_event ev;
+			struct arca_input_event ev;
 			int n = 0;
 			while (n < 64 && read(evfd, &ev, sizeof(ev)) == (ssize_t)sizeof(ev)) {
 				n++;
 				ev_events++;
-				if ((ev.type == RW_EV_ABS &&
-				     (ev.code == RW_ABS_X || ev.code == RW_ABS_Y)) ||
-				    (ev.type == RW_EV_KEY && ev.code == RW_BTN_TOUCH)) {
+				if ((ev.type == ARCA_EV_ABS &&
+				     (ev.code == ARCA_ABS_X || ev.code == ARCA_ABS_Y)) ||
+				    (ev.type == ARCA_EV_KEY && ev.code == ARCA_BTN_TOUCH)) {
 					ev_touch_events++;
 					printf("%7lld  EVDEV %-9s = %d\n", t - t0,
-					       ev.type == RW_EV_KEY ? "BTN_TOUCH" :
-					       (ev.code == RW_ABS_X ? "ABS_X" : "ABS_Y"),
+					       ev.type == ARCA_EV_KEY ? "BTN_TOUCH" :
+					       (ev.code == ARCA_ABS_X ? "ABS_X" : "ABS_Y"),
 					       ev.value);
 					fflush(stdout);
 				}

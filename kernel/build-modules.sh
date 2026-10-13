@@ -8,7 +8,7 @@
 # Produces: <out>/<driver>.ko, one per kernel/drivers/<driver>/, and with --deploy copies them to
 # /lib/modules/4.14.52/extra/ on the unit; touch-module loads only the touch driver there at boot.
 
-# shellcheck disable=SC2029,SC1091  # the device paths are ours and meant to expand here; rw-ssh.sh is sourced by path
+# shellcheck disable=SC2029,SC1091  # the device paths are ours and meant to expand here; arca-ssh.sh is sourced by path
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -50,9 +50,9 @@ done
 KERNEL_DIR="${IMAGE_WORK}/linux-4.14.52"
 STAGE_DIR="${IMAGE_WORK}/modules"
 if [ -n "$DEVICE_IP" ]; then
-    # shellcheck source=../lib/rw-ssh.sh
-    . "${SCRIPT_DIR}/../lib/rw-ssh.sh"
-    rw_ssh_gate "root@${DEVICE_IP}" || { echo "ERROR: cannot continue without SSH to ${DEVICE_IP}"; exit 1; }
+    # shellcheck source=../lib/arca-ssh.sh
+    . "${SCRIPT_DIR}/../lib/arca-ssh.sh"
+    arca_ssh_gate "root@${DEVICE_IP}" || { echo "ERROR: cannot continue without SSH to ${DEVICE_IP}"; exit 1; }
 fi
 
 for f in .config Module.symvers vmlinux; do

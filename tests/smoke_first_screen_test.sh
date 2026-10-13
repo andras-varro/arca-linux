@@ -101,7 +101,7 @@ assert_eq "touch"    "$(smoke_argmode touch)"      "A4 args=touch"
 assert_eq "fb touch" "$(smoke_argmode fb,touch)"   "A5 args=fb,touch"
 assert_eq "fb touch" "$(smoke_argmode bogus)"      "A6 an unrecognised value falls back to fb,touch"
 T=$(smoke_targets)
-has "$T" '^app_launcher|/opt/roomwizard/app_launcher|$'  "A7 app_launcher runs bare, as the init script starts it"
+has "$T" '^app_launcher|/opt/arca/app_launcher|$'  "A7 app_launcher runs bare, as the init script starts it"
 has "$T" '^control_panel|/opt/games/control_panel|/dev/fb0 /dev/input/touchscreen0$' "A8 control_panel's empty args= becomes fb,touch"
 has "$T" '^snake|/opt/games/snake|/dev/fb0 /dev/input/touchscreen0$' "A9 a game gets <fb> <touch>"
 assert_eq 13 "$(printf '%s\n' "$T" | grep -c .)" "A11 13 targets: launcher + 10 manifests + 2 tools"
@@ -198,8 +198,8 @@ printf '%s\n' "$cmd" | tr '\n' ' ' >> "$SC/calls"; echo >> "$SC/calls"
 case "$cmd" in
     true)  [ -f "$SC/down" ] && { echo "ssh: connect to host x port 22: Connection refused" >&2; exit 255; }
            exit 0 ;;
-    *"roomwizard-app stop"*)  exit 0 ;;
-    *"roomwizard-app start"*) exit 0 ;;
+    *"arca-app stop"*)  exit 0 ;;
+    *"arca-app start"*) exit 0 ;;
     *SMOKE_NOEXEC*)
         if [ -f "$SC/term" ]; then
             for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -s "$SC/mainpid" ] && break; sleep 0.1; done
@@ -243,8 +243,8 @@ run_runner 1.2.3.4 snake
 assert_eq 0 "$RC" "F1 one passing binary exits 0"
 has "$OUT" 'snake *pass 41 distinct' "F2 the verdict line names binary, outcome, count"
 has "$OUT" '1 of 1 passed' "F3 the summary"
-assert_eq 1 "$(printf '%s\n' "$CALLS" | grep -n 'roomwizard-app stop' | cut -d: -f1 | head -n1 | grep -c '^2$')" "F4 stop is the first call after the gate probe"
-has "$(printf '%s\n' "$CALLS" | tail -n1)" 'roomwizard-app start' "F5 start is the LAST call"
+assert_eq 1 "$(printf '%s\n' "$CALLS" | grep -n 'arca-app stop' | cut -d: -f1 | head -n1 | grep -c '^2$')" "F4 stop is the first call after the gate probe"
+has "$(printf '%s\n' "$CALLS" | tail -n1)" 'arca-app start' "F5 start is the LAST call"
 has "$CALLS" 'b=/opt/games/snake; .* /dev/fb0 /dev/input/touchscreen0 </dev/null' "F6 the production argv reaches the launch"
 has "$CALLS" '^kill 123' "F7 the launched PID — and only it — is killed"
 hasnt "$CALLS" 'killall' "F8 no killall, ever"
@@ -262,7 +262,7 @@ scenario "$ALIVE" "$I32" "$TMP/c32.raw" blankfail
 run_runner 1.2.3.4 snake
 has "$OUT" 'snake *could-not-tell .*blanked' "H4 a failed blank is could-not-tell"
 hasnt "$CALLS" '^cat /dev/fb' "H5 ...and nothing is captured"
-has "$(printf '%s\n' "$CALLS" | tail -n1)" 'roomwizard-app start' "H6 start still runs"
+has "$(printf '%s\n' "$CALLS" | tail -n1)" 'arca-app start' "H6 start still runs"
 
 scenario "$ALIVE" 'fbset: error' "$TMP/c32.raw"
 run_runner 1.2.3.4 snake
@@ -273,14 +273,14 @@ scenario $'SMOKE_PID=9\nSMOKE_EXIT=1' "$I32" -
 run_runner 1.2.3.4 tetris
 assert_eq 1 "$RC" "F10 a death exits 1"
 has "$OUT" 'tetris *started-died' "F11 started-died reported"
-has "$(printf '%s\n' "$CALLS" | tail -n1)" 'roomwizard-app start' "F12 start runs after a failure too"
+has "$(printf '%s\n' "$CALLS" | tail -n1)" 'arca-app start' "F12 start runs after a failure too"
 hasnt "$CALLS" '^cat /dev/fb' "F13 a dead app is not captured"
 
 scenario "$ALIVE" "$I32" -
 run_runner 1.2.3.4 pong
 assert_eq 1 "$RC" "F14 a failed capture exits 1"
 has "$OUT" 'pong *could-not-tell' "F15 capture ssh failure is could-not-tell, not black-screen"
-has "$(printf '%s\n' "$CALLS" | tail -n1)" 'roomwizard-app start' "F16 start runs after a harness failure"
+has "$(printf '%s\n' "$CALLS" | tail -n1)" 'arca-app start' "F16 start runs after a harness failure"
 
 scenario "$ALIVE" "$I32" "$TMP/blk32.raw"
 run_runner 1.2.3.4 samegame
@@ -290,12 +290,12 @@ has "$OUT" 'samegame *black-screen' "F18 black-screen reported"
 scenario "$ALIVE" "$I32" "$TMP/c32.raw" term
 run_runner 1.2.3.4 frogger
 assert_eq 143 "$RC" "F19 TERM mid-run exits 143"
-has "$(printf '%s\n' "$CALLS" | tail -n1)" 'roomwizard-app start' "F20 start runs on TERM (the trap)"
+has "$(printf '%s\n' "$CALLS" | tail -n1)" 'arca-app start' "F20 start runs on TERM (the trap)"
 
 scenario "$ALIVE" "$I32" "$TMP/c32.raw" down
 run_runner 1.2.3.4 snake
 assert_eq 2 "$RC" "F21 an unreachable device exits 2"
-hasnt "$CALLS" 'roomwizard-app' "F22 nothing is stopped (or started) on a device never reached"
+hasnt "$CALLS" 'arca-app' "F22 nothing is stopped (or started) on a device never reached"
 
 scenario "$ALIVE" "$I32" "$TMP/c32.raw"
 run_runner 1.2.3.4 no_such_app

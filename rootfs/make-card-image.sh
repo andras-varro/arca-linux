@@ -2,7 +2,7 @@
 # make-card-image.sh --mlo <MLO> --uboot <u-boot.img> --kernel <uImage> [--uenv <file>] [--modules <dir>]
 #                    [--bundle <b>] <rootfs.tar> <out.img>
 #
-# Builds a whole SD-card IMAGE FILE for a RoomWizard, from nothing but our own parts: one kind of
+# Builds a whole SD-card IMAGE FILE for an Arca, from nothing but our own parts: one kind of
 # image, generic and publishable, with no file of the vendor's on it and nothing of any unit's.
 # Inputs: our boot chain (MLO and u-boot.img from uboot/build.sh, a uImage kernel from
 # kernel/build-image.sh), a Buildroot rootfs.tar, and a directory of kernel modules (*.ko, built by
@@ -17,7 +17,7 @@
 # block device is refused.
 #
 # The partition table is written here by sfdisk (LAYOUT below, the positions every unit's card has
-# and lib/rw-identify.sh identifies partitions by), and the three extended-partition boot records
+# and lib/arca-identify.sh identifies partitions by), and the three extended-partition boot records
 # are written by hand, 63 sectors before each logical partition as on the units: sfdisk would put
 # them one sector before. The image ends with p7, so it is 6618780 sectors (3.16 GB) and fits a 4 GB card.
 #
@@ -145,9 +145,9 @@ if [ -n "$BUNDLE" ]; then
 fi
 
 # shellcheck disable=SC1090,SC1091
-. "$SCRIPT_DIR/../lib/rw-identify.sh" || die "cannot source rw-identify.sh"
+. "$SCRIPT_DIR/../lib/arca-identify.sh" || die "cannot source arca-identify.sh"
 # shellcheck disable=SC1090,SC1091
-. "$SCRIPT_DIR/../lib/rw-state.sh" || die "cannot source rw-state.sh"
+. "$SCRIPT_DIR/../lib/arca-state.sh" || die "cannot source arca-state.sh"
 
 # The partition table: <n>:<start>:<size>:<type>, 512-byte sectors, identical on every unit's card
 # (measured on an 8 GB and a 4 GB card). p4 is the extended container holding p5..p7; each logical
@@ -167,7 +167,7 @@ lay() { echo "$LAYOUT" | tr ' ' '\n' | awk -F: -v n="$1" -v c="$2" '$1==n{print 
 ssh_scan() {
     local d hits
     for d in "$@"; do
-        if ! hits=$(cd "$d" && find . -xdev ! -type d ! -type l | rw_state_ssh_keys_deny); then
+        if ! hits=$(cd "$d" && find . -xdev ! -type d ! -type l | arca_state_ssh_keys_deny); then
             echo "FAIL: SSH key material on the card under $d:" >&2
             printf '%s\n' "$hits" | sed 's/^/  /' >&2
             return 1
@@ -183,7 +183,7 @@ tar -tf "$ROOTTAR" > /dev/null || die "$ROOTTAR does not list"
 # the layout check runs here too, not only after a Buildroot build.
 bash "$SCRIPT_DIR/check-rootfs.sh" "$ROOTTAR" > /dev/null || die "$ROOTTAR fails rootfs/check-rootfs.sh (run it for the list)"
 ROOT_LIST=$(tar -tvf "$ROOTTAR" | awk '$1 !~ /^l/ { $1 = $2 = $3 = $4 = $5 = ""; sub(/^ +/, ""); print }')
-if ! KEYS_DENIED=$(printf '%s\n' "$ROOT_LIST" | rw_state_ssh_keys_deny); then
+if ! KEYS_DENIED=$(printf '%s\n' "$ROOT_LIST" | arca_state_ssh_keys_deny); then
     echo "FAIL: $ROOTTAR carries SSH key material a card image may not hold:" >&2
     printf '%s\n' "$KEYS_DENIED" | sed 's/^/  /' >&2
     echo "No image was written. Rebuild the rootfs without it." >&2
@@ -203,7 +203,7 @@ table_of() {
 }
 
 LOOP=""
-MNT=$(mktemp -d /tmp/rw-card-mnt.XXXXXX) || die "mktemp"
+MNT=$(mktemp -d /tmp/arca-card-mnt.XXXXXX) || die "mktemp"
 cleanup() {
     local rc=$?
     set +e
@@ -269,15 +269,15 @@ WANT_TABLE=""
 for e in $LAYOUT; do WANT_TABLE="$WANT_TABLE${WANT_TABLE:+ }${e}$([ "${e%%:*}" = 1 ] && echo ' boot')"; done
 GOT_TABLE=$(table_of "$OUTABS")
 [ "$GOT_TABLE" = "$WANT_TABLE" ] || die "partition table differs: want [$WANT_TABLE], got [$GOT_TABLE]"
-rw_is_card_disk "$OUTABS" || die "rw_is_card_disk says the image does not carry the RoomWizard layout"
-echo "rw_is_card_disk: yes; all seven partitions match LAYOUT"
+arca_is_card_disk "$OUTABS" || die "arca_is_card_disk says the image does not carry the Arca layout"
+echo "arca_is_card_disk: yes; all seven partitions match LAYOUT"
 # Sectors 1..62 (between the MBR and p1) are zero on every unit.
 [ "$(dd if="$OUTABS" bs=512 skip=1 count=62 status=none | tr -d '\000' | wc -c)" -eq 0 ] || die "sectors 1..62 are not zero"
 
 LOOP=$(losetup -P --show -f "$OUTABS") || die "losetup"
 echo "== loop device $LOOP"
 for n in 1 2 3 5 6 7; do
-    PD=$(rw_part_dev "$LOOP" "$n")
+    PD=$(arca_part_dev "$LOOP" "$n")
     for _ in 1 2 3 4 5 6 7 8 9 10; do [ -b "$PD" ] && break; sleep 0.5; done
     [ -b "$PD" ] || die "$PD did not appear"
 done
@@ -287,17 +287,17 @@ echo "== mkfs"
 # e2fsck understands: no metadata_csum, no 64bit. Labels are informational;
 # nothing identifies a partition by label or UUID.
 mkext() { mke2fs -F -q -t "$1" -O "$2" -L "$3" -m 1 "$4" || die "mke2fs $4"; }
-mkext ext4 ^metadata_csum,^64bit rw-data "$(rw_part_dev "$LOOP" 2)"
-mkext ext4 ^metadata_csum,^64bit rw-log "$(rw_part_dev "$LOOP" 3)"
+mkext ext4 ^metadata_csum,^64bit arca-data "$(arca_part_dev "$LOOP" 2)"
+mkext ext4 ^metadata_csum,^64bit arca-log "$(arca_part_dev "$LOOP" 3)"
 # p5: formatted like p2, empty and not mounted (kept so the table matches the units').
-mkext ext4 ^metadata_csum,^64bit rw-spare "$(rw_part_dev "$LOOP" 5)"
-mkext ext4 ^metadata_csum,^64bit rw-root "$(rw_part_dev "$LOOP" 6)"
-mkswap "$(rw_part_dev "$LOOP" 7)" > /dev/null || die "mkswap"
+mkext ext4 ^metadata_csum,^64bit arca-spare "$(arca_part_dev "$LOOP" 5)"
+mkext ext4 ^metadata_csum,^64bit arca-root "$(arca_part_dev "$LOOP" 6)"
+mkswap "$(arca_part_dev "$LOOP" 7)" > /dev/null || die "mkswap"
 
 echo "== p1: FAT32, our boot files only"
-P1DEV=$(rw_part_dev "$LOOP" 1)
+P1DEV=$(arca_part_dev "$LOOP" 1)
 # A fixed volume id keeps two builds of the same inputs identical on this partition.
-mkfs.vfat -F 32 -n RWBOOT -i 52574231 "$P1DEV" > /dev/null || die "mkfs.vfat $P1DEV"
+mkfs.vfat -F 32 -n ARCABOOT -i 41524331 "$P1DEV" > /dev/null || die "mkfs.vfat $P1DEV"
 mkdir "$MNT/p" || die "mkdir mnt"
 mount -t vfat "$P1DEV" "$MNT/p" || die "mount p1"
 # MLO first: the boot ROM reads it from the root directory of the first FAT partition.
@@ -317,7 +317,7 @@ umount "$MNT/p" || die "umount p1"
 
 fill() {   # fill <partnum> <rootfs tar>
     local n="$1"
-    mount "$(rw_part_dev "$LOOP" "$n")" "$MNT/p" || die "mount p$n"
+    mount "$(arca_part_dev "$LOOP" "$n")" "$MNT/p" || die "mount p$n"
     # The rootfs keeps its owners (dbus, avahi and the like are real users there).
     tar --numeric-owner -xpf "$2" -C "$MNT/p" || die "extract $2 into p$n"
     if [ "$n" = 6 ]; then
@@ -348,12 +348,12 @@ fill 6 "$ROOTTAR"
 
 if [ -n "$BUNDLE" ]; then
     echo "== installing bundle $BUNDLE_TAG"
-    # The layout rw_check_card_mounts and rw_offline_path expect: p6 as root,
+    # The layout arca_check_card_mounts and arca_offline_path expect: p6 as root,
     # p2/p3 as data/log — mounted, so a bundle path under /home/root/data
     # lands on p2 and not in p6's empty mount point. p1 is not mounted.
     for rp in root:6 data:2 log:3; do
         mkdir -p "$MNT/base/${rp%%:*}" || die "mkdir base"
-        mount "$(rw_part_dev "$LOOP" "${rp#*:}")" "$MNT/base/${rp%%:*}" || die "mount p${rp#*:} as ${rp%%:*}"
+        mount "$(arca_part_dev "$LOOP" "${rp#*:}")" "$MNT/base/${rp%%:*}" || die "mount p${rp#*:} as ${rp%%:*}"
     done
     if ! bash "$SCRIPT_DIR/../commissioning/commission-offline.sh" --bundle "$BUNDLE" \
             --base "$MNT/base" < /dev/null; then
@@ -371,7 +371,7 @@ fi
 echo "== fsck"
 FSCK_BAD=0
 for n in 2 3 5 6; do
-    if e2fsck -fn "$(rw_part_dev "$LOOP" "$n")" > "$MNT/fsck.$n" 2>&1; then
+    if e2fsck -fn "$(arca_part_dev "$LOOP" "$n")" > "$MNT/fsck.$n" 2>&1; then
         echo "p$n: clean ($(tail -n 1 "$MNT/fsck.$n"))"
     else
         echo "p$n: e2fsck reported problems"; cat "$MNT/fsck.$n"; FSCK_BAD=1

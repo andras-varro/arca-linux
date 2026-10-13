@@ -30,7 +30,7 @@ typedef enum {
 
 typedef struct CpPage {
     const char *name;   /* home tile label AND page title — one name */
-    const char *icon;   /* basename under /opt/roomwizard/icons/, no .ppm; NULL = letter tile */
+    const char *icon;   /* basename under /opt/arca/icons/, no .ppm; NULL = letter tile */
 
     /* Once at startup, from the control panel's loaded Config. */
     void (*load)(const Config *cfg);

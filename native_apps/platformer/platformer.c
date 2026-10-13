@@ -1,6 +1,6 @@
 /*
  * Office Runner — Mario-style side-scrolling platformer
- * Native C implementation for RoomWizard embedded device (300 MHz ARM)
+ * Native C implementation for Arca embedded device (300 MHz ARM)
  *
  * Features:
  *   - Tile-based scrolling levels with camera system
@@ -2060,7 +2060,7 @@ static void handle_input(void) {
 int main(int argc, char *argv[]) {
     /* Line-buffer stdout: at boot this is a log FILE, not a tty, so audio_bed_init()'s
      * playlist line and every other diagnostic would sit in a 4 KB glibc buffer
-     * instead of in /var/log/roomwizard/app_stdout.log.  Same reason as
+     * instead of in /var/log/arca/app_stdout.log.  Same reason as
      * app_launcher.c's, measured the same day. */
     setvbuf(stdout, NULL, _IOLBF, 0);
 

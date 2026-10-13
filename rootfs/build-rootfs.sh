@@ -1,5 +1,5 @@
 #!/bin/bash
-# build-rootfs.sh - Build the RoomWizard root filesystem tarball with Buildroot.
+# build-rootfs.sh - Build the Arca root filesystem tarball with Buildroot.
 # Run this script in WSL (Linux). Source, downloads and build tree all live on WSL's
 # native filesystem (~), never under /mnt: a Buildroot build on DrvFs is many times
 # slower, and build output must not land in the repository.
@@ -28,7 +28,7 @@ usage() {
 Usage: rootfs/build-rootfs.sh [--help]
 
 Download Buildroot (pinned version, sha256-checked) into ~/br-dl, extract it to
-~/br-src, build roomwizard_defconfig out of tree in ~/br-rw with this directory as
+~/br-src, build arca_defconfig out of tree in ~/br-rw with this directory as
 BR2_EXTERNAL, and copy the result to ~/br-rw-out/rootfs.tar.
 
 Re-running is incremental: the download, the extraction and the build tree are reused.
@@ -65,14 +65,14 @@ if [ ! -f "${BR_SRC}/Makefile" ]; then
 fi
 
 cd "$BR_SRC"
-make O="$BUILD_DIR" BR2_EXTERNAL="${SCRIPT_DIR}" BR2_DL_DIR="$DL_DIR" roomwizard_defconfig
+make O="$BUILD_DIR" BR2_EXTERNAL="${SCRIPT_DIR}" BR2_DL_DIR="$DL_DIR" arca_defconfig
 # defconfig silently drops a symbol whose dependency is unset (bash needs
 # BUSYBOX_SHOW_OTHERS), so every set line must survive into .config.
 # BR2_DL_DIR is excluded: the command line overrides it with an expanded path.
-dropped=$(grep -E '^BR2_[A-Z0-9_]+=' "${SCRIPT_DIR}/configs/roomwizard_defconfig" | grep -v '^BR2_DL_DIR=' |
+dropped=$(grep -E '^BR2_[A-Z0-9_]+=' "${SCRIPT_DIR}/configs/arca_defconfig" | grep -v '^BR2_DL_DIR=' |
     grep -vxF -f "${BUILD_DIR}/.config" || true)
 if [ -n "$dropped" ]; then
-    echo "roomwizard_defconfig lines that did not reach .config (an unmet dependency):" >&2
+    echo "arca_defconfig lines that did not reach .config (an unmet dependency):" >&2
     echo "$dropped" >&2
     exit 1
 fi

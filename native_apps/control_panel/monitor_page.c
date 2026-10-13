@@ -14,7 +14,7 @@
  * The three graphs ride the same once-a-second sample: one point per sample,
  * so they add no repaint of their own.  One widget draws all three
  * (draw_graph); each series reaches it as permille of its axis (mon_graph.h)
- * in a cpu_load.c ring.  On entry the graphs are pre-filled from rwmond's
+ * in a cpu_load.c ring.  On entry the graphs are pre-filled from arcamond's
  * published history when the daemon is running (graphs_seed_from_daemon);
  * without it they start empty.
  *
@@ -162,7 +162,7 @@ static void fmt_cpu(int others_pm, int self_pm, char *buf, size_t len) {
 }
 
 /* The memory graph's caption.  The series is MemTotal - MemAvailable — the
- * figure rwmond records, so a seeded graph and a sampled one are one series;
+ * figure arcamond records, so a seeded graph and a sampled one are one series;
  * it is not the RAM row's total - free - buffers - cached.  used < 0 = none. */
 static void fmt_mem_graph(long used_kb, unsigned long total_kb, char *buf, size_t len) {
     char u[32], t[32];
@@ -316,7 +316,7 @@ static void graphs_sample(void) {
                       mon_scale_pm(temp_mc, MON_TEMP_AXIS_LO_MC, MON_TEMP_AXIS_HI_MC));
 }
 
-/* rwmond's ring (sysmon/mon_ring.h), if the daemon is running: its three
+/* arcamond's ring (sysmon/mon_ring.h), if the daemon is running: its three
  * columns pre-fill the three graphs so the page opens on the last two
  * minutes.  A file older than 3 s means the daemon is gone, and the page then
  * starts empty and samples for itself exactly as without it.  The daemon's CPU
@@ -351,7 +351,7 @@ static void graphs_seed_from_daemon(unsigned long long now_cs) {
 
 /* The page was closed, so nothing sampled the gap: start the graphs afresh
  * rather than draw one point averaged over however long that was — from
- * rwmond's history when it is fresh, else empty. */
+ * arcamond's history when it is fresh, else empty. */
 static void graphs_restart(void) {
     for (int i = 0; i < NUM_GRAPHS; i++) cpu_hist_clear(&graphs[i]->hist);
     cpu_others_pm = cpu_self_pm = -1;

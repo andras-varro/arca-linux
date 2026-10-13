@@ -4,8 +4,8 @@
 #
 # NOT a repo tool: a scratch fixture builder for exercising commissioning/commission-offline.sh
 # without a card and without a device. It mirrors what rootfs/make-card-image.sh hands that
-# script: p6 is our Buildroot root (marker etc/roomwizard-rootfs, the rcS.d/rc5.d links and
-# the key-only sshd_config that rootfs/board/roomwizard/{post-build.sh,overlay} produce),
+# script: p6 is our Buildroot root (marker etc/arca-rootfs, the rcS.d/rc5.d links and
+# the key-only sshd_config that rootfs/board/arca/{post-build.sh,overlay} produce),
 # p2/p3/p5 are empty ext4 trees. There is no vendor software anywhere in it. It is
 # committed because the alternative is retyping it, and because the one thing it must get
 # right — REAL SYMLINKS in rc*.d — is exactly what partitions/ and partitions.new/ lost on
@@ -26,23 +26,23 @@ esac
 rm -rf "$BASE"
 
 mkdir -p "$BASE"/root/etc/{init.d,rcS.d,rc0.d,rc1.d,rc2.d,rc3.d,rc4.d,rc5.d,rc6.d,ssh,network,sysctl.d} \
-         "$BASE"/root/{opt/games,opt/roomwizard,usr/sbin,usr/lib,usr/share} \
+         "$BASE"/root/{opt/games,opt/arca,usr/sbin,usr/lib,usr/share} \
          "$BASE"/root/home/root/{data,log,backup,.ssh} \
          "$BASE"/data/lost+found "$BASE"/log/lost+found
 
-# rw_is_rootfs's four required files, our marker, and the per-unit name.
+# arca_is_rootfs's four required files, our marker, and the per-unit name.
 echo 'root:*:19000:0:99999:7:::'                    > "$BASE/root/etc/shadow"
 printf '127.0.0.1 localhost\n127.0.1.1 rwfake\n'    > "$BASE/root/etc/hosts"
 printf 'rwfake\n'                                   > "$BASE/root/etc/hostname"
 printf 'auto lo\niface lo inet loopback\n\nauto eth0\niface eth0 inet dhcp\n' \
     > "$BASE/root/etc/network/interfaces"
-printf 'RoomWizard root filesystem, built from rootfs/ (Buildroot)\n' > "$BASE/root/etc/roomwizard-rootfs"
-# Key-only, as rootfs/board/roomwizard/overlay/etc/ssh/sshd_config.
+printf 'Arca root filesystem, built from rootfs/ (Buildroot)\n' > "$BASE/root/etc/arca-rootfs"
+# Key-only, as rootfs/board/arca/overlay/etc/ssh/sshd_config.
 printf 'PermitRootLogin prohibit-password\nPubkeyAuthentication yes\nPasswordAuthentication no\nPermitEmptyPasswords no\nAuthorizedKeysFile .ssh/authorized_keys\n' \
     > "$BASE/root/etc/ssh/sshd_config"
 
-# Our init scripts (rootfs/board/roomwizard/overlay/etc/init.d), and REAL symlinks to them,
-# named as rootfs/board/roomwizard/post-build.sh makes them.
+# Our init scripts (rootfs/board/arca/overlay/etc/init.d), and REAL symlinks to them,
+# named as rootfs/board/arca/post-build.sh makes them.
 for n in mountall seedrng alignment udev hostname sysctl watchdog syslog networking \
          dbus-1 sshd hwclock.sh; do
     printf '#!/bin/sh\n# fixture stub\nexit 0\n' > "$BASE/root/etc/init.d/$n"

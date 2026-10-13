@@ -31,8 +31,8 @@
  * receipt to read it against is `AudioWav.loops`.
  */
 
-#ifndef ROOMWIZARD_AUDIO_WAV_H
-#define ROOMWIZARD_AUDIO_WAV_H
+#ifndef ARCA_AUDIO_WAV_H
+#define ARCA_AUDIO_WAV_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -88,4 +88,4 @@ void audio_wav_close(AudioWav *w);
  */
 long audio_wav_fill(void *ctx, int16_t *dst, long frames);
 
-#endif /* ROOMWIZARD_AUDIO_WAV_H */
+#endif /* ARCA_AUDIO_WAV_H */

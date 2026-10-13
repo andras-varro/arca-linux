@@ -69,7 +69,7 @@ static void expect_int(const char *what, int got, int want) {
  * sizeof(struct input_event); at EOF a regular file returns 0, which ends the
  * loop the same way EAGAIN does on a real non-blocking evdev fd. */
 static int fake_fd(void) {
-    char path[] = "/tmp/rw_gamepad_test_XXXXXX";
+    char path[] = "/tmp/arca_gamepad_test_XXXXXX";
     int fd = mkstemp(path);
     if (fd < 0) { perror("mkstemp"); exit(2); }
     unlink(path);           /* keep it only as long as the fd lives */

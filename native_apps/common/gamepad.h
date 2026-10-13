@@ -1,5 +1,5 @@
 /**
- * Gamepad Input Module for RoomWizard
+ * Gamepad Input Module for Arca
  *
  * Reusable input abstraction that merges gamepad (Xbox 360 via evdev),
  * keyboard, mouse, and touch into a unified API.  Used by all native games.

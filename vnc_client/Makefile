@@ -1,4 +1,4 @@
-# VNC Client for RoomWizard - Makefile
+# VNC Client for Arca - Makefile
 # Cross-compilation for ARM Cortex-A8
 
 # Toolchain configuration
@@ -87,7 +87,7 @@ install: $(TARGET)
 	@sudo chmod +x /opt/vnc_client/vnc_client
 	@echo "Installed to /opt/vnc_client/vnc_client"
 
-# Deploy to RoomWizard device
+# Deploy to Arca device
 deploy: $(TARGET)
 	@if [ -z "$(DEVICE_IP)" ]; then \
 		echo "Error: DEVICE_IP not set. Usage: make deploy DEVICE_IP=192.168.50.73"; \
@@ -117,7 +117,7 @@ distclean: clean
 
 # Help target
 help:
-	@echo "VNC Client for RoomWizard - Build System"
+	@echo "VNC Client for Arca - Build System"
 	@echo ""
 	@echo "Targets:"
 	@echo "  all        - Build the VNC client (default)"
@@ -125,7 +125,7 @@ help:
 	@echo "  clean      - Remove build artifacts"
 	@echo "  distclean  - Remove build artifacts and dependencies"
 	@echo "  install    - Install to local /opt/vnc_client"
-	@echo "  deploy     - Deploy to RoomWizard device"
+	@echo "  deploy     - Deploy to Arca device"
 	@echo "  help       - Show this help message"
 	@echo ""
 	@echo "Usage:"
@@ -135,4 +135,4 @@ help:
 	@echo ""
 	@echo "Environment Variables:"
 	@echo "  CROSS_COMPILE - Toolchain prefix (default: arm-linux-gnueabihf-)"
-	@echo "  DEVICE_IP     - RoomWizard IP address for deployment"
+	@echo "  DEVICE_IP     - Arca IP address for deployment"

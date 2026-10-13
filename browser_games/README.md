@@ -1,4 +1,4 @@
-# RoomWizard Browser Modifications Guide
+# Arca Browser Modifications Guide
 
 > ## ⚠️ Obsolete
 >
@@ -25,7 +25,7 @@
 
 ## Overview
 
-This guide covers browser-based modifications to the RoomWizard, specifically the implementation of a brick breaker game with LED feedback. The modifications replace the original room booking interface while maintaining the existing Jetty/Java infrastructure.
+This guide covers browser-based modifications to the Steelcase RoomWizard, specifically the implementation of a brick breaker game with LED feedback. The modifications replace the original room booking interface while maintaining the existing Jetty/Java infrastructure.
 
 ### What Was Implemented
 
@@ -121,7 +121,7 @@ This guide covers browser-based modifications to the RoomWizard, specifically th
 
 ### How to Play
 
-1. **Power on** the RoomWizard device
+1. **Power on** the Steelcase RoomWizard device
 2. Wait for the system to boot (X11 → Jetty → Browser)
 3. The **Brick Breaker start screen** will appear
 4. Touch the **START** button to begin
@@ -137,7 +137,7 @@ This guide covers browser-based modifications to the RoomWizard, specifically th
 
 ### Overview
 
-The LED control system allows the JavaScript game to control the RoomWizard's red and green LEDs through a Java servlet backend.
+The LED control system allows the JavaScript game to control the Steelcase RoomWizard's red and green LEDs through a Java servlet backend.
 
 ### Architecture
 
@@ -441,7 +441,7 @@ sync
 
 ### Step 6: Boot the Device
 
-1. **Insert modified SD card** into RoomWizard
+1. **Insert modified SD card** into the Steelcase RoomWizard
 2. **Power on** the device
 3. **Monitor boot process** via serial console (if available)
 4. **Wait for X11 and browser** to start (may take 60-90 seconds)
@@ -479,7 +479,7 @@ curl "http://localhost/frontpanel/led?color=green&brightness=0"
 
 Both `index.html` and `index.html.template` have been replaced in the extracted partition directory. The modification is complete and ready for:
 
-1. **Testing on actual hardware** (if you have access to the RoomWizard device)
+1. **Testing on actual hardware** (if you have access to the Steelcase RoomWizard device)
 2. **Repackaging the partition** (if needed for your deployment method)
 3. **Writing to SD card** (following your deployment procedure)
 

@@ -4,7 +4,7 @@
 #
 # Usage: commissioning/backup.sh <ip|host> [<out.tar.gz>]
 #
-# Takes the BACKUP set of lib/rw-state.sh — settings, touch calibration, input
+# Takes the BACKUP set of lib/arca-state.sh — settings, touch calibration, input
 # mapping, Bluetooth pairings and audio state, high scores, the SSH host keys and
 # authorized_keys, the host name and time zone, and the operator's private config
 # (the VNC password, ScummVM's ini and saves) — for an update, upgrade or reflash.
@@ -29,7 +29,7 @@ usage() {
     cat <<'USAGE'
 Usage: commissioning/backup.sh <ip|host> [<out.tar.gz>]
 
-Copies the unit's per-unit state (lib/rw-state.sh, BACKUP set) to this host.
+Copies the unit's per-unit state (lib/arca-state.sh, BACKUP set) to this host.
 Read-only on the unit. Default output: backups/<hostname>-<YYYYmmdd-HHMMSS>.tar.gz.
 The archive holds secrets (VNC password, SSH host keys); keep it private.
 Restore with: commissioning/restore.sh <ip|host> <archive> [--dry-run]
@@ -46,10 +46,10 @@ OUT="${2:-}"
 
 die() { echo "FAIL: $*" >&2; exit 1; }
 
-# shellcheck source=../lib/rw-ssh.sh
-. "$REPO_ROOT/lib/rw-ssh.sh"
-# shellcheck source=../lib/rw-state.sh
-. "$REPO_ROOT/lib/rw-state.sh"
+# shellcheck source=../lib/arca-ssh.sh
+. "$REPO_ROOT/lib/arca-ssh.sh"
+# shellcheck source=../lib/arca-state.sh
+. "$REPO_ROOT/lib/arca-state.sh"
 
 command -v gzip > /dev/null || die "gzip not installed on this host"
 if [ -n "$OUT" ]; then
@@ -58,7 +58,7 @@ if [ -n "$OUT" ]; then
 fi
 
 DEVICE="root@$TARGET"
-rw_ssh_gate "$DEVICE" || die "cannot continue without SSH to $DEVICE"
+arca_ssh_gate "$DEVICE" || die "cannot continue without SSH to $DEVICE"
 rssh() { ssh -o ConnectTimeout=10 "$DEVICE" "$@" < /dev/null; }
 
 UNIT=$(rssh 'head -n 1 /etc/hostname 2>/dev/null' | tr -cd 'A-Za-z0-9-')
@@ -69,13 +69,13 @@ if [ -z "$OUT" ]; then
     [ ! -e "$OUT" ] || die "$OUT exists"
 fi
 
-LIST=$(rssh "$(rw_state_lister backup)") || die "listing the backup set on $DEVICE"
+LIST=$(rssh "$(arca_state_lister backup)") || die "listing the backup set on $DEVICE"
 [ -n "$LIST" ] || die "the unit has none of the backup set's files; nothing to back up"
 if printf '%s\n' "$LIST" | grep -q '[[:space:]]'; then
     die "a state file name contains whitespace:
 $(printf '%s\n' "$LIST" | grep '[[:space:]]')"
 fi
-if UNSAFE=$(printf '%s\n' "$LIST" | rw_state_unsafe_paths); then :; else
+if UNSAFE=$(printf '%s\n' "$LIST" | arca_state_unsafe_paths); then :; else
     die "the unit listed unsafe paths:
 $UNSAFE"
 fi

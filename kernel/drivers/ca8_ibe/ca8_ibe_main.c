@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Report, and optionally set, ACTLR.IBE (bit 6) on the RoomWizard's
+ * Report, and optionally set, ACTLR.IBE (bit 6) on the Arca's
  * Cortex-A8.
  *
  * The context-switch BTB flush vanilla 4.14.52 already does on this core
@@ -27,7 +27,7 @@
 
 #define ACTLR_IBE		BIT(6)
 /* arch/arm/mach-omap2/soc.h, which an M= build cannot include */
-#define RW_OMAP2_DEVICE_TYPE_GP	3
+#define ARCA_OMAP2_DEVICE_TYPE_GP	3
 int omap_type(void);		/* arch/arm/mach-omap2/id.c, EXPORT_SYMBOL */
 
 asmlinkage void ca8_ibe_rom_write_actlr(u32 val);
@@ -59,7 +59,7 @@ static int __init ca8_ibe_init(void)
 	pr_info("ca8_ibe: ACTLR=0x%08x IBE=%u\n", before, !!(before & ACTLR_IBE));
 	if (!set_ibe || (before & ACTLR_IBE))
 		return 0;
-	if (omap_type() != RW_OMAP2_DEVICE_TYPE_GP) {
+	if (omap_type() != ARCA_OMAP2_DEVICE_TYPE_GP) {
 		pr_warn("ca8_ibe: not a GP OMAP (type %d), the ROM service differs; not writing\n",
 			omap_type());
 		return 0;
@@ -85,5 +85,5 @@ static void __exit ca8_ibe_exit(void)
 module_init(ca8_ibe_init);
 module_exit(ca8_ibe_exit);
 
-MODULE_DESCRIPTION("Report and set Cortex-A8 ACTLR.IBE on the RoomWizard");
+MODULE_DESCRIPTION("Report and set Cortex-A8 ACTLR.IBE on the Arca");
 MODULE_LICENSE("GPL v2");

@@ -1,4 +1,4 @@
-# USB Host Mode for RoomWizard
+# USB Host Mode for Arca
 
 ## Quick Start
 
@@ -21,7 +21,7 @@ This will:
 - **Linux/WSL** with `arm-linux-gnueabihf-gcc` installed
 - **Additional packages**: `bc`, `libssl-dev`, `bison`, `flex` (for kernel module build)
 - **Python 3** (for DTB patching script)
-- **SSH root access** to the RoomWizard (key-based auth recommended)
+- **SSH root access** to the Steelcase RoomWizard (key-based auth recommended)
 - **Micro USB OTG adapter** (Micro-B male → USB-A female)
 - **Powered USB hub** — *optional.* Measured 2026-08-10: the port **does** source VBUS, enough to run an
   Xbox pad through a passive adapter with no hub. Use one for a device whose draw exceeds the 500 mA
@@ -176,7 +176,7 @@ enables the joystick subsystem, and cross-compiles the three modules into `modul
 ⚠️ **This step is automated and the commands below are a *description*, not the instructions.** The three
 device scripts and the two `rc5.d` links are `usb`-group records in
 [`device-files/provision-rules.conf`](../device-files/provision-rules.conf), compiled by
-`rw_provision_plan_component` and executed through the *same* generated interpreter that
+`arca_provision_plan_component` and executed through the *same* generated interpreter that
 `commissioning/provision.sh` uses. Do not hand-`scp` them: a second copy of the install would drift from
 the rules file, and the modes are **declared** there rather than read off disk. What the plan resolves to:
 

@@ -5,7 +5,7 @@
 #include <stdbool.h>
 
 /**
- * Hardware Control Library for RoomWizard
+ * Hardware Control Library for Arca
  * 
  * Provides control over:
  * - LED indicators (red and green)
@@ -13,7 +13,7 @@
  * 
  * All brightness values are 0-100, expressed as a percentage OF THE USER'S
  * CONFIGURED MAXIMUM (led_brightness / backlight_brightness in
- * /opt/games/rw_config.conf) — not of the raw sysfs duty cycle. Setters scale
+ * /opt/games/arca_config.conf) — not of the raw sysfs duty cycle. Setters scale
  * down before writing and getters scale back up, so a value round-trips:
  * hw_set_backlight(hw_get_backlight()) leaves the panel where it was.
  */

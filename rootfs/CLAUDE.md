@@ -25,12 +25,12 @@ Everything that builds the **root filesystem we boot instead of the vendor's Yoc
   (from `kernel/build-image.sh`): `SYSTEM_ANALYSIS.md#4-boot-chain-and-recovery`. Recovery is "reimage the card".
 - **Our links:** `rcS.d` `S01mountall` `S01seedrng` `S02alignment` `S03udev` `S04hostname` `S05sysctl`
   `S04firstboot-hostname` `S06watchdog` `S07syslog` `S08networking`; `rc5.d` `S02dbus-1` `S09sshd` `S20hwclock.sh` `S30avahi-daemon`
-  (all linked by `rootfs/board/roomwizard/post-build.sh`). `/usr/sbin/set-hostname` is `commissioning/set-hostname.sh` installed under a
+  (all linked by `rootfs/board/arca/post-build.sh`). `/usr/sbin/set-hostname` is `commissioning/set-hostname.sh` installed under a
   command name by the same script. **sshd generates an ed25519 host key only** (`overlay/etc/init.d/sshd`; `post-build.sh` removes the
   RSA key and links ed25519 into p2): measured on `.188`, `ssh-keyscan` offers only `ssh-ed25519`, and the first-boot generation took
   ~1 min with `seedrng: uninitialized urandom read` in dmesg before `crng init done` — the wait is entropy [inferred].
 
-- **Root's login shell is `/bin/bash`**, set by `rootfs/board/roomwizard/post-build.sh` (the Buildroot skeleton gives `/bin/sh`,
+- **Root's login shell is `/bin/bash`**, set by `rootfs/board/arca/post-build.sh` (the Buildroot skeleton gives `/bin/sh`,
   BusyBox ash); the prompt comes from the overlay's `/etc/profile.d/prompt.sh`. Measured on `.188`.
 - **`make-card-image.sh --bundle <release bundle>` installs every component offline**: it runs
   `commissioning/commission-offline.sh --base <tree>` against the new image's p6/p2/p3.
@@ -51,7 +51,7 @@ Everything that builds the **root filesystem we boot instead of the vendor's Yoc
 ## Per-unit state (an image carries none)
 
 **`make-card-image.sh` builds one generic image and refuses SSH key material in the rootfs tar, on p6 or from the bundle.** It also refuses a tar that fails `check-rootfs.sh`, before writing any image (measured: a tar older than the ed25519-only commit gives 48/1, "no ssh_host_rsa_key in the image", and is refused; the rebuilt tar gives 49/0). A unit's own
-state travels only through `commissioning/backup.sh` / `restore.sh`, whose list is `RW_STATE_BACKUP` in `lib/rw-state.sh` and nowhere
+state travels only through `commissioning/backup.sh` / `restore.sh`, whose list is `ARCA_STATE_BACKUP` in `lib/arca-state.sh` and nowhere
 else. The unit names itself on first boot (`S04firstboot-hostname`: `arca-<4 hex>` from the kernel's random pool, applied with
 `/usr/sbin/set-hostname`), and sshd generates its host key then; highscores, host keys (`/home/root/data/ssh`) and cron live on p2, which
 the image creates empty. ⚠️ **`config.c:65` saves by tmp + `rename()`, which replaces a
@@ -60,5 +60,5 @@ symlink instead of writing through it**, so a symlink farm onto p2 does not relo
 
 ## Operator rulings
 
-Buildroot; card-image install only; **nothing from Steelcase on the card, at all** (2026-10-12); p2 and p3 hold only ours; p5 is cleared (ext4, label `rw-spare`, unmounted,
+Buildroot; card-image install only; **nothing from Steelcase on the card, at all** (2026-10-12); p2 and p3 hold only ours; p5 is cleared (ext4, label `arca-spare`, unmounted,
 not in `fstab`); a per-unit SSH identity is wanted; p7 swap stays off.

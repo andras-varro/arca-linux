@@ -47,7 +47,7 @@
 #
 # base/version.o re-embeds the build date on every link, so two releases from an
 # identical tree differ.  The md5 manifest is therefore GENERATED per release by
-# lib/rw-bundle.sh, never asserted against a known-good set.
+# lib/arca-bundle.sh, never asserted against a known-good set.
 #
 # ── gh ──────────────────────────────────────────────────────────────────────
 #
@@ -68,12 +68,12 @@ _START_SECONDS=$(date +%s)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# shellcheck source=lib/rw-bundle.sh
-. "$SCRIPT_DIR/lib/rw-bundle.sh"
-# shellcheck source=lib/rw-release.sh
-# Sourced for rw_release_repo alone — the one owner/repo derivation, shared with
+# shellcheck source=lib/arca-bundle.sh
+. "$SCRIPT_DIR/lib/arca-bundle.sh"
+# shellcheck source=lib/arca-release.sh
+# Sourced for arca_release_repo alone — the one owner/repo derivation, shared with
 # the fetch side so a fork publishes to and fetches from the same place.
-. "$SCRIPT_DIR/lib/rw-release.sh"
+. "$SCRIPT_DIR/lib/arca-release.sh"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 ok()   { echo -e "${GREEN}  ✓ $*${NC}"; }
@@ -82,14 +82,14 @@ warn() { echo -e "${BLUE}  ! $*${NC}"; }
 err()  { echo -e "${RED}  ✗ $*${NC}" >&2; exit 1; }
 
 # ── the components a release carries ────────────────────────────────────────
-# Order matters only in that native_apps writes /opt/roomwizard/default-app and
+# Order matters only in that native_apps writes /opt/arca/default-app and
 # the app_launcher every other component's tile is reached through.
 #
 # usb_host is here as of 2026-08-08. Its --bundle needs
 # usb_host/device_config and usb_host/modules/*.ko, both gitignored build
 # artifacts; on a fresh clone it refuses with the one command that fetches the
 # config from any unit.
-RELEASE_COMPONENTS=(native_apps vnc_client scummvm-roomwizard usb_host bluetooth)
+RELEASE_COMPONENTS=(native_apps vnc_client scummvm-arca usb_host bluetooth)
 
 usage() {
     echo "Usage: $0 --stage-only [--out <dir>] [--component <name>]..."
@@ -150,7 +150,7 @@ fi
 
 echo ""
 echo "════════════════════════════════════════"
-echo " RoomWizard release"
+echo " Arca release"
 echo "════════════════════════════════════════"
 info "Components: ${COMPONENTS[*]}"
 info "Staging to: $OUT"
@@ -201,10 +201,10 @@ if [[ $STAGE_ONLY -eq 0 ]]; then
     # this repository point to a known GitHub host".  Measured, not anticipated —
     # every gh call here therefore needs an explicit --repo.
     #
-    # ⚠️ The derivation itself lives in lib/rw-release.sh and there is ONE of it,
+    # ⚠️ The derivation itself lives in lib/arca-release.sh and there is ONE of it,
     # because the fetch side needs exactly the same answer: a fork must fetch from
     # the fork it published to.  Do not write a second copy here.
-    GH_REPO="$(rw_release_repo "$SCRIPT_DIR" 2>/dev/null || true)"
+    GH_REPO="$(arca_release_repo "$SCRIPT_DIR" 2>/dev/null || true)"
     case "$GH_REPO" in
         */*) ;;
         *)   err "could not derive owner/repo from origin
@@ -232,7 +232,7 @@ fi
 
 # ── stage ───────────────────────────────────────────────────────────────────
 # A whole-directory wipe, because a bundle assembled on top of a previous one can
-# carry a file no manifest names — which rw_bundle_check then reports, but only
+# carry a file no manifest names — which arca_bundle_check then reports, but only
 # after the operator has already been told the release is ready.
 #
 # Guarded rather than trusted: $OUT comes from the command line and this is an
@@ -240,7 +240,7 @@ fi
 # containing `..`, a non-directory, and a non-empty directory that is not a bundle.
 #
 # Normalise before comparing, so that "//" and "/." cannot spell root past a
-# string test — rw_offline_base_ok does exactly this, for exactly this reason,
+# string test — arca_offline_base_ok does exactly this, for exactly this reason,
 # and both spellings pass an un-normalised comparison.
 OUT_NORM="$(printf '%s' "$OUT" | sed -e 's:/\{2,\}:/:g' -e 's:/\.$:/:' -e 's:\(.\)/$:\1:')"
 case "$OUT_NORM" in
@@ -278,7 +278,7 @@ OUT_ABS="$(cd "$OUT" && pwd)"
 # ⚠️ Placement is load-bearing and was wrong once. This must come AFTER every
 # local refusal — --out '/', the non-empty-directory ownership check, the
 # publish preflight — and BEFORE the first build. Put earlier, it preempts
-# those refusals: rw_release_test.sh runs this script in a temp tree with no
+# those refusals: arca_release_test.sh runs this script in a temp tree with no
 # tests/ directory, so `bash …/run-all.sh` returned 127, the gate "failed",
 # and release.sh exited before reaching any --out case. That suite went 40/0
 # to 10/30, its own A0 control reporting every refusal below it as
@@ -329,36 +329,36 @@ echo "────────────────────────�
     echo "tag=${TAG:-untagged}"
     echo "built=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     echo "commit=${GIT_REV}${GIT_DIRTY}"
-    echo "components=$(rw_bundle_components "$OUT_ABS" | tr '\n' ' ')"
+    echo "components=$(arca_bundle_components "$OUT_ABS" | tr '\n' ' ')"
 } > "$OUT_ABS/manifest.d/bundle.info"
 
 # ── the same bytes, installed on the device ─────────────────────────────────
 # Until this existed, no unit could answer "what am I running?": bundle.info lived
 # in manifest.d/, which the installers read and never write, so the tag and commit
 # reached the operator's terminal and nothing else.  Staging it as an ordinary
-# bundle artifact is what puts it on the device — rw_bundle_entries drives BOTH
-# installers (rw_bundle_install_ssh for --from-bundle/--from-release, and
+# bundle artifact is what puts it on the device — arca_bundle_entries drives BOTH
+# installers (arca_bundle_install_ssh for --from-bundle/--from-release, and
 # commission-offline.sh's put() loop), so one manifest line covers every bundle
 # path and gets the file md5-verified on each of them for free.
 #
 # ⚠️ Same file, not a second rendering of the same facts: a stamp that disagreed
 # with the bundle it shipped in would be worse than no stamp at all.
 #
-# ⚠️ $RW_BUNDLE_META_COMPONENT, not one of the four real components. Manifests are
+# ⚠️ $ARCA_BUNDLE_META_COMPONENT, not one of the four real components. Manifests are
 # per-component and this file belongs to none of them; the reserved name is what
-# keeps it out of every "Components:" line — see lib/rw-bundle.sh.
-rw_bundle_init "$OUT_ABS" "$RW_BUNDLE_META_COMPONENT"
-rw_bundle_add  "$OUT_ABS" "$RW_BUNDLE_META_COMPONENT" 0644 \
-    "$OUT_ABS/manifest.d/bundle.info" "$RW_BUNDLE_STAMP" \
+# keeps it out of every "Components:" line — see lib/arca-bundle.sh.
+arca_bundle_init "$OUT_ABS" "$ARCA_BUNDLE_META_COMPONENT"
+arca_bundle_add  "$OUT_ABS" "$ARCA_BUNDLE_META_COMPONENT" 0644 \
+    "$OUT_ABS/manifest.d/bundle.info" "$ARCA_BUNDLE_STAMP" \
     || err "could not stage the provenance stamp"
-rw_bundle_finish "$OUT_ABS" "$RW_BUNDLE_META_COMPONENT" >/dev/null
+arca_bundle_finish "$OUT_ABS" "$ARCA_BUNDLE_META_COMPONENT" >/dev/null
 
 # ── NOTICE: the two licence obligations a published bundle carries ──────────
 cat > "$OUT_ABS/NOTICE" <<'NOTICE'
-RoomWizard app bundle
+Arca app bundle
 =====================
 
-This bundle contains statically linked ARM binaries for the Steelcase RoomWizard
+This bundle contains statically linked ARM binaries for Arca
 (TI OMAP3503, Cortex-A8, kernel 4.14.52).  It contains NO vendor firmware and NO
 device configuration.
 
@@ -369,13 +369,13 @@ General Public License, version 3 or later.  (Measured, not assumed: the upstrea
 tree's COPYING is GPLv3 and its source headers read "either version 3 of the
 License, or (at your option) any later version".)  The complete corresponding
 source for this binary is the upstream ScummVM tree plus this project's backend
-port in `scummvm-roomwizard/backend-files/`; both are available from the
+port in `scummvm-arca/backend-files/`; both are available from the
 repository this release was published from.  Written offers for the source are
 honoured for the lifetime of the release.
 
 Three data files travel with it and are ALSO GPLv3+, not this project's own:
 `scummremastered.zip` and `gui-icons.dat` are staged verbatim out of the ScummVM
-tree, and `vkeybd_roomwizard.zip` is a 2x scaled derivative of ScummVM's
+tree, and `vkeybd_arca.zip` is a 2x scaled derivative of ScummVM's
 `vkeybd_small.zip`.  Same corresponding-source offer.
 
 vnc_client
@@ -483,13 +483,13 @@ No device configuration is published, deliberately: /etc/hosts carries a
 host-name mapping that exists in order to be removed, and vnc_client.conf carries
 a plaintext VNC password.  Create the latter on the device after installing.
 
-No Steelcase firmware is published either.  In particular this bundle does NOT
+No vendor firmware is published either.  In particular this bundle does NOT
 contain `uImage-system` or any other file from the boot partition.
 NOTICE
 
 # ── structural + policy checks on what was staged ───────────────────────────
 info "Checking bundle structure..."
-if ! CHECK_OUT="$(rw_bundle_check "$OUT_ABS")"; then
+if ! CHECK_OUT="$(arca_bundle_check "$OUT_ABS")"; then
     echo "$CHECK_OUT"
     err "bundle is not self-consistent"
 fi
@@ -499,7 +499,7 @@ ok "Every manifest entry is staged, and every staged file is in a manifest"
 # --bundle already declines to stage its config; this is the negative control
 # that would catch a future component that forgot.
 info "Checking that no device config was staged..."
-CONFIG_HITS="$(rw_bundle_entries "$OUT_ABS" | awk '{print $2}' | grep -E '\.conf$|/etc/hosts$|/etc/hostname$|rw_config|touch_calibration|input_config' || true)"
+CONFIG_HITS="$(arca_bundle_entries "$OUT_ABS" | awk '{print $2}' | grep -E '\.conf$|/etc/hosts$|/etc/hostname$|arca_config|touch_calibration|input_config' || true)"
 if [[ -n "$CONFIG_HITS" ]]; then
     echo "$CONFIG_HITS" | sed 's/^/    /'
     err "a release must publish binaries only, never device config"
@@ -513,10 +513,10 @@ ok "No config files staged"
 # here.
 #
 # Matched on the BASENAME, not on a path: p1 is not a bundle path at all, so a
-# staged copy would arrive at some invented location like /opt/roomwizard/ — the
+# staged copy would arrive at some invented location like /opt/arca/ — the
 # hazard is the bytes, wherever they are put.
 info "Checking that no vendor firmware was staged..."
-FIRMWARE_HITS="$(rw_bundle_entries "$OUT_ABS" | awk '{print $2}' \
+FIRMWARE_HITS="$(arca_bundle_entries "$OUT_ABS" | awk '{print $2}' \
     | grep -E '(^|/)(uImage[^/]*|mlo|MLO|u-boot[^/]*|ctrlblock[^/]*)$' || true)"
 if [[ -n "$FIRMWARE_HITS" ]]; then
     echo "$FIRMWARE_HITS" | sed 's/^/    /'
@@ -525,18 +525,18 @@ if [[ -n "$FIRMWARE_HITS" ]]; then
 fi
 ok "No vendor firmware staged"
 
-FILE_COUNT="$(rw_bundle_entries "$OUT_ABS" | grep -c . || true)"
+FILE_COUNT="$(arca_bundle_entries "$OUT_ABS" | grep -c . || true)"
 info "$FILE_COUNT file(s) staged:"
-rw_bundle_components "$OUT_ABS" | while read -r c; do
+arca_bundle_components "$OUT_ABS" | while read -r c; do
     printf '    %-22s %s file(s)\n' "$c" "$(grep -c . "$OUT_ABS/manifest.d/$c.list")"
 done
 
 # ── tar ─────────────────────────────────────────────────────────────────────
 # --owner/--group/--numeric-owner so the archive does not carry whoever built it,
 # and so two builds differ only in the artifacts.  Modes inside the tar are NOT
-# the authority — manifest.d/*.list is (see lib/rw-bundle.sh); on /mnt/c every file
+# the authority — manifest.d/*.list is (see lib/arca-bundle.sh); on /mnt/c every file
 # reads 0777 and the tar would say so.
-TARBALL="$SCRIPT_DIR/build/roomwizard-apps-${TAG:-$(date -u '+%Y%m%d')}.tar.gz"
+TARBALL="$SCRIPT_DIR/build/arca-apps-${TAG:-$(date -u '+%Y%m%d')}.tar.gz"
 mkdir -p "$(dirname "$TARBALL")"
 info "Creating $TARBALL"
 tar -czf "$TARBALL" \
@@ -583,7 +583,7 @@ else
     if [[ -z "$NOTES_FILE" ]]; then
         NOTES_FILE="$(mktemp)"
         {
-            echo "Statically linked ARM binaries for the Steelcase RoomWizard."
+            echo "Statically linked ARM binaries for Arca."
             echo ""
             echo "Install offline, with no toolchain:"
             echo ""
@@ -592,7 +592,7 @@ else
             echo '```'
             echo ""
             echo "Built from ${GIT_REV}${GIT_DIRTY}. Components:"
-            rw_bundle_components "$OUT_ABS" | sed 's/^/- /'
+            arca_bundle_components "$OUT_ABS" | sed 's/^/- /'
             echo ""
             echo "See NOTICE inside the tarball for licence obligations (ScummVM is GPLv3+)."
         } > "$NOTES_FILE"
@@ -605,7 +605,7 @@ else
     gh release create "$TAG" "$TARBALL" \
         --repo "$GH_REPO" \
         --target "$GIT_REV_FULL" \
-        --title "RoomWizard apps $TAG" \
+        --title "Arca apps $TAG" \
         --notes-file "$NOTES_FILE" \
         || err "gh release create failed — the tarball is still at $TARBALL"
     ok "Published $TAG"

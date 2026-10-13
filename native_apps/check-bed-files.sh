@@ -11,14 +11,14 @@
 # plays its effects with no music: exactly what a game with no bed at all sounds
 # like.  Nothing else in the tree can see the difference.
 #
-# The paths live in ONE home — sound-sets.sh's RW_SOUND_SETS —
+# The paths live in ONE home — sound-sets.sh's ARCA_SOUND_SETS —
 # and the C side derives nothing, so this gate no longer reads a convention out
 # of a call site.  It reads the table, and checks FIVE things:
 #
 #   1. every path the table names exists in music/            FAIL
 #   2. every audio_bed_init() tag has a table row             FAIL  (silent no-music)
 #   3. a row's track count fits AUDIO_BED_MAX_TRACKS          FAIL  (silently ignored)
-#   4. CONFIG_SOUND_SET_DIR/_EXT agree with RW_SOUND_SET_DIR/_EXT   FAIL
+#   4. CONFIG_SOUND_SET_DIR/_EXT agree with ARCA_SOUND_SET_DIR/_EXT   FAIL
 #   5. every committed bed reaches some row                   WARN
 #      every table row reaches some game                      WARN
 #
@@ -34,7 +34,7 @@
 #
 # ⚠️ WHAT THIS CANNOT SEE: whether the DEVICE has the files.  It reads the repo's
 # music/ directory and the generator's table, which is what build-and-deploy.sh
-# uploads; a device whose /opt/sound or /opt/roomwizard/soundsets was hand-managed
+# uploads; a device whose /opt/sound or /opt/arca/soundsets was hand-managed
 # can still be missing one.  It also cannot see whether a bed SOUNDS right, and it
 # is a TEXT match, so a commented-out audio_bed_init() counts as a game — which is
 # how its own negative control is built (a throwaway .c under the tree naming a tag
@@ -59,8 +59,8 @@ c_ext="$(sed -nE 's/^#define[[:space:]]+CONFIG_SOUND_SET_EXT[[:space:]]+"([^"]*)
 if [ -z "$c_dir" ] || [ -z "$c_ext" ]; then
     echo -e "${RED}  ✗ could not read CONFIG_SOUND_SET_DIR/_EXT from common/config.h${NC}"
     n_fail=$((n_fail + 1))
-elif [ "$c_dir" != "$RW_SOUND_SET_DIR" ] || [ "$c_ext" != "$RW_SOUND_SET_EXT" ]; then
-    echo -e "${RED}  ✗ install path disagrees: C says $c_dir/<tag>$c_ext, sound-sets.sh says $RW_SOUND_SET_DIR/<tag>$RW_SOUND_SET_EXT${NC}"
+elif [ "$c_dir" != "$ARCA_SOUND_SET_DIR" ] || [ "$c_ext" != "$ARCA_SOUND_SET_EXT" ]; then
+    echo -e "${RED}  ✗ install path disagrees: C says $c_dir/<tag>$c_ext, sound-sets.sh says $ARCA_SOUND_SET_DIR/<tag>$ARCA_SOUND_SET_EXT${NC}"
     n_fail=$((n_fail + 1))
 fi
 
@@ -71,7 +71,7 @@ max_tracks="$(sed -nE 's/^#define[[:space:]]+AUDIO_BED_MAX_TRACKS[[:space:]]+([0
 # ── the game side: one tag per audio_bed_init() call ────────────────────────
 tags_c="$(grep -rhoE 'audio_bed_init\(&bed, &audio, "[^"]+"' --include='*.c' . 2>/dev/null \
           | sed -E 's/.*"([^"]+)"$/\1/' | sort -u || true)"
-tags_tbl="$(rw_sound_set_tags | sort -u)"
+tags_tbl="$(arca_sound_set_tags | sort -u)"
 
 if [ -z "$tags_c" ]; then
     echo "BED-SUMMARY games=0 want=0 missing=0 orphan=0 rows=$(printf '%s\n' "$tags_tbl" | grep -c . )"
@@ -89,15 +89,15 @@ while IFS='|' read -r tag name stem count; do
         n_fail=$((n_fail + 1))
     fi
     miss=""
-    for p in $(rw_sound_set_paths "$tag"); do
+    for p in $(arca_sound_set_paths "$tag"); do
         b="$(basename "$p")"
         n_want=$((n_want + 1))
         if [ -f "$MUSIC_DIR/$b" ]; then claimed="$claimed $b"
         else miss="$miss $b"; n_missing=$((n_missing + 1)); fi
     done
-    printf "  %-16s %d track(s) as %s<n>%s%s\n" "$tag" "$count" "$stem" "$RW_SOUND_BED_SUFFIX" \
+    printf "  %-16s %d track(s) as %s<n>%s%s\n" "$tag" "$count" "$stem" "$ARCA_SOUND_BED_SUFFIX" \
         "$([ -n "$miss" ] && echo "  MISSING:$miss")"
-done <<< "$(printf '%s\n' "$RW_SOUND_SETS")"
+done <<< "$(printf '%s\n' "$ARCA_SOUND_SETS")"
 
 # ── 2 + 5: the two directions between games and rows ────────────────────────
 no_row=""

@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# commissioning/set-hostname.sh — set a RoomWizard's host name, in /etc/hostname and /etc/hosts
+# commissioning/set-hostname.sh — set an Arca's host name, in /etc/hostname and /etc/hosts
 #
 # ONE implementation, called from two places with different connection models:
 #

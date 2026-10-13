@@ -27,7 +27,7 @@ set -u
 # pair lives.  Resolved before the cd, because the cd is what makes -I. mean
 # native_apps.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd /mnt/c/work/roomwizard/native_apps || exit 1
+cd /mnt/c/work/arca/native_apps || exit 1
 
 CFLAGS=(-Wall -Wextra -Wno-unused-parameter)
 SRCS=(common/framebuffer.c common/touch_input.c common/hardware.c common/common.c

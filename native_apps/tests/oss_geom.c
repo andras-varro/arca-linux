@@ -137,7 +137,7 @@ int main(void) {
      * reason for whatever the line above grants. */
     probe("native_apps rate, CHANNELS ioctl", 44100, 2, REQ_CHANNELS_IOCTL);
 
-    /* Exactly what scummvm-roomwizard/backend-files/oss-mixer.cpp asks for today. */
+    /* Exactly what scummvm-arca/backend-files/oss-mixer.cpp asks for today. */
     probe("ScummVM as shipped", 22050, 1, REQ_CHANNELS_IOCTL);
 
     /* If the shared library standardised on stereo, this is what ScummVM would run: same rate,

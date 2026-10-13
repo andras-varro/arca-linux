@@ -1,8 +1,8 @@
 /**
- * Logger for RoomWizard native apps
+ * Logger for Arca native apps
  *
  * Lightweight file logger with automatic rotation.  Output goes to a
- * per-application log file under /var/log/roomwizard/ and optionally
+ * per-application log file under /var/log/arca/ and optionally
  * also to stderr (for interactive debugging).
  *
  * Log levels:  DEBUG < INFO < WARN < ERROR
@@ -14,7 +14,7 @@
  * Rotation: when the log file exceeds LOG_MAX_SIZE bytes the current
  * file is renamed to <name>.log.1 (overwriting any previous backup)
  * and a fresh file is started.  This keeps disk usage bounded on the
- * small RoomWizard eMMC.
+ * small Arca eMMC.
  *
  * Typical use:
  *   Logger logger;
@@ -44,7 +44,7 @@ typedef enum {
 
 /* ── Logger state ───────────────────────────────────────────────────── */
 
-#define LOG_DIR         "/var/log/roomwizard"
+#define LOG_DIR         "/var/log/arca"
 #define LOG_MAX_SIZE    (256 * 1024)   /* 256 KB per log file              */
 #define LOG_APP_NAME_MAX 32
 #define LOG_PATH_MAX     128
@@ -52,7 +52,7 @@ typedef enum {
 typedef struct {
     FILE      *fp;                          /* Log file handle (NULL = stderr only) */
     char       app_name[LOG_APP_NAME_MAX];  /* e.g. "vnc_client"                    */
-    char       path[LOG_PATH_MAX];          /* e.g. "/var/log/roomwizard/vnc_client.log" */
+    char       path[LOG_PATH_MAX];          /* e.g. "/var/log/arca/vnc_client.log" */
     LogLevel   min_level;                   /* Messages below this are suppressed   */
     bool       echo_stderr;                 /* Also print to stderr?                */
     long       bytes_written;               /* Bytes since last rotation check      */

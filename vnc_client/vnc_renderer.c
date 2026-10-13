@@ -1,7 +1,7 @@
 /*
  * VNC Renderer - Phase 2 Optimized + Bilinear Interpolation
  *
- * Renders VNC framebuffer updates to the RoomWizard's visible display area.
+ * Renders VNC framebuffer updates to the Arca's visible display area.
  * All hot-path rendering uses direct uint16_t writes to the back buffer
  * in RGB565 format — no fb_draw_pixel() calls, no per-pixel bounds checks.
  *
@@ -367,16 +367,16 @@ void vnc_renderer_update_region(VNCRenderer *renderer, const uint8_t *remote_fb,
     if (!renderer || !renderer->fb || !remote_fb) return;
     if (!renderer->borders_cleared) return;     /* not yet configured */
 
-    const int rw_total = renderer->remote_width;
+    const int arca_total = renderer->remote_width;
     const int rh_total = renderer->remote_height;
 
     /* Map remote dirty rect → screen coordinates (integer math) */
     int sx1 = renderer->offset_x +
-              (rx * renderer->scaled_width) / rw_total;
+              (rx * renderer->scaled_width) / arca_total;
     int sy1 = renderer->offset_y +
               (ry * renderer->scaled_height) / rh_total;
     int sx2 = renderer->offset_x +
-              ((rx + rw) * renderer->scaled_width + rw_total - 1) / rw_total;
+              ((rx + rw) * renderer->scaled_width + arca_total - 1) / arca_total;
     int sy2 = renderer->offset_y +
               ((ry + rh) * renderer->scaled_height + rh_total - 1) / rh_total;
 
@@ -436,9 +436,9 @@ void vnc_renderer_update_region(VNCRenderer *renderer, const uint8_t *remote_fb,
                  * before converting to RGB565.
                  */
                 const uint32_t *row0 =
-                    (const uint32_t *)(remote_fb + (size_t)src_y0 * rw_total * 4);
+                    (const uint32_t *)(remote_fb + (size_t)src_y0 * arca_total * 4);
                 const uint32_t *row1 =
-                    (const uint32_t *)(remote_fb + (size_t)src_y1 * rw_total * 4);
+                    (const uint32_t *)(remote_fb + (size_t)src_y1 * arca_total * 4);
                 uint16_t *tmp = renderer->temp_row + row_start;
 
                 for (int dx = sx1; dx < sx2; dx++) {
@@ -463,9 +463,9 @@ void vnc_renderer_update_region(VNCRenderer *renderer, const uint8_t *remote_fb,
             } else if (bytes_per_pixel == 3) {
                 /* 24bpp BGR → bilinear → RGB565 */
                 const uint8_t *base0 =
-                    remote_fb + (size_t)src_y0 * rw_total * 3;
+                    remote_fb + (size_t)src_y0 * arca_total * 3;
                 const uint8_t *base1 =
-                    remote_fb + (size_t)src_y1 * rw_total * 3;
+                    remote_fb + (size_t)src_y1 * arca_total * 3;
                 uint16_t *tmp = renderer->temp_row + row_start;
 
                 for (int dx = sx1; dx < sx2; dx++) {

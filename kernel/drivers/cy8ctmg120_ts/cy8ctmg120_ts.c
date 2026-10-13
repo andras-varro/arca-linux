@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Touch driver for the Cypress CY8CTMG120 on the RoomWizard, bound to the
+ * Touch driver for the Cypress CY8CTMG120 on the Arca, bound to the
  * vendor DT node `tsc_panjit@03` (compatible "panjit_ts") that our image
  * keeps unchanged.
  *
@@ -569,5 +569,5 @@ static struct i2c_driver cy8_driver = {
 };
 module_i2c_driver(cy8_driver);
 
-MODULE_DESCRIPTION("CY8CTMG120 touchscreen on the RoomWizard");
+MODULE_DESCRIPTION("CY8CTMG120 touchscreen on the Arca");
 MODULE_LICENSE("GPL v2");

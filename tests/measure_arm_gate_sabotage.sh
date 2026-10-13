@@ -3,7 +3,7 @@
 # deliberately broken copies of the gate, and print the counts its header claims.
 #
 # There is no CI, so a suite that has only ever been seen passing is not evidence
-# that it can fail. This drives the REAL suite (via RW_GATE) against each sabotage;
+# that it can fail. This drives the REAL suite (via ARCA_GATE) against each sabotage;
 # it never restates an assertion, because a harness that re-implements what it
 # checks can repair the very defect it was written to catch.
 #
@@ -25,7 +25,7 @@ PREFIX_REV="f958534"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
-WORK="$(mktemp -d /tmp/rw-armsab.XXXXXX)"
+WORK="$(mktemp -d /tmp/arca-armsab.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 
 fail=0
@@ -53,7 +53,7 @@ measure() {
     chmod +x "$copy"
 
     local out rc got
-    out="$(RW_GATE="$copy" bash "$SUITE" 2>&1)"; rc=$?
+    out="$(ARCA_GATE="$copy" bash "$SUITE" 2>&1)"; rc=$?
     got="$(grep -oE '[0-9]+ failed' <<<"$out" | tail -1 | grep -oE '[0-9]+')"
     got="${got:-0}"
 

@@ -107,7 +107,7 @@ void audio_bed_service(AudioBed *bed, bool want_play, bool want_hold)
         }
         /* A missing file, a rate mismatch or a bus that never came up are all
          * permanent for THIS TRACK, and retrying per frame would fill
-         * /var/log/roomwizard/app_stdout.log with one refusal per 33 ms.
+         * /var/log/arca/app_stdout.log with one refusal per 33 ms.
          * ⚠️ Per track rather than per process, so one bad path in the config
          * does not silence the tracks that are fine — and the MUSIC toggle being
          * off is reported as itself rather than as a missing file. */

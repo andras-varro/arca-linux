@@ -1,6 +1,6 @@
-# RoomWizard Project
+# Arca Project
 
-> **Development projects for the Steelcase RoomWizard embedded Linux device**
+> **Arca Linux and apps for the Steelcase RoomWizard embedded Linux device**
 
 ## Documentation map
 
@@ -15,7 +15,7 @@
 
 Each component directory also has a `CLAUDE.md` (authoring guidance for that component) and a
 `README.md` (what it is and how to use it):
-[native_apps](native_apps/CLAUDE.md) · [scummvm-roomwizard](scummvm-roomwizard/CLAUDE.md) ·
+[native_apps](native_apps/CLAUDE.md) · [scummvm-arca](scummvm-arca/CLAUDE.md) ·
 [vnc_client](vnc_client/CLAUDE.md).
 
 **The rule:** component docs describe their own code only. Device facts belong in
@@ -30,7 +30,7 @@ All code is cross-compiled on the dev host and deployed over SSH — there is no
 ### Projects
 - **[Native Apps](native_apps/)** — High-performance C apps with direct framebuffer rendering
 - **[Browser Games](browser_games/)** — HTML5 games with LED control
-- **[ScummVM Backend](scummvm-roomwizard/)** — Classic adventure games port
+- **[ScummVM Backend](scummvm-arca/)** — Classic adventure games port
 - **[VNC Client](vnc_client/)** — Remote desktop viewer for Raspberry Pi displays
 
 ---
@@ -42,14 +42,14 @@ All code is cross-compiled on the dev host and deployed over SSH — there is no
 > one-line pointer stubs (`git lfs pull` fixes an existing clone). Nothing in the
 > build or deploy path depends on them — they are documentation only.
 
-### Start here — `./roomwizard.sh`
+### Start here — `./arca.sh`
 
 One menu over every path below. A card image written once produces a working unit at next
 boot. It has **no logic of its own**: each item execs one of the scripts documented further down, and
 every one of those stays non-interactive when called directly.
 
 ```bash
-./roomwizard.sh
+./arca.sh
 ```
 
 ```
@@ -166,8 +166,8 @@ secrets. `provision.sh` runs it first. After a reflash, `./commissioning/restore
 ## Architecture
 
 ```
-roomwizard/
-├── roomwizard.sh                # Front door: a menu over everything below
+arca-linux/
+├── arca.sh                      # Front door: a menu over everything below
 ├── deploy-all.sh                # Build + deploy all components
 ├── release.sh                   # Build + stage a bundle; --tag also publishes it
 ├── rootfs/                      # Our own root filesystem: Buildroot tree, make-card-image.sh (whole-card image)
@@ -178,13 +178,13 @@ roomwizard/
 │   ├── backup.sh, restore.sh    # A unit's per-unit state to/from a host tarball (read-only / stop-extract-start)
 │   └── clone-to-32gb.sh         # Clone a card onto a larger one
 ├── lib/                         # Sourced, never executed
-│   ├── rw-identify.sh           # Is this our root; which partition, by content/position (root, data, log)
-│   ├── rw-provision.sh          # provision-rules.conf -> a plan
-│   ├── rw-ssh.sh                # The one "can I reach this device" gate
-│   ├── rw-release.sh            # Resolve + fetch + verify a published release
-│   └── rw-bundle.sh             # The release-bundle layout, both directions
+│   ├── arca-identify.sh         # Is this our root; which partition, by content/position (root, data, log)
+│   ├── arca-provision.sh        # provision-rules.conf -> a plan
+│   ├── arca-ssh.sh              # The one "can I reach this device" gate
+│   ├── arca-release.sh          # Resolve + fetch + verify a published release
+│   └── arca-bundle.sh           # The release-bundle layout, both directions
 ├── device-files/                # Installed onto the device verbatim
-│   ├── roomwizard-app           # App respawn loop; rwmond = init for the history daemon
+│   ├── arca-app                 # App respawn loop; arcamond = init for the history daemon
 │   ├── enable-usb-host.sh       # The /dev/mem MUSB host-mode patch; usb-host runs it (S90)
 │   ├── xpad-modules             # insmod -f the three controller modules (S89)
 │   └── provision-rules.conf     # What the device ends up with
@@ -193,7 +193,7 @@ roomwizard/
 ├── SYSTEM_ANALYSIS.md           # Hardware analysis
 ├── native_apps/                 # C apps (games, launcher, tools)
 ├── browser_games/               # HTML5 games + LED control
-├── scummvm-roomwizard/          # ScummVM backend
+├── scummvm-arca/                # ScummVM backend
 ├── usb_host/                    # USB host mode + Xbox controller modules
 ├── bluetooth/                   # BlueZ + btmon, BT modules (incl. rfcomm), RTL8761CU firmware, boot start; BlueALSA (a2dp-source, hfp-ag)
 ├── uboot/                       # Our own mainline U-Boot v2026.10 board port (rw20-board.patch), build.sh and BUILD.md; host build only
@@ -204,16 +204,16 @@ roomwizard/
 
 | Layer | Script | Runs |
 |-------|--------|------|
-| **Front door** | `roomwizard.sh` | Whenever you'd rather not remember the flags (composition only) |
+| **Front door** | `arca.sh` | Whenever you'd rather not remember the flags (composition only) |
 | **Card image** | `rootfs/make-card-image.sh` | Once per card (offline, WSL root); `--bundle` runs `commissioning/commission-offline.sh` over it |
 | **Update a unit** | `commissioning/provision.sh` | Per update (SSH; backs up first, reboots) |
 | **Deploy all** | `deploy-all.sh` | After setup (builds + deploys everything) |
 | **Build + stage + publish** | `release.sh` | Per release |
-| **App launcher** | `device-files/roomwizard-app` | Every boot (respawn loop, reads `/opt/roomwizard/default-app`) |
+| **App launcher** | `device-files/arca-app` | Every boot (respawn loop, reads `/opt/arca/default-app`) |
 | **Project deploy** | `*/build-and-deploy.sh` | Per project (build + deploy + app manifests) |
 
 Each project's `build-and-deploy.sh` handles building, deploying binaries, and installing
-`.app` manifests to `/opt/roomwizard/apps/` for the visual launcher.
+`.app` manifests to `/opt/arca/apps/` for the visual launcher.
 System setup is done once by `commissioning/provision.sh` — no duplication across projects.
 
 ## Projects

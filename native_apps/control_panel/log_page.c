@@ -50,7 +50,7 @@
 enum { TAB_SYSLOG, TAB_RESPAWN, TAB_KERNEL, TAB_N };
 static const struct { const char *label; const char *path; } tabs[TAB_N] = {
     { "SYSLOG",  "/home/root/log/messages" },
-    { "RESPAWN", "/var/log/roomwizard/respawn.log" },
+    { "RESPAWN", "/var/log/arca/respawn.log" },
     { "KERNEL",  NULL },                            /* klogctl */
 };
 

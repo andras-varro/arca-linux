@@ -1,5 +1,5 @@
 /**
- * PPM Image Loader for RoomWizard
+ * PPM Image Loader for Arca
  *
  * Loads P6 (binary) PPM files and converts to ARGB pixel arrays
  * suitable for direct framebuffer blitting.  Includes nearest-neighbor

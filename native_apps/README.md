@@ -1,4 +1,4 @@
-# Native Apps for RoomWizard
+# Native Apps for Arca
 
 Native C apps and tools for the Steelcase RoomWizard (600MHz ARMv7, 800×480 framebuffer). Direct framebuffer rendering — no browser, no overhead.
 
@@ -28,7 +28,7 @@ See [CLAUDE.md](CLAUDE.md) for how to write code here, and [../IMPROVEMENT_PLAN.
 | `samegame` | Game | Touch / mouse cursor + keyboard navigation |
 | `platformer` | Game | Touch / keys / gamepad — reference input implementation; pause menu toggles TRAINING (10 lives, +1 per 50 coins) |
 | `app_launcher` | Launcher | Visual grid launcher — keyboard/mouse/gamepad nav, auto-starts on boot |
-| `control_panel` | Tool | **Unified hardware app** — the one you want; `control_panel <page>` opens one page directly (over SSH: `/etc/init.d/roomwizard-app stop`, then `/opt/games/control_panel /dev/fb0 /dev/input/event0 system`, then `start`; pages `audio display led usb bluetooth input network monitor system information`, case-insensitive; `--list-pages` prints them). Home icon grid; tabs: Settings, Tests, Display; pages: LED, Monitor, Network, Information, USB, System (SSH mode read-only, clock, date/time editor) |
+| `control_panel` | Tool | **Unified hardware app** — the one you want; `control_panel <page>` opens one page directly (over SSH: `/etc/init.d/arca-app stop`, then `/opt/games/control_panel /dev/fb0 /dev/input/event0 system`, then `start`; pages `audio display led usb bluetooth input network monitor system information`, case-insensitive; `--list-pages` prints them). Home icon grid; tabs: Settings, Tests, Display; pages: LED, Monitor, Network, Information, USB, System (SSH mode read-only, clock, date/time editor) |
 | `theremin` | Toy | "Tap-a-Theremin" — touch-controlled tone generator |
 | `touch_raw` | Tool | Digitizer reach: no calibration, no bezel — live crosshair + interior-only fit (hidden) |
 
@@ -37,7 +37,7 @@ USB testing lives in the `control_panel` Input page. The system `/usr/sbin/watch
 hardware watchdog.
 
 `touch_raw` needs the framebuffer at 32 bpp and asserts that itself — run `fbset -depth 32` first if ScummVM or
-`vnc_client` left it at 16. Stop the launcher before running it (`/etc/init.d/roomwizard-app stop`), and start it
+`vnc_client` left it at 16. Stop the launcher before running it (`/etc/init.d/arca-app stop`), and start it
 again afterwards. The calibrated finger trail lives in `control_panel` Input -> MULTI-TOUCH (drawn for the primary contact only;
 80 px grid, trail, RAW/CAL/LIN readouts; also logs to `/tmp/touch_trace.log`).
 
@@ -211,7 +211,7 @@ cd native_apps
 
 The `app_launcher` provides a visual grid interface for launching apps:
 
-- Scans `/opt/roomwizard/apps/*.app` manifest files
+- Scans `/opt/arca/apps/*.app` manifest files
 - Displays apps as coloured icon tiles in a 3×2 grid
 - Supports PPM icons or auto-generated letter tiles
 - Touch tile to launch, edge touch for pagination
@@ -221,12 +221,12 @@ The `app_launcher` provides a visual grid interface for launching apps:
 
 ## App Manifests
 
-Each app is registered via a `.app` manifest in `/opt/roomwizard/apps/`:
+Each app is registered via a `.app` manifest in `/opt/arca/apps/`:
 
 ```ini
 name=Snake
 exec=/opt/games/snake
-icon=/opt/roomwizard/icons/snake.ppm
+icon=/opt/arca/icons/snake.ppm
 args=fb,touch
 ```
 
@@ -250,13 +250,13 @@ and will fail to link.
 ./build-and-deploy.sh 192.168.50.73 set-default
 ```
 
-This writes `/opt/roomwizard/default-app`; the init service respawns whatever it points at.
+This writes `/opt/arca/default-app`; the init service respawns whatever it points at.
 Installing the service itself is done once by `../commissioning/provision.sh`.
 
-Or manually: `ssh root@<ip> '/etc/init.d/roomwizard-app start|stop|status'`
+Or manually: `ssh root@<ip> '/etc/init.d/arca-app start|stop|status'`
 
 ## Resources
 
 - **Device / SSH setup:** [COMMISSIONING.md](../COMMISSIONING.md)
 - **Hardware specs:** [SYSTEM_ANALYSIS.md](../SYSTEM_ANALYSIS.md)
-- **ScummVM backend:** [scummvm-roomwizard/SCUMMVM_DEV.md](../scummvm-roomwizard/SCUMMVM_DEV.md)
+- **ScummVM backend:** [scummvm-arca/SCUMMVM_DEV.md](../scummvm-arca/SCUMMVM_DEV.md)

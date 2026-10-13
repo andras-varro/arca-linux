@@ -42,7 +42,7 @@ and none is that one, so the test is vacuously true here. **Understating coverag
 absorbing a skip**, and the control for that direction is a stub that passes while saying the word.
 
 ⚠️ **A phase-2 control needs a whole miniature `native_apps/` tree, and three things make that fixture
-lie.** `phase_ctests` takes the tree it compiles in from the parent of `RW_CTEST_DIR`, so the override
+lie.** `phase_ctests` takes the tree it compiles in from the parent of `ARCA_CTEST_DIR`, so the override
 redirects the build and not merely the subject scan — otherwise a control points at a fixture and grades
 the real sources. A stub C source must be written with a quoted heredoc, because `bash` `printf` turns
 the `\n` inside a C string literal into a real newline that will not compile. And every stub needs
@@ -60,7 +60,7 @@ control passes having exercised no path. Use positional parameters, whose expans
 
 ⚠️ **Where a gate call is INSERTED is load-bearing, and a suite is what catches it wrong.** Put the call
 ahead of a script's cheap local refusals and it preempts them: in `release.sh` it briefly sat before the
-`--out` checks, `rw_release_test.sh` runs that script in a temp tree with no `tests/` directory, `bash`
+`--out` checks, `arca_release_test.sh` runs that script in a temp tree with no `tests/` directory, `bash`
 returned 127, and the suite fell from all-green to 30 failures with its own A0 control declaring every
 refusal beneath it unfalsifiable. **The call belongs after every local refusal and immediately before the
 first build.** That suite's group D holds it there: it stubs the gate, dials the verdict in per case, and
@@ -152,7 +152,7 @@ a **failure**, which matters because phase 5 split `HARDWARE.md` out of `SYSTEM_
 trailing newline (`Edit`, `cat`, `head -N` splices and heredoc rewrites all drop it, and the next append
 then lands *on* the last line rather than after it), and a column-0 paragraph directly after an **indented**
 bullet, which CommonMark folds into that bullet. E1 found one live violation on its first run
-(`scummvm-roomwizard/SCUMMVM_DEV.md`, 2026-08-19), which is its positive control on the real tree; E2's is
+(`scummvm-arca/SCUMMVM_DEV.md`, 2026-08-19), which is its positive control on the real tree; E2's is
 in the fixture. ⚠️ Its blind spots all under-count, deliberately: a paragraph opening `*Note:*` reads as a
 list marker, a column-0 `|` table row is not flagged, and the column-0-bullet case is out of scope because
 it does not read as correct. `scummvm-icons/` is pruned from the walk for this group's sake — a vendored
@@ -268,15 +268,15 @@ meant to catch**.
 
 ## The holes each suite has, named
 
-- ⚠️ **`rw_provision_test.sh` group E cannot see the copy step and never could.** It compares two
-  *plans* through `rw_provision_canonical`; a dry run copies nothing, and the offline executor has no
+- ⚠️ **`arca_provision_test.sh` group E cannot see the copy step and never could.** It compares two
+  *plans* through `arca_provision_canonical`; a dry run copies nothing, and the offline executor has no
   `scp` to be compared against — which is how a one-of-eight install defect shipped past 94 green
   cases. **Group F is that hole**, and it asserts **8 of 8**, never "more than one", because the defect
   produced exactly one.
-- **`rw_ssh_test.sh` starts a real `sshd`** on a loopback high port with an empty `AuthorizedKeysFile`
+- **`arca_ssh_test.sh` starts a real `sshd`** on a loopback high port with an empty `AuthorizedKeysFile`
   — which needs no root — because a genuine `Permission denied` cannot be produced by a stub without
   writing the string the code is supposed to recognise.
-- **`rw_provision_test.sh`'s fixtures are synthetic with real symlinks**, for the reason above.
+- **`arca_provision_test.sh`'s fixtures are synthetic with real symlinks**, for the reason above.
 - **`commission_offline_test.sh`** needs root and a staged bundle; every check it makes has a sabotage
   case, and its fixture builder is `tests/make-fake-card.sh`.
 - ⚠️ **`setup_build_env_test.sh` drives the probe loop over FIXTURE tables, never the real package set.**
@@ -289,7 +289,7 @@ meant to catch**.
   (`cat /dev/fb0` is the gfx plane only), or a wrong-but-colourful screen.** Its `ssh` stub models fb contents and
   must slurp stdin, or the check that the runner passes `ssh -n` is vacuous. The runner itself needs a
   device to run.
-- ⚠️ **`rw_release_test.sh` can assert every refusal and only a STUBBED acceptance.** `release.sh` has no
+- ⚠️ **`arca_release_test.sh` can assert every refusal and only a STUBBED acceptance.** `release.sh` has no
   `--no-build` flag, so the two `--out` values that must be *accepted* — an empty directory and a re-stage
   over a real bundle — fall straight through into a four-component ARM cross-build. The suite therefore
   runs the shipped script in a temp tree against a stub component script, and cannot see whether the real
@@ -321,7 +321,7 @@ print the counts their headers claim. Rules learned the hard way:
   control is vacuous if a `set -u` suite dies on an unbound variable instead of failing assertions.
 - ⚠️ **Stage only the files the suite sources — never `cp -a lib usb_host`.** A `cp -a` of a directory
   from `/mnt/c` into WSL `/tmp` can blow a 300 s budget and looks like a hung suite. And stage the
-  sabotaged library **inside `lib/`**, because `rw_provision_validate` derives the repo root from its
+  sabotaged library **inside `lib/`**, because `arca_provision_validate` derives the repo root from its
   own `BASH_SOURCE/..`, so a copy under `/tmp` fails the baseline for a reason no sabotage produces.
 - ⚠️ **An assertion can PASS by reading past what it claims to measure, and only a sabotage sweep finds
   it.** `native_apps/tests/audio_sample_test.c` group H checked "the last delivered sample is exactly 0"
@@ -342,7 +342,7 @@ command exits, which is indistinguishable from a hung WSL.** `timeout N` anythin
 host regression that hangs is a *test result*, not a tool timeout.
 
 ```bash
-wsl.exe -e bash -lc "cd /mnt/c/work/roomwizard && timeout 300 ./tests/rw_provision_test.sh > /mnt/c/work/roomwizard/out.txt 2>&1"
+wsl.exe -e bash -lc "cd /mnt/c/work/roomwizard && timeout 300 ./tests/arca_provision_test.sh > /mnt/c/work/roomwizard/out.txt 2>&1"
 ```
 
 ⚠️ **WSL's `/tmp` does not survive between `wsl.exe` calls** — the instance idles out and takes it with

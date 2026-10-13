@@ -1,5 +1,5 @@
 /**
- * Gamepad Input Module for RoomWizard — Implementation
+ * Gamepad Input Module for Arca — Implementation
  *
  * Scans evdev devices for gamepad, keyboard, and mouse, reads events via
  * non-blocking reads, normalizes axes, and provides unified input state
@@ -526,7 +526,7 @@ int gamepad_save_config(const GamepadManager *gp, const char *path) {
         return -1;
     }
 
-    fprintf(f, "# RoomWizard Input Configuration\n");
+    fprintf(f, "# Arca Input Configuration\n");
     fprintf(f, "# Auto-generated — edit carefully or use device tools\n\n");
 
     fprintf(f, "# Mouse settings\n");

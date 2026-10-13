@@ -768,7 +768,7 @@ static void fb_present_rect(Framebuffer *fb, int x, int y, int w, int h) {
     }
 }
 
-// Over-temperature square (common/overtemp.h): rwmond sets MON_FLAG_OVERTEMP
+// Over-temperature square (common/overtemp.h): arcamond sets MON_FLAG_OVERTEMP
 // in its ring header, and every present paints a red square into the FRONT
 // buffer at the visible area's top-right corner — never into the back buffer,
 // so no app's content is touched and clearing is a copy back from it. The
