@@ -984,6 +984,12 @@ EEPROM loaded).
 
 - **A PoE injector or PoE switch port is the only way to power the unit**, on the bench as much as
   on the wall. Budget for one before planning any out-of-case session.
+- **A shut-down unit turns on when a micro-USB OTG adapter is plugged in; USB power coming in does not
+  start it.** Measured 2026-10-13 on `.188` by the operator, unit fully dark after a shutdown: two different
+  adapters (one empty) and an unpowered hub on its own micro-USB plug each started it at plug-in, a pull
+  did nothing, and a plain micro-USB cable did nothing with or without a charger on its USB-A end. So the
+  start event is the ID pin going to ground, which the TWL4030 watches from an always-powered register
+  ([§3.6](#36-usb)). **[inferred]** which TWL4030 power-on source bit does it has not been read.
 - **Class budget is 12.95 W at the PD**, enforced by the TPS23750's class signature. Everything
   added inside the case draws from it — an XBee at ~50 mA is nothing, a bus-powered USB hard disk
   is not going to work.
