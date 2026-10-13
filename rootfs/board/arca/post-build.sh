@@ -101,6 +101,14 @@ install -D -m 0755 "$(cd "$OVERLAY/../../../.." && pwd)/commissioning/set-hostna
 printf 'Arca root filesystem, built from rootfs/ (Buildroot)\n' > "$TARGET/etc/arca-rootfs"
 chmod 0644 "$TARGET/etc/arca-rootfs"
 
+# The product name. Buildroot's target-finalize writes usr/lib/os-release (NAME=Buildroot) and an
+# /etc/os-release link BEFORE it copies the overlay and runs this hook (Makefile, 2025.02), so
+# this hook has the last word: our one source file replaces the generated one, and the link is
+# re-made in case the overlay displaced it. native_apps/common/product.c reads NAME= from it.
+install -D -m 0644 "$(cd "$OVERLAY/.." && pwd)/os-release" "$TARGET/usr/lib/os-release"
+ln -sfn ../usr/lib/os-release "$TARGET/etc/os-release"
+grep -q '^NAME=' "$TARGET/etc/os-release" || { echo "post-build: os-release not installed" >&2; exit 1; }
+
 # Root: home on the card's tree, bash as the login shell (the skeleton gives BusyBox
 # ash via /bin/sh), password locked (key-only login).
 sed -i 's|^root:\([^:]*\):0:0:root:[^:]*:[^:]*$|root:\1:0:0:root:/home/root:/bin/bash|' "$TARGET/etc/passwd"

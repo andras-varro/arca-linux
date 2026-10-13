@@ -176,7 +176,7 @@ do_install() {
     mkdir -p "${REMMINA_DIR}"
     cat > "${REMMINA_PROFILE}" <<REMMINA_EOF
 [remmina]
-name=Arca VNC
+name=Ludbox Linux VNC
 protocol=VNC
 server=${VNC_SERVER}:${VNC_PORT}
 password=${ENCRYPTED_PW}
@@ -195,8 +195,8 @@ REMMINA_EOF
     cat > "${AUTOSTART_ENTRY}" <<'AUTOSTART_EOF'
 [Desktop Entry]
 Type=Application
-Name=VNC to Arca
-Comment=Connect to Arca RPi via VNC (Remmina, fullscreen, scaled)
+Name=VNC to Ludbox Linux
+Comment=Connect to Ludbox Linux RPi via VNC (Remmina, fullscreen, scaled)
 Icon=org.remmina.Remmina
 Exec=/bin/bash -c 'sleep 5 && remmina -c ~/.local/share/remmina/arca.remmina'
 Terminal=false
@@ -212,8 +212,8 @@ AUTOSTART_EOF
     cat > "${DESKTOP_SHORTCUT}" <<'DESKTOP_EOF'
 [Desktop Entry]
 Type=Application
-Name=VNC to Arca
-Comment=Connect to Arca RPi via VNC (Remmina, fullscreen, scaled)
+Name=VNC to Ludbox Linux
+Comment=Connect to Ludbox Linux RPi via VNC (Remmina, fullscreen, scaled)
 Icon=org.remmina.Remmina
 Exec=/bin/bash -c 'sleep 5 && remmina -c ~/.local/share/remmina/arca.remmina'
 Terminal=false

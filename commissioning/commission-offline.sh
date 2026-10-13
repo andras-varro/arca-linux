@@ -53,6 +53,8 @@ cd "$REPO_ROOT"
 
 # shellcheck source=../lib/arca-identify.sh
 . "$REPO_ROOT/lib/arca-identify.sh"
+# shellcheck source=../lib/product.sh
+. "$REPO_ROOT/lib/product.sh"
 # shellcheck source=../lib/arca-provision.sh
 . "$REPO_ROOT/lib/arca-provision.sh"
 # shellcheck source=../lib/arca-bundle.sh
@@ -155,7 +157,7 @@ done
 
 echo ""
 echo "════════════════════════════════════════"
-echo " Arca image step"
+echo " $PRODUCT_NAME image step"
 echo "════════════════════════════════════════"
 [[ -z "$DRY" ]] || warn "DRY RUN — every path is resolved and printed; nothing is written."
 

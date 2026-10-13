@@ -78,10 +78,13 @@
 # actually honour `--bundle <dir>`; what it sees is that release.sh calls them
 # with exactly those two arguments and consumes the bundle they leave behind.
 
+# shellcheck source-path=SCRIPTDIR
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=../lib/product.sh
+. "$REPO_DIR/lib/product.sh"   # PRODUCT_STEM: the tarball is named from it
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
 
@@ -135,6 +138,11 @@ build_tree() {
     cp "$REPO_DIR/release.sh"        "$t/release.sh"
     cp "$REPO_DIR/lib/arca-bundle.sh"  "$t/lib/arca-bundle.sh"
     cp "$REPO_DIR/lib/arca-release.sh" "$t/lib/arca-release.sh"
+    # release.sh names its tarball and release title from lib/product.sh, which reads the
+    # repo's os-release file: both ride along or the script dies before parsing an argument.
+    cp "$REPO_DIR/lib/product.sh"      "$t/lib/product.sh"
+    mkdir -p "$t/rootfs/board/arca"
+    cp "$REPO_DIR/rootfs/board/arca/os-release" "$t/rootfs/board/arca/os-release"
     cat > "$t/tests/run-all.sh" <<'STUBGATE'
 #!/bin/bash
 # Stub for the host gate. release.sh invokes exactly:
@@ -322,7 +330,7 @@ else
     bad "B9 the run staged ${B_ENTRIES:-0} files, so every structural case above is vacuous"
 fi
 
-TARS=$(find "$TREE/build" -maxdepth 1 -name 'arca-apps-*.tar.gz' 2>/dev/null | grep -c . || true)
+TARS=$(find "$TREE/build" -maxdepth 1 -name "${PRODUCT_STEM}-apps-*.tar.gz" 2>/dev/null | grep -c . || true)
 if [ "${TARS:-0}" -ge 1 ]; then
     ok "B10 the tarball landed under the tree's own build/"
 else
@@ -370,7 +378,7 @@ build_tree "$GTREE"
     git config user.email "test@example.invalid"
     git config user.name  "arca_release_test"
     # ⚠️ An A/B must change exactly one thing, and without this it changes two.
-    # A staged run writes build/arca-apps-*.tar.gz and the stub's payload
+    # A staged run writes build/<stem>-apps-*.tar.gz and the stub's payload
     # INSIDE this fixture repo, so `git add -A` below would stage them too and
     # the next run's regenerated tarball would then read as a worktree change.
     # C4 passed by accident for that reason before this file existed: measured,

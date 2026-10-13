@@ -114,6 +114,11 @@ n=$(awk '{ name = $0; sub(/^[^ ]+ +[^ ]+ +[0-9]+ +[^ ]+ +[^ ]+ +/, "", name); su
            if (name ~ /^\.\/etc\/init\.d\/(S[0-9][0-9]|rcK)/) c++ } END { print c + 0 }' "$LIST")
 [ "$n" -eq 0 ]; check "no Buildroot S??*/rcK left in etc/init.d (found $n)" $?
 
+# The product name: post-build.sh replaces Buildroot's generated os-release with ours.
+[ "$(target_of etc/os-release)" = "../usr/lib/os-release" ]; check "etc/os-release links to ../usr/lib/os-release" $?
+member usr/lib/os-release | grep -q '^NAME=' && ! member usr/lib/os-release | grep -q '^NAME="\?Buildroot'
+check "usr/lib/os-release has a NAME= that is not Buildroot's" $?
+
 has lib/ld-linux.so.3
 check "lib/ld-linux.so.3 present" $?
 # The deploy scripts run their remote halves under bash; BusyBox ships no bash applet.

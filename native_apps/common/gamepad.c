@@ -526,7 +526,7 @@ int gamepad_save_config(const GamepadManager *gp, const char *path) {
         return -1;
     }
 
-    fprintf(f, "# Arca Input Configuration\n");
+    fprintf(f, "# Input configuration\n");
     fprintf(f, "# Auto-generated — edit carefully or use device tools\n\n");
 
     fprintf(f, "# Mouse settings\n");

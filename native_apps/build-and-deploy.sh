@@ -56,6 +56,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 . "$REPO_ROOT/lib/arca-ssh.sh"
 # shellcheck source=../lib/arca-bundle.sh
 . "$REPO_ROOT/lib/arca-bundle.sh"
+# shellcheck source=../lib/product.sh
+. "$REPO_ROOT/lib/product.sh"
 
 # ── argument shapes ─────────────────────────────────────────────────────────
 # Two, and they do not mix: `--bundle <dir>` needs no device, and every deploy
@@ -126,7 +128,7 @@ esac
 # ── 1. cross-compiler check ─────────────────────────────────────────────────
 echo ""
 echo "════════════════════════════════════════"
-echo " Arca Build + Deploy"
+echo " $PRODUCT_NAME Build + Deploy"
 echo "════════════════════════════════════════"
 info "Started — $(date '+%Y-%m-%d %H:%M:%S')"
 
@@ -198,6 +200,7 @@ step "11/31" "audio_out";    $CC "${WARN[@]}" -O2 "${AUDIO_CFLAGS[@]}" -c common
 step "12/31" "audio_wav";    $CC "${WARN[@]}" -O2 -c common/audio_wav.c       -o build/audio_wav.o
 step "13/31" "audio_bed";    $CC "${WARN[@]}" -O2 -c common/audio_bed.c       -o build/audio_bed.o
 step "14/31" "ppm";          $CC "${WARN[@]}" -O2 -c common/ppm.c             -o build/ppm.o
+                              $CC "${WARN[@]}" -O2 -c common/product.c         -o build/product.o
                               $CC "${WARN[@]}" -O2 -c common/icon_grid.c       -o build/icon_grid.o
                               $CC "${WARN[@]}" -O2 -I. -c common/top_bar.c         -o build/top_bar.o
                               $CC "${WARN[@]}" -O2 -c common/ui_focus.c        -o build/ui_focus.o
@@ -276,7 +279,7 @@ step "24/31" "platformer"
 $CC "${WARN[@]}" -O2 platformer/platformer.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/platformer -lm "${AUDIO_LIBS[@]}"
 
 step "25/31" "app_launcher"
-$CC "${WARN[@]}" -O2 -I. app_launcher/app_launcher.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" build/ppm.o build/icon_grid.o build/top_bar.o build/pointer.o build/logger.o common/status_line.c control_panel/cpu_load.c -o build/app_launcher -lm "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. app_launcher/app_launcher.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" build/ppm.o build/icon_grid.o build/top_bar.o build/pointer.o build/logger.o build/product.o common/status_line.c control_panel/cpu_load.c -o build/app_launcher -lm "${AUDIO_LIBS[@]}"
 
 step "26/31" "theremin"
 $CC "${WARN[@]}" -O2 -I. \

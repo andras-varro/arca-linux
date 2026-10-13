@@ -1,6 +1,6 @@
-# Arca Commissioning
+# Ludbox Linux Commissioning
 
-How a Steelcase RoomWizard gets our software (Arca), and how it stays up to date. A unit runs **only our own root
+How a Steelcase RoomWizard gets our software (Ludbox Linux; "Arca" is its codename, see [`README.md`](README.md)), and how it stays up to date. A unit runs **only our own root
 filesystem** (the Buildroot tree in [`rootfs/`](rootfs/CLAUDE.md), marker `/etc/arca-rootfs`);
 nothing here commissions or cleans the vendor one. Anyone holding a stock unit can check out the tag
 `last-vendor-rootfs`, the last tree that could.

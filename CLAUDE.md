@@ -4,7 +4,7 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## What this is
 
-**Arca** (full name "Arca Linux") repurposes the **Steelcase RoomWizard** — a wall-mounted meeting-room display — into a
+**Arca** (the codename used in code and paths; the product name is **Ludbox Linux**) repurposes the **Steelcase RoomWizard** — a wall-mounted meeting-room display — into a
 games/apps platform. The device is an embedded Linux box: **TI OMAP3503** ARM Cortex-A8 @ 600 MHz,
 234 MB RAM, 800×480 framebuffer, projected-capacitive touch, kernel 4.14.52, SysVinit. No GPU, no
 DSP — all rendering is software. Display is legacy **omapfb/omapdss**; there is no DRM/KMS.
@@ -166,7 +166,7 @@ misparses. When in doubt, over-deploy — the failure mode is silent.
 |---|---|
 | an app's own source, `common/common.c`, `common/gamepad.c`, `common/pointer.c` | `native_apps` |
 | `common/audio.c`, `common/audio_wav.c`, `common/audio_bed.c`, `common/audio.h` | `native_apps` only — **measured**: neither `vnc_client` (`Makefile` `SRCS`) nor ScummVM links `audio.o`; ScummVM reaches the device half through `audio_out.o` and never the mix-bus client layer |
-| `common/logger.c`, `common/ui_focus.c` | `native_apps` + `vnc_client` — **measured** for `ui_focus.c`: `vnc_client/Makefile` `SRCS` links `ui_focus.o`, `configure.patch` does not name it |
+| `common/logger.c`, `common/ui_focus.c`, `common/product.c` | `native_apps` + `vnc_client` — **measured** for `ui_focus.c`, and the same for `product.c`: `vnc_client/Makefile` `SRCS` links them, `configure.patch` does not name them |
 | `common/framebuffer.c`, `common/touch_input.c`, `common/hardware.c`, `common/config.c`, `common/input_scan.c`, `common/overtemp.h`, `common/blank_decide.h` (read by `hardware.c`), `native_apps/sysmon/mon_ring.h` (both read by `framebuffer.c`) | **all three** — `./deploy-all.sh <ip>`; ScummVM is the slow one. ⚠️ **Measured from `scummvm-arca/backend-files/configure.patch`, which is the list** — it appends each of these `.o` to ScummVM's `OBJS`, so a header in that chain counts too |
 | `common/audio_out.c`, `common/audio_gen.c` (+ `audio_out.h`, `audio_gen.h`) | `native_apps` + **ScummVM** — ⚠️ **two, not three: measured 2026-09-09**, `vnc_client/Makefile`'s `SRCS` names neither, and no `audio_out` symbol appears anywhere in that tree. They are on ScummVM's `OBJS` via `configure.patch`, which is why the row above cannot speak for them |
 | anything in `device-files/` (`arca-app`, the rules files, …) | neither — **only** `./commissioning/provision.sh <ip>`, which ends in a reboot (or a new `make-card-image.sh` image, offline) |

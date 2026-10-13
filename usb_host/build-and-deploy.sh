@@ -40,6 +40,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # --bundle stages through it AND a deploy clears the provenance stamp through it.
 # shellcheck source=../lib/arca-ssh.sh
 . "$REPO_ROOT/lib/arca-ssh.sh"
+# shellcheck source=../lib/product.sh
+. "$REPO_ROOT/lib/product.sh"
 # shellcheck source=../lib/arca-bundle.sh
 . "$REPO_ROOT/lib/arca-bundle.sh"
 
@@ -117,7 +119,7 @@ unset _mod
 
 echo ""
 echo "════════════════════════════════════════"
-echo " Arca USB Host + Controller + Audio"
+echo " $PRODUCT_NAME USB Host + Controller + Audio"
 echo "════════════════════════════════════════"
 ts "Started — $(date '+%Y-%m-%d %H:%M:%S')"
 [[ -n "$BUNDLE_DIR" ]] && info "Staging a bundle: $BUNDLE_DIR"

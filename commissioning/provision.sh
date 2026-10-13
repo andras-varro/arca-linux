@@ -57,6 +57,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 . "$REPO_ROOT/lib/arca-provision.sh"
 # shellcheck source=../lib/arca-ssh.sh
 . "$REPO_ROOT/lib/arca-ssh.sh"
+# shellcheck source=../lib/product.sh
+. "$REPO_ROOT/lib/product.sh"
 
 # ── the non-positional flags are extracted before positional parsing ────────
 #
@@ -250,7 +252,7 @@ fi
 # ── SSH check ───────────────────────────────────────────────────────────────
 echo ""
 echo "════════════════════════════════════════"
-echo " Arca System Setup"
+echo " $PRODUCT_NAME System Setup"
 echo "════════════════════════════════════════"
 
 info "Testing SSH connection to $DEVICE_IP..."

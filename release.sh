@@ -74,6 +74,8 @@ cd "$SCRIPT_DIR"
 # Sourced for arca_release_repo alone — the one owner/repo derivation, shared with
 # the fetch side so a fork publishes to and fetches from the same place.
 . "$SCRIPT_DIR/lib/arca-release.sh"
+# shellcheck source=lib/product.sh
+. "$SCRIPT_DIR/lib/product.sh"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 ok()   { echo -e "${GREEN}  ✓ $*${NC}"; }
@@ -150,7 +152,7 @@ fi
 
 echo ""
 echo "════════════════════════════════════════"
-echo " Arca release"
+echo " $PRODUCT_NAME release"
 echo "════════════════════════════════════════"
 info "Components: ${COMPONENTS[*]}"
 info "Staging to: $OUT"
@@ -355,10 +357,10 @@ arca_bundle_finish "$OUT_ABS" "$ARCA_BUNDLE_META_COMPONENT" >/dev/null
 
 # ── NOTICE: the two licence obligations a published bundle carries ──────────
 cat > "$OUT_ABS/NOTICE" <<'NOTICE'
-Arca app bundle
+@PRODUCT@ app bundle
 =====================
 
-This bundle contains statically linked ARM binaries for Arca
+This bundle contains statically linked ARM binaries for @PRODUCT@
 (TI OMAP3503, Cortex-A8, kernel 4.14.52).  It contains NO vendor firmware and NO
 device configuration.
 
@@ -486,6 +488,8 @@ a plaintext VNC password.  Create the latter on the device after installing.
 No vendor firmware is published either.  In particular this bundle does NOT
 contain `uImage-system` or any other file from the boot partition.
 NOTICE
+# The name is data (lib/product.sh); the heredoc above is quoted so its backticks stay literal.
+sed -i "s|@PRODUCT@|$PRODUCT_NAME|g" "$OUT_ABS/NOTICE"
 
 # ── structural + policy checks on what was staged ───────────────────────────
 info "Checking bundle structure..."
@@ -536,7 +540,7 @@ done
 # and so two builds differ only in the artifacts.  Modes inside the tar are NOT
 # the authority — manifest.d/*.list is (see lib/arca-bundle.sh); on /mnt/c every file
 # reads 0777 and the tar would say so.
-TARBALL="$SCRIPT_DIR/build/arca-apps-${TAG:-$(date -u '+%Y%m%d')}.tar.gz"
+TARBALL="$SCRIPT_DIR/build/${PRODUCT_STEM}-apps-${TAG:-$(date -u '+%Y%m%d')}.tar.gz"
 mkdir -p "$(dirname "$TARBALL")"
 info "Creating $TARBALL"
 tar -czf "$TARBALL" \
@@ -583,7 +587,7 @@ else
     if [[ -z "$NOTES_FILE" ]]; then
         NOTES_FILE="$(mktemp)"
         {
-            echo "Statically linked ARM binaries for Arca."
+            echo "Statically linked ARM binaries for $PRODUCT_NAME."
             echo ""
             echo "Install offline, with no toolchain:"
             echo ""
@@ -605,7 +609,7 @@ else
     gh release create "$TAG" "$TARBALL" \
         --repo "$GH_REPO" \
         --target "$GIT_REV_FULL" \
-        --title "Arca apps $TAG" \
+        --title "$PRODUCT_NAME apps $TAG" \
         --notes-file "$NOTES_FILE" \
         || err "gh release create failed — the tarball is still at $TARBALL"
     ok "Published $TAG"

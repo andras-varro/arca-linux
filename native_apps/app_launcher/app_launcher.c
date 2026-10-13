@@ -35,6 +35,7 @@
 #include "common/config.h"
 #include "common/status_line.h"
 #include "common/top_bar.h"
+#include "common/product.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,7 +65,7 @@
  * (the tap target), the title, CPU and clock, and the exit X.  The bar is
  * flush with the top edge and reserves TOP_BAR_GRID_RESERVE under the touch
  * inset, so its buttons stay pressable on any unit. */
-#define TITLE_TEXT      "Arca Launcher"
+/* The title is the product name (common/product.h), asked at draw time. */
 static IconGrid grid;
 
 /* ── The MUSIC / EFFECTS toggles are NOT here ────────────────────────────────
@@ -319,7 +320,7 @@ static void draw_launcher(Launcher *l) {
      * message left (the tap target), the title, CPU and clock, and the exit X.
      * The keyboard rings on the message and on the exit X are drawn inside
      * their targets, so the top edge of the screen does not clip them. */
-    l->bar.title = TITLE_TEXT;
+    l->bar.title = product_name();
     top_bar_draw(&l->fb, &l->bar);
 
     /* Tiles for current page */
@@ -715,7 +716,7 @@ int main(int argc, char *argv[]) {
     if (argc > 1) fb_dev    = argv[1];
     if (argc > 2) touch_dev = argv[2];
 
-    printf("Arca App Launcher\n");
+    printf("%s App Launcher\n", product_name());
     printf("=======================\n");
 
     /* Singleton guard — exit immediately if another instance is running */

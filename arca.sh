@@ -40,6 +40,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # shellcheck source=lib/arca-ssh.sh
 . "$SCRIPT_DIR/lib/arca-ssh.sh"
+# shellcheck source=lib/product.sh
+. "$SCRIPT_DIR/lib/product.sh"
 
 # ── colour helpers (same vocabulary as the three child scripts) ──────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -56,7 +58,9 @@ usage() {
     cat <<'USAGE'
 Usage: ./arca.sh
 
-Interactive front door for Arca bring-up. Menu-driven; it takes no
+USAGE
+    echo "Interactive front door for $PRODUCT_NAME bring-up. Menu-driven; it takes no"
+    cat <<'USAGE'
 arguments of its own beyond --help, and reimplements none of the flags of the
 scripts it calls. To script a step, call that script directly:
 
@@ -321,7 +325,7 @@ PRE
     hdr "Boot the device"
     cat <<'PRE'
   Now:
-    1. put the written card in the Arca
+    1. put the written card in the unit
     2. connect Ethernet and power it on
 PRE
     echo ""
@@ -353,7 +357,7 @@ do_setup_build_env() {
 
 # ── main menu ───────────────────────────────────────────────────────────────
 while true; do
-    hdr "Arca"
+    hdr "$PRODUCT_NAME"
     [ -n "$TARGET" ] && info "Target: $TARGET"
     cat <<'MENU'
   2) Update a booted device      ssh; backup, update, reboot

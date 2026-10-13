@@ -5,7 +5,7 @@
 # Required-Stop:     $local_fs $remote_fs
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
-# Short-Description: Arca App Launcher
+# Short-Description: App Launcher
 # Description:       Starts the configured application from /opt/arca/default-app
 ### END INIT INFO
 
@@ -20,7 +20,10 @@
 # rcS.d/S06watchdog (rootfs post-build.sh).  No separate feeder needed here.
 
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
-DESC="Arca App Launcher"
+# The product name is data in /etc/os-release (rootfs/board/arca/os-release); read in a
+# subshell because that file also sets NAME, which is this script's own variable.
+PRODUCT=$(. /etc/os-release 2>/dev/null && printf '%s' "$NAME")
+DESC="${PRODUCT:+$PRODUCT }App Launcher"
 NAME=arca-app
 CONFIG=/opt/arca/default-app
 PIDFILE=/var/run/arca-app.pid

@@ -186,7 +186,7 @@ int config_save(const Config *cfg) {
     FILE *f = file_write_atomic_open(cfg->filepath, tmp_path, sizeof(tmp_path));
     if (!f) return -1;
 
-    if (fprintf(f, "# Arca Configuration\n") < 0 ||
+    if (fprintf(f, "# Configuration\n") < 0 ||
         fprintf(f, "# Auto-generated — edit with control_panel\n\n") < 0) {
         file_write_atomic_abort(f, tmp_path);
         return -1;

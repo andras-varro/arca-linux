@@ -16,6 +16,7 @@ source `arca-bundle.sh` on the *write* side while the commissioner reads it, and
 | `arca-release.sh` | fetch a published release — **the one library here that opens a socket** |
 | `arca-ssh.sh` | the one answer to "can I reach this device" |
 | `arca-state.sh` | the per-unit state lists: the BACKUP set and the SSH-key deny the card-image builder applies; `rootfs/` and `commissioning/backup.sh`/`restore.sh` source it, `tests/arca_state_test.sh` covers it |
+| `product.sh` | `PRODUCT_NAME` / `PRODUCT_STEM` for banners, release titles and download names, read from `rootfs/board/arca/os-release`; no fallback, it refuses instead |
 
 ## One SSH gate, and BatchMode stays on it
 

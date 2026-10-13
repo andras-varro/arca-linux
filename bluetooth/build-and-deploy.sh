@@ -48,6 +48,8 @@ FW_DIR="$REPO_ROOT/kernel/3rdparty/realtek/bluetooth"
 
 # shellcheck source=../lib/arca-ssh.sh
 . "$REPO_ROOT/lib/arca-ssh.sh"
+# shellcheck source=../lib/product.sh
+. "$REPO_ROOT/lib/product.sh"
 # shellcheck source=../lib/arca-bundle.sh
 . "$REPO_ROOT/lib/arca-bundle.sh"
 
@@ -100,7 +102,7 @@ DEVICE="root@$DEVICE_IP"
 
 echo ""
 echo "════════════════════════════════════════"
-echo " Arca Bluetooth"
+echo " $PRODUCT_NAME Bluetooth"
 echo "════════════════════════════════════════"
 ts "Started — $(date '+%Y-%m-%d %H:%M:%S')"
 [[ -n "$BUNDLE_DIR" ]] && info "Staging a bundle: $BUNDLE_DIR"

@@ -54,6 +54,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/lib/arca-release.sh"
 # shellcheck source=lib/arca-ssh.sh
 . "$SCRIPT_DIR/lib/arca-ssh.sh"
+# shellcheck source=lib/product.sh
+. "$SCRIPT_DIR/lib/product.sh"
 
 DEVICE_IP="${1:-}"
 
@@ -206,7 +208,7 @@ fi
 # ── main ────────────────────────────────────────────────────────────────────
 echo ""
 echo "╔═══════════════════════════════════════╗"
-echo "║  Arca Deploy All                ║"
+printf '║  %-37s║\n' "$PRODUCT_NAME Deploy All"
 echo "╚═══════════════════════════════════════╝"
 info "Started — $(date '+%Y-%m-%d %H:%M:%S')"
 echo ""

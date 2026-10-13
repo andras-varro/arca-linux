@@ -28,6 +28,7 @@ SRCS = vnc_client.c \
        $(COMMON_DIR)/config.c \
        $(COMMON_DIR)/input_scan.c \
        $(COMMON_DIR)/ui_focus.c \
+       $(COMMON_DIR)/product.c \
        $(COMMON_DIR)/logger.c
 
 # Object files

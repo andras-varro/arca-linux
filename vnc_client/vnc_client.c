@@ -36,6 +36,7 @@
 #include "../native_apps/common/touch_input.h"
 #include "../native_apps/common/hardware.h"
 #include "../native_apps/common/logger.h"
+#include "../native_apps/common/product.h"
 
 static Logger g_logger;
 
@@ -1056,7 +1057,7 @@ static int run_vnc_client(const char *host, int port) {
 int main(int argc, char *argv[]) {
     /* --help */
     if (argc == 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
-        printf("Arca VNC Client v2.2\n\n");
+        printf("%s VNC Client v2.2\n\n", product_name());
         printf("Usage: vnc_client [OPTIONS] [host [port]]\n\n");
         printf("Options:\n");
         printf("  --config <path>   Config file (default: %s)\n", VNC_CONFIG_FILE);
@@ -1073,7 +1074,11 @@ int main(int argc, char *argv[]) {
     }
 
     printf("╔═══════════════════════════════════════╗\n");
-    printf("║  Arca VNC Client v2.2           ║\n");
+    {   /* the box's inner width is 39 columns; the name comes from os-release */
+        char title[40];
+        snprintf(title, sizeof(title), "%s VNC Client v2.2", product_name());
+        printf("║  %-37.37s║\n", title);
+    }
     printf("║  Auto-Reconnect + Bilinear            ║\n");
     printf("╚═══════════════════════════════════════╝\n\n");
 

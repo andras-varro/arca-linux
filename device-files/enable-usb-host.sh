@@ -51,7 +51,7 @@ for path in /usr/local/bin/devmem_write /tmp/devmem_write; do
     fi
 done
 
-echo "=== Arca USB Host Mode Enabler ==="
+echo "=== USB Host Mode Enabler ==="
 
 # ============================================================================
 # Check if already enabled (idempotent)

@@ -62,6 +62,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # by position on every unit.
 # shellcheck source=../lib/arca-identify.sh
 . "$REPO_ROOT/lib/arca-identify.sh"
+# shellcheck source=../lib/product.sh
+. "$REPO_ROOT/lib/product.sh"
 
 # Captured by do_verify before repartitioning and checked again by
 # do_final_verify.  The meaningful question after a resize is whether the UUID
@@ -144,11 +146,11 @@ usage() {
     echo ""
     echo -e "${BOLD}MODES${NC}"
     echo "  --clone-from <src>   Clone from an image file or source device, then expand."
-    echo "                       Example: --clone-from arca-card.img /dev/sdb"
+    echo "                       Example: --clone-from card.img /dev/sdb"
     echo "                       Example: --clone-from /dev/sdc /dev/sdb"
     echo ""
     echo "  --expand-only        Skip cloning; expand partitions on a card that already"
-    echo "                       has the Arca image cloned onto it."
+    echo "                       has the $PRODUCT_NAME image cloned onto it."
     echo "                       Example: --expand-only /dev/sdb"
     echo ""
     echo -e "${BOLD}OPTIONS${NC}"
@@ -496,7 +498,7 @@ do_verify() {
         error "Expected ${EXPECTED_PARTITION_COUNT} partitions, found ${part_count}"
         echo ""
         lsblk "$DEVICE"
-        error "The target device does not have the expected Arca partition layout"
+        error "The target device does not have the expected $PRODUCT_NAME partition layout"
         error "Expected 7 partitions: p1(FAT32,boot) p2(ext3) p3(ext3) p4(extended) p5(ext3) p6(ext3,rootfs) p7(swap)"
         exit 1
     fi
@@ -512,9 +514,9 @@ do_verify() {
     # p1 p2 p3 p5 p6 — byte-identical on every unit measured — and deliberately
     # does NOT pin p4 or p7, which absorb the difference in physical card size.
     if arca_is_card_disk "$DEVICE"; then
-        info "Partition layout matches the Arca card layout ✓"
+        info "Partition layout matches the $PRODUCT_NAME card layout ✓"
     else
-        warn "Partition layout does NOT match the Arca card layout."
+        warn "Partition layout does NOT match the $PRODUCT_NAME card layout."
         warn "  p1 p2 p3 p5 p6 must be at the image's start sectors and sizes."
         warn "  Expected: ${ARCA_LAYOUT}"
         echo ""
@@ -537,7 +539,7 @@ do_verify() {
 
     if [ -z "$ORIG_P6_UUID" ]; then
         error "Could not read UUID from ${p6_dev}"
-        error "Is the Arca image properly cloned to this card?"
+        error "Is the $PRODUCT_NAME image properly cloned to this card?"
         exit 1
     fi
     info "p6 UUID: ${ORIG_P6_UUID} (recorded; must survive the resize)"
@@ -845,7 +847,7 @@ do_final_verify() {
     fi
 
     echo -e "  ${GREEN}Next steps:${NC}"
-    echo -e "    1. Insert card into Arca"
+    echo -e "    1. Insert card into the unit"
     echo -e "    2. Boot it, then update: ${BOLD}./commissioning/provision.sh <device-ip>${NC}"
     echo -e "    3. Run: ${BOLD}./deploy-all.sh <device-ip>${NC}"
     echo ""
@@ -857,7 +859,7 @@ do_final_verify() {
 main() {
     echo ""
     echo -e "${BLUE}${BOLD}╔══════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}${BOLD}║  Arca SD Card Clone & Expand Tool              ║${NC}"
+    echo -e "${BLUE}${BOLD}║  $PRODUCT_NAME SD Card Clone & Expand Tool      ║${NC}"
     echo -e "${BLUE}${BOLD}║  4 GB image → larger card (any ≥${MIN_TARGET_SIZE_GB} GB)                 ║${NC}"
     echo -e "${BLUE}${BOLD}╚══════════════════════════════════════════════════════╝${NC}"
     echo ""

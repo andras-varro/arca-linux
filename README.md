@@ -1,6 +1,8 @@
-# Arca Project
+# Ludbox Linux
 
-> **Arca Linux and apps for the Steelcase RoomWizard embedded Linux device**
+> **Ludbox Linux and apps for the Steelcase RoomWizard embedded Linux device**
+
+Arca is the project's codename; you will see it in paths and file names.
 
 ## Documentation map
 

@@ -179,7 +179,7 @@ def configure_x11vnc(client):
     
     # Create systemd service
     service = r"""[Unit]
-Description=x11vnc VNC Server for Arca
+Description=x11vnc VNC Server for Ludbox Linux
 After=multi-user.target graphical.target
 Wants=graphical.target
 
