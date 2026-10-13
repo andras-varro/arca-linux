@@ -10,6 +10,14 @@
 
 set -e
 
+# It takes no arguments, so anything else is refused rather than read as "go": --help used to
+# start a full build and overwrite linux-4.14.52/.config.
+case "${1:-}" in
+    "") ;;
+    -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "usage: $0 [--help]   (takes no arguments)" >&2; exit 2 ;;
+esac
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
