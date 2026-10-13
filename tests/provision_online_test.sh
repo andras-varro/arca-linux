@@ -124,6 +124,14 @@ LAST=$(grep '^SSH' "$TMP/full.log" | tail -1 | cut -f2)
 [ "$(grep -cP "^SSH\treboot$" "$TMP/full.log")" -eq 1 ]; chk "A8 reboot happens once"
 NEWBK=$(new_backups)
 [ "$NEWBK" -ge 1 ]; chk "A9 an archive was produced"
+# backup.sh names its archive <unit>-<YYYYmmdd-HHMMSS>.tar.gz and refuses an existing
+# name ("exists", before it ever calls the lister). The whole suite takes about a second,
+# so run C could land in the same second as run A and die there, with C1 still passing
+# and C2 failing. Remove what A made, so no later run can collide with it.
+for f in "$BK"/*; do
+    [ -e "$f" ] || continue
+    grep -qxF "${f##*/}" "$TMP/backups.before" || rm -f "$f"
+done
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo ""
