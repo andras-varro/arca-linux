@@ -912,6 +912,7 @@ static const char *wall_hms(char buf[9])
 {
     time_t t = time(NULL);
     struct tm tm;
+    tzset();    /* follow a zone change made by another process; see logger.c */
     if (!localtime_r(&t, &tm) || strftime(buf, 9, "%H:%M:%S", &tm) == 0)
         snprintf(buf, 9, "??:??:??");
     return buf;

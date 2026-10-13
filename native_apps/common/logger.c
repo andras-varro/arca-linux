@@ -150,6 +150,10 @@ void logger_write(Logger *log, LogLevel level,
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     struct tm tm;
+    /* tzset() first: a long-running app outlives a zone change made by the
+     * Control Panel, and glibc's localtime_r() reads the zone only on its
+     * first call.  With TZ unset it is one stat() of /etc/localtime. */
+    tzset();
     localtime_r(&ts.tv_sec, &tm);
 
     char timebuf[32];
