@@ -1,7 +1,7 @@
 /*
  * VNC Renderer - Phase 2 Optimized + Bilinear Interpolation
  *
- * Renders VNC framebuffer updates to the Arca's visible display area.
+ * Renders VNC framebuffer updates to the device's visible display area.
  * All hot-path rendering uses direct uint16_t writes to the back buffer
  * in RGB565 format — no fb_draw_pixel() calls, no per-pixel bounds checks.
  *

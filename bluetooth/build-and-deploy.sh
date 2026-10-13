@@ -1,5 +1,5 @@
 #!/bin/bash
-# build-and-deploy.sh — Bluetooth for the Arca: kernel modules, RTL8761CU firmware,
+# build-and-deploy.sh — Bluetooth for Arca: kernel modules, RTL8761CU firmware,
 # bluetoothd + bluetoothctl, and the boot start.
 #
 # Usage:

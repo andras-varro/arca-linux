@@ -10,7 +10,7 @@
 # function pointers, calls the stubs (which return NULL DMA controller), and
 # falls back to PIO mode — which works perfectly for USB host operations.
 #
-# Must run as root on the Arca device.
+# Must run as root on the device.
 # Requires: devmem_write binary in /usr/local/bin/ or /tmp/
 #
 # This script is idempotent — safe to run multiple times.

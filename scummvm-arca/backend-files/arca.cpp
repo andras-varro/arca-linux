@@ -432,7 +432,7 @@ void OSystem_Arca::showVirtualKeyboard() {
 	if (!_vkbd) {
 		_vkbd = new Common::VirtualKeyboard();
 		// vkeybd_arca is a 2x-scaled (640x480) version of vkeybd_small,
-		// sized for the Arca 800x480 display.
+		// sized for the device's 800x480 display.
 		if (!_vkbd->loadKeyboardPack("vkeybd_arca") &&
 		    !_vkbd->loadKeyboardPack("vkeybd_small") &&
 		    !_vkbd->loadKeyboardPack("vkeybd_default")) {

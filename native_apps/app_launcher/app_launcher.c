@@ -99,7 +99,6 @@ static bool msg_pressed;         /* the current touch went down on the status me
 /* ── Colours ────────────────────────────────────────────────────────────── */
 
 #define BG_COLOR        RGB(25, 25, 35)
-#define TITLE_COLOR     RGB(200, 200, 220)
 
 /* ── Argument-passing modes ─────────────────────────────────────────────── */
 
@@ -323,7 +322,6 @@ static void draw_launcher(Launcher *l) {
      * The keyboard rings on the message and on the exit X are drawn inside
      * their targets, so the top edge of the screen does not clip them. */
     l->bar.title = TITLE_TEXT;
-    l->bar.title_color = TITLE_COLOR;
     top_bar_draw(&l->fb, &l->bar);
     if (l->msg_focus && l->msg) {
         UiRect r = top_bar_ring_rect(&l->bar.L, TB_MSG);

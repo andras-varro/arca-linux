@@ -1,5 +1,5 @@
 /*
- * i2c_touch_read — userspace burst reader for the Arca touch controller.
+ * i2c_touch_read — userspace burst reader for the device's touch controller.
  *
  * Reads a register window from the touch controller over /dev/i2c-N and prints
  * every change while a human touches the glass.

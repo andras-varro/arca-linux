@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Report, and optionally set, ACTLR.IBE (bit 6) on the Arca's
+ * Report, and optionally set, ACTLR.IBE (bit 6) on the device's
  * Cortex-A8.
  *
  * The context-switch BTB flush vanilla 4.14.52 already does on this core
@@ -85,5 +85,5 @@ static void __exit ca8_ibe_exit(void)
 module_init(ca8_ibe_init);
 module_exit(ca8_ibe_exit);
 
-MODULE_DESCRIPTION("Report and set Cortex-A8 ACTLR.IBE on the Arca");
+MODULE_DESCRIPTION("Report and set Cortex-A8 ACTLR.IBE on the device");
 MODULE_LICENSE("GPL v2");

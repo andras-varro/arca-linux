@@ -1,5 +1,5 @@
 #!/bin/bash
-# build-and-deploy.sh — USB host mode, Xbox controller and USB audio support for the Arca
+# build-and-deploy.sh — USB host mode, Xbox controller and USB audio support for Arca
 #
 # Usage:
 #   ./build-and-deploy.sh                          # build the eight artifacts only
