@@ -155,13 +155,13 @@ Seen in the Control Panel log viewer; boot-console errors are defects here. **Me
 
 `kernel/dts/rw20.dts:550` has `cd-gpios = <&gpio4 31 GPIO_ACTIVE_LOW>` (gpio_127, the vendor's value, kept) while the pad it muxes as a GPIO (`rw20.dts:278`) is `sdmmc1_dat4` = gpio_126. **[unverified]** Whether the switch is read at all has not been checked; the card boots, so nothing observed depends on it. **Done when** a card insert and removal is observed in the kernel log, or the property is shown to be inert.
 
-### B70. The terminal's login answers "bad salt" while root has no password — open, operator report 2026-10-14
+### B70. The terminal's login answers "bad salt" while root has no password — fix deployed, panel check open
 
-The image ships root locked (`root:*` in `/etc/shadow`, `rootfs/board/arca/post-build.sh:118`), and the terminal app runs `/bin/login` (`native_apps/terminal/terminal.c:262`). With that field, BusyBox login prints `bad salt` (the string is in the unit's `/bin/busybox`, `grep -a`) — that `*` is the cause is **[inferred]**. Once a password was set on the Control Panel SSH page, terminal login worked (operator, `.188`). **Done when** a locked root gets one line that says how to set a password, not `bad salt`.
+The image ships root locked (`root:*` in `/etc/shadow`, `rootfs/board/arca/post-build.sh:118`), and the terminal app runs `/bin/login` (`native_apps/terminal/terminal.c`). With that field, BusyBox login prints `bad salt` (the string is in the unit's `/bin/busybox`, `grep -a`). Once a password was set on the Control Panel SSH page, terminal login worked (operator, `.188`, 2026-10-14) — that is the evidence for the cause; it was not tried the other way round. The terminal now reads `/etc/shadow` first (`sys_shadow_root_has_password`, linked from `control_panel/sys_settings.c`) and prints a two-line hint before login runs. Deployed to `.115`, whose root already has a hash, so the hint path **has not been seen on a panel**. **Done when** a unit with root locked shows the hint in the terminal.
 
-### B71. The on-screen keyboard has no space key — open, operator report 2026-10-14
+### B71. The terminal's on-screen keyboard has no space key — fix deployed, panel check open
 
-Operator, `.188`. `native_apps/common/keyboard.c:20` has a `_` key in the ALPHA layout that stores a space, so either the user did not see it as space or the keyboard in question is another one (the terminal's, `native_apps/terminal/term_keymap.c`) **[unverified]**. **Done when** every on-screen keyboard has a key that reads as space.
+Operator, `.188`: the high-score keyboard has `_` as space, the terminal's `_` is `_`, and no space was found. Cause **[measured by reading]**: `native_apps/common/keyboard.c` maps `_` to space in the ALPHA layout only; the FULL layout (terminal, root password) had no space at all. FULL now has a SPACE action button (and OK no longer trims a trailing space there). Deployed to `.115`; **not seen on a panel**. ALPHANUM (host name) still has its blank last key as the only space, left alone: a host name takes none. **Done when** the terminal keyboard shows SPACE and typing it enters a space.
 
 ## Features
 

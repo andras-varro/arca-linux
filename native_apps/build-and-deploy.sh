@@ -318,7 +318,7 @@ $CC "${WARN[@]}" -O2 -I. sysmon/arcamond.c sysmon/mon_ring.c control_panel/cpu_l
 # VTERM_CFLAGS / VTERM_LIBS; term_keymap.c is its pure key table (host test
 # tests/term_keymap_test.c).  -lvterm goes after the objects that need it.
 step "31/31" "terminal"
-$CC "${WARN[@]}" -O2 -I. "${VTERM_CFLAGS[@]}" terminal/terminal.c terminal/term_keymap.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/terminal -lm "${VTERM_LIBS[@]}" "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. "${VTERM_CFLAGS[@]}" terminal/terminal.c terminal/term_keymap.c control_panel/sys_settings.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/terminal -lm "${VTERM_LIBS[@]}" "${AUDIO_LIBS[@]}"
 
 # Collect icon files from source dirs → build/icons/.  control_panel/icons/ holds
 # the control panel's home-grid icons (gen_cp_icons.py); control_panel reads them

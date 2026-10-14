@@ -130,7 +130,7 @@ static void kb_focus_move(const char **keys, KeyboardLayout layout, int rows, in
     if (best >= 0) { *fr = nr; *fc = best; }
 }
 
-enum { KA_DEL, KA_CLEAR, KA_SHIFT, KA_CANCEL, KA_OK };
+enum { KA_DEL, KA_CLEAR, KA_SHIFT, KA_SPACE, KA_CANCEL, KA_OK };
 
 int keyboard_enter(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
                    const char *title, char *buf, int max_len, KeyboardLayout layout) {
@@ -204,12 +204,13 @@ int keyboard_enter(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
 
     /* ── Action buttons ──────────────────────────────────────────────── */
     bool has_shift = (layout == KB_LAYOUT_FULL);
-    int n_action = has_shift ? 5 : 4;          /* DEL CLEAR [SHIFT] CANCEL OK */
+    bool has_space = (layout == KB_LAYOUT_FULL);   /* the others keep a space on a key */
+    int n_action = 4 + (has_shift ? 1 : 0) + (has_space ? 1 : 0);   /* DEL CLEAR [SHIFT] [SPACE] CANCEL OK */
     int aw = safe_w / n_action;
 
     const char *del_label = (layout == KB_LAYOUT_NUMERIC) ? "<-" : "DEL";
 
-    Button btn_del, btn_clear, btn_shift, btn_cancel, btn_ok;
+    Button btn_del, btn_clear, btn_shift, btn_space, btn_cancel, btn_ok;
     int col_idx = 0;
 
     button_init_full(&btn_del, safe_l + col_idx * aw, action_y, aw - 4, btn_h,
@@ -229,6 +230,13 @@ int keyboard_enter(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
         col_idx++;
     }
 
+    if (has_space) {
+        button_init_full(&btn_space, safe_l + col_idx * aw, action_y, aw - 4, btn_h,
+                         "SPACE",
+                         RGB(30, 30, 80), COLOR_WHITE, RGB(100, 100, 220), 2);
+        col_idx++;
+    }
+
     button_init_full(&btn_cancel, safe_l + col_idx * aw, action_y, aw - 4, btn_h,
                      "CANCEL",
                      RGB(80, 0, 0), COLOR_WHITE, RGB(200, 0, 0), 2);
@@ -239,12 +247,13 @@ int keyboard_enter(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
                      RGB(0, 70, 0), COLOR_WHITE, RGB(0, 180, 0), 2);
 
     /* The action row in order, so a focus column maps to one button and one id. */
-    Button *act_btn[5];
-    int     act_id[5];
+    Button *act_btn[6];
+    int     act_id[6];
     int     na = 0;
     act_btn[na] = &btn_del;    act_id[na++] = KA_DEL;
     act_btn[na] = &btn_clear;  act_id[na++] = KA_CLEAR;
     if (has_shift) { act_btn[na] = &btn_shift; act_id[na++] = KA_SHIFT; }
+    if (has_space) { act_btn[na] = &btn_space; act_id[na++] = KA_SPACE; }
     act_btn[na] = &btn_cancel; act_id[na++] = KA_CANCEL;
     act_btn[na] = &btn_ok;     act_id[na++] = KA_OK;
 
@@ -330,6 +339,8 @@ int keyboard_enter(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
             button_draw(fb, &btn_clear);
             if (has_shift)
                 button_draw(fb, &btn_shift);
+            if (has_space)
+                button_draw(fb, &btn_space);
             button_draw(fb, &btn_cancel);
             button_draw(fb, &btn_ok);
 
@@ -444,12 +455,20 @@ int keyboard_enter(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
             dirty = true;
             /* Swap key pointer for next frame redraw */
             keys = shifted ? full_upper_keys : full_lower_keys;
+        } else if (pick_a == KA_SPACE) {
+            if (cursor < max_len) {
+                work[cursor++] = ' ';
+                work[cursor]   = '\0';
+                dirty = true;
+            }
         } else if (pick_a == KA_CANCEL) {
             return KB_RESULT_CANCEL;   /* buf unchanged */
         } else if (pick_a == KA_OK) {
-            /* Trim trailing spaces */
+            /* Trim trailing spaces -- but not from FULL, whose SPACE key is typed on
+             * purpose (a password may end in one). */
             int l = (int)strlen(work);
-            while (l > 0 && work[l - 1] == ' ') work[--l] = '\0';
+            if (layout != KB_LAYOUT_FULL)
+                while (l > 0 && work[l - 1] == ' ') work[--l] = '\0';
 
             strncpy(buf, work, max_len);
             buf[max_len] = '\0';

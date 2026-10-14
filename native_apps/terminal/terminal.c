@@ -50,6 +50,7 @@
 #include "../common/input_scan.h"
 #include "../common/keyboard.h"
 #include "../common/touch_input.h"
+#include "control_panel/sys_settings.h"
 #include "terminal/term_keymap.h"
 
 #define MAX_ROWS   100
@@ -216,6 +217,23 @@ static void set_pty_size(void) {
 
 /* ── the pty and its child ───────────────────────────────────────────────── */
 
+/* BusyBox login answers a locked root ("root:*" in /etc/shadow, the image's
+ * state until a password is set) with "bad salt".  Say what to do instead; other
+ * accounts may still log in, so login runs regardless. */
+static void hint_if_root_locked(void) {
+    static char shadow[8192];
+    int fd = open("/etc/shadow", O_RDONLY);
+    if (fd < 0) return;
+    ssize_t n = read(fd, shadow, sizeof shadow - 1);
+    close(fd);
+    if (n <= 0) return;
+    shadow[n] = '\0';
+    if (!sys_shadow_root_has_password(shadow))
+        say("root has no password yet. Set one in Control Panel > SSH,\r\n"
+            "then log in as root. (\"bad salt\" means exactly this.)\r\n\r\n");
+    memset(shadow, 0, sizeof shadow);
+}
+
 /* 0 on success; -1 with errno set, and a line already written to the screen. */
 static int start_session(void) {
     int m = posix_openpt(O_RDWR | O_NOCTTY);
@@ -238,6 +256,7 @@ static int start_session(void) {
     ws.ws_col = (unsigned short)T.cols;
     ioctl(m, TIOCSWINSZ, &ws);
 
+    hint_if_root_locked();
     pid_t pid = fork();
     if (pid < 0) {
         int e = errno;
