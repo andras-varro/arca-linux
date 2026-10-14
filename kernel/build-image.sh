@@ -10,10 +10,14 @@
 # Produces: <out>/zImage-with-dtb and <out>/uImage-test. It never writes p1: installing the image
 # as uImage-system is a manual operator step (kernel/README.md), and nothing scripted writes it.
 
+# shellcheck source-path=SCRIPTDIR
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# The tarball's pin lives in rootfs/package-hashes/linux-headers.hash; the check runs before tar xf.
+# shellcheck source=../lib/arca-kernel-src.sh
+. "${REPO_DIR}/lib/arca-kernel-src.sh"
 
 KERNEL_VERSION="4.14.52"
 KERNEL_TARBALL="${REPO_DIR}/usb_host/linux-${KERNEL_VERSION}.tar.xz"
@@ -117,6 +121,7 @@ if [ "$REUSE" -eq 1 ] && [ -f "${KERNEL_DIR}/Makefile" ]; then
     echo "  --reuse: keeping ${KERNEL_DIR}"
 else
     rm -rf "$KERNEL_DIR"
+    arca_check_kernel_tarball "$KERNEL_TARBALL" || exit 1
     tar xf "$KERNEL_TARBALL" -C "$WORK_DIR"
     echo "  Extracted into ${KERNEL_DIR}"
 fi

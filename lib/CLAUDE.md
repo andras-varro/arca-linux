@@ -17,6 +17,7 @@ source `arca-bundle.sh` on the *write* side while the commissioner reads it, and
 | `arca-ssh.sh` | the one answer to "can I reach this device" |
 | `arca-state.sh` | the per-unit state lists: the BACKUP set and the SSH-key deny the card-image builder applies; `rootfs/` and `commissioning/backup.sh`/`restore.sh` source it, `tests/arca_state_test.sh` covers it |
 | `product.sh` | `PRODUCT_NAME` / `PRODUCT_STEM` for banners, release titles and download names, read from `rootfs/board/arca/os-release`; no fallback, it refuses instead |
+| `arca-kernel-src.sh` | `arca_check_kernel_tarball`: the sha256 check `kernel/build-image.sh` and `usb_host/build-kernel-modules.sh` run before `tar xf`; the pin is read from `rootfs/package-hashes/linux-headers.hash` and nowhere else, and a missing pin refuses |
 
 ## One SSH gate, and BatchMode stays on it
 

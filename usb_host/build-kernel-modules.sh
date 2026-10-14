@@ -8,6 +8,7 @@
 # Produces: usb_host/modules/{ff-memless,joydev,xpad}.ko  (Xbox controller)
 #           usb_host/modules/{snd-hwdep,snd-rawmidi,snd-usb-audio,snd-usbmidi-lib}.ko  (USB audio)
 
+# shellcheck source-path=SCRIPTDIR
 set -e
 
 # It takes no arguments, so anything else is refused rather than read as "go": --help used to
@@ -19,6 +20,9 @@ case "${1:-}" in
 esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/arca-kernel-src.sh
+# The tarball's pin lives in rootfs/package-hashes/linux-headers.hash; checked after download and before tar xf.
+. "$SCRIPT_DIR/../lib/arca-kernel-src.sh"
 cd "$SCRIPT_DIR"
 
 KERNEL_VERSION="4.14.52"
@@ -64,6 +68,7 @@ if [ -f "$KERNEL_TARBALL" ]; then
 else
     echo "  Downloading ${KERNEL_URL}..."
     wget -q --show-progress "$KERNEL_URL" -O "$KERNEL_TARBALL"
+    arca_check_kernel_tarball "$KERNEL_TARBALL" || exit 1
     echo "  Download complete."
 fi
 
@@ -74,6 +79,7 @@ if [ -d "$KERNEL_DIR" ]; then
     echo "  Source directory already exists, skipping extraction."
 else
     echo "  Extracting ${KERNEL_TARBALL}..."
+    arca_check_kernel_tarball "$KERNEL_TARBALL" || exit 1
     tar xf "$KERNEL_TARBALL"
     echo "  Extraction complete."
 fi
