@@ -289,8 +289,7 @@ upgrade or new drivers still ship as an image to flash. Finishing steps, in orde
 
 1. **A downloadable image:** compressed with a checksum on a release page, flashable with any card writer. D18's source
    offer is a prerequisite for publishing it.
-2. **The first boot grows the card:** the image is minimal, and the first boot extends the last partition (p3, the mounted rootfs) plus its filesystem to the end of the card, for example with sfdisk and online resize2fs, as the
-   Raspberry Pi image does. Offline `resize2fs` 512 MiB to 30 GiB is measured clean; an online grow of the mounted root is **[unverified]**, and so is whether `resize2fs`/`sfdisk` are in our rootfs.
+2. **The first boot grows the card:** built as `growroot` (`rootfs/board/arca/overlay/etc/init.d/growroot`, host test `tests/arca_growroot_test.sh`); the online grow ran clean on `.188` by hand. **Open:** one real first boot from a freshly flashed card, which also times the grow at its largest (an 8 GB card took 17 s; a 32 GB one is unmeasured).
 3. **What an image ships:** no secrets and no copyrighted data (the existing rule). It runs as root, as the vendor
    system did. Operator 2026-10-12: SSH needs no image change, only a README paragraph: set a root password, allow
    password login, copy a public key, then switch to key-only. Where a user first sets that password is **[unverified]**.

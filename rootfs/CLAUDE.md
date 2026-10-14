@@ -23,7 +23,7 @@ Everything that builds the **root filesystem we boot instead of the vendor's Yoc
   `uImage-fallback` (a second copy of the same kernel) and `uEnv.txt`. Inputs are `--mlo`/`--uboot` (from `uboot/build.sh`) and `--kernel`
   (from `kernel/build-image.sh`): `SYSTEM_ANALYSIS.md#4-boot-chain-and-recovery`. Recovery is "reimage the card".
 - **Our links:** `rcS.d` `S01mountall` `S01seedrng` `S02alignment` `S03udev` `S04hostname` `S05sysctl`
-  `S04firstboot-hostname` `S06watchdog` `S07syslog` `S08networking`; `rc5.d` `S02dbus-1` `S09sshd` `S20hwclock.sh` `S30avahi-daemon`
+  `S04firstboot-hostname` `S06watchdog` `S07growroot` `S07syslog` `S08networking`; `rc5.d` `S02dbus-1` `S09sshd` `S20hwclock.sh` `S30avahi-daemon`
   (all linked by `rootfs/board/arca/post-build.sh`). `/usr/sbin/set-hostname` is `commissioning/set-hostname.sh` installed under a
   command name by the same script. **sshd generates an ed25519 host key only** (`overlay/etc/init.d/sshd`; `post-build.sh` removes the
   RSA key and links ed25519 into `/home/root/data/ssh`, on p3): measured on `.188`, `ssh-keyscan` offers only `ssh-ed25519`, and the first-boot generation took

@@ -1,0 +1,103 @@
+#!/bin/sh
+# First boot of a generic image: grow the root (p3, the last partition) and its ext4 filesystem to
+# the end of the card. The image is minimal; a bigger card is claimed here, once, online.
+# Every boot reads the sizes and does nothing when p3 already ends at the card's end and the
+# filesystem fills p3, so an interrupted run is finished by the next boot.
+# Order: the new size is told to the kernel first (resizepart) and written to the MBR second, so
+# a failure between the two leaves the old table, and the next boot repeats both. The filesystem
+# is grown last, from its own superblock, so it is finished even when the table is already done.
+# It refuses, with one line, anything that is not the layout of rootfs/make-card-image.sh: root=
+# not p3, a partition after p3, an MBR entry that disagrees with sysfs. It never fails the boot.
+# The ARCA_* variables point the script at a fixture for the host test; on the unit they are unset.
+DISK=${ARCA_DISK:-mmcblk0}
+SYS=${ARCA_SYS:-/sys/block}
+DEVDIR=${ARCA_DEVDIR:-/dev}
+CMDLINE=${ARCA_CMDLINE:-/proc/cmdline}
+RESIZEPART=${ARCA_RESIZEPART:-resizepart}
+RESIZE2FS=${ARCA_RESIZE2FS:-resize2fs}
+PART=3
+ENTRY=$((446 + 16 * (PART - 1)))   # byte offset of p3's MBR entry
+MIN_GAP=2048                       # sectors (1 MiB) below which the tail is not worth a write
+MAX_SECTORS=4294967295             # the MBR size field is 32 bits
+
+# le32 <file> <offset>: the little-endian 32-bit value there, or nothing and failure
+le32() {
+    # shellcheck disable=SC2046  # the four od fields are meant to split
+    set -- $(dd if="$1" bs=1 skip="$2" count=4 2> /dev/null | od -An -tu1)
+    [ $# -eq 4 ] || return 1
+    echo $(($1 + ($2 << 8) + ($3 << 16) + ($4 << 24)))
+}
+# sys_num <name>: a number from sysfs
+sys_num() { cat "$SYS/$DISK/$1" 2> /dev/null; }
+
+grow() {
+    dev=$DEVDIR/$DISK
+    pdev=$DEVDIR/${DISK}p$PART
+    disk=$(sys_num size)
+    pstart=$(sys_num "${DISK}p$PART/start")
+    psize=$(sys_num "${DISK}p$PART/size")
+    if [ -z "$disk" ] || [ -z "$pstart" ] || [ -z "$psize" ]; then
+        echo "growroot: no $DISK p$PART in sysfs, leaving the card alone" >&2
+        return 0
+    fi
+    # Stage 1: the partition table.
+    new=$((disk - pstart))
+    [ "$new" -gt $((MAX_SECTORS - pstart)) ] && new=$((MAX_SECTORS - pstart))
+    if [ $((new - psize)) -ge "$MIN_GAP" ]; then
+        if ! grep -qE "root=/dev/${DISK}p$PART( |\$)" "$CMDLINE" 2> /dev/null; then
+            echo "growroot: root is not p$PART, leaving the card alone" >&2
+            return 0
+        fi
+        for p in "$SYS/$DISK/${DISK}p"*; do
+            n=${p##*/${DISK}p}
+            [ "$n" = "$PART" ] && continue
+            s=$(cat "$p/start" 2> /dev/null)
+            if [ -z "$s" ] || [ "$s" -ge "$pstart" ]; then
+                echo "growroot: partition $n is not before p$PART, leaving the card alone" >&2
+                return 0
+            fi
+        done
+        sig=$(le32 "$dev" 508)   # its top half is the 55AA signature, 0xAA55 read little-endian
+        mstart=$(le32 "$dev" $((ENTRY + 8)))
+        msize=$(le32 "$dev" $((ENTRY + 12)))
+        if [ $((${sig:-0} >> 16)) -ne 43605 ] || [ "$mstart" != "$pstart" ] || [ "$msize" != "$psize" ]; then
+            echo "growroot: the MBR entry does not match sysfs, leaving the card alone" >&2
+            return 0
+        fi
+        echo "growroot: extending p$PART from $((psize / 2048)) to $((new / 2048)) MiB"
+        if ! "$RESIZEPART" "$dev" "$PART" "$new" > /dev/null 2>&1; then
+            echo "growroot: resizepart failed, the table is unchanged" >&2
+            return 0
+        fi
+        # Four size bytes, written as octal escapes: every shell printf takes those.
+        b0=$((new & 255)); b1=$(((new >> 8) & 255)); b2=$(((new >> 16) & 255)); b3=$(((new >> 24) & 255))
+        # shellcheck disable=SC2059  # the escapes are the format
+        printf "$(printf '\\%03o\\%03o\\%03o\\%03o' $b0 $b1 $b2 $b3)" |
+            dd of="$dev" bs=1 seek=$((ENTRY + 12)) conv=notrunc 2> /dev/null
+        if [ "$(le32 "$dev" $((ENTRY + 12)))" != "$new" ]; then
+            echo "growroot: the MBR write did not take, the table may be inconsistent" >&2
+            return 0
+        fi
+        psize=$new
+    fi
+    # Stage 2: the filesystem, from the size its own superblock records.
+    blocks=$(le32 "$pdev" 1028)
+    lsz=$(le32 "$pdev" 1048)
+    if [ -z "$blocks" ] || [ -z "$lsz" ] || [ "$lsz" -gt 6 ]; then
+        echo "growroot: p$PART has no readable ext superblock, leaving the filesystem alone" >&2
+        return 0
+    fi
+    fs=$((blocks << (lsz + 1)))   # 1 KiB << lsz is 2 << lsz sectors
+    if [ $((psize - fs)) -ge $((2 << lsz)) ]; then
+        echo "growroot: growing the filesystem from $((fs / 2048)) to $((psize / 2048)) MiB"
+        "$RESIZE2FS" "$pdev" > /dev/null 2>&1 || echo "growroot: resize2fs failed" >&2
+    fi
+    return 0
+}
+
+case "$1" in
+    start) grow ;;
+    stop|restart|reload) ;;
+    *) echo "Usage: $0 {start|stop|restart|reload}" >&2; exit 1 ;;
+esac
+exit 0

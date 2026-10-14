@@ -101,6 +101,7 @@ SUITE_ROWS=(
     "arca_source_offer_test.sh|deploy"
     "arca_kernel_tarball_test.sh|deploy"
     "arca_hostname_test.sh|deploy"
+    "arca_growroot_test.sh|deploy"
     "dump_boot_regs_test.sh|deploy"
     "setup_build_env_test.sh|deploy"
     "smoke_first_screen_test.sh|deploy"

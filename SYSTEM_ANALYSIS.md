@@ -1693,7 +1693,7 @@ SSH host key under `/home/root/data/ssh` kept its fingerprint over two reboots. 
 | p2 | ext4, label `arca-log` | 147456, 2097152 sectors = 1 GiB, fixed | `/home/root/log` | System logs |
 | p3 | ext4, label `arca-root` | 2244608, 1048576 sectors = 512 MiB, **last so it can grow** | `/` | Root filesystem; 193,880 KiB used with the full bundle. `/home/root/data` is a **plain directory on it**: settings, scores, calibration, the SSH host key and ScummVM saves live here, so a reflash wipes them (`backup.sh`/`restore.sh` are the only protection) |
 
-`resize2fs` offline from 512 MiB to 30 GiB ran clean (measured); an online grow of a mounted root is `[unverified]`. `commissioning/clone-to-32gb.sh` grows p3 to the end of the card.
+`resize2fs` offline from 512 MiB to 30 GiB ran clean (measured); an online grow of the mounted root ran clean on `.188` (`[n=1]`, 512 MiB to 6520 MiB in 17 s, no reboot; kernel log "resized filesystem to 1669120"). `rootfs/board/arca/overlay/etc/init.d/growroot` (`S07growroot`) does it at every boot when p3 has a tail: `resizepart` for the kernel, the four size bytes of the MBR entry, then `resize2fs`; whether a freshly flashed card does it at first boot is `[unverified]`. `commissioning/clone-to-32gb.sh` grows p3 offline.
 U-Boot's built-in root is `/dev/mmcblk0p3` (`uboot/rw20-board.patch`); `make-card-image.sh` refuses an older `u-boot.img` (`root=` p6) via `arca_uboot_root_ok`.
 
 **The vendor's card** (measured on RW09 and a second unit):

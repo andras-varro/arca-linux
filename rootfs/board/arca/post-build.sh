@@ -40,6 +40,8 @@ link rcS.d S04firstboot-hostname firstboot-hostname
 link rcS.d S04hostname    hostname
 link rcS.d S05sysctl      sysctl
 link rcS.d S06watchdog    watchdog
+# Once, on the first boot of a bigger card; after the watchdog is being fed, because a large resize can run for minutes.
+link rcS.d S07growroot    growroot
 link rcS.d S07syslog      syslog
 link rcS.d S08networking  networking
 link rc5.d S02dbus-1      dbus-1
