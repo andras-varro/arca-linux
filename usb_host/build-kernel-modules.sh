@@ -49,7 +49,7 @@ if ! command -v bc &>/dev/null; then
 fi
 if [ ! -f "$DEVICE_CONFIG" ]; then
     echo "ERROR: Device config not found at ${DEVICE_CONFIG}"
-    echo "  Copy it from the device: scp root@192.168.50.73:/proc/config.gz device_config.gz"
+    echo "  It is tracked in git: git checkout -- usb_host/device_config. To replace it from a unit: scp root@192.168.50.73:/proc/config.gz device_config.gz"
     echo "  Then: gunzip device_config.gz"
     exit 1
 fi

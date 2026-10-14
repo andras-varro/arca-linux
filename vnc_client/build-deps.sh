@@ -34,6 +34,17 @@ mkdir -p "${DEPS_DIR}"/{lib,include}
 mkdir -p "${BUILD_DIR}"
 mkdir -p "${SRC_DIR}"
 
+# sha256 of each tarball this script builds. A cached or downloaded file that differs is
+# refused: the source offered with a card image is the source that was compiled.
+pinned_sha256() {
+    case "$1" in
+        zlib-1.2.13.tar.gz)             echo "b3a24de97a8fdbc835b9833169501030b8977031bcb54b3b3ac13740f846ab30" ;;
+        libjpeg-turbo-2.1.5.1.tar.gz)   echo "2fdc3feb6e9deb17adec9bafa3321419aa19f8f4e5dea7bf8486844ca22207bf" ;;
+        LibVNCServer-0.9.14.tar.gz)     echo "83104e4f7e28b02f8bf6b010d69b626fae591f887e949816305daebae527c9a5" ;;
+        *) return 1 ;;
+    esac
+}
+
 # Function to download and extract
 download_and_extract() {
     local name=$1
@@ -52,6 +63,16 @@ download_and_extract() {
         echo "Already downloaded: ${filename}"
     fi
     
+    local want
+    want="$(pinned_sha256 "${filename}")" || {
+        echo -e "${RED}No pinned sha256 for ${filename}${NC}"
+        return 1
+    }
+    echo "${want}  ${filename}" | sha256sum -c - >/dev/null || {
+        echo -e "${RED}${filename} does not match its pinned sha256${NC}"
+        return 1
+    }
+
     echo "Extracting ${filename}..."
     tar -xf "${filename}"
 }

@@ -80,10 +80,10 @@ if [ "$missing" -ne 0 ]; then
     exit 1
 fi
 [ -f "$KERNEL_TARBALL" ] || { echo "ERROR: ${KERNEL_TARBALL} not found."; exit 1; }
-# gitignored, so a fresh clone lacks it: it comes off a unit.
+# tracked in git (the unit's own /proc/config.gz), so only a damaged checkout lacks it.
 if [ ! -f "$DEVICE_CONFIG" ]; then
-    echo "ERROR: ${DEVICE_CONFIG} not found (gitignored; it is the unit's own /proc/config.gz)."
-    echo "  In usb_host/: scp root@<ip>:/proc/config.gz device_config.gz && gunzip device_config.gz"
+    echo "ERROR: ${DEVICE_CONFIG} not found (it is tracked in git: git checkout -- usb_host/device_config)."
+    echo "  To replace it from a unit, in usb_host/: scp root@<ip>:/proc/config.gz device_config.gz && gunzip device_config.gz"
     exit 1
 fi
 [ "$DTB_MODE" = file ] || [ -f "$DTS_SOURCE" ] || { echo "ERROR: ${DTS_SOURCE} not found."; exit 1; }

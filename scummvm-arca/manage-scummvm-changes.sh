@@ -222,9 +222,12 @@ update_upstream() {
     echo "Stashing local changes..."
     git stash push -m "Arca changes - $(date +%Y%m%d-%H%M%S)"
     
-    # Pull from upstream
-    echo "Pulling from upstream..."
-    git pull origin branch-2-8
+    # Move the tree to the commit pinned in upstream-commit (the build refuses any other).
+    echo "Checking out the pinned upstream commit..."
+    PIN="$(sed -n 's/^\([0-9a-f]\{40\}\)$/\1/p' "$SCRIPT_DIR/upstream-commit" | head -n 1)"
+    [ -n "$PIN" ] || { echo "no 40-hex commit in upstream-commit"; exit 1; }
+    git fetch origin branch-2-8
+    git checkout --detach "$PIN"
     
     # Restore changes
     echo "Restoring local changes..."
@@ -308,13 +311,13 @@ case "${1:-}" in
         echo "  restore        - Restore backend files FROM version control (recommended)"
         echo "  backup         - Create legacy tar.gz backup (old method)"
         echo "  backup-restore - Restore from legacy tar.gz backup (old method)"
-        echo "  update         - Update from upstream (pulls and syncs changes)"
+        echo "  update         - Move the tree to the commit pinned in upstream-commit (and sync)"
         echo "  setup          - Setup git ignore configuration (run once)"
         echo "  reset          - Reset skip-worktree for configure file"
         echo ""
         echo "Recommended workflow:"
         echo "  $0 sync     # Sync your changes to version control"
-        echo "  $0 update   # Pull latest ScummVM updates"
+        echo "  $0 update   # Check out the pinned ScummVM commit"
         echo "  $0 restore  # Restore your backend files after update"
         echo ""
         echo "Legacy workflow (tar.gz):"

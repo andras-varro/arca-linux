@@ -14,6 +14,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 UBOOT_TAG="v2026.10"
+# The commit the tag must point at: a tag can be moved, and the source offer ships this one.
+UBOOT_COMMIT="5508406582f6f7120dce0c4b3059819a41788db2"
 UBOOT_URL="https://source.denx.de/u-boot/u-boot.git"
 PATCH="${SCRIPT_DIR}/rw20-board.patch"
 DEFCONFIG="rw20_defconfig"
@@ -74,6 +76,8 @@ if [ -z "$SRC_REPO" ]; then
 fi
 git -C "$SRC_REPO" rev-parse -q --verify "refs/tags/${UBOOT_TAG}^{commit}" >/dev/null \
     || die "no tag ${UBOOT_TAG} in ${SRC_REPO}"
+[ "$(git -C "$SRC_REPO" rev-parse "refs/tags/${UBOOT_TAG}^{commit}")" = "$UBOOT_COMMIT" ] \
+    || die "tag ${UBOOT_TAG} in ${SRC_REPO} is not commit ${UBOOT_COMMIT}"
 
 TREE="${WORK_DIR}/u-boot"
 BUILD="${WORK_DIR}/build"

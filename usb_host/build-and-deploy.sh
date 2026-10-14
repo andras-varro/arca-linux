@@ -172,11 +172,10 @@ else
     if [[ ! -f "$SCRIPT_DIR/device_config" ]]; then
         if [[ -z "$DEVICE_IP" ]]; then
             err "the modules are not built and usb_host/device_config is absent, so
-     build-kernel-modules.sh has no kernel config to build against — and with no
-     <ip> there is no device to read one from. Get it from any unit once:
-       ssh root@<ip> cat /proc/config.gz | gunzip > usb_host/device_config
-     Then re-run. (device_config and modules/ are gitignored: they are
-     cross-compilation artifacts, not sources.)"
+     build-kernel-modules.sh has no kernel config to build against. The file is
+     tracked in git; restore it with:  git checkout -- usb_host/device_config
+     (or, with a unit at hand: ssh root@<ip> cat /proc/config.gz | gunzip > usb_host/device_config).
+     modules/ is a gitignored cross-compilation artifact, not a source."
         fi
         info "fetching /proc/config.gz from the device..."
         ssh "$DEVICE" "cat /proc/config.gz" > "$SCRIPT_DIR/device_config.gz"

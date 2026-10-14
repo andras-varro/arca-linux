@@ -173,9 +173,14 @@ build_arm_deps() {
         cd "$BUILD_DIR" || { log_error "Failed to cd into $BUILD_DIR"; cd "$ORIG_DIR"; exit 1; }
 
         log_info "Downloading zlib..."
-        wget -L --no-check-certificate -O zlib-1.3.1.tar.gz \
+        wget -O zlib-1.3.1.tar.gz \
             "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz" || {
             log_error "Failed to download zlib (tried GitHub mirror)"
+            rm -rf "$BUILD_DIR"
+            cd "$ORIG_DIR"; exit 1
+        }
+        echo "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23  zlib-1.3.1.tar.gz" | sha256sum -c - || {
+            log_error "zlib-1.3.1.tar.gz does not match its pinned sha256"
             rm -rf "$BUILD_DIR"
             cd "$ORIG_DIR"; exit 1
         }
@@ -212,9 +217,14 @@ build_arm_deps() {
         cd "$BUILD_DIR" || { log_error "Failed to cd into $BUILD_DIR"; cd "$ORIG_DIR"; exit 1; }
 
         log_info "Downloading libpng..."
-        wget -L --no-check-certificate -O libpng-1.6.43.tar.gz \
+        wget -O libpng-1.6.43.tar.gz \
             "https://github.com/pnggroup/libpng/archive/refs/tags/v1.6.43.tar.gz" || {
             log_error "Failed to download libpng"
+            rm -rf "$BUILD_DIR"
+            cd "$ORIG_DIR"; exit 1
+        }
+        echo "fecc95b46cf05e8e3fc8a414750e0ba5aad00d89e9fdf175e94ff041caf1a03a  libpng-1.6.43.tar.gz" | sha256sum -c - || {
+            log_error "libpng-1.6.43.tar.gz does not match its pinned sha256"
             rm -rf "$BUILD_DIR"
             cd "$ORIG_DIR"; exit 1
         }
@@ -298,11 +308,28 @@ check_prerequisites() {
         log_error "ScummVM directory not found: $SCUMMVM_DIR"
         echo ""
         echo "The upstream tree is gitignored, so a fresh clone has none. One installer"
-        echo "clones it, checks out branch-2-8 and restores our backend:"
+        echo "clones it, checks out the pinned commit (scummvm-arca/upstream-commit) and restores our backend:"
         echo "  ./setup-build-env.sh --scummvm        (from the repo root)"
         exit 1
     fi
     
+    # The tree must be the commit the source offer names. branch-2-8 moves, and a binary
+    # built from a later tip could not be matched to any source we ship.
+    PIN_FILE="$SCRIPT_DIR/upstream-commit"
+    PIN="$(sed -n 's/^\([0-9a-f]\{40\}\)$/\1/p' "$PIN_FILE" 2>/dev/null | head -n 1)"
+    if [ -z "$PIN" ]; then
+        log_error "no 40-hex commit in $PIN_FILE"
+        exit 1
+    fi
+    HEAD_NOW="$(git -C "$SCUMMVM_DIR" rev-parse HEAD 2>/dev/null || true)"
+    if [ "$HEAD_NOW" != "$PIN" ]; then
+        log_error "ScummVM tree is at ${HEAD_NOW:-<not a git tree>}, not the pinned $PIN"
+        echo "Check out the pin and restore our backend:"
+        echo "  git -C scummvm checkout --detach $PIN && bash scummvm-arca/manage-scummvm-changes.sh restore"
+        echo "(or change scummvm-arca/upstream-commit if you mean to move the pin)"
+        exit 1
+    fi
+
     # Check if backend files are synced
     if [ ! -f "$SCUMMVM_DIR/backends/platform/arca/arca.cpp" ]; then
         log_error "Arca backend files not found in ScummVM directory!"

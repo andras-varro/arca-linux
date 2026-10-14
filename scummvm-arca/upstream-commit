@@ -1,0 +1,5 @@
+# The upstream ScummVM commit the binary is built from (branch-2-8 at the time of the pin).
+# setup-build-env.sh --scummvm checks it out; scummvm-arca/build-and-deploy.sh refuses any
+# other HEAD, so the source offered with a card image is the source that was compiled.
+# To move it: change the hash below, then run scummvm-arca/manage-scummvm-changes.sh update.
+eaccc4614e88476f73293dd3ad033ffc76c37ab8

@@ -29,7 +29,8 @@ Usage: rootfs/build-rootfs.sh [--help]
 
 Download Buildroot (pinned version, sha256-checked) into ~/br-dl, extract it to
 ~/br-src, build arca_defconfig out of tree in ~/br-rw with this directory as
-BR2_EXTERNAL, and copy the result to ~/br-rw-out/rootfs.tar.
+BR2_EXTERNAL, and copy the result to ~/br-rw-out/rootfs.tar. It then runs make legal-info
+(the licence and source tree make-source-offer.sh reads) and fails if that fails.
 
 Re-running is incremental: the download, the extraction and the build tree are reused.
 USAGE
@@ -83,3 +84,13 @@ ls -l "${OUT_DIR}/rootfs.tar"
 
 # A tarball that lacks the boot-critical files is a failed build, whatever make said.
 "${SCRIPT_DIR}/check-rootfs.sh" "${OUT_DIR}/rootfs.tar"
+
+# The source offer (make-source-offer.sh) needs Buildroot's legal-info tree. It aborts on a
+# package whose licence-file hash is wrong, which no build step notices, so a rootfs that
+# builds but cannot be offered with its source must fail here and not at release time.
+# BR2_EXTERNAL is already stored in the build tree by the defconfig step above.
+if ! make O="$BUILD_DIR" BR2_DL_DIR="$DL_DIR" legal-info; then
+    echo "make legal-info failed: the source offer cannot be produced from this build" >&2
+    exit 1
+fi
+echo "legal-info: ${BUILD_DIR}/legal-info"

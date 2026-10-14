@@ -43,7 +43,7 @@ of these tools is absent and the report would be about the shell, not the host.
   (no flags)       Probe and report. Offers to install only if stdin is a TTY.
   --install-deps   Install without asking. For scripted use, or a fresh clone.
   --scummvm        Also set up the upstream ScummVM tree, which is not an apt
-                   package: clone it, check out branch-2-8, and restore our
+                   package: clone it, check out the commit pinned in scummvm-arca/upstream-commit, and restore our
                    backend files. Needed only to build scummvm-arca.
   --group <g>      Probe only these groups; repeatable. Default: all four.
                      core    every component needs these
@@ -294,11 +294,16 @@ setup_scummvm() {
             || { miss "clone failed"; return 1; }
     fi
 
-    if [ "$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)" != "branch-2-8" ]; then
-        info "git checkout branch-2-8"
-        git -C "$dir" checkout branch-2-8 || { miss "checkout branch-2-8 failed"; return 1; }
+    # The commit is data in one file, shared with scummvm-arca/build-and-deploy.sh, which
+    # refuses any other HEAD: the source offered with a card image must be what was built.
+    local pin
+    pin="$(sed -n 's/^\([0-9a-f]\{40\}\)$/\1/p' "$REPO/scummvm-arca/upstream-commit" 2>/dev/null | head -n 1)"
+    [ -n "$pin" ] || { miss "no 40-hex commit in scummvm-arca/upstream-commit"; return 1; }
+    if [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" != "$pin" ]; then
+        info "git checkout --detach $pin"
+        git -C "$dir" checkout --detach "$pin" || { miss "checkout of the pinned commit failed"; return 1; }
     fi
-    ok "on branch-2-8 at $(git -C "$dir" rev-parse --short HEAD 2>/dev/null || echo '?')"
+    ok "at the pinned commit $(git -C "$dir" rev-parse --short HEAD 2>/dev/null || echo '?')"
 
     # Our backend is not in upstream. `restore` copies backend-files/ into the tree and
     # sets the skip-worktree bits that keep our edits out of upstream's git status.

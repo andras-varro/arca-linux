@@ -1,0 +1,4 @@
+# The kernel headers are the 4.14.52 tree, not the 6.x tree the stock hash file describes.
+# Licence file hash: COPYING of linux-4.14.52. Source hash: kernel.org sha256sums.asc.
+sha256  a5d226c7b2fd1eb0f01d56e4e2c6a0100784b68df907cc7317f32bde34f88810  linux-4.14.52.tar.xz
+sha256  af8067302947c01fd9eee72befa54c7e3ef8a48fecde7fd71277f2290b2bf0f7  COPYING

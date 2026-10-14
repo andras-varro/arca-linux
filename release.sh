@@ -88,9 +88,8 @@ err()  { echo -e "${RED}  ✗ $*${NC}" >&2; exit 1; }
 # the app_launcher every other component's tile is reached through.
 #
 # usb_host is here as of 2026-08-08. Its --bundle needs
-# usb_host/device_config and usb_host/modules/*.ko, both gitignored build
-# artifacts; on a fresh clone it refuses with the one command that fetches the
-# config from any unit.
+# usb_host/modules/*.ko, a gitignored build artifact (usb_host/device_config, the
+# base kernel config, is tracked); on a fresh clone it builds them from the tracked config.
 RELEASE_COMPONENTS=(native_apps vnc_client scummvm-arca usb_host bluetooth)
 
 usage() {

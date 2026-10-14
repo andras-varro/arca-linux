@@ -1,0 +1,21 @@
+# glob (against the path inside the image, no leading ./)<TAB>component in SOURCES.csv
+# The programs on a card image that Buildroot did not install. rootfs/check-source-offer.sh
+# fails any program on the image that matches neither this table nor Buildroot's own
+# packages-file-list.txt, so a new binary needs a row here (or a line in the build that
+# makes Buildroot install it).
+p1/MLO	u-boot
+p1/u-boot.img	u-boot
+p1/uImage-*	linux
+p1/uEnv.txt	arca
+*.ko	linux
+*/bluetoothd	bluez
+*/bluetoothctl	bluez
+*/btmon	bluez
+*/libbluetooth.so*	bluez
+*/bluealsa*	bluez-alsa
+*/vnc_client	libvncserver
+*/devmem_write	glibc-host
+*/scummvm	scummvm
+*/libasound_module_*_bluealsa.so	bluez-alsa
+opt/*/*	arca
+usr/local/bin/*	arca
