@@ -7,6 +7,7 @@
 #   ./release.sh --stage-only [--out <dir>]        # build + stage + tar, no network
 #   ./release.sh --tag <tag>  [--out <dir>]        # the above, then gh release create
 #   ./release.sh --stage-only --component native_apps
+#   ./release.sh --tag <tag> --source-offer [--image <card image>]...
 #   ./release.sh --help
 #
 # ── Why this exists ─────────────────────────────────────────────────────────
@@ -41,6 +42,19 @@
 # Everything it installs is on p6: its build artifacts are bundled like any
 # others, and its device scripts are device-files/provision-rules.conf's `usb`
 # group.  No installer writes p1.
+#
+# ── The source offer, and the card image ────────────────────────────────────
+#
+# --source-offer runs rootfs/make-source-offer.sh under the release's own tag and attaches
+# the file it writes (<stem>-source-<tag>.tar, and its .sha256) to the release, next to the
+# bundle: the GPLv2 section 3(a) source for the card image, offered from the same place and
+# under the same tag. --image <file> attaches a card image (repeatable) and records its md5
+# in the offer; an image is refused without --source-offer, because it would be published
+# without its source. NOTICE names the file only when --source-offer is given, so it never
+# offers a file that is not in the release. The offer is assembled before the first
+# component builds: it needs only caches and the git tree, and a missing cache then costs
+# seconds instead of a four-component cross-build. With --stage-only nothing is published,
+# so the offer is a development build (make-source-offer.sh --allow-dev).
 
 #
 # ── Not byte-reproducible ───────────────────────────────────────────────────
@@ -93,8 +107,8 @@ err()  { echo -e "${RED}  ✗ $*${NC}" >&2; exit 1; }
 RELEASE_COMPONENTS=(native_apps vnc_client scummvm-arca usb_host bluetooth)
 
 usage() {
-    echo "Usage: $0 --stage-only [--out <dir>] [--component <name>]..."
-    echo "       $0 --tag <tag>  [--out <dir>] [--component <name>]..."
+    echo "Usage: $0 --stage-only [--out <dir>] [--component <name>]... [--source-offer]"
+    echo "       $0 --tag <tag>  [--out <dir>] [--component <name>]... [--source-offer [--image <file>]...]"
     echo ""
     echo "  --stage-only      Build, stage and tar. No network, no gh."
     echo "  --skip-tests      Stage without running the host gate first. The"
@@ -105,6 +119,13 @@ usage() {
     echo "  --component <n>   Only this component; repeatable. Default: all of"
     echo "                    ${RELEASE_COMPONENTS[*]}"
     echo "  --notes <file>    Release notes for gh (default: generated)."
+    echo "  --source-offer    Also write the corresponding source of the card image"
+    echo "                    (rootfs/make-source-offer.sh, under the same tag) and attach"
+    echo "                    it to the release. Needs the caches that script reads."
+    echo "  --source-out <d>  Where the source file is written (default:"
+    echo "                    ~/${PRODUCT_STEM}-source-out); must be outside this repository."
+    echo "  --image <file>    Attach a card image to the release; repeatable. Its md5 is"
+    echo "                    recorded in the source file. Needs --source-offer."
     echo ""
     echo "Components: ${RELEASE_COMPONENTS[*]}"
     exit 1
@@ -116,11 +137,18 @@ STAGE_ONLY=0
 SKIP_TESTS=0
 NOTES_FILE=""
 COMPONENTS=()
+SOURCE_OFFER=0
+SOURCE_OUT="${HOME}/${PRODUCT_STEM}-source-out"
+IMAGES=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --stage-only) STAGE_ONLY=1; shift ;;
         --skip-tests) SKIP_TESTS=1; shift ;;
+        --source-offer) SOURCE_OFFER=1; shift ;;
+        --source-out) SOURCE_OUT="${2:-}"; [[ -n "$SOURCE_OUT" ]] || { echo "--source-out needs a value"; usage; }; shift 2 ;;
+        --image)      [[ -n "${2:-}" && -f "$2" ]] || { echo "no such image file: ${2:-}"; usage; }
+                      IMAGES+=("$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"); shift 2 ;;
         --tag)        TAG="${2:-}";  [[ -n "$TAG" ]]  || { echo "--tag needs a value"; usage; }; shift 2 ;;
         --out)        OUT="${2:-}";  [[ -n "$OUT" ]]  || { echo "--out needs a value"; usage; }; shift 2 ;;
         --notes)      NOTES_FILE="${2:-}"; [[ -f "$NOTES_FILE" ]] || { echo "no such notes file: ${2:-}"; usage; }; shift 2 ;;
@@ -147,6 +175,20 @@ if [[ $STAGE_ONLY -eq 0 && -z "$TAG" ]]; then
 fi
 if [[ $STAGE_ONLY -eq 1 && -n "$TAG" ]]; then
     err "--stage-only and --tag are mutually exclusive"
+fi
+if [[ ${#IMAGES[@]} -gt 0 && $SOURCE_OFFER -eq 0 ]]; then
+    err "--image needs --source-offer: a card image is not published without its source."
+fi
+if [[ $SOURCE_OFFER -eq 1 ]]; then
+    [[ -f "$SCRIPT_DIR/rootfs/make-source-offer.sh" ]] \
+        || err "rootfs/make-source-offer.sh not found — --source-offer cannot run"
+    # The same refusal make-source-offer.sh makes, hoisted: it would otherwise come after
+    # the host gate. The offer is ~0.7 GB and group D of doc_check counts what is in the tree.
+    SOURCE_OUT_PARENT="$(cd "$(dirname "$SOURCE_OUT")" 2>/dev/null && pwd -P)" \
+        || err "the parent of --source-out ($SOURCE_OUT) does not exist"
+    case "$SOURCE_OUT_PARENT/$(basename "$SOURCE_OUT")/" in
+        "$(pwd -P)"/*) err "--source-out is inside the repository ($SOURCE_OUT): choose a directory outside it" ;;
+    esac
 fi
 
 echo ""
@@ -181,6 +223,11 @@ if ! git -C "$SCRIPT_DIR" diff --quiet 2>/dev/null \
     GIT_DIRTY=" (dirty)"
 fi
 
+# One name for the release's tag, used by the bundle tarball, NOTICE and the source file, so
+# that they cannot disagree: without --tag it is the date, as the tarball always was.
+RELEASE_TAG="${TAG:-$(date -u '+%Y%m%d')}"
+# make-source-offer.sh appends -dev to a development build, which is what a dirty tree is.
+SOURCE_FILE="${PRODUCT_STEM}-source-${RELEASE_TAG}${GIT_DIRTY:+-dev}.tar"
 # ── publish preflight ───────────────────────────────────────────────────────
 # Every refusal `--tag` can raise from LOCAL state is raised here, before the first
 # component builds.  These checks used to sit after the tarball, so `--tag` on a
@@ -306,6 +353,28 @@ else
     esac
 fi
 
+# ── the source offer, before the long build ─────────────────────────────────
+# It reads caches and the git tree, never a build output of this run, so it can come first:
+# a missing cache or a refusal then costs seconds, not a four-component cross-build. The tag
+# is the release's own, and make-source-offer.sh enforces the rest of the preflight (clean
+# tree, commit on a remote branch). --stage-only publishes nothing, so there it is a
+# development build.
+SOURCE_ARGS=()
+if [[ $SOURCE_OFFER -eq 1 ]]; then
+    echo ""
+    echo "────────────────────────────────────────"
+    echo " Source offer"
+    echo "────────────────────────────────────────"
+    SOURCE_ARGS=(--tag "$RELEASE_TAG" --out "$SOURCE_OUT")
+    [[ $STAGE_ONLY -eq 0 ]] || SOURCE_ARGS+=(--allow-dev)
+    for img in "${IMAGES[@]}"; do SOURCE_ARGS+=(--image "$img"); done
+    bash "$SCRIPT_DIR/rootfs/make-source-offer.sh" "${SOURCE_ARGS[@]}" \
+        || err "rootfs/make-source-offer.sh failed — nothing was built"
+    [[ -s "$SOURCE_OUT/$SOURCE_FILE" && -s "$SOURCE_OUT/$SOURCE_FILE.sha256" ]] \
+        || err "make-source-offer.sh succeeded but $SOURCE_OUT/$SOURCE_FILE (and .sha256) is not there"
+    ok "Source: $SOURCE_OUT/$SOURCE_FILE"
+fi
+
 for comp in "${COMPONENTS[@]}"; do
     echo ""
     echo "────────────────────────────────────────"
@@ -355,7 +424,10 @@ arca_bundle_add  "$OUT_ABS" "$ARCA_BUNDLE_META_COMPONENT" 0644 \
 arca_bundle_finish "$OUT_ABS" "$ARCA_BUNDLE_META_COMPONENT" >/dev/null
 
 # ── NOTICE: the two licence obligations a published bundle carries ──────────
-cat > "$OUT_ABS/NOTICE" <<'NOTICE'
+# Three pieces: the opening, the source offer (which depends on --source-offer: NOTICE must
+# not offer a file the release does not carry), and the per-component sections.
+{
+cat <<'NOTICE'
 @PRODUCT@ app bundle
 =====================
 
@@ -363,6 +435,38 @@ This bundle contains statically linked ARM binaries for @PRODUCT@
 (TI OMAP3503, Cortex-A8, kernel 4.14.52).  It contains NO vendor firmware and NO
 device configuration.
 
+NOTICE
+if [[ $SOURCE_OFFER -eq 1 ]]; then
+cat <<'NOTICE'
+Corresponding source (written offer)
+------------------------------------
+The complete corresponding source of every program in this bundle that is licensed
+under the GNU GPL or LGPL, and of everything else on the @PRODUCT@ card image
+published under the same release tag, is the file
+
+    @SOURCE_FILE@
+
+with its checksum file @SOURCE_FILE@.sha256, attached to the same release as this
+bundle.  It holds the upstream sources at the exact versions built, this project's
+patches and build scripts, and a README-SOURCE.txt that says where the source of each
+program is.  This is a written offer under section 3(a) of the GNU General Public
+License, version 2 (and the matching terms of the LGPL 2.1 and GPL 3), honoured for the
+lifetime of the release.  The per-component offers below name the same sources one by
+one; that file is the one place that holds all of them.
+
+NOTICE
+else
+cat <<'NOTICE'
+Corresponding source
+--------------------
+This bundle was staged without a source file (release.sh was run without
+--source-offer).  The source of the programs in it is the repository this release was
+published from, at the commit named in manifest.d/bundle.info, together with the
+upstream releases named below.
+
+NOTICE
+fi
+cat <<'NOTICE'
 ScummVM
 -------
 The `scummvm` binary is a build of ScummVM, which is licensed under the GNU
@@ -370,8 +474,9 @@ General Public License, version 3 or later.  (Measured, not assumed: the upstrea
 tree's COPYING is GPLv3 and its source headers read "either version 3 of the
 License, or (at your option) any later version".)  The complete corresponding
 source for this binary is the upstream ScummVM tree plus this project's backend
-port in `scummvm-arca/backend-files/`; both are available from the
-repository this release was published from.  Written offers for the source are
+port in `scummvm-arca/backend-files/`; both are in the source file named under
+"Corresponding source" above or, for a bundle staged without one, available from
+the repository this release was published from.  Written offers for the source are
 honoured for the lifetime of the release.
 
 Three data files travel with it and are ALSO GPLv3+, not this project's own:
@@ -487,8 +592,9 @@ a plaintext VNC password.  Create the latter on the device after installing.
 No vendor firmware is published either.  In particular this bundle does NOT
 contain `uImage-system` or any other file from the boot partition.
 NOTICE
-# The name is data (lib/product.sh); the heredoc above is quoted so its backticks stay literal.
-sed -i "s|@PRODUCT@|$PRODUCT_NAME|g" "$OUT_ABS/NOTICE"
+} > "$OUT_ABS/NOTICE"
+# The name is data (lib/product.sh); the heredocs above are quoted so their backticks stay literal.
+sed -i -e "s|@PRODUCT@|$PRODUCT_NAME|g" -e "s|@SOURCE_FILE@|$SOURCE_FILE|g" "$OUT_ABS/NOTICE"
 
 # ── structural + policy checks on what was staged ───────────────────────────
 info "Checking bundle structure..."
@@ -539,7 +645,7 @@ done
 # and so two builds differ only in the artifacts.  Modes inside the tar are NOT
 # the authority — manifest.d/*.list is (see lib/arca-bundle.sh); on /mnt/c every file
 # reads 0777 and the tar would say so.
-TARBALL="$SCRIPT_DIR/build/${PRODUCT_STEM}-apps-${TAG:-$(date -u '+%Y%m%d')}.tar.gz"
+TARBALL="$SCRIPT_DIR/build/${PRODUCT_STEM}-apps-${RELEASE_TAG}.tar.gz"
 mkdir -p "$(dirname "$TARBALL")"
 info "Creating $TARBALL"
 tar -czf "$TARBALL" \
@@ -548,6 +654,7 @@ tar -czf "$TARBALL" \
 ok "Tarball: $(du -h "$TARBALL" | cut -f1)"
 
 md5sum "$TARBALL" | sed 's/^/    /'
+[[ $SOURCE_OFFER -eq 0 ]] || echo "    source: $SOURCE_OUT/$SOURCE_FILE"
 
 # ── publish ─────────────────────────────────────────────────────────────────
 if [[ $STAGE_ONLY -eq 1 ]]; then
@@ -598,14 +705,26 @@ else
             arca_bundle_components "$OUT_ABS" | sed 's/^/- /'
             echo ""
             echo "See NOTICE inside the tarball for licence obligations (ScummVM is GPLv3+)."
+            if [[ $SOURCE_OFFER -eq 1 ]]; then
+                echo ""
+                echo "Corresponding source (GPLv2 section 3(a)): \`$SOURCE_FILE\`, attached to this"
+                echo "release, with its sha256 beside it."
+                for img in "${IMAGES[@]}"; do echo "Card image: \`$(basename "$img")\`"; done
+            fi
         } > "$NOTES_FILE"
+    fi
+
+    ASSETS=("$TARBALL")
+    if [[ $SOURCE_OFFER -eq 1 ]]; then
+        ASSETS+=("$SOURCE_OUT/$SOURCE_FILE" "$SOURCE_OUT/$SOURCE_FILE.sha256")
+        ASSETS+=("${IMAGES[@]}")
     fi
 
     info "gh release create $TAG"
     # --target pins the tag to the commit the binaries were actually built from.
     # Without it gh tags the remote default branch's HEAD, which is a different
     # commit whenever anything landed on main after this build started.
-    gh release create "$TAG" "$TARBALL" \
+    gh release create "$TAG" "${ASSETS[@]}" \
         --repo "$GH_REPO" \
         --target "$GIT_REV_FULL" \
         --title "$PRODUCT_NAME apps $TAG" \

@@ -21,16 +21,24 @@
 #      ELF, a removed row, an unmapped kernel module and an empty tree each fail
 #   E  make-source-offer.sh: --help has no side effect; it refuses with nothing written when
 #      --out is inside the repo, when the tree is dirty, and when HEAD is on no remote branch
+#   F  make-card-image.sh: the licence documents it puts on p6 (LICENSE.md, manifest.csv,
+#      licenses/, SOURCE-OFFER.txt naming the source file), and its refusals
+#      (MCI=<path> grades a sabotaged copy; tests/measure_source_offer_sabotage.sh does)
 #
 # CAN NOT SEE: the real caches, the downloads, or a real card image. The map table is graded
-# against an invented image here; against the real one it was run by hand.
+# against an invented image here; against the real one it was run by hand. Group F cannot see
+# the loop-mounted fill itself (root): F12 reads the call as text, and the step was seen to work
+# on a real image built with --bundle.
 
+# shellcheck source-path=SCRIPTDIR
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CSO="${CSO:-$REPO_DIR/rootfs/check-source-offer.sh}"
 MSO="$REPO_DIR/rootfs/make-source-offer.sh"
+# MCI=<path> runs the card-image cases (group F) against another copy of make-card-image.sh.
+MCI="${MCI:-$REPO_DIR/rootfs/make-card-image.sh}"
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
@@ -172,6 +180,60 @@ if [ "$rc" = 1 ] && grep -q 'not on any remote branch' "$T/out" && [ ! -e "$T/go
 echo "# touched" >>"$T/g/rootfs/make-source-offer.sh"
 "$T/g/rootfs/make-source-offer.sh" --tag t --out "$T/gout" >"$T/out" 2>&1; rc=$?
 if [ "$rc" = 1 ] && grep -q 'uncommitted changes' "$T/out" && [ ! -e "$T/gout" ]; then ok "E6 a dirty tree is refused before anything is written"; else bad "E6 rc $rc, $(cat "$T/out")"; fi
+
+# ── F ───────────────────────────────────────────────────────────────────────
+# make-card-image.sh needs root and a loop device, so the licence step is extracted from the
+# shipped file (MCI=<path> points at another copy) and run on fixture directories; the
+# script's own refusals are driven as a program, because they come before the root check.
+# PRODUCT_NAME / PRODUCT_STEM come from lib/product.sh, as in the script.
+# shellcheck source=../lib/product.sh
+. "$REPO_DIR/lib/product.sh"
+awk '/^licence_docs_install\(\) \{$/{p=1} p{print} p&&/^\}$/{exit}' "$MCI" >"$T/ldi.sh"
+if [ -s "$T/ldi.sh" ]; then ok "F0 licence_docs_install is in make-card-image.sh"; else bad "F0 make-card-image.sh has no licence_docs_install"; : >"$T/ldi.sh"; fi
+# shellcheck source=/dev/null
+. "$T/ldi.sh"
+ldi_run() { rm -rf "$T/p6"; mkdir -p "$T/p6"; licence_docs_install "$T/p6" "$@" >"$T/out" 2>&1; echo $?; }
+mkdir -p "$T/fx/repo" "$T/fx/legal/licenses/foo-1.0"
+echo "licence record" >"$T/fx/repo/LICENSE.md"; chmod 0755 "$T/fx/repo/LICENSE.md"
+printf '"PACKAGE","VERSION"\n"foo","1.0"\n' >"$T/fx/legal/manifest.csv"
+echo "GPL text" >"$T/fx/legal/licenses/foo-1.0/COPYING"; chmod 0755 "$T/fx/legal/licenses/foo-1.0/COPYING"
+D="$T/p6/usr/share/doc/arca-licenses"
+if [ "$(declare -F licence_docs_install >/dev/null && ldi_run "$T/fx/repo" "$T/fx/legal" v1.0 https://example.invalid/rel/v1.0)" = 0 ] \
+   && [ -f "$D/LICENSE.md" ] && [ -f "$D/manifest.csv" ] && [ "$(cat "$D/licenses/foo-1.0/COPYING" 2>/dev/null)" = "GPL text" ]; then
+    ok "F1 LICENSE.md, manifest.csv and licenses/ land under /usr/share/doc/arca-licenses"
+else bad "F1 the licence documents did not land: $(find "$T/p6" 2>&1 | tr '\n' ' ')"; fi
+if [ "$(stat -c %a "$D/LICENSE.md" 2>/dev/null)" = 644 ] && [ "$(stat -c %a "$D/licenses/foo-1.0/COPYING" 2>/dev/null)" = 644 ]; then
+    ok "F2 they are 0644 whatever the source file's mode was"; else bad "F2 modes: $(stat -c %a "$D/LICENSE.md" "$D/licenses/foo-1.0/COPYING" 2>&1 | tr '\n' ' ')"; fi
+if grep -qxF "    ${PRODUCT_STEM}-source-v1.0.tar" "$D/SOURCE-OFFER.txt" && grep -qF "${PRODUCT_STEM}-source-v1.0.tar.sha256" "$D/SOURCE-OFFER.txt" \
+   && grep -qF "release tagged" "$D/SOURCE-OFFER.txt" && grep -qF "https://example.invalid/rel/v1.0" "$D/SOURCE-OFFER.txt" && grep -qF "section 3(a)" "$D/SOURCE-OFFER.txt"; then
+    ok "F3 SOURCE-OFFER.txt names the source file, its checksum, the tag and the release page"
+else bad "F3 SOURCE-OFFER.txt: $(tr '\n' '|' < "$D/SOURCE-OFFER.txt" 2>&1)"; fi
+if grep -qF "$PRODUCT_NAME" "$D/SOURCE-OFFER.txt"; then ok "F4 and carries the product name from lib/product.sh"; else bad "F4 no product name in SOURCE-OFFER.txt"; fi
+rc="$(ldi_run "$T/fx/repo" "$T/fx/legal" "" "")"
+if [ "$rc" = 0 ] && grep -qF "without a release tag" "$D/SOURCE-OFFER.txt" && ! grep -qF -e "-source-" "$D/SOURCE-OFFER.txt"; then
+    ok "F5 without a tag the offer names no file and says the image is for local use"
+else bad "F5 rc $rc: $(tr '\n' '|' < "$D/SOURCE-OFFER.txt" 2>&1)"; fi
+rc="$(ldi_run "$T/fx/repo" "" v1.0 "")"
+if [ "$rc" = 0 ] && [ ! -e "$D/manifest.csv" ] && [ ! -e "$D/licenses" ] && grep -qF "without --legal-info" "$D/SOURCE-OFFER.txt"; then
+    ok "F6 without a legal-info tree no package texts are claimed, and the offer says so"
+else bad "F6 rc $rc: $(find "$T/p6" 2>&1 | tr '\n' ' ')"; fi
+mkdir -p "$T/fx/bad"; echo x >"$T/fx/bad/manifest.csv"
+rc="$(ldi_run "$T/fx/repo" "$T/fx/bad" v1.0 "")"
+if [ "$rc" != 0 ] && grep -qF "not a legal-info tree" "$T/out"; then ok "F7 a legal-info tree without licenses/ is refused"; else bad "F7 rc $rc: $(cat "$T/out")"; fi
+rc="$(ldi_run "$T/fx/nowhere" "$T/fx/legal" v1.0 "")"
+if [ "$rc" != 0 ] && grep -qF "LICENSE.md" "$T/out"; then ok "F8 a missing LICENSE.md is refused"; else bad "F8 rc $rc: $(cat "$T/out")"; fi
+# the script's own arguments, as a program (no root needed: these refusals precede the root check)
+bash "$MCI" --mlo m --uboot u --kernel k --legal-info "$T/fx/nowhere" a.tar "$T/never.img" >"$T/out" 2>&1; rc=$?
+if [ "$rc" = 1 ] && grep -q -- '--legal-info .* has no manifest.csv' "$T/out" && [ ! -e "$T/never.img" ]; then ok "F9 an explicit --legal-info that is not a legal-info tree is refused"; else bad "F9 rc $rc: $(cat "$T/out")"; fi
+bash "$MCI" --mlo m --uboot u --kernel k --legal-info "$T/fx/legal" --source-tag 'a/b' a.tar "$T/never.img" >"$T/out" 2>&1; rc=$?
+if [ "$rc" = 1 ] && grep -q -- '--source-tag may contain only' "$T/out"; then ok "F10 a --source-tag that is not a plain tag is refused"; else bad "F10 rc $rc: $(cat "$T/out")"; fi
+bash "$MCI" --help >"$T/out" 2>&1; rc=$?
+if [ "$rc" = 0 ] && grep -q -- '--legal-info' "$T/out" && grep -q -- '--source-tag' "$T/out" && grep -q -- '--source-url' "$T/out"; then ok "F11 --help names the three new options"; else bad "F11 rc $rc"; fi
+# the wiring: the p6 fill step calls it with the three values it was given. Text, not behaviour:
+# the call is inside a loop-mounted fill that needs root; a real image was built to see it work.
+# shellcheck disable=SC2016  # the literal text of the call is the thing being looked for
+if grep -qF 'licence_docs_install "$MNT/p" "$SCRIPT_DIR/.." "$LEGAL" "$SOURCE_TAG" "$SOURCE_URL"' "$MCI"; then
+    ok "F12 the p6 fill calls it with the legal-info tree, the tag and the URL"; else bad "F12 fill does not call licence_docs_install with its arguments"; fi
 
 total=$((pass+fail))
 echo ""

@@ -27,6 +27,11 @@
 # only guards against a damaged file until the operator stages a different kernel as uImage-system.
 # p2/p3/p5 are made fresh and EMPTY; p6 gets the rootfs and the kernel modules; p7 is swap.
 #
+# p6 also gets the licence documents under /usr/share/doc/arca-licenses/, so a unit carries the
+# licence texts of what it runs: LICENSE.md (this repository's per-file licence record), Buildroot's
+# legal-info manifest.csv and licenses/ (from --legal-info), and SOURCE-OFFER.txt, the written offer
+# that names the source file published under the same release tag (rootfs/make-source-offer.sh).
+#
 # No SSH key material of any kind may be in the rootfs tar, on p6, or from the bundle (refused, never
 # filtered), and the image has no host name of its own: the unit names itself and makes its SSH host
 # key on the first boot.
@@ -43,7 +48,8 @@ die() { echo "FAIL: $*" >&2; exit 1; }
 usage() {
     cat <<'USAGE'
 Usage: make-card-image.sh --mlo <MLO> --uboot <u-boot.img> --kernel <uImage> [--uenv <file>]
-                          [--modules <dir>] [--bundle <dir|tar>] <rootfs.tar> <out.img>
+                          [--modules <dir>] [--bundle <dir|tar>] [--legal-info <dir>]
+                          [--source-tag <tag>] [--source-url <url>] <rootfs.tar> <out.img>
 
   --mlo <file>     the SPL (MLO) from uboot/build.sh; becomes p1/MLO, written first
   --uboot <file>   u-boot.img from uboot/build.sh (a legacy uImage); becomes p1/u-boot.img
@@ -58,6 +64,14 @@ Usage: make-card-image.sh --mlo <MLO> --uboot <u-boot.img> --kernel <uImage> [--
                    so the card boots with every component
                    and no provision.sh or deploy-all.sh afterwards. Needs
                    arm-linux-gnueabihf-objdump (that script's ARM check).
+  --legal-info <d> Buildroot's legal-info tree (make legal-info): its manifest.csv and licenses/ are
+                   copied to p6 /usr/share/doc/arca-licenses/ (default: br-rw/legal-info of the
+                   invoking user, when it is there). Without one the image carries no package
+                   licence texts and the summary says it must not be published.
+  --source-tag <t> the release tag the source file (<product>-source-<tag>.tar, from
+                   rootfs/make-source-offer.sh) is published under; named in SOURCE-OFFER.txt on
+                   p6. Default: the tag of --bundle, when it has one.
+  --source-url <u> the release page URL, written into SOURCE-OFFER.txt as well (optional)
   -h, --help       this text
 
 The image is the same for every unit: no vendor file, no SSH key, no host name (the unit picks
@@ -70,6 +84,9 @@ MLO=""
 UBOOT=""
 KERNEL=""
 UENV=""
+LEGAL=""
+SOURCE_TAG=""
+SOURCE_URL=""
 need_val() { [ "$1" -ge 2 ] || { usage >&2; exit 2; }; }
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -86,6 +103,12 @@ while [ $# -gt 0 ]; do
         --modules=*) MODDIR="${1#--modules=}"; shift ;;
         --bundle) need_val $#; BUNDLE="$2"; shift 2 ;;
         --bundle=*) BUNDLE="${1#--bundle=}"; shift ;;
+        --legal-info) need_val $#; LEGAL="$2"; shift 2 ;;
+        --legal-info=*) LEGAL="${1#--legal-info=}"; shift ;;
+        --source-tag) need_val $#; SOURCE_TAG="$2"; shift 2 ;;
+        --source-tag=*) SOURCE_TAG="${1#--source-tag=}"; shift ;;
+        --source-url) need_val $#; SOURCE_URL="$2"; shift 2 ;;
+        --source-url=*) SOURCE_URL="${1#--source-url=}"; shift ;;
         --) shift; break ;;
         -*) usage >&2; exit 2 ;;
         *) break ;;
@@ -103,6 +126,21 @@ if [ -z "$MODDIR" ]; then
     if [ -n "${SUDO_USER:-}" ]; then UHOME=$(getent passwd "$SUDO_USER" | cut -d: -f6); fi
     MODDIR="$UHOME/rw-kmods"
 fi
+# The licence arguments are checked here, ahead of the root check, so a refusal does not depend on
+# who runs the script. An explicit --legal-info that is not a legal-info tree is refused; the
+# default is used only when it is there, and its absence is reported in the summary.
+LEGAL_GIVEN=0
+if [ -n "$LEGAL" ]; then
+    LEGAL_GIVEN=1
+else
+    UH="${UHOME:-$HOME}"
+    if [ -n "${SUDO_USER:-}" ]; then UH=$(getent passwd "$SUDO_USER" | cut -d: -f6); fi
+    [ ! -f "$UH/br-rw/legal-info/manifest.csv" ] || LEGAL="$UH/br-rw/legal-info"
+fi
+if [ "$LEGAL_GIVEN" -eq 1 ] && { [ ! -f "$LEGAL/manifest.csv" ] || [ ! -d "$LEGAL/licenses" ]; }; then
+    die "--legal-info $LEGAL has no manifest.csv and licenses/ (run 'make legal-info' in the Buildroot build tree)"
+fi
+case "$SOURCE_TAG" in *[!A-Za-z0-9._-]*) die "--source-tag may contain only letters, digits, . _ -" ;; esac
 
 for a in "$ROOTTAR" "$OUT" "$MLO" "$UBOOT" "$KERNEL" "$UENV"; do
     [ ! -b "$a" ] || die "$a is a block device; this script only writes an image file"
@@ -142,8 +180,15 @@ if [ -n "$BUNDLE" ]; then
     BUNDLE_TAG=$(printf '%s\n' "$INFO" | awk -F= '$1=="tag"{t=$2} $1=="commit"{c=$2} $1=="built"{b=$2}
         END{ if (t != "") printf "%s (commit %s, built %s)", t, c, b }')
     [ -n "$BUNDLE_TAG" ] || BUNDLE_TAG="untagged (no manifest.d/bundle.info)"
+    # The image and its source file are published under one tag: the bundle's tag is the default.
+    if [ -z "$SOURCE_TAG" ]; then
+        SOURCE_TAG=$(printf '%s\n' "$INFO" | awk -F= '$1=="tag"{print $2}')
+        case "$SOURCE_TAG" in untagged|*[!A-Za-z0-9._-]*) SOURCE_TAG="" ;; esac
+    fi
 fi
 
+# shellcheck disable=SC1090,SC1091
+. "$SCRIPT_DIR/../lib/product.sh" || die "cannot source product.sh"
 # shellcheck disable=SC1090,SC1091
 . "$SCRIPT_DIR/../lib/arca-identify.sh" || die "cannot source arca-identify.sh"
 # shellcheck disable=SC1090,SC1091
@@ -315,6 +360,61 @@ P1_EXPECT=$(echo "$P1_WANT" | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's
 [ "$P1_HAVE" = "$P1_EXPECT" ] || die "p1 holds [$P1_HAVE], expected [$P1_EXPECT]"
 umount "$MNT/p" || die "umount p1"
 
+# licence_docs_install <p6 root> <repo dir> <legal-info dir or ""> <source tag or ""> <release url or "">
+# Writes <p6 root>/usr/share/doc/arca-licenses/: LICENSE.md, SOURCE-OFFER.txt and, with a legal-info
+# tree, manifest.csv and licenses/. The source file named is the one rootfs/make-source-offer.sh
+# writes: <product stem>-source-<tag>.tar, with a .sha256 beside it. Without a tag the offer says the
+# image was made for local use and must not be redistributed.
+licence_docs_install() {
+    local root="$1" repo="$2" legal="$3" tag="$4" url="$5" d asset
+    d="$root/usr/share/doc/arca-licenses"
+    asset="${PRODUCT_STEM}-source-${tag}.tar"
+    mkdir -p "$d" || return 1
+    [ -f "$repo/LICENSE.md" ] || { echo "no $repo/LICENSE.md" >&2; return 1; }
+    install -m 0644 "$repo/LICENSE.md" "$d/LICENSE.md" || return 1
+    if [ -n "$legal" ]; then
+        if [ ! -f "$legal/manifest.csv" ] || [ ! -d "$legal/licenses" ]; then
+            echo "$legal is not a legal-info tree" >&2; return 1
+        fi
+        install -m 0644 "$legal/manifest.csv" "$d/manifest.csv" || return 1
+        cp -r --no-preserve=mode,ownership "$legal/licenses" "$d/licenses" || return 1
+        chmod -R u=rwX,go=rX "$d/licenses" || return 1
+    fi
+    {
+        echo "${PRODUCT_NAME}: written offer for source code"
+        echo "============================================="
+        echo
+        if [ -n "$tag" ]; then
+            echo "The programs on this card include free software under the GNU General Public License"
+            echo "and the GNU Lesser General Public License (the Linux kernel, U-Boot, BusyBox, bash,"
+            echo "glibc and others). The complete corresponding source of all of them is the file"
+            echo
+            echo "    $asset"
+            echo
+            echo "with its checksum file $asset.sha256, attached to the release tagged"
+            echo "$tag of the project this image was downloaded from."
+            [ -z "$url" ] || echo "Release page: $url"
+            echo
+            echo "This is a written offer under section 3(a) of the GNU General Public License, version 2,"
+            echo "honoured for the lifetime of that release. The file holds the upstream sources at the"
+            echo "versions built, this project's patches and build scripts, and a README-SOURCE.txt that"
+            echo "says where the source of each program on the card is."
+        else
+            echo "This image was made without a release tag, so no source file is named. It was built"
+            echo "for local use and must not be passed on without the source of the programs on it."
+        fi
+        echo
+        echo "Beside this file:"
+        echo "  LICENSE.md     the project's per-file licence record"
+        if [ -n "$legal" ]; then
+            echo "  manifest.csv   every package the root filesystem was built from, with its licence"
+            echo "  licenses/      the licence texts of those packages"
+        else
+            echo "(this image carries no package licence texts: it was made without --legal-info.)"
+        fi
+    } > "$d/SOURCE-OFFER.txt" || return 1
+}
+
 fill() {   # fill <partnum> <rootfs tar>
     local n="$1"
     mount "$(arca_part_dev "$LOOP" "$n")" "$MNT/p" || die "mount p$n"
@@ -334,6 +434,10 @@ fill() {   # fill <partnum> <rootfs tar>
             NKO=$((NKO + 1))
         done
         [ -f "$EXTRA/cy8ctmg120_ts.ko" ] || die "cy8ctmg120_ts.ko did not land in p6"
+        if ! licence_docs_install "$MNT/p" "$SCRIPT_DIR/.." "$LEGAL" "$SOURCE_TAG" "$SOURCE_URL"; then
+            umount "$MNT/p"; rm -f "$OUTABS"
+            die "could not install the licence documents; the image is deleted"
+        fi
         echo "p6 holds $(find "$MNT/p" -xdev | wc -l) entries; $NKO kernel modules in /lib/modules/4.14.52/extra"
         if ! ssh_scan "$MNT/p"; then
             umount "$MNT/p"; rm -f "$OUTABS"
@@ -397,6 +501,15 @@ echo "rootfs tar:      $ROOTTAR ($(stat -c %y "$ROOTTAR"))"
 echo "p1:              $P1_WANT"
 echo "fsck:            $([ "$FSCK_BAD" -eq 0 ] && echo 'all five clean' || echo 'PROBLEMS, see above')"
 echo "bundle:          ${BUNDLE_TAG:-none (no --bundle: run provision.sh and deploy-all.sh after the first boot)}"
+echo "licences:        /usr/share/doc/arca-licenses: LICENSE.md, SOURCE-OFFER.txt$([ -n "$LEGAL" ] && echo ", manifest.csv, licenses/")"
+if [ -z "$LEGAL" ]; then
+    echo "WARNING:         no --legal-info: the package licence texts are NOT on this image. Do not publish it."
+fi
+if [ -n "$SOURCE_TAG" ]; then
+    echo "source offer:    names ${PRODUCT_STEM}-source-${SOURCE_TAG}.tar: publish that file under release $SOURCE_TAG with this image"
+else
+    echo "WARNING:         no source tag (--source-tag, or a tagged --bundle): the offer names no source file. Do not publish it."
+fi
 echo
 echo "Next, on Windows: copy the image out of WSL, e.g."
 printf '  copy \\\\wsl$\\<distro>%s C:\\work\\rw-scratch\\card.img\n' "$OUTABS"

@@ -25,10 +25,12 @@ set -u
 cd "$(dirname "$0")/.." || exit 1
 
 BAK=/tmp/arca-release.orig.$$
+SAB=/tmp/arca-release.sab.$$
 HARNESS_ERR=0
 cp release.sh "$BAK"
+mkdir -p "$SAB"
 restore() { cp "$BAK" release.sh; }
-trap 'restore; rm -f "$BAK"' EXIT INT TERM
+trap 'restore; rm -rf "$BAK" "$SAB"' EXIT INT TERM
 
 run() {
     if [ "${1:-}" = sab ] && cmp -s release.sh "$BAK"; then
@@ -39,6 +41,9 @@ echo ""
 echo -n "  baseline (nothing broken)             "; run
 
 # ── 1. the whole pre-fix file ───────────────────────────────────────────────
+# ARCA_SAB_COPIES_ONLY=1 skips stanzas 1-8, which edit release.sh in place (and restore it
+# from a copy), and runs only the stanzas that work on copies.
+if [ -z "${ARCA_SAB_COPIES_ONLY:-}" ]; then
 # The guard as it stood before 2026-09-07: four checks, no normalisation, no
 # ownership check, and a QUOTED "/*" case pattern that is a literal.
 restore
@@ -97,6 +102,46 @@ echo -n "  release.sh replaced by 'exit 1'      "; run sab
 restore
 printf '#!/bin/bash\nexit 0\n' > release.sh
 echo -n "  release.sh replaced by 'exit 0'      "; run sab
+fi
+
+# ── 9+. the source-offer cases (group E), on COPIES ─────────────────────────
+# The suite's RELEASE_SH points it at a copy, so release.sh itself is never touched by these
+# stanzas. Each prints the count and the cases that failed: every one must name at least one
+# group E case, and the baseline above must stay at 0 failed.
+#
+# Case 9 is the real pre-change file (`git show d79b40c:release.sh`, the commit before
+# --source-offer existed; pinned, because HEAD stops being pre-change at the next commit).
+runcopy() {
+    if cmp -s "$SAB/cur.sh" release.sh; then
+        echo "SABOTAGE DID NOT APPLY - the copy is byte-identical to the shipped release.sh"; HARNESS_ERR=1; return; fi
+    local out
+    out="$(RELEASE_SH="$SAB/cur.sh" ./tests/arca_release_test.sh 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
+    echo "$(echo "$out" | grep -oE '[0-9]+ passed, [0-9]+ failed')   $(echo "$out" | grep '^  FAIL' | awk '{print $2}' | head -14 | tr '\n' ' ')"
+}
+start_copy() { cp release.sh "$SAB/cur.sh"; }   # each case then edits the copy with perl
+report() { printf '  %-44s' "$1"; runcopy; }
+printf '  %-44s' "9. the pre-change release.sh entire"
+git show d79b40c:release.sh > "$SAB/cur.sh"; runcopy
+start_copy; perl -0pi -e 's/bash "\$SCRIPT_DIR\/rootfs\/make-source-offer.sh" "\$\{SOURCE_ARGS\[\@\]\}" \x5c\n/true \x5c\n/' "$SAB/cur.sh"; report "10. the offer script is never run"
+start_copy; perl -0pi -e 's/\[\[ \$STAGE_ONLY -eq 0 \]\] \|\| SOURCE_ARGS\+=\(--allow-dev\)/:/' "$SAB/cur.sh"; report "11. --allow-dev dropped from --stage-only"
+start_copy; perl -0pi -e 's/ASSETS\+=\("\$SOURCE_OUT\/\$SOURCE_FILE" "\$SOURCE_OUT\/\$SOURCE_FILE.sha256"\)/:/' "$SAB/cur.sh"; report "12. source file not attached to the release"
+start_copy; perl -0pi -e 's/ASSETS\+=\("\$\{IMAGES\[\@\]\}"\)/:/' "$SAB/cur.sh"; report "13. images not attached to the release"
+start_copy; perl -0pi -e 's/if \[\[ \$SOURCE_OFFER -eq 1 \]\]; then\ncat <<\x27NOTICE\x27\nCorresponding/if false; then\ncat <<\x27NOTICE\x27\nCorresponding/' "$SAB/cur.sh"; report "14. NOTICE never names the source file"
+start_copy; perl -0pi -e 's/if \[\[ \$\{#IMAGES\[\@\]\} -gt 0 && \$SOURCE_OFFER -eq 0 \]\]; then/if false; then/' "$SAB/cur.sh"; report "15. --image allowed without --source-offer"
+start_copy; perl -0pi -e 's/\[\[ -s "\$SOURCE_OUT\/\$SOURCE_FILE" && -s "\$SOURCE_OUT\/\$SOURCE_FILE.sha256" \]\] \x5c\n[^\n]*\n/:\n/' "$SAB/cur.sh"; report "16. the written-file check dropped"
+start_copy; perl -0pi -e 's/"\$\(pwd -P\)"\/\*\) err/"\/no-such-root-ever"\/*) err/' "$SAB/cur.sh"; report "17. the inside-the-repo refusal dropped"
+start_copy; perl -0pi -e 's/SOURCE_ARGS=\(--tag "\$RELEASE_TAG"/SOURCE_ARGS=(--tag "\${TAG:-untagged}"/' "$SAB/cur.sh"; report "18. the offer gets a different tag"
+start_copy; perl -0pi -e 's/\$\{GIT_DIRTY:\+-dev\}//' "$SAB/cur.sh"; report "19. no -dev in the name release.sh expects"
+start_copy; perl -0pi -e '($b)=/(# ── the source offer.*?)(?=for comp in)/s; s/\Q$b\E//; s/(# ── bundle metadata)/$b$1/' "$SAB/cur.sh"; report "20. the offer moved after the components"
+start_copy; perl -0pi -e '($b)=/(# ── the source offer.*?)(?=for comp in)/s; s/\Q$b\E//; s/(# ── the host gate)/$b$1/' "$SAB/cur.sh"; report "21. the offer moved before the host gate"
+start_copy; perl -0pi -e 's/ && -f "\$2" \]\] \|\| \{ echo "no such image/ ]] || { echo "no such image/' "$SAB/cur.sh"; report "22. the --image existence check dropped"
+start_copy; perl -0pi -e 's/err "the parent of --source-out/true "the parent of --source-out/' "$SAB/cur.sh"; report "23. the --source-out parent check dropped"
+start_copy; perl -0pi -e 's/\[\[ \$STAGE_ONLY -eq 0 \]\] \|\| SOURCE_ARGS\+=\(--allow-dev\)/SOURCE_ARGS+=(--allow-dev)/' "$SAB/cur.sh"; report "24. --allow-dev also when publishing"
+start_copy; perl -0pi -e 's/echo "Corresponding source \(GPLv2[^\n]*\n/:\n/' "$SAB/cur.sh"; report "25. release notes do not name the source"
+start_copy; perl -0pi -e 's/apps-\$\{RELEASE_TAG\}/apps-\${TAG:-x}/' "$SAB/cur.sh"; report "26. bundle tarball tagged differently"
+start_copy; perl -0pi -e 's/if \[\[ \$SOURCE_OFFER -eq 1 \]\]; then\n        ASSETS\+=/if true; then\n        ASSETS+=/' "$SAB/cur.sh"; report "27. source attached even without the flag"
+start_copy; perl -0pi -e 's/if \[\[ \$SOURCE_OFFER -eq 1 \]\]; then\n    echo ""\n    echo "─/if true; then\n    echo ""\n    echo "─/' "$SAB/cur.sh"; report "28. the offer is run without the flag"
+start_copy; perl -0pi -e 's/if \[\[ \$SOURCE_OFFER -eq 1 \]\]; then\ncat <<\x27NOTICE\x27\nCorresponding/if true; then\ncat <<\x27NOTICE\x27\nCorresponding/' "$SAB/cur.sh"; report "29. NOTICE always names the source file"
 
 restore
 echo ""

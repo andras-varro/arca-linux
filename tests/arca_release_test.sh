@@ -43,6 +43,14 @@
 #   C  GIT_DIRTY, which is what the publish preflight refuses on and what
 #      bundle.info records. C1 and C4 are the controls: the check must be able to
 #      say "clean", or C2/C3 pass against a check hardwired to say "dirty".
+#   D  the host gate: that release.sh runs it once, obeys its verdict, and skips it only
+#      under --skip-tests.
+#   E  --source-offer / --source-out / --image: the offer script is run under the release's
+#      own tag, before the build and after the gate; NOTICE names the file only when it is
+#      made; a publish attaches bundle, source file, checksum and image to one release.
+#      The offer script and gh are stubs. E0 and E13 are the controls (no flag, no change).
+#      RELEASE_SH=<path> grades another copy; the E sweep is the second half of
+#      tests/measure_release_sabotage.sh (ARCA_SAB_COPIES_ONLY=1 runs just that half).
 #
 # ── Seen failing ────────────────────────────────────────────────────────────
 #
@@ -83,6 +91,9 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# RELEASE_SH=<path> runs every case against another copy of release.sh: that is how a
+# sabotaged copy is graded (tests/measure_release_sabotage.sh), so the shipped file is never edited.
+RELEASE_SH="${RELEASE_SH:-$REPO_DIR/release.sh}"
 # shellcheck source=../lib/product.sh
 . "$REPO_DIR/lib/product.sh"   # PRODUCT_STEM: the tarball is named from it
 
@@ -100,8 +111,8 @@ assert_eq() {
 }
 exists() { if [ -e "$1" ] || [ -L "$1" ]; then ok "$2"; else bad "$2 — missing: $1"; fi; }
 
-if [ ! -f "$REPO_DIR/release.sh" ]; then
-    echo -e "  ${RED}✗${NC} no release.sh at $REPO_DIR"
+if [ ! -f "$RELEASE_SH" ]; then
+    echo -e "  ${RED}✗${NC} no release.sh at $RELEASE_SH"
     exit 1
 fi
 
@@ -135,7 +146,7 @@ chmod +x "$SHIM/rm"
 build_tree() {
     local t="$1"
     mkdir -p "$t/lib" "$t/native_apps" "$t/tests"
-    cp "$REPO_DIR/release.sh"        "$t/release.sh"
+    cp "$RELEASE_SH"                   "$t/release.sh"
     cp "$REPO_DIR/lib/arca-bundle.sh"  "$t/lib/arca-bundle.sh"
     cp "$REPO_DIR/lib/arca-release.sh" "$t/lib/arca-release.sh"
     # release.sh names its tarball and release title from lib/product.sh, which reads the
@@ -173,8 +184,40 @@ echo "stub payload" > "$HERE/payload.bin"
 arca_bundle_init "$2" native_apps
 arca_bundle_add  "$2" native_apps 0755 "$HERE/payload.bin" /opt/games/stub_game
 arca_bundle_finish "$2" native_apps >/dev/null
+if [ -n "${ARCA_ORDER_LOG:-}" ]; then echo component >> "$ARCA_ORDER_LOG"; fi
 echo "stub: staged 1 file"
 STUBCOMP
+    # Stub for rootfs/make-source-offer.sh. The real one is a 0.7 GB assembly that reads
+    # caches this temp tree does not have, so what is asserted is how release.sh CALLS it
+    # (argv, order) and what it does with the file it leaves. It writes the file name the
+    # real script writes: <stem>-source-<tag>[-dev].tar plus .sha256, -dev when the
+    # tree is dirty, measured with the same two git commands.
+    mkdir -p "$t/rootfs"
+    cat > "$t/rootfs/make-source-offer.sh" <<'STUBOFFER'
+#!/bin/bash
+set -u
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=../lib/product.sh
+. "$HERE/lib/product.sh"
+if [ -n "${ARCA_OFFER_LOG:-}" ]; then printf '%s\n' "$*" >> "$ARCA_OFFER_LOG"; fi
+if [ -n "${ARCA_ORDER_LOG:-}" ]; then echo offer >> "$ARCA_ORDER_LOG"; fi
+[ "${ARCA_STUB_OFFER_RC:-0}" = 0 ] || { echo "stub offer: failing as told" >&2; exit "$ARCA_STUB_OFFER_RC"; }
+tag="" out=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --tag) tag="$2"; shift 2 ;;
+        --out) out="$2"; shift 2 ;;
+        --image) shift 2 ;;
+        *) shift ;;
+    esac
+done
+dev=""
+if ! git -C "$HERE" diff --quiet 2>/dev/null || ! git -C "$HERE" diff --cached --quiet 2>/dev/null; then dev="-dev"; fi
+[ -z "${ARCA_STUB_OFFER_NOFILE:-}" ] || exit 0
+mkdir -p "$out"
+echo "stub source" > "$out/${PRODUCT_STEM}-source-${tag}${dev}.tar"
+echo "stub sha256  ${PRODUCT_STEM}-source-${tag}${dev}.tar" > "$out/${PRODUCT_STEM}-source-${tag}${dev}.tar.sha256"
+STUBOFFER
 }
 
 TREE="$TMP/tree"
@@ -434,7 +477,7 @@ assert_eq "" "$(dirty_of "$TMP/g-committed")" \
 # anchored on it.
 # shellcheck disable=SC2016  # the literal $SCRIPT_DIR is the point: it is what
 # distinguishes the two call sites from the comment quoting them.
-BOTH=$(grep -cF 'git -C "$SCRIPT_DIR" diff --cached --quiet' "$REPO_DIR/release.sh" || true)
+BOTH=$(grep -cF 'git -C "$SCRIPT_DIR" diff --cached --quiet' "$RELEASE_SH" || true)
 assert_eq "2" "${BOTH:-0}" \
     "C5 both dirty checks in the shipped script compare against HEAD as well as the index"
 
@@ -492,6 +535,209 @@ ARCA_STUB_GATE_MARKER="$GATE_MARK" ARCA_STUB_GATE_RC=1 \
 assert_eq "0" "$ST" "D4 --skip-tests proceeds even with a gate that would fail"
 assert_eq "0" "$(grep -c called "$GATE_MARK" || true)" \
     "D4b and the gate was never invoked at all"
+
+# ═══════════════════════════════════════════════════════════════════════════
+echo ""
+echo "E. the source offer — --source-offer, --source-out, --image, and the NOTICE that names the file"
+echo "   (rootfs/make-source-offer.sh and gh are stubs; what is asserted is how release.sh calls them)"
+# ═══════════════════════════════════════════════════════════════════════════
+# The offer is GPLv2 section 3(a) source for the card image, offered from the place the image
+# is published and under its tag. What can go wrong here is a release that carries the image and
+# not the source, a NOTICE that offers a file the release lacks, or a tag that differs between
+# the three. E0 and E13 are the controls: a release without --source-offer must behave as before,
+# or the cases between them pass against a script that always runs the offer.
+DAY=$(date -u '+%Y%m%d')
+IMG="$TMP/card.img"; echo "pretend image" > "$IMG"
+OFFLOG="$TMP/offer.log"; ORDLOG="$TMP/order.log"; GHLOG="$TMP/gh.log"; GHNOTES="$TMP/gh-notes.log"
+GHSHIM="$TMP/ghshim"
+mkdir -p "$GHSHIM"
+cat > "$GHSHIM/gh" <<'GHSTUB'
+#!/bin/bash
+# Not gh. Records its argv and the release notes it was handed, and answers `release view`.
+printf '%s\n' "$*" >> "$ARCA_GH_LOG"
+prev=""
+for a in "$@"; do
+    if [ "$prev" = "--notes-file" ]; then cat "$a" >> "$ARCA_GH_NOTES"; fi
+    prev="$a"
+done
+if [ "$1 $2" = "release view" ]; then echo "https://example.invalid/releases/$3"; fi
+exit 0
+GHSTUB
+chmod +x "$GHSHIM/gh"
+
+# A clean, pushed tree, so a publish passes the preflight: a fixture repo with a fake remote.
+PTREE="$TMP/ptree"
+build_tree "$PTREE"
+(
+    cd "$PTREE" || exit 1
+    git init -q .
+    git config user.email "test@example.invalid"
+    git config user.name  "arca_release_test"
+    printf 'build/\npayload.bin\n' > .gitignore
+    git add -A
+    git commit -qm "fixture"
+    git remote add origin git@github.com:acme/widget.git
+    git update-ref refs/remotes/origin/main HEAD
+) > "$TMP/git-setup-p.log" 2>&1
+if [ -n "$(git -C "$PTREE" branch -r --contains HEAD 2>/dev/null)" ]; then
+    ok "E00 the publish fixture is clean and its commit is on a (fake) remote branch"
+else
+    bad "E00 the publish fixture has no remote branch — the publish cases below are meaningless"
+fi
+
+# run_e <tree> [args...]  — gh is the stub; the env the caller prefixes reaches the stubs.
+run_e() {
+    local t="$1"; shift
+    OUT_TXT=$(cd "$t" && PATH="$GHSHIM:$PATH" ARCA_OFFER_LOG="$OFFLOG" ARCA_ORDER_LOG="$ORDLOG" \
+        ARCA_GH_LOG="$GHLOG" ARCA_GH_NOTES="$GHNOTES" ARCA_STUB_GATE_MARKER="$GATE_MARK" \
+        bash "$t/release.sh" "$@" 2>&1)
+    ST=$?
+}
+reset_logs() { : > "$OFFLOG"; : > "$ORDLOG"; : > "$GHLOG"; : > "$GHNOTES"; : > "$GATE_MARK"; }
+# notice_names <bundle dir> : the source file NOTICE names, or empty
+notice_names() { grep -o "${PRODUCT_STEM}-source-[A-Za-z0-9._-]*\.tar" "$1/NOTICE" | head -n 1; }
+
+# E0: no --source-offer: the offer is not run, and NOTICE does not name a file it lacks
+reset_logs
+run_e "$PTREE" --stage-only --component native_apps --out "$TMP/e0"
+assert_eq "0" "$ST" "E0 a release without --source-offer still stages"
+assert_eq "0" "$(grep -c . "$OFFLOG")" "E0b and the offer script was never run"
+assert_eq "" "$(notice_names "$TMP/e0")" "E0c and NOTICE names no source file"
+if grep -qF "without a source file" "$TMP/e0/NOTICE"; then
+    ok "E0d and NOTICE says the bundle was staged without one"
+else
+    bad "E0d NOTICE should say the bundle was staged without a source file"
+fi
+
+# E1: --source-offer with --stage-only
+reset_logs
+run_e "$PTREE" --stage-only --component native_apps --out "$TMP/e1" --source-offer --source-out "$TMP/srcout1"
+assert_eq "0" "$ST" "E1 --source-offer stages"
+assert_eq "1" "$(grep -c . "$OFFLOG")" "E1b and the offer script ran exactly once"
+for want in "--tag $DAY" "--allow-dev" "--out $TMP/srcout1"; do
+    if grep -qF -e "$want" "$OFFLOG"; then ok "E1c the offer was called with '$want'"; else bad "E1c the offer was not called with '$want': $(cat "$OFFLOG")"; fi
+done
+exists "$TMP/srcout1/${PRODUCT_STEM}-source-${DAY}.tar" "E1d the source file is where --source-out said"
+assert_eq "${PRODUCT_STEM}-source-${DAY}.tar" "$(notice_names "$TMP/e1")" \
+    "E1e NOTICE names exactly that file, under the same tag as the bundle tarball"
+if grep -qF "${PRODUCT_STEM}-source-${DAY}.tar.sha256" "$TMP/e1/NOTICE"; then
+    ok "E1f and its .sha256"
+else
+    bad "E1f NOTICE does not name the .sha256"
+fi
+exists "$PTREE/build/${PRODUCT_STEM}-apps-${DAY}.tar.gz" "E1g and the bundle tarball carries the same tag stem"
+assert_eq "1" "$(grep -c called "$GATE_MARK" || true)" \
+    "E1h and the host gate ran (so 'the gate did not run' in E4b/E6b is a real reading)"
+
+# E2: the offer comes before the components build
+assert_eq "offer component" "$(tr '\n' ' ' < "$ORDLOG" | sed 's/ $//')" \
+    "E2 the offer is assembled before the first component builds"
+
+# E3: a dirty tree: the file written is -dev, and NOTICE names that one (TREE is not a git repo,
+# which release.sh reads as dirty)
+reset_logs
+run_e "$TREE" --stage-only --component native_apps --out "$TMP/e3" --source-offer --source-out "$TMP/srcout3"
+assert_eq "0" "$ST" "E3 --source-offer on a dirty tree stages"
+NAMED="$(notice_names "$TMP/e3")"
+case "$NAMED" in *-dev.tar) ok "E3b NOTICE names the -dev file of a development build" ;; *) bad "E3b expected a -dev name, got '$NAMED'" ;; esac
+exists "$TMP/srcout3/$NAMED" "E3c and that file exists"
+
+# E4..E7: refusals, all raised before the host gate and before anything is staged
+reset_logs
+run_e "$PTREE" --stage-only --component native_apps --out "$TMP/e4" --image "$IMG"
+if [ "$ST" -ne 0 ] && printf '%s\n' "$OUT_TXT" | grep -qF -e "--image needs --source-offer"; then
+    ok "E4 --image without --source-offer is refused"
+else
+    bad "E4 --image without --source-offer must be refused — exit $ST"
+fi
+assert_eq "000" "$(grep -c . "$GATE_MARK")$(grep -c . "$OFFLOG")$([ -e "$TMP/e4" ] && echo 1 || echo 0)" \
+    "E4b and nothing ran: no gate, no offer, no staging directory"
+reset_logs
+run_e "$PTREE" --stage-only --component native_apps --out "$TMP/e5" --source-offer --image "$TMP/no-such.img"
+if [ "$ST" -ne 0 ] && printf '%s\n' "$OUT_TXT" | grep -qF "no such image file"; then
+    ok "E5 an --image that is not a file is refused"
+else
+    bad "E5 a missing --image must be refused — exit $ST"
+fi
+reset_logs
+run_e "$PTREE" --stage-only --component native_apps --out "$TMP/e6" --source-offer --source-out "$PTREE/offer-out"
+if [ "$ST" -ne 0 ] && printf '%s\n' "$OUT_TXT" | grep -qF "inside the repository"; then
+    ok "E6 --source-out inside the repository is refused"
+else
+    bad "E6 --source-out inside the repository must be refused — exit $ST"
+fi
+assert_eq "00" "$(grep -c . "$GATE_MARK")$(grep -c . "$OFFLOG")" "E6b and before the host gate, not after it"
+reset_logs
+run_e "$PTREE" --stage-only --component native_apps --out "$TMP/e7" --source-offer --source-out "$TMP/nope/deeper"
+if [ "$ST" -ne 0 ] && printf '%s\n' "$OUT_TXT" | grep -qF "does not exist"; then
+    ok "E7 a --source-out whose parent is missing is refused"
+else
+    bad "E7 a --source-out whose parent is missing must be refused — exit $ST"
+fi
+
+# E8: the gate comes first: a failing gate means the offer is never assembled
+reset_logs
+ARCA_STUB_GATE_MARKER="$GATE_MARK" ARCA_STUB_GATE_RC=1 \
+    run_e "$PTREE" --stage-only --component native_apps --out "$TMP/e8" --source-offer --source-out "$TMP/srcout8"
+if [ "$ST" -ne 0 ]; then ok "E8 a failing gate refuses the release"; else bad "E8 a failing gate must refuse"; fi
+assert_eq "0" "$(grep -c . "$OFFLOG")" "E8b and the offer was not assembled"
+
+# E9/E10: the offer fails, or claims success and writes nothing: no component is built
+reset_logs
+ARCA_STUB_OFFER_RC=3 run_e "$PTREE" --stage-only --component native_apps --out "$TMP/e9" --source-offer --source-out "$TMP/srcout9"
+if [ "$ST" -ne 0 ] && printf '%s\n' "$OUT_TXT" | grep -qF "make-source-offer.sh failed"; then
+    ok "E9 a failing offer script refuses the release"
+else
+    bad "E9 a failing offer script must refuse — exit $ST"
+fi
+assert_eq "offer" "$(tr '\n' ' ' < "$ORDLOG" | sed 's/ $//')" "E9b and no component was built after it"
+reset_logs
+ARCA_STUB_OFFER_NOFILE=1 run_e "$PTREE" --stage-only --component native_apps --out "$TMP/e10" --source-offer --source-out "$TMP/srcout10"
+if [ "$ST" -ne 0 ] && printf '%s\n' "$OUT_TXT" | grep -qF "is not there"; then
+    ok "E10 an offer script that wrote no file is not taken at its word"
+else
+    bad "E10 a missing source file must refuse — exit $ST"
+fi
+
+# E11: images are handed to the offer, by absolute path, once each
+reset_logs
+run_e "$PTREE" --stage-only --component native_apps --out "$TMP/e11" --source-offer --source-out "$TMP/srcout11" --image "$IMG"
+assert_eq "0" "$ST" "E11 --image with --source-offer stages"
+if grep -qF -e "--image $IMG" "$OFFLOG"; then ok "E11b the image reaches the offer script"; else bad "E11b the image did not reach the offer: $(cat "$OFFLOG")"; fi
+
+# E12: publishing: image, bundle, source file and its checksum go to ONE `gh release create`, under
+# one tag, and the offer was not asked for a development build
+reset_logs
+run_e "$PTREE" --tag v1.2 --out "$TMP/e12" --source-offer --source-out "$TMP/srcout12" --image "$IMG" --component native_apps
+assert_eq "0" "$ST" "E12 a publish with --source-offer and --image succeeds"
+assert_eq "1" "$(grep -c '^release create v1.2 ' "$GHLOG")" "E12b one 'gh release create v1.2'"
+for want in "${PRODUCT_STEM}-apps-v1.2.tar.gz" "$TMP/srcout12/${PRODUCT_STEM}-source-v1.2.tar " "$TMP/srcout12/${PRODUCT_STEM}-source-v1.2.tar.sha256" "$IMG"; do
+    if grep '^release create' "$GHLOG" | grep -qF -e "$want"; then ok "E12c the release carries $(basename "$want")"; else bad "E12c the release does not carry '$want': $(cat "$GHLOG")"; fi
+done
+if grep -qF -e "--tag v1.2" "$OFFLOG" && ! grep -qF -e "--allow-dev" "$OFFLOG"; then
+    ok "E12d the offer was built under the release's tag and is not a development build"
+else
+    bad "E12d expected '--tag v1.2' and no --allow-dev: $(cat "$OFFLOG")"
+fi
+assert_eq "${PRODUCT_STEM}-source-v1.2.tar" "$(notice_names "$TMP/e12")" "E12e NOTICE names the file the release carries"
+if grep -qF "${PRODUCT_STEM}-source-v1.2.tar" "$GHNOTES" && grep -qF "card.img" "$GHNOTES"; then
+    ok "E12f and the release notes name the source file and the image"
+else
+    bad "E12f the release notes should name both: $(cat "$GHNOTES")"
+fi
+
+# E13: control — publishing without --source-offer attaches the bundle alone
+reset_logs
+run_e "$PTREE" --tag v1.3 --out "$TMP/e13" --component native_apps
+assert_eq "0" "$ST" "E13 a publish without --source-offer is unchanged"
+if grep '^release create v1.3 ' "$GHLOG" | grep -qF -e "-source-"; then
+    bad "E13b a release without --source-offer must not attach a source file: $(cat "$GHLOG")"
+else
+    ok "E13b and attaches no source file"
+fi
+assert_eq "0" "$(grep -c . "$OFFLOG")" "E13c and never ran the offer script"
+
+assert_eq "$CANARY_MD5" "$(canary_md5)" "E14 the canary is still intact after the source-offer cases"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo ""
