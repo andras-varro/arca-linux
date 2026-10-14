@@ -282,9 +282,9 @@ An option for the clocks that print the time (`native_apps/common/top_bar.c:251`
 
 The operator wants games that show no menu or close button at all. Open design question: how a touch-only player pauses and exits (pad and keyboard keep their keys). The games do not carry the shared top bar, so their own exit X is part of the same question. **Done when** the question is answered with the operator and one game follows the answer.
 
-### F148. A three-partition card: p1 FAT boot, p2 rootfs, p3 data — open, operator-approved 2026-10-12
+### F148. A three-partition card: p1 FAT boot, p2 logs, p3 rootfs — open, operator-approved 2026-10-12, layout 2026-10-13
 
-With our own U-Boot, only p1 must stay the FAT boot partition (ROM/NAND shim, MLO, u-boot.img, kernels, `uEnv.txt`) **[inferred]**. The logical partitions, the 63-sector EBR offsets and p4/p5/p7 exist only because `make-card-image.sh` copies the vendor table. Logs go on p3 (or tmpfs). Two partitions were rejected: a full log could fill root, and a rootfs rewrite should keep data. Scope: U-Boot's compiled-in `root=` (`mmcblk0p6` becomes p2) and the full commented `bootargs` line in `uboot/uEnv.txt`; `fstab`; the position roles in `lib/arca-identify.sh`; the backup and provision roles; the `make-card-image.sh` layout and its tests. Deployed units are re-flashed, never repartitioned in place (F149). **Done when** a fresh card boots with three partitions and its data and logs land on p3.
+With our own U-Boot, only p1 must stay the FAT boot partition (ROM/NAND shim, MLO, u-boot.img, kernels, `uEnv.txt`): SPL and U-Boot default to partition 1 (v2026.10 source, read, not run); the ROM's view of MBR entries 2-4 is **[inferred]**, so p1 keeps its exact entry (start 63, size 144522, type `0c`, bootable). The logical partitions, the 63-sector EBR offsets and p4/p5/p7 exist only because `make-card-image.sh` copies the vendor table. **Operator layout 2026-10-13:** MBR primaries only; p2 = logs, 1 GiB, fixed (a full log cannot fill root); p3 = rootfs **and** `/home/root/data` (settings, high scores, calibration, games), last so it grows to fill a larger card (the grow itself is F149, online on the mounted root **[inferred]**). Scope: U-Boot's compiled-in `sysroot=/dev/mmcblk0p6` (`uboot/rw20-board.patch`) and the commented `bootargs` in `uboot/uEnv.txt` become p3; `fstab`; `ARCA_LAYOUT`/`ARCA_PART_ROLES` in `lib/arca-identify.sh` become the one home of the layout (`make-card-image.sh` keeps a second `LAYOUT` today); `commission-offline.sh`; `clone-to-32gb.sh` (grow p3); `/home/root/log` is hard-coded in `native_apps/control_panel/log_page.c` and `monitor_page.c`; a host test of the image's partition table, which none builds today. `make-card-image.sh` should refuse a `--uboot` whose `u-boot.img` lacks `mmcblk0p3`: an old U-Boot with a new card panics. Survey: `~/.claude/plans/f148-survey.md` (written for the earlier p2-root order). Deployed units are re-flashed, never repartitioned in place (F149). **Done when** a fresh card boots with three partitions, root on p3 and logs on p2.
 
 ### F149. Flash the card and use it: a downloadable image replaces commissioning — open, operator-approved 2026-10-12
 
@@ -293,7 +293,7 @@ upgrade or new drivers still ship as an image to flash. Finishing steps, in orde
 
 1. **A downloadable image:** compressed with a checksum on a release page, flashable with any card writer. D18's source
    offer is a prerequisite for publishing it.
-2. **The first boot grows the card:** the image is minimal, and the first boot extends the last partition (p3 data,
+2. **The first boot grows the card:** the image is minimal, and the first boot extends the last partition (p3, the mounted rootfs,
    after F148) plus its filesystem to the end of the card, for example with sfdisk and online resize2fs, as the
    Raspberry Pi image does. Whether `resize2fs`/`sfdisk` are in our rootfs is **[unverified]**.
 3. **What an image ships:** no secrets and no copyrighted data (the existing rule). It runs as root, as the vendor
@@ -319,6 +319,12 @@ follow its shape. Navigation stays as it is: the pages' `*_page_focusables` rect
 `common/ui_focus.c` and Enter as a synthetic tap. Open design question: whether a focus stop carries a kind/shape the ring is drawn
 from, or a draw callback owned by the widget. **Done when** buttons, toggles, sliders, launcher tiles, dialog buttons and the bar draw
 focus through one mechanism, and the Control Panel's generic ring is gone.
+
+### F151. User data on a USB stick: export/import settings and scores, import games and audio — open, operator idea 2026-10-13, future, not designed
+
+A user with no PC tools has no backup (`commissioning/backup.sh` needs SSH) and no way to put ScummVM games or audio on a
+grown p3. Proposed shape: one settings-app page with export and import, not a file manager. **Blocked by the operator ruling of
+2026-09-06 (no USB work beyond USB audio)**: lift it first; needs the `usb-storage` and `vfat`/`exfat` modules (a module build).
 
 ### F106. Support BeagleBone Black boards — open, operator idea 2026-10-01, future
 
