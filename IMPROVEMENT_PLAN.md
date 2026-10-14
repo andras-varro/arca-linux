@@ -155,6 +155,14 @@ Seen in the Control Panel log viewer; boot-console errors are defects here. **Me
 
 `kernel/dts/rw20.dts:550` has `cd-gpios = <&gpio4 31 GPIO_ACTIVE_LOW>` (gpio_127, the vendor's value, kept) while the pad it muxes as a GPIO (`rw20.dts:278`) is `sdmmc1_dat4` = gpio_126. **[unverified]** Whether the switch is read at all has not been checked; the card boots, so nothing observed depends on it. **Done when** a card insert and removal is observed in the kernel log, or the property is shown to be inert.
 
+### B70. The terminal's login answers "bad salt" while root has no password — open, operator report 2026-10-14
+
+The image ships root locked (`root:*` in `/etc/shadow`, `rootfs/board/arca/post-build.sh:118`), and the terminal app runs `/bin/login` (`native_apps/terminal/terminal.c:262`). With that field, BusyBox login prints `bad salt` (the string is in the unit's `/bin/busybox`, `grep -a`) — that `*` is the cause is **[inferred]**. Once a password was set on the Control Panel SSH page, terminal login worked (operator, `.188`). **Done when** a locked root gets one line that says how to set a password, not `bad salt`.
+
+### B71. The on-screen keyboard has no space key — open, operator report 2026-10-14
+
+Operator, `.188`. `native_apps/common/keyboard.c:20` has a `_` key in the ALPHA layout that stores a space, so either the user did not see it as space or the keyboard in question is another one (the terminal's, `native_apps/terminal/term_keymap.c`) **[unverified]**. **Done when** every on-screen keyboard has a key that reads as space.
+
 ## Features
 
 Userspace except F101, which is the image build.
@@ -289,7 +297,7 @@ upgrade or new drivers still ship as an image to flash. Finishing steps, in orde
 
 1. **A downloadable image:** compressed with a checksum on a release page, flashable with any card writer. D18's source
    offer is a prerequisite for publishing it.
-2. **The first boot grows the card:** built as `growroot` (`rootfs/board/arca/overlay/etc/init.d/growroot`, host test `tests/arca_growroot_test.sh`); the online grow ran clean on `.188` by hand. **Open:** one real first boot from a freshly flashed card, which also times the grow at its largest (an 8 GB card took 17 s; a 32 GB one is unmeasured).
+2. **The first boot grows the card:** built as `growroot` (`rootfs/board/arca/overlay/etc/init.d/growroot`, host test `tests/arca_growroot_test.sh`); the online grow ran clean on `.188` by hand. A freshly flashed card grew by itself at first boot (`.188`, 8 GB). **Open:** the time on a 32 GB card (8 GB took 17 s by hand).
 3. **What an image ships:** no secrets and no copyrighted data (the existing rule). It runs as root, as the vendor
    system did. Operator 2026-10-12: SSH needs no image change, only a README paragraph: set a root password, allow
    password login, copy a public key, then switch to key-only. Where a user first sets that password is **[unverified]**.
