@@ -12,7 +12,6 @@
 #      arca_state_unsafe_paths; ordinary ones are not.
 #   B  The generated lister, run under dash against a synthetic tree, lists what
 #      exists and nothing that does not.
-#   C  arca_state_backup_foreign: what restore.sh may write is the BACKUP set only.
 #   D  arca_state_ssh_keys_deny: a card image may carry no SSH key material.
 #
 # The count at the end includes a floor: a file that silently ran zero cases
@@ -48,69 +47,6 @@ expect_out() {
 expect_rc() {
     if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (exit $2, expected $1)"; fi
 }
-
-# The real `tar -tf` of a state archive captured from .188 (2026-10), in archive order.
-cat > "$TMP/real.lst" <<'EOF'
-etc/touch_calibration.conf
-etc/touch_calibration.conf.bak1
-etc/touch_calibration.conf.bak2
-etc/touch_calibration.conf.bak3
-etc/touch_calibration.conf.bak4
-etc/touch_calibration.conf.bak5
-etc/touch_calibration.conf.bak6
-etc/touch_calibration.conf.bak7
-etc/touch_calibration.conf.bak8
-etc/touch_calibration.conf.bak9
-opt/games/arca_config.conf
-opt/games/scummvm.ini
-opt/vnc_client/vnc_client.conf
-var/lib/alsa/asound.state
-var/lib/bluetooth/
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/cache/
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/cache/5C:D3:3D:83:A3:B6
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/cache/94:45:60:89:F6:48
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/cache/E4:17:D8:13:49:41
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/cache/08:C8:C2:3C:67:17
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/cache/E4:17:D8:42:BD:FF
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/cache/08:EB:ED:FE:C1:3D
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/cache/90:7A:58:B9:C6:F5
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/cache/AC:0B:FB:14:87:62
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/cache/E6:7A:00:00:20:9F
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/cache/E4:17:D8:40:EB:AE
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/cache/34:88:5D:55:62:C5
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/cache/00:0C:BF:40:02:9B
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/08:EB:ED:FE:C1:3D/
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/08:EB:ED:FE:C1:3D/info
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/08:EB:ED:FE:C1:3D/attributes
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/90:7A:58:B9:C6:F5/
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/90:7A:58:B9:C6:F5/info
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/90:7A:58:B9:C6:F5/attributes
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/E6:7A:00:00:20:9F/
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/E6:7A:00:00:20:9F/info
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/E6:7A:00:00:20:9F/attributes
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/E4:17:D8:40:EB:AE/
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/E4:17:D8:40:EB:AE/info
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/E4:17:D8:40:EB:AE/attributes
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/34:88:5D:55:62:C5/
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/34:88:5D:55:62:C5/info
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/34:88:5D:55:62:C5/attributes
-var/lib/bluetooth/A0:AD:9F:70:DD:CA/settings
-var/lib/bluealsa/
-var/lib/bluealsa/08:C8:C2:3C:67:17
-var/lib/bluealsa/08:EB:ED:FE:C1:3D
-var/lib/bluealsa/90:7A:58:B9:C6:F5
-etc/hostname
-etc/hosts
-etc/timezone
-etc/localtime
-home/root/.ssh/
-home/root/.ssh/authorized_keys
-opt/arca/default-app
-home/root/kq2.000
-home/root/wget.err
-home/root/wget.out
-EOF
 
 : > "$TMP/empty"
 
@@ -174,20 +110,6 @@ arca_state_lister image > /dev/null 2>&1; rc=$?
 expect_rc 2 "$rc" "B2 the retired image set is refused, exit 2"
 
 echo ""
-echo "C  what restore.sh will write: the BACKUP set and nothing else"
-tar -C "$R" -cf - -T "$TMP/listed.backup" | tar -tf - > "$TMP/c1.lst"
-arca_state_backup_foreign < "$TMP/c1.lst" > "$TMP/c1.out"; rc=$?
-expect_out "$TMP/empty" "$TMP/c1.out" "C1 a tar of the backup set is all members"
-expect_rc 0 "$rc" "C2 and exits 0"
-arca_state_backup_foreign < "$TMP/real.lst" > "$TMP/c3.out"
-expect_out "$TMP/empty" "$TMP/c3.out" "C3 the real .188 listing is all backup members"
-printf '%s\n' etc/shadow etc/ssh/sshd_config usr/bin/x home/root/subdir/x home/root/subdir/ \
-    /etc/hostname ../x opt/games/snake > "$TMP/c4.lst"
-arca_state_backup_foreign < "$TMP/c4.lst" > "$TMP/c4.out"; rc=$?
-expect_out "$TMP/c4.lst" "$TMP/c4.out" "C4 system files, a nested /home/root file, unsafe paths and a binary are foreign"
-expect_rc 1 "$rc" "C5 and exits 1"
-
-echo ""
 echo "D  arca_state_ssh_keys_deny: a card image carries no SSH key material"
 printf '%s\n' ./ ./etc/ssh/sshd_config ./home/root/.ssh/ ./home/root/.ssh/authorized_keys ./usr/bin/ssh > "$TMP/g1.lst"
 arca_state_ssh_keys_deny < "$TMP/g1.lst" > "$TMP/g1.out"; rc=$?
@@ -216,8 +138,8 @@ expect_rc 0 "$rc" "D7 and exits 0"
 echo ""
 TOTAL=$((PASS + FAIL))
 echo "  $PASS passed, $FAIL failed"
-# groups A..D: 4 + 4 + 5 + 9 = 22 (group B has the zero-numbered B0 twice, group D has 3b/3c)
-MIN_CASES=22
+# groups A, B, D: 4 + 4 + 9 = 17 (group B has the zero-numbered B0 twice, group D has 3b/3c)
+MIN_CASES=17
 if [ "$TOTAL" -lt "$MIN_CASES" ]; then
     echo -e "  ${RED}HARNESS ERROR${NC}: only $TOTAL cases ran, expected at least $MIN_CASES."
     exit 2

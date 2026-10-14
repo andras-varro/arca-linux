@@ -8,7 +8,7 @@
 # mapping, Bluetooth pairings and audio state, high scores, the SSH host keys and
 # authorized_keys, the host name and time zone, and the operator's private config
 # (the VNC password, ScummVM's ini and saves) — for an update, upgrade or reflash.
-# commissioning/restore.sh puts it back.
+# No script here writes it back.
 #
 # READ-ONLY on the unit: the list is built there (only files that exist), BusyBox
 # tar streams it over ssh stdout, and this host compresses it (the unit has no
@@ -32,7 +32,6 @@ Usage: commissioning/backup.sh <ip|host> [<out.tar.gz>]
 Copies the unit's per-unit state (lib/arca-state.sh, BACKUP set) to this host.
 Read-only on the unit. Default output: backups/<hostname>-<YYYYmmdd-HHMMSS>.tar.gz.
 The archive holds secrets (VNC password, SSH host keys); keep it private.
-Restore with: commissioning/restore.sh <ip|host> <archive> [--dry-run]
 
   -h, --help   this text
 USAGE

@@ -22,8 +22,7 @@
 #                     into u-boot.img with no saveenv, so p3 IS the rootfs by
 #                     position and cannot be renumbered. See
 #                     SYSTEM_ANALYSIS.md#42-partitions.
-#   arca_card_partitions
-#                     POSITION. Which partition holds which of the two trees
+#   ARCA_PART_ROLES   POSITION. Which partition holds which of the two trees
 #                     that are mounted. Also by position, for the same reason:
 #                     /etc/fstab names /dev/mmcblk0p2 literally. Nothing on
 #                     the device consumes a UUID at all.
@@ -120,40 +119,6 @@ arca_is_rootfs() {
 }
 
 # ---------------------------------------------------------------------------
-# arca_find_rootfs
-#
-# Echo the mount point of every mounted Arca rootfs, one per line.
-# Callers decide what 0, 1 or many means.
-#
-# "/" is EXCLUDED unconditionally. Commissioning is an offline, card-in-reader
-# operation, so the live root is never the intended target — and a content scan,
-# unlike the UUID lookup it replaces, could otherwise select the dev host's own
-# root and rewrite its /etc/shadow. Excluding it makes that impossible rather
-# than unlikely. To act on a live root deliberately, set ROOTFS=/ by hand.
-# ---------------------------------------------------------------------------
-arca_find_rootfs() {
-    local target fstype
-    # Fed by a here-doc rather than a pipe so the loop body runs in THIS shell:
-    # a `findmnt | while read` would put it in a subshell, which matters as soon
-    # as anyone adds a variable assignment to the body.
-    while read -r target fstype; do
-        [ -n "$target" ] || continue
-        [ "$target" = "/" ] && continue
-        case "$fstype" in
-            ext2|ext3|ext4) ;;
-            *) continue ;;
-        esac
-        arca_is_rootfs "$target" && echo "$target"
-    done <<EOF
-$(findmnt -rno TARGET,FSTYPE 2>/dev/null)
-EOF
-    # Explicit, because the loop's status is that of the last arca_is_rootfs call:
-    # a final non-match would otherwise return 1 and kill a caller running under
-    # `set -e`. "No cards found" is a normal result, not an error.
-    return 0
-}
-
-# ---------------------------------------------------------------------------
 # arca_is_rootfs_writable DIR
 #
 # 0 if DIR is mounted read-write. A card auto-mounted read-only is the one way
@@ -167,28 +132,6 @@ arca_is_rootfs_writable() {
         *,ro,*) return 1 ;;
         *) return 0 ;;
     esac
-}
-
-# ---------------------------------------------------------------------------
-# arca_can_read_partition_table DEVICE
-#
-# 0 if DEVICE's partition table can be read at all.
-#
-# Exists to separate two failures that arca_is_card_disk cannot distinguish,
-# because both are `return 1`: "this is not an Arca card" and "this process
-# cannot read the table". `sfdisk -d` needs root — block devices are
-# brw-rw---- root:disk — so a non-root run on a genuine card reported
-# "does not carry the Arca partition layout", which is a lie that sends the
-# operator looking at the card instead of at the command. Measured 2026-08-05 on
-# a real unit's card at /dev/mmcblk0.
-#
-# Also 1 when sfdisk is absent, which a caller should report as its own thing.
-# ---------------------------------------------------------------------------
-arca_can_read_partition_table() {
-    local dev="$1"
-    [ -n "$dev" ] || return 1
-    command -v sfdisk >/dev/null 2>&1 || return 1
-    sfdisk -d "$dev" >/dev/null 2>&1
 }
 
 # ---------------------------------------------------------------------------
@@ -239,35 +182,6 @@ arca_is_card_disk() {
     return 0
 }
 
-# ---------------------------------------------------------------------------
-# arca_find_card_disks
-#
-# Echo every whole disk on the host that carries the Arca layout, one
-# "DEVICE SIZE" pair per line. Used only to make a "nothing is mounted" error
-# actionable, so it is best-effort and prints nothing if lsblk is unavailable.
-#
-# The root disk is skipped, and by resolution rather than by name: arca_host_root_disk
-# below is the one implementation of that resolution, shared with the mount path,
-# because on this host every disk reports removable=0 including the root disk and
-# a wsl --mount'ed card lands on the same /dev/sd? namespace as / — so a
-# "removable only" filter rejects everything and a name filter rejects nothing.
-# (CLAUDE.md, "Working from this host".)
-# ---------------------------------------------------------------------------
-arca_find_card_disks() {
-    local rootdisk="" name size
-    command -v lsblk >/dev/null 2>&1 || return 0
-    rootdisk=$(arca_host_root_disk 2>/dev/null || true)
-
-    while read -r name size; do
-        [ -n "$name" ] || continue
-        [ "$name" = "$rootdisk" ] && continue
-        arca_is_card_disk "/dev/$name" && echo "/dev/$name $size"
-    done <<EOF
-$(lsblk -drno NAME,SIZE --nodeps 2>/dev/null)
-EOF
-    return 0   # see arca_find_rootfs: finding nothing is not an error
-}
-
 # ═══════════════════════════════════════════════════════════════════════════
 # The two mounts, by POSITION
 # ═══════════════════════════════════════════════════════════════════════════
@@ -292,8 +206,8 @@ EOF
 #
 # p1 is deliberately NOT in this table. It carries mlo, u-boot.img and the
 # kernel; leaving it untouched is what keeps a power cycle a free undo
-# (SYSTEM_ANALYSIS.md#47-recovery). A caller cannot reach p1 through these
-# functions, which is a stronger guarantee than remembering not to.
+# (SYSTEM_ANALYSIS.md#47-recovery). A caller cannot reach p1 through this
+# table, which is a stronger guarantee than remembering not to.
 ARCA_PART_ROLES="3:root 2:log"
 
 # Where each role is mounted on a RUNNING device. Used to translate a
@@ -363,38 +277,6 @@ arca_part_dev() {
 }
 
 # ---------------------------------------------------------------------------
-# arca_card_partitions DISK
-#
-# Echo "<role> <partition-device>" for each of the two, one per line, root
-# first. Pure name arithmetic over ARCA_PART_ROLES — it does not check that the
-# nodes exist, because a caller may be working on an image file where they do
-# not, and arca_is_card_disk has already established the layout.
-# ---------------------------------------------------------------------------
-arca_card_partitions() {
-    local disk="$1" entry num role
-    [ -n "$disk" ] || return 1
-    for entry in $ARCA_PART_ROLES; do
-        num="${entry%%:*}"
-        role="${entry#*:}"
-        echo "$role $(arca_part_dev "$disk" "$num")"
-    done
-}
-
-# ---------------------------------------------------------------------------
-# arca_role_device_path ROLE
-#
-# Echo the absolute path ROLE's tree has on a running device, or nothing for an
-# unknown role.
-# ---------------------------------------------------------------------------
-arca_role_device_path() {
-    local want="$1" entry
-    for entry in $ARCA_ROLE_DEVICE_PATH; do
-        [ "${entry%%:*}" = "$want" ] && { echo "${entry#*:}"; return 0; }
-    done
-    return 1
-}
-
-# ---------------------------------------------------------------------------
 # arca_offline_path BASE DEVPATH
 #
 # Map a device-absolute path onto the right one of the two offline mounts.
@@ -459,116 +341,6 @@ arca_offline_base_ok() {
         echo "arca-identify: refusing base '$base' — not a directory" >&2
         return 1
     fi
-    return 0
-}
-
-# ---------------------------------------------------------------------------
-# arca_host_root_disk
-#
-# Echo the whole disk this host boots from.
-#
-# Resolved, never guessed by name or by the removable flag. On the machine this
-# was written on EVERY disk reports removable = 0 — including the root disk — and
-# a `wsl --mount`ed card lands in the same /dev/sd? namespace as /, so a
-# "removable media only" gate rejects everything and a name filter rejects
-# nothing (CLAUDE.md → "Working from this host").
-#
-# `mount | grep ^/dev/sdX` is NOT a substitute: it never lists swap, so a disk
-# whose only mounted piece is the swap partition looks unused.
-# ---------------------------------------------------------------------------
-arca_host_root_disk() {
-    local src
-    command -v lsblk >/dev/null 2>&1 || return 1
-    src=$(findmnt -no SOURCE --target / 2>/dev/null) || return 1
-    [ -n "$src" ] || return 1
-    lsblk -rnso NAME "$src" 2>/dev/null | tail -1
-}
-
-# ---------------------------------------------------------------------------
-# arca_is_host_root_disk DEVICE
-#
-# 0 if DEVICE is (or is a partition of) the disk this host boots from. The gate
-# every write path checks before it does anything: writing to the dev host's own
-# disk is the one mistake in this file with no undo.
-#
-# Returns 1 — "not the root disk" — when lsblk cannot answer at all, which is the
-# permissive direction. That is deliberate: this function is a veto, and callers
-# also require arca_is_card_disk to have said yes. An unanswerable lsblk on a disk
-# that carries the exact Arca partition table is not the dev host.
-# ---------------------------------------------------------------------------
-arca_is_host_root_disk() {
-    local dev="$1" rootdisk name
-    [ -n "$dev" ] || return 1
-    rootdisk=$(arca_host_root_disk) || return 1
-    [ -n "$rootdisk" ] || return 1
-
-    # Compare by resolved disk, not by string: /dev/sda, /dev/sda1 and
-    # /dev/disk/by-id/… all have to match when the root disk is sda.
-    name=$(lsblk -rnso NAME "$dev" 2>/dev/null | tail -1)
-    [ -n "$name" ] || name="$(basename "$dev")"
-    [ "$name" = "$rootdisk" ]
-}
-
-# ---------------------------------------------------------------------------
-# arca_mount_card DISK BASE
-#
-# Mount both of DISK's trees read-write under BASE/{root,log}
-# and echo "<role> <mountpoint>" per line. Needs root.
-#
-# Refuses the host's own disk before mounting anything, rather than after: a
-# read-write mount of the dev host's root is already a bad outcome even if
-# nothing is written to it.
-#
-# Partial failure unwinds. A caller that got one of two mounts and proceeded
-# would install into one tree and silently miss the other -- a bundle path under
-# /home/root/log landing in p3's empty mount point instead of on p2.
-# ---------------------------------------------------------------------------
-arca_mount_card() {
-    local disk="$1" base="$2" role part mp
-    [ -n "$disk" ] && [ -n "$base" ] || return 1
-
-    if arca_is_host_root_disk "$disk"; then
-        echo "arca_mount_card: $disk is this host's root disk — refusing" >&2
-        return 1
-    fi
-    if ! arca_is_card_disk "$disk"; then
-        echo "arca_mount_card: $disk does not carry the Arca partition layout" >&2
-        return 1
-    fi
-
-    while read -r role part; do
-        [ -n "$role" ] || continue
-        mp="$base/$role"
-        mkdir -p "$mp" || { arca_umount_card "$base"; return 1; }
-        if ! mount "$part" "$mp" 2>/dev/null; then
-            echo "arca_mount_card: could not mount $part on $mp" >&2
-            arca_umount_card "$base"
-            return 1
-        fi
-        echo "$role $mp"
-    done <<EOF
-$(arca_card_partitions "$disk")
-EOF
-    return 0
-}
-
-# ---------------------------------------------------------------------------
-# arca_umount_card BASE
-#
-# Unmount whatever arca_mount_card put under BASE. Idempotent, and never an error:
-# it is called from the failure path of arca_mount_card and from a trap, where a
-# non-zero status would mask the real problem.
-# ---------------------------------------------------------------------------
-arca_umount_card() {
-    local base="$1" entry role
-    [ -n "$base" ] || return 0
-    for entry in $ARCA_PART_ROLES; do
-        role="${entry#*:}"
-        mountpoint -q "$base/$role" 2>/dev/null && umount "$base/$role" 2>/dev/null
-    done
-    # root last is not required — they are independent filesystems, not
-    # nested mounts — but sync is, before the operator pulls the card.
-    sync
     return 0
 }
 

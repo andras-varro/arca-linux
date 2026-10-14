@@ -34,14 +34,11 @@
 #                     puts the root on. Fixtures are made with printf; no U-Boot build.
 #
 #   arca_part_dev       The two partition-naming schemes. /dev/sdf + 3 is
-#   arca_card_partitions  /dev/sdf3 but /dev/mmcblk0 + 3 is /dev/mmcblk0p3, and
-#                     getting that wrong means mounting nothing at all. Plus the
-#                     assertion that matters most: p1 is NOT in the role table,
-#                     so no caller can reach it through these functions.
+#                     /dev/sdf3 but /dev/mmcblk0 + 3 is /dev/mmcblk0p3, and
+#                     getting that wrong means mounting nothing at all.
 #
-#   arca_host_root_disk Resolved, not guessed. Checked against findmnt independently
-#                     of the implementation, and the veto is checked in both
-#                     directions — a veto that always says "no" is invisible.
+#   ARCA_PART_ROLES     The role table itself. The assertion that matters most: p1 is NOT
+#                     in it, so no caller can reach it through the functions that read it.
 #
 #   arca_check_card_mounts
 #                     Both halves, including the one that earns its keep: two
@@ -353,11 +350,11 @@ expect_eq "/dev/loop3p2"     "$(arca_part_dev /dev/loop3 2)"      "loop device: 
 expect_eq "/dev/nvme0n1p5"   "$(arca_part_dev /dev/nvme0n1 5)"    "nvme: a 'p' is inserted"
 
 echo ""
-echo "arca_card_partitions"
+echo "ARCA_PART_ROLES (the table arca_check_card_mounts and arca_uboot_root_ok read)"
 
-PARTS=$(arca_card_partitions /dev/mmcblk0)
-expect_eq "root /dev/mmcblk0p3" "$(echo "$PARTS" | grep '^root ')"   "p3 is root"
-expect_eq "log /dev/mmcblk0p2"  "$(echo "$PARTS" | grep '^log ')"    "p2 is log"
+PARTS=$(for e in $ARCA_PART_ROLES; do echo "${e#*:} p${e%%:*}"; done)
+expect_eq "root p3" "$(echo "$PARTS" | grep '^root ')"   "p3 is root"
+expect_eq "log p2"  "$(echo "$PARTS" | grep '^log ')"    "p2 is log"
 expect_eq "2" "$(echo "$PARTS" | grep -c .)"                         "exactly two roles"
 expect_eq "0" "$(echo "$PARTS" | grep -c '^data ')"                  "there is no data role (data is a plain directory on root)"
 
@@ -373,21 +370,6 @@ for forbidden in 1 4 5 6 7; do
         ok "p$forbidden is absent from the role table"
     fi
 done
-
-echo ""
-echo "arca_role_device_path"
-expect_eq "/"                    "$(arca_role_device_path root)"   "root  → /"
-expect_eq "/home/root/log"       "$(arca_role_device_path log)"    "log   → /home/root/log"
-if arca_role_device_path data >/dev/null 2>&1; then
-    bad "data is not a role any more and must not resolve to a path"
-else
-    ok "data does not resolve as a role"
-fi
-if arca_role_device_path boot >/dev/null 2>&1 || arca_role_device_path backup >/dev/null 2>&1; then
-    bad "an unknown role (boot, and the retired backup) must not resolve to a path"
-else
-    ok "an unknown role does not resolve"
-fi
 
 echo ""
 echo "arca_offline_path / arca_offline_base_ok"
@@ -421,38 +403,6 @@ if arca_offline_base_ok "$TMP/offline-base" 2>/dev/null; then
     ok "a real directory is accepted as a base"
 else
     bad "a real directory must be accepted as a base"
-fi
-
-echo ""
-echo "arca_host_root_disk / arca_is_host_root_disk"
-
-HOST_ROOT_DISK=$(arca_host_root_disk 2>/dev/null || true)
-if [ -z "$HOST_ROOT_DISK" ]; then
-    skipped "host root disk" "lsblk/findmnt could not resolve /"
-    skipped "root-disk veto (positive)" "no root disk resolved"
-    skipped "root-disk veto (negative)" "no root disk resolved"
-else
-    # Cross-checked against findmnt directly rather than against the function's
-    # own output, so this is a second opinion and not a tautology.
-    ROOT_SRC=$(findmnt -no SOURCE --target / 2>/dev/null)
-    case "$ROOT_SRC" in
-        *"$HOST_ROOT_DISK"*) ok "root disk '$HOST_ROOT_DISK' is a prefix of '$ROOT_SRC'" ;;
-        *) bad "root disk '$HOST_ROOT_DISK' does not appear in '$ROOT_SRC'" ;;
-    esac
-
-    # Both directions. A veto stuck at "yes" blocks every card; one stuck at "no"
-    # is worse — it silently permits writing to this host's own disk, which is
-    # the one mistake here with no undo.
-    if arca_is_host_root_disk "/dev/$HOST_ROOT_DISK"; then
-        ok "the host root disk is vetoed"
-    else
-        bad "the host root disk is NOT vetoed"
-    fi
-    if arca_is_host_root_disk "/dev/arca-no-such-disk-$$"; then
-        bad "a nonexistent device must not be vetoed as the root disk"
-    else
-        ok "a nonexistent device is not vetoed"
-    fi
 fi
 
 echo ""
@@ -530,17 +480,16 @@ echo "  $PASS passed, $FAIL failed, $SKIP skipped"
 #   4  arca_layout_end / arca_layout_sfdisk_script
 #   6  arca_uboot_root_ok
 #   4  arca_part_dev
-#   9  arca_card_partitions (4 role lines + no-data) + 5 forbidden-partition assertions
-#   4  arca_role_device_path
+#   9  ARCA_PART_ROLES (4 role lines + no-data) + 5 forbidden-partition assertions
 #  15  arca_offline_path (8) + arca_offline_base_ok (7)
 #   3  arca_check_card_mounts
-# = 62.   arca_host_root_disk's 3 are skippable (they need a working lsblk), and the
-# real card images are gitignored, so neither is counted.  The 10 synthetic
+# = 58.   The
+# real card images are gitignored, so they are not counted.  The 10 synthetic
 # arca_is_card_disk cases need sfdisk, so on a host without it the floor drops to
-# 52 -- otherwise fixing the skip above just trades a red FAIL for a red harness
+# 48 -- otherwise fixing the skip above just trades a red FAIL for a red harness
 # error, which is the same defect wearing a different label.
-MIN_CASES=62
-[ "$HAVE_SFDISK" = no ] && MIN_CASES=52
+MIN_CASES=58
+[ "$HAVE_SFDISK" = no ] && MIN_CASES=48
 if [ "$TOTAL" -lt "$MIN_CASES" ]; then
     echo -e "  ${RED}HARNESS ERROR${NC}: only $TOTAL cases ran, expected at least $MIN_CASES."
     echo "  Cases were skipped that cannot be skipped, or the file was truncated."

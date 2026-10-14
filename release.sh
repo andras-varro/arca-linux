@@ -24,9 +24,9 @@
 # dynamic binaries link only the device's own soft-float userspace (glibc 2.31, libstdc++,
 # libasound.so.2), which its stock rootfs provides — so there is nothing to ship beside them.
 #
-# commissioning/commission-offline.sh is the first non-developer consumer — an offline
-# commissioner has no toolchain to fall back on, so a bundle IS its only source
-# of binaries.
+# rootfs/make-card-image.sh --bundle is the first non-developer consumer — it hands the bundle to
+# commissioning/commission-offline.sh, and an offline image build has no toolchain to fall back on,
+# so a bundle IS its only source of binaries.
 #
 # ── What is NOT published, and why ──────────────────────────────────────────
 #
@@ -70,7 +70,7 @@
 #
 # `gh` 2.86.0 is installed in WSL (from the release .deb — focal's apt has no `gh`
 # and the snap links against a glibc newer than 2.31).  --stage-only stays the
-# network-free path and produces a tarball commissioning/commission-offline.sh
+# network-free path and produces a tarball rootfs/make-card-image.sh
 # --bundle <file> takes directly.
 #
 # ⚠️ Every gh call below passes --repo, and it is NOT optional.  `origin` is an SSH
@@ -698,8 +698,8 @@ if [[ $STAGE_ONLY -eq 1 ]]; then
     echo ""
     ok "Staged only — nothing was published."
     echo ""
-    echo "  Install it offline, with no network and no toolchain:"
-    echo "    ./commissioning/commission-offline.sh --bundle $TARBALL"
+    echo "  Put it on a card image (the other inputs: rootfs/make-card-image.sh --help):"
+    echo "    sudo ./rootfs/make-card-image.sh --bundle $TARBALL <other options> <rootfs.tar> <out.img>"
     echo ""
     echo "  Or publish it:"
     echo "    $0 --tag <tag>"
@@ -732,10 +732,10 @@ else
         {
             echo "Statically linked ARM binaries for $PRODUCT_NAME."
             echo ""
-            echo "Install offline, with no toolchain:"
+            echo "Put these binaries on a card image, with no toolchain:"
             echo ""
             echo '```'
-            echo "./commissioning/commission-offline.sh --bundle $(basename "$TARBALL")"
+            echo "sudo ./rootfs/make-card-image.sh --bundle $(basename "$TARBALL") <other options> <rootfs.tar> <out.img>"
             echo '```'
             echo ""
             echo "Built from ${GIT_REV}${GIT_DIRTY}. Components:"

@@ -7,11 +7,10 @@
 #
 # ONE home for the BACKUP list: everything that makes a unit THIS unit — settings,
 # calibration, pairings, high scores, SSH identity, and the operator's own private config
-# (the VNC password, ScummVM's ini and saves). Read by commissioning/backup.sh;
-# commissioning/restore.sh writes it back.
+# (the VNC password, ScummVM's ini and saves). Read by commissioning/backup.sh, the only reader.
 #
 # A card image carries NONE of it: rootfs/make-card-image.sh builds one generic image from our
-# own parts, and a unit's state travels only through backup.sh and restore.sh. What the
+# own parts, and a unit's state travels only through backup.sh. What the
 # image builder takes from this file is arca_state_ssh_keys_deny, below.
 #
 # ── Where ScummVM's saves go ────────────────────────────────────────────────
@@ -22,9 +21,6 @@
 # is why kq2.000 turned up loose in /home/root. Saves have no fixed name (<target>.NNN
 # for AGI, <target>.sNN for SCUMM), so the backup also takes every regular file
 # directly in those two directories (ARCA_STATE_LOOSE_DIRS), for units with old saves.
-#
-# arca_state_backup_foreign is the restore side's gate: every entry outside the BACKUP
-# set, so restore.sh cannot be made to write /etc/shadow from a hand-built archive.
 #
 # Paths are relative to /, never absolute, and contain no whitespace.
 
@@ -97,14 +93,6 @@ arca_state_unsafe_paths() {
     [ "$found" -ne 0 ]
 }
 
-# _arca_state_norm ENTRY — strip a leading "./" and a trailing "/".
-_arca_state_norm() {
-    local e="$1"
-    while [ "${e#./}" != "$e" ]; do e="${e#./}"; done
-    e="${e%/}"
-    printf '%s' "$e"
-}
-
 # arca_state_ssh_keys_deny
 #   stdin: a tar listing (tar -tf), or `find . ! -type d` output. Prints every entry
 #   that is SSH key material: anything inside a '.ssh' directory (including a non-directory
@@ -130,43 +118,6 @@ arca_state_ssh_keys_deny() {
             */id_dsa) printf '%s\n' "$e"; found=0 ;;
             */.ssh) printf '%s\n' "$e"; found=0 ;;
         esac
-    done
-    [ "$found" -ne 0 ]
-}
-
-# _arca_state_backup_member ENTRY — 0 if a tar entry belongs to the BACKUP set.
-# Patterns are globs by design, hence the unquoted case patterns.
-# shellcheck disable=SC2254
-_arca_state_backup_member() {
-    local raw="$1" e p d
-    case "/$raw/" in //*|*/../*) return 1 ;; esac
-    e="$(_arca_state_norm "$raw")"
-    case "$e" in ''|.) return 0 ;; esac
-    for p in "${ARCA_STATE_BACKUP[@]}"; do
-        case "$e" in $p|$p/*) return 0 ;; esac
-        case "$raw" in */) case "$p" in "$e"/*) return 0 ;; esac ;; esac
-    done
-    # A loose file: a non-directory entry directly inside one of the loose dirs.
-    case "$raw" in */) return 1 ;; esac
-    for d in "${ARCA_STATE_LOOSE_DIRS[@]}"; do
-        if [ "$d" = . ]; then
-            case "$e" in */*) ;; *) return 0 ;; esac
-        else
-            case "$e" in "$d"/*/*) ;; "$d"/*) return 0 ;; esac
-        fi
-    done
-    return 1
-}
-
-# arca_state_backup_foreign
-#   stdin: a tar listing. Prints every entry outside the BACKUP set, unsafe ones
-#   included — what commissioning/restore.sh refuses to write. Exit 1 if it printed
-#   any, 0 if none.
-arca_state_backup_foreign() {
-    local e found=1
-    while IFS= read -r e; do
-        [ -n "$e" ] || continue
-        if ! _arca_state_backup_member "$e"; then printf '%s\n' "$e"; found=0; fi
     done
     [ "$found" -ne 0 ]
 }
