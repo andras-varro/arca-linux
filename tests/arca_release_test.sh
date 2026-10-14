@@ -690,6 +690,28 @@ fi
 assert_eq "0000" "$(grep -c . "$GATE_MARK")$(grep -c . "$OFFLOG")$(grep -c . "$GHLOG")$([ -e "$TMP/e7b" ] && echo 1 || echo 0)" \
     "E7c and nothing ran: no gate, no offer, no gh call, no staging directory"
 
+# E7d: each offer input (--rootfs-build, --uboot-src, --cache) without --source-offer is refused
+# before anything runs, as --image is. E7e: and nothing ran for any of the three.
+reset_logs
+for flag in --rootfs-build --uboot-src --cache; do
+    run_e "$PTREE" --stage-only --component native_apps --out "$TMP/e7d$flag" "$flag" "$TMP/e7d-value"
+    if [ "$ST" -ne 0 ] && printf '%s\n' "$OUT_TXT" | grep -qF -e "$flag needs --source-offer" && [ ! -e "$TMP/e7d$flag" ]; then
+        ok "E7d $flag without --source-offer is refused"
+    else
+        bad "E7d $flag without --source-offer must be refused — exit $ST"
+    fi
+done
+assert_eq "000" "$(grep -c . "$GATE_MARK")$(grep -c . "$OFFLOG")$(grep -c . "$GHLOG")" \
+    "E7e and nothing ran for any of the three: no gate, no offer, no gh call"
+# E7f: a value option with no value is refused, as --tag and --out are
+reset_logs
+run_e "$PTREE" --stage-only --component native_apps --out "$TMP/e7f" --source-offer --cache
+if [ "$ST" -ne 0 ] && printf '%s\n' "$OUT_TXT" | grep -qF -e "--cache needs a value"; then
+    ok "E7f --cache with no value is refused"
+else
+    bad "E7f --cache with no value must be refused — exit $ST"
+fi
+
 # E8: the gate comes first: a failing gate means the offer is never assembled
 reset_logs
 ARCA_STUB_GATE_MARKER="$GATE_MARK" ARCA_STUB_GATE_RC=1 \
@@ -740,6 +762,30 @@ if grep -qF "${PRODUCT_STEM}-source-v1.2.tar" "$GHNOTES" && grep -qF "card.img" 
 else
     bad "E12f the release notes should name both: $(cat "$GHNOTES")"
 fi
+
+# E13: the three offer inputs reach the offer script with their values, each exactly once
+RB_V="$TMP/e13-rootfs"; UB_V="$TMP/e13-uboot"; CA_V="$TMP/e13-cache"
+mkdir -p "$RB_V" "$UB_V" "$CA_V"
+reset_logs
+run_e "$PTREE" --stage-only --component native_apps --out "$TMP/e13" --source-offer --source-out "$TMP/srcout13" \
+    --rootfs-build "$RB_V" --uboot-src "$UB_V" --cache "$CA_V"
+assert_eq "0" "$ST" "E13 the three offer inputs with --source-offer stage"
+for pair in "--rootfs-build $RB_V" "--uboot-src $UB_V" "--cache $CA_V"; do
+    flag="${pair%% *}"
+    if grep -qF -e "$pair" "$OFFLOG" && [ "$(grep -o -e "$flag" "$OFFLOG" | grep -c .)" -eq 1 ]; then
+        ok "E13b the offer received '$pair', exactly once"
+    else
+        bad "E13b the offer must receive '$pair' exactly once: $(cat "$OFFLOG")"
+    fi
+done
+
+# E13c: with --source-offer and none of the three, the offer receives none of them: its own
+# defaults stay in force
+reset_logs
+run_e "$PTREE" --stage-only --component native_apps --out "$TMP/e13c" --source-offer --source-out "$TMP/srcout13c"
+assert_eq "0" "$ST" "E13c --source-offer without the inputs stages"
+assert_eq "000" "$(grep -c -e '--rootfs-build' "$OFFLOG")$(grep -c -e '--uboot-src' "$OFFLOG")$(grep -c -e '--cache' "$OFFLOG")" \
+    "E13d and the offer received none of the three"
 
 assert_eq "$CANARY_MD5" "$(canary_md5)" "E14 the canary is still intact after the source-offer cases"
 

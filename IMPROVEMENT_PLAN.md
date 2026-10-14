@@ -395,7 +395,7 @@ and it must fire in a file of the same kind, or the scan goes blind where it use
 
 ### D18. A published card image does not yet meet its source offer — open, measured 2026-10-10
 
-`release.sh --source-offer [--image ...]`, the `NOTICE` text and the p6 licence documents exist (`LICENSE.md`, *The source-offer duty*). **Operator ruling 2026-10-12: the offer is required** for the published image. **Still open:** (1) a real publish (`gh release create`) and a real offer through `release.sh --source-offer` are untested: `tests/arca_release_test.sh` stubs both; (2) `release.sh` passes no `--rootfs-build`/`--uboot-src`/`--cache` through to `make-source-offer.sh`. **Done when** a published card image comes with its source offer, from a real run.
+`release.sh --source-offer [--image ...]`, the `NOTICE` text and the p6 licence documents exist (`LICENSE.md`, *The source-offer duty*). **Operator ruling 2026-10-12: the offer is required** for the published image. **Still open:** a real publish (`gh release create`) and a real offer through `release.sh --source-offer` are untested: `tests/arca_release_test.sh` stubs both. **Done when** a published card image comes with its source offer, from a real run.
 
 ---
 

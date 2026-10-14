@@ -143,6 +143,11 @@ start_copy; perl -0pi -e 's/if \[\[ \$SOURCE_OFFER -eq 1 \]\]; then\n        ASS
 start_copy; perl -0pi -e 's/if \[\[ \$SOURCE_OFFER -eq 1 \]\]; then\n    echo ""\n    echo "─/if true; then\n    echo ""\n    echo "─/' "$SAB/cur.sh"; report "28. the offer is run without the flag"
 start_copy; perl -0pi -e 's/if \[\[ \$SOURCE_OFFER -eq 1 \]\]; then\ncat <<\x27NOTICE\x27\nCorresponding/if true; then\ncat <<\x27NOTICE\x27\nCorresponding/' "$SAB/cur.sh"; report "29. NOTICE always names the source file"
 start_copy; perl -0pi -e 's/if \[\[ -n "\$TAG" && \$SOURCE_OFFER -eq 0 \]\]; then\n    err "--tag needs/if false; then\n    err "--tag needs/' "$SAB/cur.sh"; report "30. --tag publishes without --source-offer"
+# 31: the pass-through of --rootfs-build dropped: the offer is run without the input. The E13
+# cases are the ones that can see it; E13c stays green, since it expects none of the three.
+start_copy; perl -0pi -e 's/    if \[\[ -n "\$ROOTFS_BUILD" \]\]; then SOURCE_ARGS\+=\(--rootfs-build "\$ROOTFS_BUILD"\); fi\n//' "$SAB/cur.sh"; report "31. --rootfs-build not passed to the offer"
+# 32: the refusal for --rootfs-build removed: --rootfs-build without --source-offer is accepted.
+start_copy; perl -0pi -e 's/if \[\[ -n "\$ROOTFS_BUILD" && \$SOURCE_OFFER -eq 0 \]\]; then/if false; then/' "$SAB/cur.sh"; report "32. --rootfs-build accepted without --source-offer"
 
 restore
 echo ""

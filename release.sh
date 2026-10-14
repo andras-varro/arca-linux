@@ -8,6 +8,9 @@
 #   ./release.sh --stage-only --component native_apps
 #   ./release.sh --tag <tag> --source-offer [--image <card image>]...   # the above, then gh release create
 #                                    (--tag is refused without --source-offer)
+#   ./release.sh ... --source-offer [--rootfs-build <dir>] [--uboot-src <dir>] [--cache <dir>]
+#                                    (passed to rootfs/make-source-offer.sh; each is refused
+#                                    without --source-offer, and given only when set)
 #   ./release.sh --help
 #
 # ── Why this exists ─────────────────────────────────────────────────────────
@@ -109,6 +112,7 @@ RELEASE_COMPONENTS=(native_apps vnc_client scummvm-arca usb_host bluetooth)
 usage() {
     echo "Usage: $0 --stage-only [--out <dir>] [--component <name>]... [--source-offer]"
     echo "       $0 --tag <tag>  --source-offer [--out <dir>] [--component <name>]... [--image <file>]..."
+    echo "                    [--rootfs-build <dir>] [--uboot-src <dir>] [--cache <dir>]"
     echo ""
     echo "  --stage-only      Build, stage and tar. No network, no gh."
     echo "  --skip-tests      Stage without running the host gate first. The"
@@ -127,6 +131,12 @@ usage() {
     echo "                    ~/${PRODUCT_STEM}-source-out); must be outside this repository."
     echo "  --image <file>    Attach a card image to the release; repeatable. Its md5 is"
     echo "                    recorded in the source file. Needs --source-offer."
+    echo "  --rootfs-build <d> Buildroot output tree for the source offer (passed to"
+    echo "                    rootfs/make-source-offer.sh; default is its own). Needs --source-offer."
+    echo "  --uboot-src <d>   U-Boot checkout for the source offer (default is its own)."
+    echo "                    Needs --source-offer."
+    echo "  --cache <d>       Download cache for the source offer (default is its own)."
+    echo "                    Needs --source-offer."
     echo ""
     echo "Components: ${RELEASE_COMPONENTS[*]}"
     exit 1
@@ -141,12 +151,18 @@ COMPONENTS=()
 SOURCE_OFFER=0
 SOURCE_OUT="${HOME}/${PRODUCT_STEM}-source-out"
 IMAGES=()
+ROOTFS_BUILD=""
+UBOOT_SRC=""
+CACHE_DIR=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --stage-only) STAGE_ONLY=1; shift ;;
         --skip-tests) SKIP_TESTS=1; shift ;;
         --source-offer) SOURCE_OFFER=1; shift ;;
+        --rootfs-build) ROOTFS_BUILD="${2:-}"; [[ -n "$ROOTFS_BUILD" ]] || { echo "--rootfs-build needs a value"; usage; }; shift 2 ;;
+        --uboot-src)  UBOOT_SRC="${2:-}";    [[ -n "$UBOOT_SRC" ]]    || { echo "--uboot-src needs a value"; usage; }; shift 2 ;;
+        --cache)      CACHE_DIR="${2:-}";    [[ -n "$CACHE_DIR" ]]    || { echo "--cache needs a value"; usage; }; shift 2 ;;
         --source-out) SOURCE_OUT="${2:-}"; [[ -n "$SOURCE_OUT" ]] || { echo "--source-out needs a value"; usage; }; shift 2 ;;
         --image)      [[ -n "${2:-}" && -f "$2" ]] || { echo "no such image file: ${2:-}"; usage; }
                       IMAGES+=("$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"); shift 2 ;;
@@ -179,6 +195,16 @@ if [[ $STAGE_ONLY -eq 1 && -n "$TAG" ]]; then
 fi
 if [[ ${#IMAGES[@]} -gt 0 && $SOURCE_OFFER -eq 0 ]]; then
     err "--image needs --source-offer: a card image is not published without its source."
+fi
+# The offer's own inputs: they are handed to make-source-offer.sh, which runs only with the flag.
+if [[ -n "$ROOTFS_BUILD" && $SOURCE_OFFER -eq 0 ]]; then
+    err "--rootfs-build needs --source-offer: it is an input to the source offer, which is not made without it."
+fi
+if [[ -n "$UBOOT_SRC" && $SOURCE_OFFER -eq 0 ]]; then
+    err "--uboot-src needs --source-offer: it is an input to the source offer, which is not made without it."
+fi
+if [[ -n "$CACHE_DIR" && $SOURCE_OFFER -eq 0 ]]; then
+    err "--cache needs --source-offer: it is an input to the source offer, which is not made without it."
 fi
 # A publish carries the bundle's binaries and, with --image, the card image: both are under
 # GPL/LGPL obligations that the source offer meets. A release without one is refused here,
@@ -375,6 +401,10 @@ if [[ $SOURCE_OFFER -eq 1 ]]; then
     SOURCE_ARGS=(--tag "$RELEASE_TAG" --out "$SOURCE_OUT")
     [[ $STAGE_ONLY -eq 0 ]] || SOURCE_ARGS+=(--allow-dev)
     for img in "${IMAGES[@]}"; do SOURCE_ARGS+=(--image "$img"); done
+    # Each offer input is given only when set, so make-source-offer.sh's own defaults stay in force.
+    if [[ -n "$ROOTFS_BUILD" ]]; then SOURCE_ARGS+=(--rootfs-build "$ROOTFS_BUILD"); fi
+    if [[ -n "$UBOOT_SRC" ]]; then SOURCE_ARGS+=(--uboot-src "$UBOOT_SRC"); fi
+    if [[ -n "$CACHE_DIR" ]]; then SOURCE_ARGS+=(--cache "$CACHE_DIR"); fi
     bash "$SCRIPT_DIR/rootfs/make-source-offer.sh" "${SOURCE_ARGS[@]}" \
         || err "rootfs/make-source-offer.sh failed — nothing was built"
     [[ -s "$SOURCE_OUT/$SOURCE_FILE" && -s "$SOURCE_OUT/$SOURCE_FILE.sha256" ]] \
