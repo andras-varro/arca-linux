@@ -282,10 +282,6 @@ An option for the clocks that print the time (`native_apps/common/top_bar.c:251`
 
 The operator wants games that show no menu or close button at all. Open design question: how a touch-only player pauses and exits (pad and keyboard keep their keys). The games do not carry the shared top bar, so their own exit X is part of the same question. **Done when** the question is answered with the operator and one game follows the answer.
 
-### F148. A three-partition card: p1 FAT boot, p2 logs, p3 rootfs — built and host-verified 2026-10-13; boot check open
-
-Built (image `f148.img`, host gate green): MBR primaries p1 boot (unchanged), p2 log 1 GiB, p3 root 512 MiB last and growable, `/home/root/data` a plain directory on p3; U-Boot's `root=` is p3 and `make-card-image.sh` refuses an older `u-boot.img`. Layout and measurements: `SYSTEM_ANALYSIS.md#42-partitions`. **Open:** the ROM's treatment of MBR entries 2-3 and the boot itself are not measured. **Check on a spare unit (`.115` or `.188`):** the ROM and SPL load from p1 with this table; the kernel mounts p3 as root; p2 mounts on `/home/root/log` and `syslogd` writes there; the first boot generates the ed25519 key under `/home/root/data/ssh` on p3; the Control Panel log and monitor pages read `/home/root/log`; `clone-to-32gb.sh` grown card boots. **Done when** those hold on a unit; then delete this entry.
-
 ### F149. Flash the card and use it: a downloadable image replaces commissioning — open, operator-approved 2026-10-12
 
 Operator ruling 2026-10-12: nobody outside the lab runs this, so units are re-flashed and never migrated. A kernel
@@ -293,8 +289,7 @@ upgrade or new drivers still ship as an image to flash. Finishing steps, in orde
 
 1. **A downloadable image:** compressed with a checksum on a release page, flashable with any card writer. D18's source
    offer is a prerequisite for publishing it.
-2. **The first boot grows the card:** the image is minimal, and the first boot extends the last partition (p3, the mounted rootfs,
-   after F148) plus its filesystem to the end of the card, for example with sfdisk and online resize2fs, as the
+2. **The first boot grows the card:** the image is minimal, and the first boot extends the last partition (p3, the mounted rootfs) plus its filesystem to the end of the card, for example with sfdisk and online resize2fs, as the
    Raspberry Pi image does. Offline `resize2fs` 512 MiB to 30 GiB is measured clean; an online grow of the mounted root is **[unverified]**, and so is whether `resize2fs`/`sfdisk` are in our rootfs.
 3. **What an image ships:** no secrets and no copyrighted data (the existing rule). It runs as root, as the vendor
    system did. Operator 2026-10-12: SSH needs no image change, only a README paragraph: set a root password, allow

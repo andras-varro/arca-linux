@@ -1682,8 +1682,10 @@ tree reads them; the vendor rootfs's `/opt/sbin/getBootStatus.sh` parses them ou
 ### 4.2 Partitions
 
 **Our card** (`rootfs/make-card-image.sh`; the layout is `ARCA_LAYOUT` in `lib/arca-identify.sh`): MBR, three primary partitions, measured on the built image
-(`~/rw-card-out/f148.img`, 3293184 sectors = 1608 MiB, so it fits a nominal 2 GB card **[inferred]**). **Built and host-verified (`tests/card_layout_test.sh`), not yet
-booted on a unit; how the ROM treats MBR entries 2-3 is `[unverified]`.**
+(`~/rw-card-out/f148.img`, 3293184 sectors = 1608 MiB, so it fits a nominal 2 GB card **[inferred]**). **Host-verified (`tests/card_layout_test.sh`) and booted
+on one unit (`.188`, 2026-10-13/14, `[n=1]`): the ROM and SPL load from p1 with this table, `root=/dev/mmcblk0p3`, p2 is mounted on `/home/root/log` and receives logs, and the
+SSH host key under `/home/root/data/ssh` kept its fingerprint over two reboots. Not looked at: the Control Panel log and monitor pages reading p2, and a
+`clone-to-32gb.sh`-grown card booting `[unverified]`.**
 
 | Partition | Type | Start, size | Mount | Contents |
 |---|---|---|---|---|
