@@ -130,7 +130,7 @@ is that *nothing here is redistributed as source by this repository* — the obl
 
 ### The root filesystem (`rootfs/`, Buildroot 2025.02.18)
 
-Every package in the card's p6 comes from one Buildroot build (`rootfs/configs/arca_defconfig`,
+Every package in the card's p3 comes from one Buildroot build (`rootfs/configs/arca_defconfig`,
 pinned and sha256-checked by `rootfs/build-rootfs.sh`). **Measured 2026-10-10** by running Buildroot's
 `make -k legal-info` over that tree in WSL: its `manifest.csv` lists the 25 target packages below, and
 the licence strings are Buildroot's own `<PKG>_LICENSE` for that version, not ours. Buildroot itself
@@ -232,7 +232,7 @@ once as a development offer and checked (PASS, no unmapped program).
 
 - **The offer ships through `release.sh --source-offer`**, which runs `make-source-offer.sh` under the release's tag and attaches the tar and its `.sha256`;
   `NOTICE` names that source asset **only when `--source-offer` is given** (otherwise it says the bundle was staged without a source file). The image carries
-  its own notices: `make-card-image.sh` puts this file, Buildroot's `manifest.csv` and `licenses/`, and `SOURCE-OFFER.txt` in p6 `/usr/share/doc/arca-licenses/`.
+  its own notices: `make-card-image.sh` puts this file, Buildroot's `manifest.csv` and `licenses/`, and `SOURCE-OFFER.txt` in p3 `/usr/share/doc/arca-licenses/`.
   Whether pointing at upstream's mirrors instead would suffice is **unverified** and not assumed.
 - **The kernel tarball is not checked before the kernel build.** `kernel/build-image.sh` and
   `usb_host/build-kernel-modules.sh` carry no sha256 for `usb_host/linux-4.14.52.tar.xz`; only Buildroot and the

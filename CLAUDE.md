@@ -63,7 +63,7 @@ don't copy.
 | `device-files/CLAUDE.md` | what is installed verbatim, and how to author the two rules files |
 | `tests/CLAUDE.md` | the host regressions, what each cannot see, sabotage-harness discipline |
 | `scummvm-arca/CLAUDE.md`, `vnc_client/CLAUDE.md` | those ports |
-| `rootfs/CLAUDE.md` | our own p6 root filesystem: Buildroot tree, ABI, rc links, the generic card image |
+| `rootfs/CLAUDE.md` | our own root filesystem (p3): Buildroot tree, ABI, rc links, the generic card image |
 | `kernel/CLAUDE.md` | our 4.14.52 image: its patches, DT changes, build script and missing drivers — notes in `kernel/README.md` |
 
 ⚠️ **The vanilla kernel tree is the authority for every subsystem the vendor did not patch, and
@@ -353,9 +353,9 @@ identical firmware share none of their four. `lib/arca-identify.sh` is the one i
 for a mounted rootfs, the partition table for a disk, **position** for which partition holds which
 tree. ⚠️ **p1 is deliberately absent from `ARCA_PART_ROLES`, and a test asserts its absence**, so nothing
 can reach `mlo`/`u-boot.bin`/`ctrlblock.bin` through those functions. ⚠️ **And a rootfs mounted offline
-shows `/home/root/{data,log}` as EMPTY directories** — they are mount points for p2/p3 (p5 stays in
-the table, unused and unmounted), so a tool that mounts only p6 can report success having touched
-neither. All three:
+shows `/home/root/log` as an EMPTY directory** — it is the mount point for p2 (the root is p3, and
+`/home/root/data` is a plain directory on it), so a tool that mounts only p3 can report success having
+touched no log. All three:
 `lib/CLAUDE.md`.
 
 **A script's executable bit lives in the git index, so one bad commit breaks every fresh clone.** All

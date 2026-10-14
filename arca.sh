@@ -149,9 +149,10 @@ confirm() {
 do_image_card() {
     hdr "6. Build a card IMAGE (our own root, bundle installed, offline)"
     cat <<'PRE'
-  Builds an image file of the whole card: our boot files on p1, our Buildroot root on p6,
-  empty p2/p3/p5, the release bundle installed and verified. The same image for every unit:
-  no vendor file, no SSH key, no host name. You write the file to a card of 4 GB or more
+  Builds an image file of the whole card: our boot files on p1, an empty log partition p2,
+  our Buildroot root on p3 (settings and scores live there too), the release bundle installed
+  and verified. The same image for every unit:
+  no vendor file, no SSH key, no host name. You write the file to a card of 2 GB or more
   yourself and the unit boots working. Updating a unit that is already running is item 2.
 
   Before continuing:

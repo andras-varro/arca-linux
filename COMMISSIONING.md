@@ -46,15 +46,16 @@ bash rootfs/build-rootfs.sh; bash release.sh --stage-only --skip-tests      # WS
 rootfs/make-card-image.sh --mlo ~/rw-uboot-out/MLO --uboot ~/rw-uboot-out/u-boot.img --kernel <uImage> --modules /home/z001x91h/rw-kmods --bundle build/release ~/br-rw-out/rootfs.tar <out.img>   # as root
 ```
 
-⚠️ **After reflashing a card, remove the unit's old host key in both shells** (the keys live on p2, which an image creates empty, so
-the unit gets new ones; Git Bash and WSL keep separate `known_hosts`). A bundle-based update normally avoids reflashing.
+⚠️ **After reflashing a card, remove the unit's old host key in both shells** (the keys live on p3, which an image creates fresh, so
+the unit gets new ones; Git Bash and WSL keep separate `known_hosts`). ⚠️ **A reflash also wipes everything under `/home/root/data`** (settings, scores, touch calibration, ScummVM saves):
+it is a plain directory on the root partition, so run `backup.sh` first and `restore.sh` after. A bundle-based update normally avoids reflashing.
 
 ```bash
 ssh-keygen -R <ip>                                  # in Git Bash
 wsl.exe -e bash -lc "ssh-keygen -R <ip>"            # the same, in WSL
 ```
 
-`--bundle` mounts p6, p2 and p3 as `<base>/{root,data,log}` and runs
+`--bundle` mounts p3 and p2 as `<base>/{root,log}` (`/home/root/data` is a plain directory under root) and runs
 [`commissioning/commission-offline.sh`](commissioning/commission-offline.sh) over them. It asks nothing,
 cleans nothing and mounts nothing else: the boot scripts and links from
 [`device-files/provision-rules.conf`](device-files/provision-rules.conf) and every component's files go in,
@@ -78,10 +79,10 @@ sabotage case; needs root and a staged bundle.
 Connect Ethernet and power on. SSH answers after roughly half a minute, and the unit also answers to
 `<hostname>.local` once mDNS is up. sshd policy is the overlay's
 `rootfs/board/arca/overlay/etc/ssh/sshd_config` (key-only), the only one there is. SSH host keys are
-generated on first boot, so a fresh p2 means a slow first boot. Then deploy: `./deploy-all.sh <ip>`, or the
+generated on first boot, so a fresh p3 means a slow first boot. Then deploy: `./deploy-all.sh <ip>`, or the
 menu item *First boot of an imaged card*.
 
-A card larger than the image's fixed geometry needs p6 grown:
+The image is 1608 MiB (three partitions, root last; layout in `lib/arca-identify.sh`, [`SYSTEM_ANALYSIS.md`](SYSTEM_ANALYSIS.md#42-partitions)), **built and host-verified, not yet booted on a unit**. A larger card needs p3 grown:
 [`commissioning/clone-to-32gb.sh`](commissioning/clone-to-32gb.sh) (`--help` lists its modes and guards).
 
 ## Finding the card
@@ -90,17 +91,16 @@ A card larger than the image's fixed geometry needs p6 grown:
 generated at mkfs time, so it names one *card*, not a model: two Steelcase RoomWizards running the identical
 firmware build share **none** of their UUIDs. A hardcoded UUID therefore recognises only the unit its
 constant was copied from and rejects every other one. Nothing on the device consumes a UUID either:
-U-Boot passes `root=/dev/mmcblk0p6` and `/etc/fstab` names partitions by position.
+U-Boot passes `root=/dev/mmcblk0p3` and `/etc/fstab` names partitions by position.
 
 [`lib/arca-identify.sh`](lib/arca-identify.sh) holds the two checks:
 
 | Function | Question | How |
 |---|---|---|
 | `arca_is_rootfs` | is this mounted tree our Arca root? | the marker file `/etc/arca-rootfs`. No vendor root is recognised. |
-| `arca_is_card_disk` | is this disk an Arca card? | the partition table: start and size of the fixed partitions, which are byte-identical on every unit. The partitions that absorb the difference in physical card size are **not** pinned. |
+| `arca_is_card_disk` | is this disk an Arca card? | the partition table: start and size of each partition in `ARCA_LAYOUT`, byte-identical on every card. Only p3's **size** is not pinned (`ARCA_LAYOUT_GROW`), because a bigger card grows it. |
 
-Partition roles are root (p6), data (p2) and log (p3). p5 stays in the partition table, unused and never
-mounted. `arca_offline_path` and `arca_offline_base_ok` map a device-absolute path onto the right mounted
+Partition roles are root (p3) and log (p2); there is no data role, `/home/root/data` being a directory on p3. `arca_offline_path` and `arca_offline_base_ok` map a device-absolute path onto the right mounted
 partition and check that a `<base>` is usable. `/` is never a candidate: selecting it would rewrite this
 host's own `/etc/shadow`.
 
@@ -207,7 +207,7 @@ front of you: it cannot be derived on the host, and it cannot be copied from ano
 one. A failed boot yields no diagnostics at all — so if two changes went out together, nothing on the
 unit can tell you which of them is responsible.
 There is no serial console ([§3.12](SYSTEM_ANALYSIS.md#312-serial-ports)), so the only post-mortem is
-mounting p3 offline and reading `messages` — which helps only if the boot got as far as syslog.
+mounting p2 (the log partition) offline and reading `messages` — which helps only if the boot got as far as syslog.
 
 ## Deploy apps
 
@@ -252,7 +252,7 @@ manifest, never from the transfer — see [`CLAUDE.md`](CLAUDE.md) → *Bundles*
 | Mechanism | Delivers | Lives on | Delivered by |
 |---|---|---|---|
 | `/dev/mem` patch of `omap2430_ops.dma_init`/`.dma_exit` + a MUSB rebind | **USB host mode itself** | nothing on disk — re-applied at every boot by `/etc/init.d/usb-host` | the `usb` group of [`device-files/provision-rules.conf`](device-files/provision-rules.conf) |
-| `xpad.ko` / `joydev.ko` / `ff-memless.ko`, force-loaded | the controller as `/dev/input/event*` | `/lib/modules/4.14.52/extra` (p6) | the release bundle, md5-verified |
+| `xpad.ko` / `joydev.ko` / `ff-memless.ko`, force-loaded | the controller as `/dev/input/event*` | `/lib/modules/4.14.52/extra` (p3) | the release bundle, md5-verified |
 
 So a unit set up by either path — `commissioning/provision.sh <ip>` or
 `commissioning/commission-offline.sh` — comes up with USB host mode by default. The controller power

@@ -60,12 +60,12 @@ probe. There used to be eight, already drifted into three wordings of one messag
 
 ⚠️ **Never identify a partition by filesystem UUID.** A UUID is assigned at mkfs time, so it names one
 *card*: units are mkfs'd independently at the factory and two Steelcase RoomWizards on identical firmware share
-**none** of their four UUIDs. Nothing on the device consumes one either — `root=/dev/mmcblk0p6` and
-`/etc/fstab`'s `/dev/mmcblk0p{2,3,5,7}` are both by position.
+**none** of their four UUIDs. Nothing on the device consumes one either — `root=/dev/mmcblk0p3` and
+the partition numbers in `/etc/fstab` are both by position.
 
 `arca-identify.sh` is the one implementation: **content** for a mounted rootfs (`arca_is_rootfs`), the
 **partition table** for a disk (`arca_is_card_disk`), and **position** for which partition holds which
-tree (`arca_card_partitions` → `ARCA_PART_ROLES` = p6 root, p2 data, p3 log). It requires our marker
+tree (`arca_card_partitions` → `ARCA_PART_ROLES` = p3 root, p2 log; `/home/root/data` is a plain directory on p3, so there is no data role). It requires our marker
 (`/etc/arca-rootfs`) of a rootfs; no other tree counts. It excludes `/`
 from its scan on purpose — a content scan that selected the dev host's root would rewrite this host's
 `/etc/shadow`; `arca_host_root_disk` / `arca_is_host_root_disk` are the resolved veto for the disk-level
@@ -73,13 +73,12 @@ equivalent.
 
 ⚠️ **p1 is deliberately absent from `ARCA_PART_ROLES`, and a test asserts its absence.** Nothing can
 reach `mlo`, `u-boot.bin` or `ctrlblock.bin` through those functions — a stronger guarantee than every
-caller remembering not to. p4 (extended container), p5 (kept in the partition table, unused) and p7
-(swap) are absent for the same reason: nothing to mount. No function in this directory mounts p1 at all.
+caller remembering not to. The layout itself is `ARCA_LAYOUT` (`ARCA_LAYOUT_GROW=3` marks the one partition whose size is not pinned; `arca_uboot_root_ok` refuses a `u-boot.img` whose `root=` is not the root role); `tests/card_layout_test.sh` is its host test. No function in this directory mounts p1 at all.
 
-⚠️ **A rootfs mounted offline shows `/home/root/{data,log}` as EMPTY directories** — they are mount
-points for p2/p3. An offline tool that mounts only p6 sees none of the per-unit state (p2) or logs
-(p3), and would report success having touched neither. Use `arca_mount_card` / `arca_check_card_mounts`; the latter's negative half —
-"a rootfs where `data` was expected means the partitions are in the wrong order" — is the half that
+⚠️ **A rootfs mounted offline shows `/home/root/log` as an EMPTY directory** — it is the mount
+point for p2. An offline tool that mounts only p3 sees none of the logs, and would report success having touched
+them. Use `arca_mount_card` / `arca_check_card_mounts`; the latter's negative half —
+"a rootfs where `log` was expected means the partitions are in the wrong order" — is the half that
 catches the mistake that makes every later path resolve under the wrong tree.
 
 Measurements: `SYSTEM_ANALYSIS.md#42-partitions`. Reasoning: `COMMISSIONING.md` → *Finding the card*.

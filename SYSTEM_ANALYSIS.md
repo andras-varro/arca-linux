@@ -1607,7 +1607,7 @@ OMAP3 ROM (in the SoC, cannot be changed)
        warm-resets via PRM_RSTCTRL. It loads nothing itself; the ROM loads MLO without any check by it.
  └─> OMAP3 ROM again: loads MLO from FAT p1 of the card (bootable, 70.6 MB) to 0x40200800
  └─> SPL (the MLO file): clocks, pinmux, SDRAM, then the next stage from FAT p1
- └─> U-Boot proper  ──>  kernel uImage-system (appended DTB)  ──>  Linux 4.14.52, root=/dev/mmcblk0p6
+ └─> U-Boot proper  ──>  kernel uImage-system (appended DTB)  ──>  Linux 4.14.52, root=/dev/mmcblk0p3 (ours; the vendor's is p6)
 ```
 
 The redirector was disassembled from a dump of `mtd0` (measured). The two chains differ from the SPL's file name on:
@@ -1670,7 +1670,7 @@ on `.188` under our chain (`/proc/cmdline`, 2026-10-11) is U-Boot's words up to 
 | `initcall_blacklist=fb_logo_late_init` | U-Boot | `init/main.c`: skips `fb_logo_late_init` (`drivers/video/logo/logo.c`), which marks the boot logos freed; skipped, they stay usable `[inferred]` |
 | `consoleblank=0` | U-Boot | `drivers/tty/vt/vt.c` (`core_param`): the text console never blanks |
 | `mpurate=auto` | U-Boot | **nothing**: no occurrence in the 4.14.52 tree, and it is in init's environment (measured, as `vram`). Inherited from the Overo lineage `[inferred]` |
-| `root=/dev/mmcblk0p6 rw rootfstype=ext4 rootwait` | U-Boot | `init/do_mounts.c`; the ext3 root is mounted by the ext4 driver ([§4.2](#42-partitions)); by position, never by UUID |
+| `root=/dev/mmcblk0p3 rw rootfstype=ext4 rootwait` | U-Boot | `init/do_mounts.c`; by position, never by UUID. Built-in default of `uboot/rw20-board.patch`; the capture above was taken on the earlier layout (`p6`), and p3 is built, **not yet booted** |
 | `vt.global_cursor_default=0` | kernel `CMDLINE_EXTEND` | `drivers/tty/vt/vt.c`: the console cursor is off by default |
 | `usbcore.autosuspend=-1` | kernel `CMDLINE_EXTEND` | `drivers/usb/core/usb.c`: USB autosuspend off; the reason is in `kernel/config-changes` |
 | `console=tty0` | kernel `CMDLINE_EXTEND` | the kernel console: the panel; last, so it is `/dev/console` while `ttyO1` keeps every printk |
@@ -1681,30 +1681,45 @@ tree reads them; the vendor rootfs's `/opt/sbin/getBootStatus.sh` parses them ou
 
 ### 4.2 Partitions
 
+**Our card** (`rootfs/make-card-image.sh`; the layout is `ARCA_LAYOUT` in `lib/arca-identify.sh`): MBR, three primary partitions, measured on the built image
+(`~/rw-card-out/f148.img`, 3293184 sectors = 1608 MiB, so it fits a nominal 2 GB card **[inferred]**). **Built and host-verified (`tests/card_layout_test.sh`), not yet
+booted on a unit; how the ROM treats MBR entries 2-3 is `[unverified]`.**
+
+| Partition | Type | Start, size | Mount | Contents |
+|---|---|---|---|---|
+| p1 | FAT32, label `ARCABOOT`, type `0c`, bootable | 63, 144522 sectors (70.6 MB), byte-identical to the vendor's | none | Boot files, listed in [§4.1](#41-the-chain). **The DTB is inside `uImage-system`** — no separate `.dtb` file exists. |
+| p2 | ext4, label `arca-log` | 147456, 2097152 sectors = 1 GiB, fixed | `/home/root/log` | System logs |
+| p3 | ext4, label `arca-root` | 2244608, 1048576 sectors = 512 MiB, **last so it can grow** | `/` | Root filesystem; 193,880 KiB used with the full bundle. `/home/root/data` is a **plain directory on it**: settings, scores, calibration, the SSH host key and ScummVM saves live here, so a reflash wipes them (`backup.sh`/`restore.sh` are the only protection) |
+
+`resize2fs` offline from 512 MiB to 30 GiB ran clean (measured); an online grow of a mounted root is `[unverified]`. `commissioning/clone-to-32gb.sh` grows p3 to the end of the card.
+U-Boot's built-in root is `/dev/mmcblk0p3` (`uboot/rw20-board.patch`); `make-card-image.sh` refuses an older `u-boot.img` (`root=` p6) via `arca_uboot_root_ok`.
+
+**The vendor's card** (measured on RW09 and a second unit):
+
 | Partition | Type | Size | Mount | Contents |
 |---|---|---|---|---|
-| p1 | FAT32 | 70.6 MB | `/var/volatile/boot` | Boot files, listed in [§4.1](#41-the-chain). **The DTB is inside `uImage-system`** — no separate `.dtb` file exists. |
+| p1 | FAT32 | 70.6 MB | `/var/volatile/boot` | Boot files, listed in [§4.1](#41-the-chain). |
 | p2 | ext3 | 256 MB | `/home/root/data` | Application data |
 | p3 | ext3 | 250 MB | `/home/root/log` | System logs |
-| p5 | ext3 | 1500 MB | `/home/root/backup` | Firmware backup, incl. `factory/` upgrade images + `.md5` files; on our own root it stays in the table, unused and never mounted |
+| p5 | ext3 | 1500 MB | `/home/root/backup` | Firmware backup, incl. `factory/` upgrade images + `.md5` files |
 | p6 | ext3 | ~981 MB | `/` | Root filesystem |
 
 p1's files, their roles and readers: [§4.1](#41-the-chain). The vendor's p1 is FAT32 made by `mkdosfs` with 1-sector clusters
 (measured on two units), and sectors 1..62 between the MBR and p1 are zero on both. ⚠️ **The four vendor files cannot go into a
 published image:** U-Boot is GPL-2.0, these builds are modified, and no source is published, so a redistributor cannot offer the
 corresponding source. Operator ruling 2026-10-12: a card image carries nothing of the vendor's. `rootfs/make-card-image.sh` writes
-the partition table itself at the positions below, formats p1 the same way, and puts only our `MLO` (first), `u-boot.img`,
-`uImage-system`, `uImage-fallback` and `uEnv.txt` on it. The image ends with p7, at sector 6618780 (3.16 GB), so it fits a 4 GB card.
+the partition table itself at the positions above, formats p1 the same way, and puts only our `MLO` (first), `u-boot.img`,
+`uImage-system`, `uImage-fallback` and `uEnv.txt` on it.
 
 Windows may add a `System Volume Information` directory to p1 when it writes a card. **It is ignored**: no boot stage reads it
 and nothing scripted writes p1 (`lib/CLAUDE.md`, *p1: nothing scripted writes it*).
 
-> **Gotcha — p6 is ext3, mounted by the ext4 driver.** U-Boot passes `rootfstype=ext4` and the ext4
-> driver happily mounts the ext3 filesystem. **Do not reformat it as ext4.** The converse also fails: `mke2fs -t ext3 -O none` makes a journal-less (ext2) filesystem that the kernel refuses as ext3 with `EINVAL`.
+> **Gotcha — the vendor's p6 is ext3, mounted by the ext4 driver.** U-Boot passes `rootfstype=ext4` and the ext4
+> driver happily mounts the ext3 filesystem. **Do not reformat a vendor root as ext4 in place.** The converse also fails: `mke2fs -t ext3 -O none` makes a journal-less (ext2) filesystem that the kernel refuses as ext3 with `EINVAL`.
 
-Live usage: root 47 % used (474 MB free), data 40 %, log 4 %.
+Live usage (vendor card): root 47 % used (474 MB free), data 40 %, log 4 %.
 
-**What actually occupies each partition** — measured 2026-08-05 on the second captured card, stock and
+**What actually occupies each partition of the vendor card** — measured 2026-08-05 on the second captured card, stock and
 uncommissioned. `/home/root/{data,log,backup}` are **mount points**, so a rootfs mounted offline shows
 all three empty; the vendor's config and logs are on the other partitions.
 
@@ -1730,7 +1745,7 @@ litter of `upgradeProgressListener_upgradeStatus=*` files dropped in `/` show it
 `.md5`), `factory/uImage-system-original` (5225796 B), `factory/upgrade.conf`, `serialno` and `pointercal`.
 The full-card backup holds them.
 
-**The layout is the identity; the UUIDs are not.** Measured across two units of the same firmware
+**The vendor layout is the identity there; the UUIDs are not.** Measured across two units of the same firmware
 build (`/etc/version` `20180309123456`), the partition table is byte-identical — same start sector
 and same size for p1, p2, p3, p5 and p6:
 
@@ -1755,9 +1770,9 @@ units are mkfs'd independently at the factory, so two RoomWizards on identical f
 | RW09 | `d5758df8` | `da4cda60` | `26a7a226` | `108a1490` |
 | a second unit | `2932baf1` | `d4d5ddbd` | `0f17045a` | `8acefb02` |
 
-**Nothing on the device consumes a UUID.** U-Boot passes `root=/dev/mmcblk0p6` (compiled in, and
-there is no `saveenv` — §4.4), and `/etc/fstab` names `/dev/mmcblk0p{2,3,5,7}`. Both are by position,
-so p6 *is* the rootfs and cannot be renumbered. Host tooling identifies a card by layout and a rootfs
+**Nothing on the device consumes a UUID.** U-Boot passes `root=` by device name (compiled in: p6 on the vendor card, p3 on ours, and
+there is no `saveenv` — §4.4), and the vendor `/etc/fstab` names `/dev/mmcblk0p{2,3,5,7}`. Both are by position,
+so the root partition *is* the rootfs and cannot be renumbered. Host tooling identifies a card by layout and a rootfs
 by content — `lib/arca-identify.sh`, and `COMMISSIONING.md` → *Finding the card*. A hardcoded UUID
 recognises exactly one unit, and assigning it to a second card so it "matches" produces two cards
 claiming one UUID.
@@ -1882,7 +1897,7 @@ image first ([kernel/README.md](kernel/README.md)). Copying that backup back is 
 answers; otherwise it is Layer 2.
 
 **Layer 2 — pull the card.** The whole system is on removable microSD (`mmcblk0`, root
-`mmcblk0p6`). `dd` a known-good backup back, roughly 10 minutes. **This is the working recovery
+`mmcblk0p3` on our card, `p6` on the vendor's). `dd` a known-good backup back, roughly 10 minutes. **This is the working recovery
 loop for this project:** pop the card, reimage, set up DHCP, SSH back in. ⚠️ It is also the *only*
 recovery from a `uImage-system` that does not boot (short of copying the backup back in a card reader)
 — nothing runs before the kernel loads, so there is no SSH and no serial console to fix it from.
@@ -1946,12 +1961,12 @@ to sshd listening at 09:45:50. BusyBox `seedrng` (`rootfs/board/arca/overlay/etc
 
 ⚠️ **A first boot with no seed prints a handful of "uninitialized urandom read" lines; the second boot prints none, bar one different line.** Measured on `.188`, 2026-10-12, card `arca-card-20261012b`: the first boot's dmesg held 7 lines (`seedrng` 256 B, `udevd` 16 B twice, `tr` 8192 B twice, `avahi-daemon` 4 B, plus "4 callbacks suppressed"), and `/var/lib/seedrng` held `seed.no-credit`. The second boot, read at 1 min uptime with `udevd` and `avahi-daemon` running, printed 0: `seed.credit`, "fast init done", "crng init done". One line remains on it: `random: get_random_u32 called from bucket_table_alloc+0xf8/0x24c with crng_init=0`. **[inferred]** The first-boot lines cannot be avoided: a fresh card has no seed, and a seed baked into the image would be shared by every card made from it. **Operator-observed:** none of these lines shows on the console or in the Control Panel log viewer.
 
-⚠️ **`/var/log` is a symlink to `/home/root/log`, i.e. p3, and `syslogd` holds three files there
+⚠️ **`/var/log` is a symlink to `/home/root/log`, i.e. p2 on our card (p3 on the vendor's), and `syslogd` holds three files there
 open.** Measured from `/proc/<pid>/fd` on a unit in service, 2026-08-05: `messages` (its target per
 `/etc/syslog.conf`), `upgrade.log` and `concurrent.log`. **Unlinking any of them on a running device
 leaves `syslogd` writing to an unlinked inode and logging silently stops until reboot** — truncate them
 instead, and the same applies to `wtmp` and `lastlog`, which `sshd` and `login` hold open. Offline the
-symlink dangles, so a path under `/var/log/` reaches nothing at all; name the p3 path.
+symlink dangles, so a path under `/var/log/` reaches nothing at all; name the log-partition path.
 
 ⚠️ **On the stock image the root crontab lives on p2, reached through a symlink.** `/var/cron/tabs/root` is a
 symlink to `/home/root/data/cron/tabs/root` (measured on the unit in service, symlink dated Jan 2022).

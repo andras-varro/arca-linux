@@ -42,7 +42,7 @@
 #
 # ── usb_host IS published ───────────────────────────────────────────────────
 #
-# Everything it installs is on p6: its build artifacts are bundled like any
+# Everything it installs is on p3: its build artifacts are bundled like any
 # others, and its device scripts are device-files/provision-rules.conf's `usb`
 # group.  No installer writes p1.
 #
