@@ -111,11 +111,11 @@ sudo ./rootfs/make-card-image.sh --mlo <MLO> --uboot <u-boot.img> --kernel <uIma
 
 `MLO` and `u-boot.img` come from `uboot/build.sh`, `<uImage>` from `kernel/build-image.sh`, `<rootfs.tar>` from `rootfs/build-rootfs.sh`; the
 operator-facing steps are in [COMMISSIONING.md](COMMISSIONING.md). Make a bundle with
-`./release.sh --stage-only`, or publish one with `./release.sh --tag <tag>`. For a card larger than the
+`./release.sh --stage-only`, or publish one with `./release.sh --tag <tag> --source-offer`. For a card larger than the
 image, grow p6 afterwards with `commissioning/clone-to-32gb.sh` ([SD_CARD_UPGRADE.md](SD_CARD_UPGRADE.md)).
 
-A card image goes out with its source: `./release.sh --tag <tag> --source-offer [--image <img>]... [--source-out <dir>]` publishes the bundle,
-`ludbox-source-<tag>.tar`, its `.sha256` and the images under one tag. `--image` needs `--source-offer`. The offer (`rootfs/make-source-offer.sh`) is
+A publish is refused without its source offer: `./release.sh --tag <tag> --source-offer [--image <img>]... [--source-out <dir>]` publishes the bundle,
+`ludbox-source-<tag>.tar`, its `.sha256` and the images under one tag. `--image` needs it too. The offer (`rootfs/make-source-offer.sh`) is
 assembled after the host gate and before the component builds; `--stage-only --source-offer` makes a development offer (`--allow-dev`: dirty tree or unpushed commit accepted; the name gets `-dev` only on a dirty tree).
 
 ### Installing from a published release — no cross-compiler
