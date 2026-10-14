@@ -85,7 +85,7 @@ mkdir -p "$TARGET/home/root/.ssh"
 chmod 0700 "$TARGET/home/root/.ssh"
 chmod 0755 "$TARGET/home/root"
 
-# sshd host keys live on the data partition; /etc/init.d/sshd creates them there.
+# sshd host keys live in /home/root/data, a directory on the root partition; /etc/init.d/sshd creates them there.
 # Only ed25519: an RSA key added a second generation wait to first boot for no client we use.
 rm -f "$TARGET/etc/ssh/ssh_host_rsa_key" "$TARGET/etc/ssh/ssh_host_rsa_key.pub"
 rm -f "$TARGET/etc/ssh/ssh_host_ed25519_key" "$TARGET/etc/ssh/ssh_host_ed25519_key.pub"

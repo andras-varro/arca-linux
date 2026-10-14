@@ -16,19 +16,22 @@
 #
 #   arca_is_rootfs      CONTENT. The marker file our own root filesystem (rootfs/)
 #                     carries. A vendor tree has none, and is not recognised.
-#   arca_is_card_disk   LAYOUT. The partition table, which the vendor's own
-#                     partitioning produced identically on every unit and which
-#                     U-Boot depends on — `root=/dev/mmcblk0p6` is compiled into
-#                     u-boot.bin with no saveenv, so p6 IS the rootfs by
+#   arca_is_card_disk   LAYOUT. The partition table, which our own card image
+#                     (rootfs/make-card-image.sh) writes from ARCA_LAYOUT below and
+#                     which U-Boot depends on — `root=/dev/mmcblk0p3` is compiled
+#                     into u-boot.img with no saveenv, so p3 IS the rootfs by
 #                     position and cannot be renumbered. See
 #                     SYSTEM_ANALYSIS.md#42-partitions.
 #   arca_card_partitions
-#                     POSITION. Which partition holds which of the three trees
+#                     POSITION. Which partition holds which of the two trees
 #                     that are mounted. Also by position, for the same reason:
-#                     /etc/fstab names /dev/mmcblk0p{2,3,7} literally. Nothing on
+#                     /etc/fstab names /dev/mmcblk0p2 literally. Nothing on
 #                     the device consumes a UUID at all.
+#   arca_uboot_root_ok
+#                     The same position, read out of a u-boot.img: the root= it
+#                     boots must be the partition this file calls root.
 #
-# Both are readable without mounting anything new and without writing anything.
+# All of them are readable without mounting anything new and without writing anything.
 
 # ── Content markers ─────────────────────────────────────────────────────────
 #
@@ -44,15 +47,56 @@
 ARCA_ROOTFS_REQUIRED="etc/shadow etc/hosts etc/ssh/sshd_config etc/network/interfaces"
 ARCA_ROOTFS_OURS="etc/arca-rootfs"
 
-# ── Layout fingerprint ──────────────────────────────────────────────────────
+# ── Layout: the ONE table ───────────────────────────────────────────────────
 #
-# start,size in 512-byte sectors, from `sfdisk -d`. p1 p2 p3 p5 p6 are
-# byte-identical on every unit measured. p4 (the extended container) and p7
-# (swap) are NOT pinned: they absorb the difference in physical card size, and
-# two cards of the same nominal 4 GB differ there (6586650 vs 6891885 sectors of
-# p4). Pinning them would reject a genuine Arca for being a slightly
-# different card. p5 stays in the table, unused, so the table still matches.
-ARCA_LAYOUT="1:63,144522 2:144585,514080 3:658665,498015 5:1156743,2939832 6:4096638,2008062"
+# n:start:size:type, in 512-byte sectors, MBR, three primary partitions:
+#   p1  FAT boot (63 on purpose: the ROM reads it; bootable), mlo/u-boot/kernel
+#   p2  log, 1 GiB, mounted on /home/root/log
+#   p3  root, the LAST partition, mounted on /; /home/root/data is a plain
+#       directory inside it (there is no data partition)
+# This string is the only copy: arca_layout_sfdisk_script prints it as an sfdisk
+# script for the card-image builder, arca_layout_end gives the image size, and
+# arca_is_card_disk below compares a real table against it.
+#
+# ARCA_LAYOUT_GROW names the one partition whose START is pinned and whose SIZE is
+# not: p3 is extended to the card's end (and its filesystem grown) on a bigger card,
+# and that card is still an Arca. Type is not compared.
+ARCA_LAYOUT="1:63:144522:c 2:147456:2097152:83 3:2244608:1048576:83"
+ARCA_LAYOUT_GROW=3
+
+# ---------------------------------------------------------------------------
+# arca_layout_sfdisk_script
+#
+# Print ARCA_LAYOUT as an sfdisk script (device names x<n>: sfdisk on an image
+# file ignores them). p1 is the bootable one. Nothing else in the repo writes
+# this table out.
+# ---------------------------------------------------------------------------
+arca_layout_sfdisk_script() {
+    local e n s z t
+    echo "label: dos"
+    echo "label-id: 0x00000000"
+    echo "unit: sectors"
+    echo
+    for e in $ARCA_LAYOUT; do
+        IFS=: read -r n s z t <<< "$e"
+        printf 'x%s : start=%s, size=%s, type=%s%s\n' "$n" "$s" "$z" "$t" "$([ "$n" = 1 ] && echo ', bootable')"
+    done
+}
+
+# ---------------------------------------------------------------------------
+# arca_layout_end
+#
+# Print the first sector past the last partition (start + size of the last
+# ARCA_LAYOUT entry): the size, in sectors, of an image file that holds the table.
+# ---------------------------------------------------------------------------
+arca_layout_end() {
+    local e n s z t end=0
+    for e in $ARCA_LAYOUT; do
+        IFS=: read -r n s z t <<< "$e"
+        end=$((s + z))
+    done
+    echo "$end"
+}
 
 # ---------------------------------------------------------------------------
 # arca_is_rootfs DIR
@@ -151,26 +195,29 @@ arca_can_read_partition_table() {
 # arca_is_card_disk DEVICE
 #
 # 0 if DEVICE (a whole disk or an image file) carries the Arca partition
-# layout. Reads the partition table only — nothing is mounted and nothing is
+# layout: start and size of every entry in ARCA_LAYOUT, start only for
+# ARCA_LAYOUT_GROW (a grown card still matches). Type is not compared. Reads the
+# partition table only — nothing is mounted and nothing is
 # written, so this is safe to run against any disk on the host.
 # ---------------------------------------------------------------------------
 arca_is_card_disk() {
-    local dev="$1" table entry num want got
+    local dev="$1" table entry num start size want got
     [ -n "$dev" ] || return 1
     table=$(sfdisk -d "$dev" 2>/dev/null) || return 1
     [ -n "$table" ] || return 1
 
     for entry in $ARCA_LAYOUT; do
-        num="${entry%%:*}"
-        want="${entry#*:}"
+        IFS=: read -r num start size _ <<< "$entry"
+        want="$start,$size"
+        [ "$num" = "$ARCA_LAYOUT_GROW" ] && want="$start"
         # sfdisk -d prints, with the padding shown:
-        #   /dev/sdf6 : start=  4096638, size=  2008062, type=83
+        #   /dev/sdf3 : start=  2244608, size=  1048576, type=83
         # so `start=` and its value are separate awk fields. Matched with a
         # regex over the whole line instead of by field index, because the
         # padding is not guaranteed and `type=` may or may not be followed by
         # `bootable`.
         #
-        # The partition number is anchored on a non-digit: a bare /p?6$/ also
+        # The partition number is anchored on a non-digit: a bare /p?3$/ also
         # matches /dev/sdf16, and a substring test on "${dev}${num}" matches
         # nothing at all on /dev/mmcblk0, whose partitions are p-prefixed.
         got=$(echo "$table" | awk -v n="$num" '
@@ -185,6 +232,8 @@ arca_is_card_disk() {
                 print s "," z
                 exit
             }')
+        # The grown partition: only its start counts, the size is whatever the card gave.
+        [ "$num" = "$ARCA_LAYOUT_GROW" ] && got="${got%%,*}"
         [ "$got" = "$want" ] || return 1
     done
     return 0
@@ -220,39 +269,79 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
-# The three mounts, by POSITION
+# The two mounts, by POSITION
 # ═══════════════════════════════════════════════════════════════════════════
 #
-# A booted Arca assembles three partitions into one tree (p7 is swap). Offline —
-# a card in a reader — they are three separate mounts, and an offline tool that mounts
-# only p6 sees /home/root/{data,log} as EMPTY directories, because they are mount
-# points: the per-unit state is on p2 and the logs on p3. p5 stays in the partition
-# table, unused: nothing mounts it, so it has no role here.
+# A booted Arca assembles two partitions into one tree: p3 is the root, p2 the
+# log partition mounted on /home/root/log. /home/root/data is NOT a mount: it is
+# a plain directory inside p3, so there is no data role. Offline — a card in a
+# reader — they are two separate mounts, and an offline tool that mounts only
+# p3 sees /home/root/log as an EMPTY directory, because it is a mount point.
 #
 # ⚠️ ROLE IS BY POSITION, NEVER BY UUID OR BY CONTENT.
 #
 #   * Not UUID, for the reason at the top of this file: all of them differ per unit.
-#   * Not content either, for p2/p3. p6 has a marker to recognise; the other two
-#     do not have anything reliable, and a p3 that has been rotated is
-#     indistinguishable from an empty p2. Guessing from content would mis-mount a
-#     unit's partitions and the install would then run against the wrong tree.
+#   * Not content either, for the log partition. p3 has a marker to recognise; the
+#     log partition has nothing reliable, and a rotated log is indistinguishable
+#     from an empty one. Guessing from content would mis-mount a unit's
+#     partitions and the install would then run against the wrong tree.
 #   * Position is what the device itself uses: /etc/fstab names
-#     /dev/mmcblk0p{2,3,7} literally and U-Boot passes root=/dev/mmcblk0p6
+#     /dev/mmcblk0p2 literally and U-Boot passes root=/dev/mmcblk0p3
 #     compiled in, with no saveenv to change it. So position is not merely
 #     convenient here, it is the device's own definition.
 #
-# p1 is deliberately NOT in this table. It carries mlo, u-boot.bin,
-# ctrlblock.bin and uImage-system; leaving it untouched is what keeps a power
-# cycle a free undo (SYSTEM_ANALYSIS.md#47-recovery). A caller cannot reach p1
-# through these functions, which is a stronger guarantee than remembering not to.
-# p4 (extended container), p5 (unused) and p7 (swap) are absent for the same
-# reason: nothing to mount.
-ARCA_PART_ROLES="6:root 2:data 3:log"
+# p1 is deliberately NOT in this table. It carries mlo, u-boot.img and the
+# kernel; leaving it untouched is what keeps a power cycle a free undo
+# (SYSTEM_ANALYSIS.md#47-recovery). A caller cannot reach p1 through these
+# functions, which is a stronger guarantee than remembering not to.
+ARCA_PART_ROLES="3:root 2:log"
 
 # Where each role is mounted on a RUNNING device. Used to translate a
 # device-absolute path (which is how the install rules are written) into a path
-# under the right offline mount.
-ARCA_ROLE_DEVICE_PATH="root:/ data:/home/root/data log:/home/root/log"
+# under the right offline mount. A path under /home/root/data is under root.
+ARCA_ROLE_DEVICE_PATH="root:/ log:/home/root/log"
+
+# ---------------------------------------------------------------------------
+# arca_uboot_root_ok FILE
+#
+# 0 if the u-boot.img FILE boots the partition this layout puts the root on.
+# U-Boot carries its kernel command line as a NUL-terminated string in its
+# built-in environment ("sysroot=/dev/mmcblk0p3 rw"), compiled in with no
+# saveenv. A card whose root is p3 under a U-Boot that boots another partition
+# panics at once, with no log, so the card-image builder asks this first.
+#
+# The expected number is the root entry of ARCA_PART_ROLES, so the layout stays
+# the one home. Three distinct refusals: file missing, no sysroot= string found
+# (a witness that the grep itself works), and a different partition number.
+# The FIRST sysroot= string in the file is the one compared; a stray later one
+# is not looked at.
+# ---------------------------------------------------------------------------
+arca_uboot_root_ok() {
+    local file="${1:-}" entry want="" got num
+    for entry in $ARCA_PART_ROLES; do
+        [ "${entry#*:}" = "root" ] && want="${entry%%:*}"
+    done
+    if [ -z "$want" ]; then
+        echo "arca-identify: ARCA_PART_ROLES has no root entry" >&2
+        return 1
+    fi
+    if [ ! -f "$file" ]; then
+        echo "arca-identify: $file: not found" >&2
+        return 1
+    fi
+    got=$(grep -a -o 'sysroot=/dev/mmcblk0p[0-9]* rw' "$file" | head -1)
+    if [ -z "$got" ]; then
+        echo "arca-identify: $file has no 'sysroot=/dev/mmcblk0pN rw' string - not a u-boot.img from uboot/build.sh" >&2
+        return 1
+    fi
+    num="${got#sysroot=/dev/mmcblk0p}"
+    num="${num%% *}"
+    if [ "$num" != "$want" ]; then
+        echo "arca-identify: $file boots root=/dev/mmcblk0p$num; this card layout has its root on p$want - rebuild U-Boot with uboot/build.sh" >&2
+        return 1
+    fi
+    return 0
+}
 
 # ---------------------------------------------------------------------------
 # arca_part_dev DISK N
@@ -276,7 +365,7 @@ arca_part_dev() {
 # ---------------------------------------------------------------------------
 # arca_card_partitions DISK
 #
-# Echo "<role> <partition-device>" for each of the three, one per line, root
+# Echo "<role> <partition-device>" for each of the two, one per line, root
 # first. Pure name arithmetic over ARCA_PART_ROLES — it does not check that the
 # nodes exist, because a caller may be working on an image file where they do
 # not, and arca_is_card_disk has already established the layout.
@@ -308,7 +397,7 @@ arca_role_device_path() {
 # ---------------------------------------------------------------------------
 # arca_offline_path BASE DEVPATH
 #
-# Map a device-absolute path onto the right one of the three offline mounts.
+# Map a device-absolute path onto the right one of the two offline mounts.
 #
 # LONGEST prefix wins, and it must match on a component boundary.  Both matter:
 # role "root" has device path "/", which prefixes everything, and /home/rootless
@@ -423,16 +512,16 @@ arca_is_host_root_disk() {
 # ---------------------------------------------------------------------------
 # arca_mount_card DISK BASE
 #
-# Mount all three of DISK's trees read-write under BASE/{root,data,log}
+# Mount both of DISK's trees read-write under BASE/{root,log}
 # and echo "<role> <mountpoint>" per line. Needs root.
 #
 # Refuses the host's own disk before mounting anything, rather than after: a
 # read-write mount of the dev host's root is already a bad outcome even if
 # nothing is written to it.
 #
-# Partial failure unwinds. A caller that got two of three mounts and proceeded
-# would install into two trees and silently miss the third — a bundle path under
-# /home/root/data landing in p6's empty mount point instead of on p2.
+# Partial failure unwinds. A caller that got one of two mounts and proceeded
+# would install into one tree and silently miss the other -- a bundle path under
+# /home/root/log landing in p3's empty mount point instead of on p2.
 # ---------------------------------------------------------------------------
 arca_mount_card() {
     local disk="$1" base="$2" role part mp
@@ -486,11 +575,11 @@ arca_umount_card() {
 # ---------------------------------------------------------------------------
 # arca_check_card_mounts BASE
 #
-# Sanity-check a mounted card: p6 must look like our rootfs, and the other two
-# must NOT. Echoes each problem; returns 1 if there were any.
+# Sanity-check a mounted card: p3 (root) must look like our rootfs, and the other one
+# (the log partition, p2) must NOT. Echoes each problem; returns 1 if there were any.
 #
 # The negative half is the half that earns its keep. Getting the partition order
-# wrong — mounting p2 where p6 was expected — is the one mistake that makes every
+# wrong — mounting p2 where p3 was expected — is the one mistake that makes every
 # later path resolve under the wrong tree, and it would otherwise be invisible
 # until the install landed in the wrong place.
 # ---------------------------------------------------------------------------

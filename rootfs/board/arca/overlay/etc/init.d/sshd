@@ -1,27 +1,17 @@
 #!/bin/sh
-# OpenSSH server. Host keys live on the data partition (/home/root/data/ssh) so they survive
-# a reflash of the root filesystem; /etc/ssh/ssh_host_*_key link there. If that partition
-# is not mounted, the keys go to the tmpfs and sshd still starts, with fresh keys each boot.
+# OpenSSH server. Host keys live in /home/root/data/ssh, a plain directory on the root
+# partition, so they die with a reflash of the unit like the rest of the root filesystem;
+# /etc/ssh/ssh_host_*_key link there. Data is on root, mounted before S09sshd, so the
+# directory is always there.
 # The marker /etc/ssh/sshd_off (made by the Control Panel) keeps `start` from starting it.
 DAEMON=/usr/sbin/sshd
 PIDFILE=/var/run/sshd.pid
 KEYDIR=/home/root/data/ssh
 
 genkeys() {
-    if mountpoint -q /home/root/data; then
-        dir=$KEYDIR
-    else
-        dir=/var/run/ssh
-        logger -t sshd "data partition not mounted: host keys on tmpfs"
-    fi
+    dir=$KEYDIR
     mkdir -p "$dir"
     chmod 700 "$dir"
-    # The links in /etc/ssh point at $KEYDIR, so the fallback keys must be reachable there.
-    if [ "$dir" != "$KEYDIR" ]; then
-        mkdir -p "$KEYDIR"
-        ln -sf "$dir/ssh_host_ed25519_key" "$KEYDIR/ssh_host_ed25519_key"
-        ln -sf "$dir/ssh_host_ed25519_key.pub" "$KEYDIR/ssh_host_ed25519_key.pub"
-    fi
     # ed25519 only: an RSA key doubled the first-boot wait, which is entropy-bound.
     if [ ! -s "$dir/ssh_host_ed25519_key" ]; then
         echo "sshd: generating ed25519 host key"

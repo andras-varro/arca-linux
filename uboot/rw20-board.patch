@@ -706,7 +706,7 @@ index 00000000..0eef3e29
 +	"mmcdev=0\0" \
 +	"vram=12M\0" \
 +	"mpurate=auto\0" \
-+	"sysroot=/dev/mmcblk0p6 rw\0" \
++	"sysroot=/dev/mmcblk0p3 rw\0" \
 +	"sysrootfstype=ext4 rootwait\0" \
 +	"kernel=uImage-system\0" \
 +	"fallback=uImage-fallback\0" \

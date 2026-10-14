@@ -92,6 +92,7 @@ SUITE_ROWS=(
     "provision_online_test.sh|deploy"
     "arca_bundle_ssh_test.sh|deploy"
     "arca_identify_test.sh|deploy"
+    "card_layout_test.sh|deploy"
     "arca_provision_test.sh|deploy"
     "arca_release_test.sh|deploy"
     "arca_ssh_test.sh|deploy"
@@ -256,9 +257,12 @@ if [ "$ONLY" = "selftest" ]; then
 
     mkdir -p "$T/failing"
     printf '#!/bin/bash\necho "3 passed, 1 failed"\nexit 1\n' > "$T/failing/arca_identify_test.sh"
-    for n in check_arm_safe commission_offline provision_online arca_bundle_ssh \
-             arca_provision arca_release arca_ssh arca_state setup_build_env smoke_first_screen; do
-        printf '#!/bin/bash\necho "1 passed, 0 failed"\n' > "$T/failing/${n}_test.sh"
+    # One stub per table row, read from the table itself: a hand-kept list here rotted (five rows
+    # were missing) and turned controls 3 and 5 into harness errors for a reason unrelated to them.
+    for row in "${SUITE_ROWS[@]}"; do
+        n="${row%%|*}"
+        [ "$n" = arca_identify_test.sh ] && continue
+        printf '#!/bin/bash\necho "1 passed, 0 failed"\n' > "$T/failing/$n"
     done
     printf '#!/bin/bash\necho ok\n' > "$T/failing/doc_check.sh"
     control "3 a suite that exits 1 fails the gate" 1 \

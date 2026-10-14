@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Measure group F of tests/arca_source_offer_test.sh (the licence documents make-card-image.sh
-# puts on p6) against deliberately broken COPIES of rootfs/make-card-image.sh, and print, per
+# puts on p3) against deliberately broken COPIES of rootfs/make-card-image.sh, and print, per
 # sabotage, the counts and the cases that failed.
 #
 #   wsl.exe -e bash -lc "cd /mnt/c/work/roomwizard && bash tests/measure_source_offer_sabotage.sh"
@@ -48,7 +48,7 @@ start_copy; perl -0pi -e 's/if \[ ! -f "\$legal\/manifest.csv" \] \|\| \[ ! -d "
 start_copy; perl -0pi -e 's/            echo "\(this image carries no package[^\n]*\n/            :\n/' "$SAB/cur.sh"; report "10. no text when there is no legal-info"
 start_copy; perl -0pi -e 's/if \[ "\$LEGAL_GIVEN" -eq 1 \] && \{[^\n]*; then\n/if false; then\n/' "$SAB/cur.sh"; report "11. an explicit --legal-info not checked"
 start_copy; perl -0pi -e 's/die "--source-tag may contain only[^\n]*;; esac/:  ;; esac/' "$SAB/cur.sh"; report "12. --source-tag not validated"
-start_copy; perl -0pi -e 's/licence_docs_install "\$MNT\/p"/true "\$MNT\/p"/' "$SAB/cur.sh"; report "13. the p6 fill does not call it"
+start_copy; perl -0pi -e 's/licence_docs_install "\$MNT\/p"/true "\$MNT\/p"/' "$SAB/cur.sh"; report "13. the p3 fill does not call it"
 
 echo ""
 [ "$HARNESS_ERR" -eq 0 ] || { echo "HARNESS ERROR: a sabotage matched nothing"; exit 1; }

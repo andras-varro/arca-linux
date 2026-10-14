@@ -70,11 +70,13 @@ trap 'rm -rf "$TMP"' EXIT INT TERM
 REPO="$TMP/repo"
 mkdir -p "$REPO/native_apps" "$REPO/commissioning" "$REPO/lib"
 for f in commissioning/commission-offline.sh \
-         lib/arca-identify.sh lib/arca-provision.sh lib/arca-bundle.sh; do
+         lib/arca-identify.sh lib/product.sh lib/arca-provision.sh lib/arca-bundle.sh; do
     cp "$REPO_DIR/$f" "$REPO/$f"
 done
 cp -a "$REPO_DIR/device-files" "$REPO/device-files"
 cp "$REPO_DIR/native_apps/check-arm-safe.sh" "$REPO/native_apps/"
+# lib/product.sh reads the product name from here (the one home for it).
+mkdir -p "$REPO/rootfs/board/arca" && cp "$REPO_DIR/rootfs/board/arca/os-release" "$REPO/rootfs/board/arca/"
 
 # run <bundle-dir> <repo-dir> [extra args...]  -> stdout+stderr in $OUT, status in $ST
 OUT=""; ST=0
@@ -325,10 +327,10 @@ echo ""
 echo "3. the card itself"
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Wrong partition order: p2 mounted where p6 was expected. The one mistake that
+# Wrong partition order: p2 mounted where p3 was expected. The one mistake that
 # makes every later path resolve under the wrong tree.
 bash "$SCRIPT_DIR/make-fake-card.sh" "$TMP/card" >/dev/null
-mv "$TMP/card/root" "$TMP/card/.r"; mv "$TMP/card/data" "$TMP/card/root"; mv "$TMP/card/.r" "$TMP/card/data"
+mv "$TMP/card/root" "$TMP/card/.r"; mv "$TMP/card/log" "$TMP/card/root"; mv "$TMP/card/.r" "$TMP/card/log"
 set +e
 OUT=$(bash "$REPO/commissioning/commission-offline.sh" \
           --bundle "$BUNDLE" --base "$TMP/card" 2>&1); ST=$?
@@ -428,7 +430,7 @@ else
     ok "6d commission-offline.sh contains no terminal read"
 fi
 
-# A root without our marker (a vendor tree, or p2 mounted as p6) is not ours to install
+# A root without our marker (a vendor tree, or p2 mounted as p3) is not ours to install
 # into: with no clean, the vendor stack would keep running beside the bundle.
 bash "$SCRIPT_DIR/make-fake-card.sh" "$TMP/card" >/dev/null
 rm -f "$TMP/card/root/etc/arca-rootfs"

@@ -4,9 +4,9 @@
 #
 # NOT a repo tool: a scratch fixture builder for exercising commissioning/commission-offline.sh
 # without a card and without a device. It mirrors what rootfs/make-card-image.sh hands that
-# script: p6 is our Buildroot root (marker etc/arca-rootfs, the rcS.d/rc5.d links and
+# script: p3 is our Buildroot root (marker etc/arca-rootfs, the rcS.d/rc5.d links and
 # the key-only sshd_config that rootfs/board/arca/{post-build.sh,overlay} produce),
-# p2/p3/p5 are empty ext4 trees. There is no vendor software anywhere in it. It is
+# p2 (log) is an empty ext4 tree. There is no vendor software anywhere in it. It is
 # committed because the alternative is retyping it, and because the one thing it must get
 # right — REAL SYMLINKS in rc*.d — is exactly what partitions/ and partitions.new/ lost on
 # the way through Windows (CLAUDE.md → "Working from this host").
@@ -28,7 +28,7 @@ rm -rf "$BASE"
 mkdir -p "$BASE"/root/etc/{init.d,rcS.d,rc0.d,rc1.d,rc2.d,rc3.d,rc4.d,rc5.d,rc6.d,ssh,network,sysctl.d} \
          "$BASE"/root/{opt/games,opt/arca,usr/sbin,usr/lib,usr/share} \
          "$BASE"/root/home/root/{data,log,backup,.ssh} \
-         "$BASE"/data/lost+found "$BASE"/log/lost+found
+         "$BASE"/log/lost+found
 
 # arca_is_rootfs's four required files, our marker, and the per-unit name.
 echo 'root:*:19000:0:99999:7:::'                    > "$BASE/root/etc/shadow"

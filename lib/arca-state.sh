@@ -16,7 +16,7 @@
 #
 # ── Where ScummVM's saves go ────────────────────────────────────────────────
 #
-# Our backend's default savepath is home/root/data/scummvm-saves (p2; backend-files/
+# Our backend's default savepath is home/root/data/scummvm-saves (on the root partition, p3; backend-files/
 # arca.cpp). Binaries built before it had none, and a save then landed in the
 # process's CURRENT DIRECTORY: "/" when booted, /home/root from an SSH shell — which
 # is why kq2.000 turned up loose in /home/root. Saves have no fixed name (<target>.NNN

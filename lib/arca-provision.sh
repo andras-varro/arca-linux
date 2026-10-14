@@ -6,7 +6,7 @@
 #
 # SOURCED, not executed:   . "$REPO_ROOT/lib/arca-provision.sh"
 #                          (needs lib/arca-identify.sh sourced first — arca_offline_path does the
-#                          p2/p3/p5/p6 mapping and arca_offline_base_ok is the guard)
+#                          p3/p2 mapping and arca_offline_base_ok is the guard)
 #
 # ── The decisions are not in this file ──────────────────────────────────────
 #
@@ -45,7 +45,7 @@
 #
 # unlink before link (a glob would eat the link just made), install before link (a
 # link to a not-yet-written file dangles on a card). Paths are DEVICE-absolute; mapping them onto
-# p2/p3/p5/p6 is the offline executor's job.
+# p3/p2 is the offline executor's job.
 
 ARCA_PROVISION_TYPES="install link link-opt unlink"
 ARCA_PROVISION_GROUPS_ALL="base mdns usb bluetooth"

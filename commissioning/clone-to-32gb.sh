@@ -1,36 +1,24 @@
 #!/bin/bash
-# commissioning/clone-to-32gb.sh — Write a card image onto a larger card and grow the root filesystem
+# commissioning/clone-to-32gb.sh — Write a card image onto a larger card and grow p3 to fill it
 #
 # Usage:
 #   sudo ./commissioning/clone-to-32gb.sh --clone-from <image_or_device> /dev/sdX
 #   sudo ./commissioning/clone-to-32gb.sh --expand-only /dev/sdX
 #
-# This script writes a card image (as rootfs/make-card-image.sh builds it, ~4GB)
-# onto a larger (16-128GB) SD card and expands the root filesystem (p6) to use all
-# available space, while preserving partition numbering and filesystem UUID.
+# This script writes a card image (as rootfs/make-card-image.sh builds it, ~1.6 GB)
+# onto a larger (16-128GB) SD card and grows p3 (the root filesystem, which also
+# holds /home/root/data) to the end of the card.  The layout is ARCA_LAYOUT in
+# lib/arca-identify.sh, three primaries:
+#   p1: FAT32 boot, bootable (MLO, U-Boot, uImage, DTB)
+#   p2: ext4, 1 GiB (logs, mounted at /home/root/log)
+#   p3: ext4, root filesystem — LAST, so nothing sits behind it
 #
-# The image's partition table has 7 partitions:
-#   p1: FAT32, ~70.6 MB, bootable (MLO, U-Boot, uImage, DTB)
-#   p2: ext3, ~251 MB (application data)
-#   p3: ext3, ~243 MB (system logs)
-#   p4: extended container, ~3.14 GB (holds p5-p7)
-#   p5: ext3, ~1.40 GB (unused, kept in the table)
-#   p6: ext3, ~981 MB (root filesystem)
-#   p7: swap, ~259 MB (swap space — dropped during upgrade)
+# Strategy: dd the image, rewrite the table with p3's size dropped (sfdisk then
+# extends it to the end of the disk), e2fsck + resize2fs.  The UUID is preserved
+# because we resize, not reformat.
 #
-# The upgrade drops p7 (swap) to maximize rootfs space. Swap is not needed
-# for our gaming use case, and removing it lets p6 expand further.
-#
-# For full background, partition layout details, and manual procedure, see:
-#   SD_CARD_UPGRADE.md
-#
-# Strategy:
-#   1. Write the image to the larger card with dd
-#   2. Use sfdisk to expand extended partition (p4) and rootfs (p6)
-#   3. Drop swap partition (p7) — not needed for gaming
-#   4. Use e2fsck + resize2fs to grow the ext3 filesystem
-#   5. Keep p5 at its size so p6 keeps its device number
-#   6. UUID is preserved because we resize, not reformat
+# Full background: SD_CARD_UPGRADE.md.  This script goes away once the unit
+# grows p3 itself on first boot.
 
 # Source-path directive: resolves the source= hints below against this script's directory.
 # shellcheck source-path=SCRIPTDIR
@@ -40,10 +28,10 @@ set -euo pipefail
 # Constants
 # ---------------------------------------------------------------------------
 MIN_TARGET_SIZE_GB=16
-# Upper bound as well as a lower one: a minimum alone rejects a card as small as the 4 GB image
+# Upper bound as well as a lower one: a minimum alone rejects a card as small as the image
 # card and accepts a 4 TB disk.  Env-overridable for a genuinely large card.
 MAX_TARGET_SIZE_GB=${MAX_TARGET_SIZE_GB:-128}
-EXPECTED_PARTITION_COUNT=7  # The image has 7 partitions (including swap on p7)
+EXPECTED_PARTITION_COUNT=3  # The image has three primaries: boot, log, root
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -54,11 +42,11 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 #
 # ⚠️ Do not gate this script on a rootfs UUID.  A filesystem UUID is generated at
 # mkfs time, so it names ONE CARD: two Arca units on the identical firmware
-# build share none of their four UUIDs, so such a gate warns on every unit but
+# build share none of their UUIDs, so such a gate warns on every unit but
 # the one the constant came from.  And it must never be "repaired" by running
 # `tune2fs -U` to make a card match another — two cards claiming one UUID is a
 # harder bug than the one it hides.  The partition LAYOUT is the invariant:
-# U-Boot has root=/dev/mmcblk0p6 compiled in with no saveenv, so p6 is the rootfs
+# U-Boot has root=/dev/mmcblk0p3 compiled in with no saveenv, so p3 is the rootfs
 # by position on every unit.
 # shellcheck source=../lib/arca-identify.sh
 . "$REPO_ROOT/lib/arca-identify.sh"
@@ -69,7 +57,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # do_final_verify.  The meaningful question after a resize is whether the UUID
 # survived it, which is a comparison against this card's own earlier value — not
 # against a constant copied from some other card.
-ORIG_P6_UUID=""
+ORIG_P3_UUID=""
 
 # ---------------------------------------------------------------------------
 # Colors
@@ -137,7 +125,7 @@ part_dev() {
 # Usage / help
 # ---------------------------------------------------------------------------
 usage() {
-    echo -e "${BOLD}${SCRIPT_NAME}${NC} — Write a card image to a larger card and grow p6"
+    echo -e "${BOLD}${SCRIPT_NAME}${NC} — Write a card image to a larger card and grow p3"
     echo ""
     echo -e "${BOLD}USAGE${NC}"
     echo "  sudo ./${SCRIPT_NAME} --clone-from <image_or_device> <target_device>"
@@ -173,21 +161,15 @@ usage() {
     echo ""
     echo -e "${BOLD}WHAT IT DOES${NC}"
     echo "  1. (Clone mode) dd the source image/device to the target"
-    echo "  2. Verify the image's 7-partition layout and rootfs UUID"
-    echo "  3. Expand extended partition (p4) and rootfs (p6) to fill the card"
-    echo "  4. Drop swap partition (p7) to maximize rootfs space"
-    echo "  5. Keep the unused partition (p5) at its size so p6 keeps its device number"
-    echo "  6. Grow the ext3 filesystem on p6 with resize2fs"
-    echo "  7. Verify UUID is preserved"
+    echo "  2. Verify the image's 3-partition layout and record the p3 UUID"
+    echo "  3. Rewrite the table so p3 (root + data) runs to the end of the card"
+    echo "  4. Grow the ext4 filesystem on p3 with e2fsck + resize2fs"
+    echo "  5. Verify UUID is preserved"
     echo ""
-    echo -e "${BOLD}PARTITION LAYOUT (the image's 7 partitions)${NC}"
+    echo -e "${BOLD}PARTITION LAYOUT (the image's 3 primaries)${NC}"
     echo "  p1: FAT32  ~70.6 MB  bootable  (boot: MLO, U-Boot, uImage, DTB)"
-    echo "  p2: ext3   ~251 MB             (application data)"
-    echo "  p3: ext3   ~243 MB             (system logs)"
-    echo "  p4: ext    ~3.14 GB            (extended container for p5-p7)"
-    echo "  p5: ext3   ~1.40 GB            (unused, kept in the table)"
-    echo "  p6: ext3   ~981 MB             (root filesystem)"
-    echo "  p7: swap   ~259 MB             (swap — DROPPED during upgrade)"
+    echo "  p2: ext4   1 GiB               (system logs)"
+    echo "  p3: ext4   ~512 MB, GROWN      (root filesystem, holds /home/root/data)"
     echo ""
     echo -e "${BOLD}SEE ALSO${NC}"
     echo "  SD_CARD_UPGRADE.md — Full documentation of the upgrade procedure"
@@ -368,7 +350,7 @@ check_device_safe() {
     fi
 
     # A size *window*.  A minimum alone is not a safety check — it rejects the
-    # 4 GB image-sized card and waves through a 4 TB drive.
+    # image-sized card and waves through a 4 TB drive.
     local size_bytes size_gb
     size_bytes=$(blockdev --getsize64 "$dev")
     size_gb=$(( size_bytes / 1073741824 ))
@@ -482,47 +464,48 @@ do_clone() {
 # ---------------------------------------------------------------------------
 # Phase 2: Verify partition structure
 # ---------------------------------------------------------------------------
+# Print ARCA_LAYOUT (n:start:size:type) one partition per line.
+print_expected_layout() {
+    local e n s z t
+    for e in $ARCA_LAYOUT; do
+        IFS=: read -r n s z t <<< "$e"
+        if [ "$n" = "$ARCA_LAYOUT_GROW" ]; then
+            warn "  p${n}: start=${s}, type=${t}  (size is whatever the card gave)"
+        else
+            warn "  p${n}: start=${s}, size=${z}, type=${t}"
+        fi
+    done
+}
+
 do_verify() {
     step "Verify partition structure"
 
-    local p6_dev
-    p6_dev=$(part_dev "$DEVICE" 6)
+    local p3_dev part_count
+    p3_dev=$(part_dev "$DEVICE" 3)
 
-    # Count partitions
-    local part_count
-    part_count=$(lsblk -n -o NAME "$DEVICE" | grep -c -v "^$(basename "$DEVICE")$" || true)
-
+    part_count=$(sfdisk -d "$DEVICE" | grep -c 'start=' || true)
     info "Found ${part_count} partition(s) on ${DEVICE}"
 
     if [ "$part_count" -ne "$EXPECTED_PARTITION_COUNT" ]; then
         error "Expected ${EXPECTED_PARTITION_COUNT} partitions, found ${part_count}"
-        echo ""
-        lsblk "$DEVICE"
-        error "The target device does not have the expected $PRODUCT_NAME partition layout"
-        error "Expected 7 partitions: p1(FAT32,boot) p2(ext3) p3(ext3) p4(extended) p5(ext3) p6(ext3,rootfs) p7(swap)"
+        sfdisk -l "$DEVICE"
+        error "The target does not have the $PRODUCT_NAME card layout (p1 boot, p2 log, p3 root)."
+        error "A card from an older 7-partition image is rewritten from a current image, not grown."
         exit 1
     fi
-    info "Partition count: ${part_count} (7 partitions including swap) — OK"
 
-    # Show current partition table
     echo ""
     info "Current partition table:"
     sfdisk -l "$DEVICE"
     echo ""
 
-    # Verify the LAYOUT, not a UUID.  arca_is_card_disk pins the start and size of
-    # p1 p2 p3 p5 p6 — byte-identical on every unit measured — and deliberately
-    # does NOT pin p4 or p7, which absorb the difference in physical card size.
+    # Verify the LAYOUT, not a UUID.  arca_is_card_disk pins start and size of p1
+    # and p2 and only the start of p3, so a card that was already grown matches.
     if arca_is_card_disk "$DEVICE"; then
         info "Partition layout matches the $PRODUCT_NAME card layout ✓"
     else
-        warn "Partition layout does NOT match the $PRODUCT_NAME card layout."
-        warn "  p1 p2 p3 p5 p6 must be at the image's start sectors and sizes."
-        warn "  Expected: ${ARCA_LAYOUT}"
-        echo ""
-        warn "If this card has already been expanded, you are past the point this"
-        warn "check is for — p4 and p6 have grown and p7 is gone. Re-running is a"
-        warn "no-op at best."
+        warn "Partition layout does NOT match the $PRODUCT_NAME card layout. Expected:"
+        print_expected_layout
         echo ""
         confirm "Layout does not match. Continue anyway?"
     fi
@@ -531,172 +514,62 @@ do_verify() {
     # only thing worth asserting is that the resize preserves it, which
     # do_final_verify checks against the value captured here.
     if $DRY_RUN; then
-        dry_run "Would record the UUID of ${p6_dev}"
+        dry_run "Would record the UUID of ${p3_dev}"
         return
     fi
 
-    ORIG_P6_UUID=$(blkid -s UUID -o value "$p6_dev" 2>/dev/null || echo "")
+    ORIG_P3_UUID=$(blkid -s UUID -o value "$p3_dev" 2>/dev/null || echo "")
 
-    if [ -z "$ORIG_P6_UUID" ]; then
-        error "Could not read UUID from ${p6_dev}"
+    if [ -z "$ORIG_P3_UUID" ]; then
+        error "Could not read UUID from ${p3_dev}"
         error "Is the $PRODUCT_NAME image properly cloned to this card?"
         exit 1
     fi
-    info "p6 UUID: ${ORIG_P6_UUID} (recorded; must survive the resize)"
+    info "p3 UUID: ${ORIG_P3_UUID} (recorded; must survive the resize)"
 }
 
 # ---------------------------------------------------------------------------
 # Phase 3: Repartition
 # ---------------------------------------------------------------------------
 do_repartition() {
-    step "Repartition — expand extended (p4) and rootfs (p6), drop swap (p7)"
+    step "Repartition — grow p3 (root + data) to the end of the card"
 
-    # Save current partition table
-    local saved_table
+    local saved_table p3_dev p3_line p3_start total_sectors new_table
     saved_table=$(sfdisk -d "$DEVICE")
 
     info "Current sfdisk dump:"
     echo "$saved_table"
     echo ""
 
-    # Parse partition entries from sfdisk dump
-    # Format: /dev/sdb1 : start=        63, size=      144522, type=c, bootable
-    local p1_start p1_size p1_type p1_bootable
-    local p2_start p2_size p2_type
-    local p3_start p3_size p3_type
-    local p4_start p4_size p4_type
-    local p5_start p5_size p5_type
-    local p6_start p6_size p6_type
-    local p7_start p7_size p7_type
+    # Format: /dev/sdb3 : start=   2244608, size=   1048576, type=83
+    p3_dev=$(part_dev "$DEVICE" 3)
+    p3_line=$(echo "$saved_table" | grep "^${p3_dev} " || true)
+    if [ -z "$p3_line" ]; then
+        error "Could not parse ${p3_dev} from the sfdisk dump"
+        exit 1
+    fi
+    p3_start=$(echo "$p3_line" | sed -E 's/.*start= *([0-9]+).*/\1/')
+    OLD_P3_SIZE=$(echo "$p3_line" | sed -E 's/.*size= *([0-9]+).*/\1/')
 
-    parse_partition() {
-        local line="$1"
-        echo "$line" | sed -E 's/.*start=\s*([0-9]+).*/\1/'
-    }
-    parse_size() {
-        local line="$1"
-        echo "$line" | sed -E 's/.*size=\s*([0-9]+).*/\1/'
-    }
-    parse_type() {
-        local line="$1"
-        echo "$line" | sed -E 's/.*type=\s*([0-9a-fA-F]+).*/\1/'
-    }
+    total_sectors=$(blockdev --getsz "$DEVICE")
+    NEW_P3_SIZE=$(( total_sectors - p3_start ))
+    info "Device sectors: ${total_sectors}; p3 starts at ${p3_start}"
+    info "p3: $(( OLD_P3_SIZE * 512 / 1048576 )) MB → $(( NEW_P3_SIZE * 512 / 1048576 )) MB; p1 and p2 unchanged"
 
-    # Extract label-id for preservation
-    local label_id
-    label_id=$(echo "$saved_table" | grep -oP 'label-id:\s*\K.*' || echo "0x00000000")
-
-    # Extract each partition line
-    local p1_line p2_line p3_line p4_line p5_line p6_line p7_line
-
-    p1_line=$(echo "$saved_table" | grep "$(part_dev "$DEVICE" 1) " || echo "$saved_table" | grep "$(part_dev "$DEVICE" 1)$" || true)
-    p2_line=$(echo "$saved_table" | grep "$(part_dev "$DEVICE" 2) " || echo "$saved_table" | grep "$(part_dev "$DEVICE" 2)$" || true)
-    p3_line=$(echo "$saved_table" | grep "$(part_dev "$DEVICE" 3) " || echo "$saved_table" | grep "$(part_dev "$DEVICE" 3)$" || true)
-    p4_line=$(echo "$saved_table" | grep "$(part_dev "$DEVICE" 4) " || echo "$saved_table" | grep "$(part_dev "$DEVICE" 4)$" || true)
-    p5_line=$(echo "$saved_table" | grep "$(part_dev "$DEVICE" 5) " || echo "$saved_table" | grep "$(part_dev "$DEVICE" 5)$" || true)
-    p6_line=$(echo "$saved_table" | grep "$(part_dev "$DEVICE" 6) " || echo "$saved_table" | grep "$(part_dev "$DEVICE" 6)$" || true)
-    p7_line=$(echo "$saved_table" | grep "$(part_dev "$DEVICE" 7) " || echo "$saved_table" | grep "$(part_dev "$DEVICE" 7)$" || true)
-
-    # Verify we found all 7 partitions
-    for pnum in 1 2 3 4 5 6 7; do
-        local varname="p${pnum}_line"
-        if [ -z "${!varname}" ]; then
-            error "Could not parse partition ${pnum} from sfdisk dump"
-            exit 1
-        fi
-    done
-
-    # Check if p1 has bootable flag
-    p1_bootable=""
-    if echo "$p1_line" | grep -q "bootable"; then
-        p1_bootable=", bootable"
+    # The dump already is the table (label-id, p1 with its bootable flag, p2);
+    # drop p3's size= and sfdisk extends it to the end of the disk.
+    new_table=$(echo "$saved_table" | sed -E "s|^(${p3_dev} :.*)size= *[0-9]+, |\1|")
+    if [ "$new_table" = "$saved_table" ]; then
+        error "Could not drop size= from the ${p3_dev} line of the dump"
+        exit 1
     fi
 
-    # Parse values
-    p1_start=$(parse_partition "$p1_line"); p1_size=$(parse_size "$p1_line"); p1_type=$(parse_type "$p1_line")
-    p2_start=$(parse_partition "$p2_line"); p2_size=$(parse_size "$p2_line"); p2_type=$(parse_type "$p2_line")
-    p3_start=$(parse_partition "$p3_line"); p3_size=$(parse_size "$p3_line"); p3_type=$(parse_type "$p3_line")
-    p4_start=$(parse_partition "$p4_line"); p4_size=$(parse_size "$p4_line"); p4_type=$(parse_type "$p4_line")
-    p5_start=$(parse_partition "$p5_line"); p5_size=$(parse_size "$p5_line"); p5_type=$(parse_type "$p5_line")
-    p6_start=$(parse_partition "$p6_line"); p6_size=$(parse_size "$p6_line"); p6_type=$(parse_type "$p6_line")
-    p7_start=$(parse_partition "$p7_line"); p7_size=$(parse_size "$p7_line"); p7_type=$(parse_type "$p7_line")
-
-    info "Parsed current layout (7 partitions):"
-    info "  p1: start=${p1_start}, size=${p1_size}, type=${p1_type}${p1_bootable}  (~$(( p1_size * 512 / 1048576 )) MB, FAT32 boot)"
-    info "  p2: start=${p2_start}, size=${p2_size}, type=${p2_type}  (~$(( p2_size * 512 / 1048576 )) MB, data)"
-    info "  p3: start=${p3_start}, size=${p3_size}, type=${p3_type}  (~$(( p3_size * 512 / 1048576 )) MB, log)"
-    info "  p4: start=${p4_start}, size=${p4_size}, type=${p4_type}  (~$(( p4_size * 512 / 1048576 )) MB, extended)"
-    info "  p5: start=${p5_start}, size=${p5_size}, type=${p5_type}  (~$(( p5_size * 512 / 1048576 )) MB, unused)"
-    info "  p6: start=${p6_start}, size=${p6_size}, type=${p6_type}  (~$(( p6_size * 512 / 1048576 )) MB, rootfs)"
-    info "  p7: start=${p7_start}, size=${p7_size}, type=${p7_type}  (~$(( p7_size * 512 / 1048576 )) MB, swap — WILL BE DROPPED)"
-
-    # Record old p6 size for summary
-    OLD_P6_SIZE=$p6_size
-
-    # Calculate new sizes
-    local total_sectors
-    total_sectors=$(blockdev --getsz "$DEVICE")
-    info "Total device sectors: ${total_sectors}"
-
-    # New p4 (extended): same start, extends to end of disk
-    local new_p4_size=$(( total_sectors - p4_start ))
-
-    # p5 stays the same
-    # p6: same start, expand to fill remaining space in extended (p7 swap is dropped)
-    # Calculate p6 size: from p6 start to end of the extended partition
-    local new_p6_size=$(( p4_start + new_p4_size - p6_start ))
-
-    local old_p6_mb=$(( p6_size * 512 / 1048576 ))
-    local new_p6_mb=$(( new_p6_size * 512 / 1048576 ))
-    local p7_mb=$(( p7_size * 512 / 1048576 ))
-
-    echo ""
-    info "New layout plan (6 partitions — p7 swap dropped):"
-    info "  p1: start=${p1_start}, size=${p1_size}, type=${p1_type}${p1_bootable}  (unchanged)"
-    info "  p2: start=${p2_start}, size=${p2_size}, type=${p2_type}  (unchanged)"
-    info "  p3: start=${p3_start}, size=${p3_size}, type=${p3_type}  (unchanged)"
-    info "  p4: start=${p4_start}, size=${new_p4_size}, type=${p4_type}  (EXPANDED)"
-    info "  p5: start=${p5_start}, size=${p5_size}, type=${p5_type}  (unchanged)"
-    info "  p6: start=${p6_start}, size=${new_p6_size}, type=${p6_type}  (EXPANDED: ${old_p6_mb} MB → ${new_p6_mb} MB)"
-    info "  p7: DROPPED (was swap, ${p7_mb} MB — not needed for gaming)"
-    echo ""
-
     confirm "Apply new partition table to ${DEVICE}?"
-
-    # Build the sfdisk input
-    # We use the dump format that sfdisk understands
-    # Preserve label-id and bootable flag from the original table
-    local p1_dev p2_dev p3_dev p4_dev p5_dev p6_dev
-    p1_dev=$(part_dev "$DEVICE" 1)
-    p2_dev=$(part_dev "$DEVICE" 2)
-    p3_dev=$(part_dev "$DEVICE" 3)
-    p4_dev=$(part_dev "$DEVICE" 4)
-    p5_dev=$(part_dev "$DEVICE" 5)
-    p6_dev=$(part_dev "$DEVICE" 6)
-
-    # Note: We omit size for p4 and p6 so sfdisk fills to max available space.
-    # We explicitly set label-id to preserve the original value (0x00000000).
-    # We include the bootable flag on p1 to match the original layout.
-    local new_table
-    new_table="label: dos
-label-id: ${label_id}
-unit: sectors
-sector-size: 512
-
-${p1_dev} : start=${p1_start}, size=${p1_size}, type=${p1_type}${p1_bootable}
-${p2_dev} : start=${p2_start}, size=${p2_size}, type=${p2_type}
-${p3_dev} : start=${p3_start}, size=${p3_size}, type=${p3_type}
-${p4_dev} : start=${p4_start}, type=${p4_type}
-${p5_dev} : start=${p5_start}, size=${p5_size}, type=${p5_type}
-${p6_dev} : start=${p6_start}, type=${p6_type}
-"
 
     if $DRY_RUN; then
         dry_run "Would apply the following partition table:"
         echo "$new_table"
         dry_run "partprobe ${DEVICE}"
-        # Store for summary
-        NEW_P6_SIZE=$new_p6_size
         return
     fi
 
@@ -706,9 +579,6 @@ ${p6_dev} : start=${p6_start}, type=${p6_type}
     info "Re-reading partition table..."
     partprobe "$DEVICE"
     sleep 2
-
-    # Store new p6 size for summary
-    NEW_P6_SIZE=$new_p6_size
 
     info "Repartition complete"
     echo ""
@@ -720,20 +590,20 @@ ${p6_dev} : start=${p6_start}, type=${p6_type}
 # Phase 4: Filesystem expansion
 # ---------------------------------------------------------------------------
 do_resize_fs() {
-    step "Expand ext3 filesystem on rootfs (p6)"
+    step "Expand ext4 filesystem on rootfs (p3)"
 
-    local p6_dev
-    p6_dev=$(part_dev "$DEVICE" 6)
+    local p3_dev
+    p3_dev=$(part_dev "$DEVICE" 3)
 
     if $DRY_RUN; then
-        dry_run "e2fsck -f -y ${p6_dev}"
-        dry_run "resize2fs ${p6_dev}"
+        dry_run "e2fsck -f -y ${p3_dev}"
+        dry_run "resize2fs ${p3_dev}"
         return
     fi
 
-    info "Running filesystem check on ${p6_dev}..."
+    info "Running filesystem check on ${p3_dev}..."
     # e2fsck returns 1 if errors were corrected, which is OK for us
-    e2fsck -f -y "$p6_dev" || {
+    e2fsck -f -y "$p3_dev" || {
         local rc=$?
         if [ $rc -le 1 ]; then
             info "e2fsck completed (corrected minor issues)"
@@ -744,7 +614,7 @@ do_resize_fs() {
     }
 
     info "Resizing filesystem to fill partition..."
-    resize2fs "$p6_dev"
+    resize2fs "$p3_dev"
 
     info "Filesystem expansion complete"
 }
@@ -755,97 +625,49 @@ do_resize_fs() {
 do_final_verify() {
     step "Final verification"
 
-    local p6_dev
-    p6_dev=$(part_dev "$DEVICE" 6)
+    local p3_dev
+    p3_dev=$(part_dev "$DEVICE" 3)
 
     if $DRY_RUN; then
-        dry_run "blkid ${p6_dev}"
+        dry_run "blkid ${p3_dev}"
         dry_run "sfdisk -l ${DEVICE}"
-        dry_run "dumpe2fs -h ${p6_dev}"
-        echo ""
-        dry_run "Summary:"
-        local old_mb=$(( OLD_P6_SIZE * 512 / 1048576 ))
-        local new_mb=$(( NEW_P6_SIZE * 512 / 1048576 ))
-        dry_run "  Old rootfs partition: ${old_mb} MB"
-        dry_run "  New rootfs partition: ${new_mb} MB"
-        dry_run "  Swap partition (p7): DROPPED"
+        dry_run "Summary: p3 $(( OLD_P3_SIZE * 512 / 1048576 )) MB → $(( NEW_P3_SIZE * 512 / 1048576 )) MB"
         return
     fi
 
     # Did the resize preserve this card's UUID?  resize2fs must not change it,
     # and that — not equality with some other card's UUID — is the only thing
-    # worth asserting here.
-    #
-    # Nothing on the device consumes a UUID at all: U-Boot passes
-    # root=/dev/mmcblk0p6 and /etc/fstab names /dev/mmcblk0p{2,3,5,7}, both by
-    # position.  Neither does our tooling any more — the card tooling
-    # finds the rootfs by content.  So a changed UUID is a curiosity, not a
-    # breakage — and never "fix" one with `tune2fs -U` to match another card.
+    # worth asserting here.  Nothing on the device consumes a UUID (U-Boot passes
+    # root=/dev/mmcblk0p3, /etc/fstab names partitions by position), so a changed
+    # one is a curiosity, not a breakage — and never "fix" one with `tune2fs -U`.
     echo ""
     info "Checking rootfs UUID..."
-    local p6_uuid
-    p6_uuid=$(blkid -s UUID -o value "$p6_dev" 2>/dev/null || echo "UNKNOWN")
+    local p3_uuid
+    p3_uuid=$(blkid -s UUID -o value "$p3_dev" 2>/dev/null || echo "UNKNOWN")
 
-    if [ -z "$ORIG_P6_UUID" ]; then
-        info "p6 UUID is now ${p6_uuid} (no pre-resize value was recorded)"
-    elif [ "$p6_uuid" = "$ORIG_P6_UUID" ]; then
-        info "✓ UUID preserved across the resize: ${p6_uuid}"
+    if [ -z "$ORIG_P3_UUID" ]; then
+        info "p3 UUID is now ${p3_uuid} (no pre-resize value was recorded)"
+    elif [ "$p3_uuid" = "$ORIG_P3_UUID" ]; then
+        info "✓ UUID preserved across the resize: ${p3_uuid}"
     else
         warn "✗ The resize CHANGED the rootfs UUID:"
-        warn "  Before: ${ORIG_P6_UUID}"
-        warn "  After:  ${p6_uuid}"
-        warn "  resize2fs is not supposed to do this. The card still boots and"
-        warn "  still commissions — nothing references the UUID — but it means"
-        warn "  something more than a resize happened to the filesystem."
+        warn "  Before: ${ORIG_P3_UUID}"
+        warn "  After:  ${p3_uuid}"
+        warn "  resize2fs is not supposed to do this; something more than a resize"
+        warn "  happened to the filesystem."
     fi
 
-    # Show blkid details
-    echo ""
-    info "blkid output for ${p6_dev}:"
-    blkid "$p6_dev"
-
-    # Show final partition table
     echo ""
     info "Final partition table:"
     sfdisk -l "$DEVICE"
 
-    # Show filesystem size via dumpe2fs
+    local new_mb=$(( NEW_P3_SIZE * 512 / 1048576 ))
     echo ""
-    info "Filesystem details (dumpe2fs):"
-    local block_count block_size
-    block_count=$(dumpe2fs -h "$p6_dev" 2>/dev/null | grep "Block count:" | awk '{print $3}')
-    block_size=$(dumpe2fs -h "$p6_dev" 2>/dev/null | grep "Block size:" | awk '{print $3}')
-
-    if [ -n "$block_count" ] && [ -n "$block_size" ]; then
-        local fs_size_mb=$(( block_count * block_size / 1048576 ))
-        info "  Block count: ${block_count}"
-        info "  Block size:  ${block_size} bytes"
-        info "  Filesystem:  ${fs_size_mb} MB ($(( fs_size_mb / 1024 )) GB)"
-    fi
-
-    # Summary
-    echo ""
-    echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════${NC}"
     echo -e "${GREEN}${BOLD}  SD Card Upgrade Complete!${NC}"
-    echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════${NC}"
-    echo ""
-
-    local old_mb=$(( OLD_P6_SIZE * 512 / 1048576 ))
-    local new_mb=$(( NEW_P6_SIZE * 512 / 1048576 ))
-
     echo -e "  Device:           ${BOLD}${DEVICE}${NC}"
-    echo -e "  Rootfs partition: ${BOLD}${p6_dev}${NC}"
-    echo -e "  Old rootfs size:  ${old_mb} MB (~981 MB)"
-    echo -e "  New rootfs size:  ${BOLD}${new_mb} MB${NC} ($(( new_mb / 1024 )) GB)"
-    echo -e "  Swap (p7):        ${BOLD}DROPPED${NC} (was ~259 MB — not needed for gaming)"
-    echo -e "  UUID:             ${BOLD}${p6_uuid}${NC}"
+    echo -e "  Rootfs partition: ${BOLD}${p3_dev}${NC}  (UUID ${p3_uuid})"
+    echo -e "  Size:             $(( OLD_P3_SIZE * 512 / 1048576 )) MB → ${BOLD}${new_mb} MB${NC} ($(( new_mb / 1024 )) GB)"
     echo ""
-
-    if [ -n "${fs_size_mb:-}" ]; then
-        echo -e "  Filesystem size:  ${BOLD}${fs_size_mb} MB${NC} ($(( fs_size_mb / 1024 )) GB)"
-        echo ""
-    fi
-
     echo -e "  ${GREEN}Next steps:${NC}"
     echo -e "    1. Insert card into the unit"
     echo -e "    2. Boot it, then update: ${BOLD}./commissioning/provision.sh <device-ip>${NC}"
@@ -860,7 +682,7 @@ main() {
     echo ""
     echo -e "${BLUE}${BOLD}╔══════════════════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}${BOLD}║  $PRODUCT_NAME SD Card Clone & Expand Tool      ║${NC}"
-    echo -e "${BLUE}${BOLD}║  4 GB image → larger card (any ≥${MIN_TARGET_SIZE_GB} GB)                 ║${NC}"
+    echo -e "${BLUE}${BOLD}║  2 GB image → larger card (any ≥${MIN_TARGET_SIZE_GB} GB)                 ║${NC}"
     echo -e "${BLUE}${BOLD}╚══════════════════════════════════════════════════════╝${NC}"
     echo ""
 
@@ -883,8 +705,8 @@ main() {
     check_device_safe "$DEVICE"
 
     # Initialize size tracking
-    OLD_P6_SIZE=0
-    NEW_P6_SIZE=0
+    OLD_P3_SIZE=0
+    NEW_P3_SIZE=0
 
     # Execute phases
     if [ "$MODE" = "clone" ]; then

@@ -308,7 +308,7 @@ build_card() {
     mkdir -p "$CARD/root/etc/init.d" "$CARD/root/etc/rc2.d" "$CARD/root/etc/rc3.d" \
              "$CARD/root/etc/rc4.d" "$CARD/root/etc/rc5.d" "$CARD/root/etc/ssh" \
              "$CARD/root/etc/sysctl.d" "$CARD/root/usr/sbin" "$CARD/root/var" \
-             "$CARD/data" "$CARD/log" "$CARD/backup"
+             "$CARD/log" "$CARD/backup"
     # The vendor's sshd_config, with the factory default this hardening exists for.
     printf 'PermitRootLogin yes\nPermitEmptyPasswords yes\n' > "$CARD/root/etc/ssh/sshd_config"
     # /etc/profile as measured on both card captures.

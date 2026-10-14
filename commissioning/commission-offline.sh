@@ -4,7 +4,7 @@
 #                         provision plan into a card's partitions, mounted by the caller.
 #
 # The only caller is rootfs/make-card-image.sh --bundle, which loop-mounts the four
-# partitions of a card IMAGE it is building (our own Buildroot root on p6, marker
+# partitions of a card IMAGE it is building (our own Buildroot root on p3, marker
 # etc/arca-rootfs) and hands them over with --base. Nothing here reads a
 # terminal, scans a disk or mounts anything; it needs no root of its own and no network.
 # A unit already in service is updated online with commissioning/provision.sh.
@@ -16,7 +16,7 @@
 #   --bundle <path>     A release tarball from `./release.sh --stage-only`, or a staged
 #                       bundle directory. THE source of binaries: this host has no
 #                       toolchain to fall back on.
-#   --base <dir>        REQUIRED. The card, already mounted as <dir>/{root,data,log}.
+#   --base <dir>        REQUIRED. The card, already mounted as <dir>/{root,log}.
 #   --dry-run           Print every resolved absolute path and change nothing.
 #   --no-<group>        Skip one group of the provision plan (see --help).
 #   --arm-check=skip    Proceed with UNVERIFIED binaries when the ARM objdump is
@@ -41,7 +41,7 @@
 #                              DECLARED there too.
 #
 # Host name, password and ssh identity are not set here: they are whatever the caller's
-# p6 already carries.
+# p3 already carries.
 
 # Source-path directive: resolves the source= hints below against this script's directory.
 # shellcheck source-path=SCRIPTDIR
@@ -96,8 +96,8 @@ The image step of rootfs/make-card-image.sh --bundle. Asks nothing, mounts nothi
 needs no network. A unit in service is updated with commissioning/provision.sh.
 
   --bundle <path>    Release tarball or staged bundle directory (REQUIRED)
-  --base <dir>       The card, already mounted as <dir>/{root,data,log}
-                     (REQUIRED). p6 must carry our root's marker, etc/arca-rootfs.
+  --base <dir>       The card, already mounted as <dir>/{root,log}
+                     (REQUIRED). p3 must carry our root's marker, etc/arca-rootfs.
   --dry-run          Resolve and print everything, change nothing.
   --no-<group>       Skip one group of the provision plan. Groups:
                      $(arca_provision_optional_groups)
@@ -174,13 +174,13 @@ BASE="${BASE%/}"
 # path below resolve under the wrong tree.
 if ! CHECK="$(arca_check_card_mounts "$BASE")"; then
     echo "$CHECK"
-    err "the three mounts do not look right"
+    err "the two mounts do not look right"
 fi
 # Our own root only (arca_is_rootfs requires the marker too; this names it in the refusal). A vendor tree
 # would have its software left running beside ours, since nothing cleans one any more.
 [[ -f "$BASE/root/$ARCA_ROOTFS_OURS" ]] \
     || err "$BASE/root has no /$ARCA_ROOTFS_OURS — this installs into OUR root filesystem (rootfs/) only"
-ok "p6 is our root ($(head -1 "$BASE/root/$ARCA_ROOTFS_OURS")); p2/p3 are not rootfs trees"
+ok "p3 is our root ($(head -1 "$BASE/root/$ARCA_ROOTFS_OURS")); p2 (log) is not a rootfs tree"
 arca_is_rootfs_writable "$BASE/root" || err "$BASE/root is mounted read-only"
 
 # ── 2. the bundle ───────────────────────────────────────────────────────────
@@ -598,7 +598,7 @@ echo "    4. sound: Control Panel -> Audio, or Tap-a-Theremin"
 echo "    5. touch: Control Panel -> Display -> CALIBRATE TOUCH — the one step"
 echo "       that still needs the panel, because it is per-unit."
 echo ""
-# USB host mode lives entirely on p6 — the usb-group boot scripts and the
+# USB host mode lives entirely on p3 — the usb-group boot scripts and the
 # controller modules — so a bundle delivers it outright.
 case " $NO_PROV_GROUPS " in
     *" usb "*)

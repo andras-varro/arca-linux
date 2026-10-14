@@ -21,7 +21,7 @@
 #      ELF, a removed row, an unmapped kernel module and an empty tree each fail
 #   E  make-source-offer.sh: --help has no side effect; it refuses with nothing written when
 #      --out is inside the repo, when the tree is dirty, and when HEAD is on no remote branch
-#   F  make-card-image.sh: the licence documents it puts on p6 (LICENSE.md, manifest.csv,
+#   F  make-card-image.sh: the licence documents it puts on p3 (LICENSE.md, manifest.csv,
 #      licenses/, SOURCE-OFFER.txt naming the source file), and its refusals
 #      (MCI=<path> grades a sabotaged copy; tests/measure_source_offer_sabotage.sh does)
 #
@@ -229,11 +229,11 @@ bash "$MCI" --mlo m --uboot u --kernel k --legal-info "$T/fx/legal" --source-tag
 if [ "$rc" = 1 ] && grep -q -- '--source-tag may contain only' "$T/out"; then ok "F10 a --source-tag that is not a plain tag is refused"; else bad "F10 rc $rc: $(cat "$T/out")"; fi
 bash "$MCI" --help >"$T/out" 2>&1; rc=$?
 if [ "$rc" = 0 ] && grep -q -- '--legal-info' "$T/out" && grep -q -- '--source-tag' "$T/out" && grep -q -- '--source-url' "$T/out"; then ok "F11 --help names the three new options"; else bad "F11 rc $rc"; fi
-# the wiring: the p6 fill step calls it with the three values it was given. Text, not behaviour:
+# the wiring: the p3 fill step calls it with the three values it was given. Text, not behaviour:
 # the call is inside a loop-mounted fill that needs root; a real image was built to see it work.
 # shellcheck disable=SC2016  # the literal text of the call is the thing being looked for
 if grep -qF 'licence_docs_install "$MNT/p" "$SCRIPT_DIR/.." "$LEGAL" "$SOURCE_TAG" "$SOURCE_URL"' "$MCI"; then
-    ok "F12 the p6 fill calls it with the legal-info tree, the tag and the URL"; else bad "F12 fill does not call licence_docs_install with its arguments"; fi
+    ok "F12 the p3 fill calls it with the legal-info tree, the tag and the URL"; else bad "F12 fill does not call licence_docs_install with its arguments"; fi
 
 total=$((pass+fail))
 echo ""

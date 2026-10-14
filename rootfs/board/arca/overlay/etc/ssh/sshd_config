@@ -1,6 +1,6 @@
 # Key-only root login. This OpenSSH is built without PAM, so there is no UsePAM line.
-# The host keys are symlinks into /home/root/data/ssh (partition 2), which survives a
-# reflash of the root filesystem; /etc/init.d/sshd generates them on first start.
+# The host keys are symlinks into /home/root/data/ssh, a directory on the root partition
+# (p3), so they are lost on a reflash with the rest of the unit; /etc/init.d/sshd generates them on first start.
 HostKey /etc/ssh/ssh_host_ed25519_key
 PidFile /var/run/sshd.pid
 PermitRootLogin prohibit-password

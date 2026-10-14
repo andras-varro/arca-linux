@@ -5,5 +5,6 @@ sysfs            /sys              sysfs    defaults                     0      
 devpts           /dev/pts          devpts   mode=0620,gid=5              0      0
 tmpfs            /var/volatile     tmpfs    defaults,nodev               0      0
 tmpfs            /dev/shm          tmpfs    mode=0777                    0      0
-/dev/mmcblk0p2   /home/root/data   ext4     defaults,nodev,noatime       0      0
-/dev/mmcblk0p3   /home/root/log    ext4     defaults,nodev,noatime       0      0
+# p1 is the FAT boot partition (not mounted here). p3 is the root filesystem and carries
+# /home/root/data as a plain directory, so it has no line of its own.
+/dev/mmcblk0p2   /home/root/log    ext4     defaults,nodev,noatime       0      0

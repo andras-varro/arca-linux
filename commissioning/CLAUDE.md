@@ -15,7 +15,7 @@ cleans, removes or edits a vendor stack, and neither installer mounts or writes 
 | `provision.sh <ip>` | the online UPDATE of a unit already running our root: backup, install the provision plan, reboot |
 | `commission-offline.sh --bundle <tar.gz\|dir> --base <dir>` | the image step: installs a release bundle and the provision plan into a card's partitions mounted by the caller — `rootfs/make-card-image.sh --bundle` is the only caller |
 | `set-hostname.sh` | the one writer of the name files |
-| `clone-to-32gb.sh` | grows p6 onto a larger card (`SD_CARD_UPGRADE.md`) |
+| `clone-to-32gb.sh` | grows p3 onto a larger card (`SD_CARD_UPGRADE.md`) |
 | `backup.sh <ip> [<out>]` | before an update or reflash: the unit's BACKUP set (`lib/arca-state.sh`) to `backups/` — read-only on the unit, archive holds secrets |
 | `restore.sh <ip> <tar.gz> [--dry-run]` | after: refuses unsafe or non-BACKUP paths, `arca-app stop`, `tar -o` over `/`, SSH modes, `start` |
 
@@ -34,11 +34,11 @@ Regression: `tests/provision_online_test.sh` (fake `ssh`/`scp`; no device). Rule
 ## `commission-offline.sh` has no prompt, no clean and no disk scan
 
 It reads no terminal, needs no root of its own and mounts nothing: `--base` is required and names a
-directory already holding `{root,data,log}`, and `lib/arca-identify.sh` refuses a `root` that lacks our
+directory already holding `{root,log}`, and `lib/arca-identify.sh` refuses a `root` that lacks our
 marker. The retired flags (`--no-clean`, `--keep-<group>`, `--delete-factory`, `--unattended`, `--disk`,
 `--release`, `--ssh-auth=*`, `--sshd-only`) are **refused by name with a non-zero exit** — a flag
 accepted and ignored reads as a choice honoured. Host name, password and ssh identity are not set here;
-they are whatever the caller's p6 already carries.
+they are whatever the caller's p3 already carries.
 
 ## `commission-offline.sh` verifies what it installed, on the card
 

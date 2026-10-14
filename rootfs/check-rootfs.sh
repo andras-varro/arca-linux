@@ -125,13 +125,17 @@ check "lib/ld-linux.so.3 present" $?
 has bin/bash
 check "bin/bash present" $?
 
-# fstab
-for dev in '/dev/mmcblk0p2 /home/root/data' '/dev/mmcblk0p3 /home/root/log'; do
-    member etc/fstab | tr -s ' \t' '  ' | grep -q "^$dev "
-    check "fstab mounts $dev" $?
-done
+# fstab: p2 is the log partition; /home/root/data is a plain directory on p3 (root), not a mount
+member etc/fstab | tr -s ' \t' '  ' | grep -q "^/dev/mmcblk0p2 /home/root/log "
+check "fstab mounts /dev/mmcblk0p2 /home/root/log" $?
+! member etc/fstab | grep -v '^#' | grep -q '/home/root/data'
+check "fstab has no line for /home/root/data (a directory on root)" $?
+! member etc/fstab | grep -qE 'mmcblk0p(3|5|6|7)'
+check "fstab mounts no p3/p5/p6/p7" $?
 ! member etc/fstab | grep -q 'mmcblk0p5'
 check "fstab does not mount p5 (kept formatted but unmounted)" $?
+! member etc/init.d/sshd | grep -q 'mountpoint'
+check "init.d/sshd does not use mountpoint (keys always on root)" $?
 
 # /var/log is the log partition
 [ "$(target_of var/log)" = "/home/root/log" ]

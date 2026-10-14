@@ -13,8 +13,8 @@
 # Kernel command line. Replaces the built-in one completely. Without this line the
 # built-in one is used:
 #   console=ttyO1,115200n8 vram=12M initcall_blacklist=fb_logo_late_init
-#   consoleblank=0 mpurate=auto root=/dev/mmcblk0p6 rw rootfstype=ext4 rootwait
-#bootargs=console=ttyO1,115200n8 vram=12M initcall_blacklist=fb_logo_late_init consoleblank=0 mpurate=auto root=/dev/mmcblk0p6 rw rootfstype=ext4 rootwait
+#   consoleblank=0 mpurate=auto root=/dev/mmcblk0p3 rw rootfstype=ext4 rootwait
+#bootargs=console=ttyO1,115200n8 vram=12M initcall_blacklist=fb_logo_late_init consoleblank=0 mpurate=auto root=/dev/mmcblk0p3 rw rootfstype=ext4 rootwait
 
 # Extra kernel arguments, appended to the command line (the built-in one, or bootargs above).
 #optargs=quiet
