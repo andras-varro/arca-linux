@@ -230,10 +230,10 @@ once as a development offer and checked (PASS, no unmapped program).
 
 **Gaps, stated plainly:**
 
-- **The offer is not yet published with an image.** `release.sh` does not call `make-source-offer.sh` for a
-  release, `NOTICE` does not name the offer, and the licence documents (this file, Buildroot's `licenses/`
-  texts) are not copied onto the image or into the bundle. Until they are, **a published card image would not
-  meet the duty.** Whether pointing at upstream's mirrors instead would suffice is **unverified** and not assumed.
+- **The offer ships through `release.sh --source-offer`**, which runs `make-source-offer.sh` under the release's tag and attaches the tar and its `.sha256`;
+  `NOTICE` names that source asset **only when `--source-offer` is given** (otherwise it says the bundle was staged without a source file). The image carries
+  its own notices: `make-card-image.sh` puts this file, Buildroot's `manifest.csv` and `licenses/`, and `SOURCE-OFFER.txt` in p6 `/usr/share/doc/arca-licenses/`.
+  Whether pointing at upstream's mirrors instead would suffice is **unverified** and not assumed.
 - **The kernel tarball is not checked before the kernel build.** `kernel/build-image.sh` and
   `usb_host/build-kernel-modules.sh` carry no sha256 for `usb_host/linux-4.14.52.tar.xz`; only Buildroot and the
   offer check it, against `rootfs/package-hashes/linux-headers.hash`.

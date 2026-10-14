@@ -279,7 +279,7 @@ meant to catch**.
 - **`arca_provision_test.sh`'s fixtures are synthetic with real symlinks**, for the reason above.
 - **`commission_offline_test.sh`** needs root and a staged bundle; every check it makes has a sabotage
   case, and its fixture builder is `tests/make-fake-card.sh`.
-- **`arca_source_offer_test.sh` drives `rootfs/check-source-offer.sh` over a miniature offer and a fixture image**, never a real 0.7 GB offer; each check has a sabotage case, and `CSO=<path>` points the suite at a sabotaged copy of the checker. Blind: the real downloads and a real card image (the map table was graded against the real one by hand).
+- **`arca_source_offer_test.sh` drives `rootfs/check-source-offer.sh` over a miniature offer and a fixture image**, never a real 0.7 GB offer; each check has a sabotage case, and `CSO=<path>` points the suite at a sabotaged copy of the checker (`MCI=<path>`, the same for `make-card-image.sh`). Its group F extracts `licence_docs_install` from the shipped script and runs it on fixture directories. Blind: the real downloads and a real card image (the map table was graded against the real one by hand), and the loop-mounted p6 fill that calls that function. `tests/measure_source_offer_sabotage.sh` is the sweep.
 - ⚠️ **`setup_build_env_test.sh` drives the probe loop over FIXTURE tables, never the real package set.**
   A run against the real table on a provisioned host reports "0 missing" and proves only that this host is
   provisioned — a silenced instrument. Its `sudo` is a PATH tripwire recording argv on **every** case, so a
@@ -298,7 +298,7 @@ meant to catch**.
   arguments and consumes the bundle they leave behind. ⚠️ **Its `rm` is a PATH tripwire that records its
   argv and fails**, which is what makes a root spelling safe to exercise against a pre-fix copy of a guard
   whose whole defect was letting one through — so the "and the decoy's file is still there" cases witness
-  the tripwire's claim, not the guard's, and the sabotage sweep leaves them green.
+  the tripwire's claim, not the guard's, and the sabotage sweep leaves them green. `RELEASE_SH=<path>` grades another copy; `ARCA_SAB_COPIES_ONLY=1 tests/measure_release_sabotage.sh` runs just the copy half. ⚠️ **Group E drives `--source-offer` through a stub offer script and a stub `gh`**, so it cannot see the real offer or a real publish.
 
 ## Sabotage harnesses
 

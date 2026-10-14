@@ -38,10 +38,8 @@ Everything that builds the **root filesystem we boot instead of the vendor's Yoc
 
 - **Root's login shell is `/bin/bash`**, set by `rootfs/board/arca/post-build.sh` (the Buildroot skeleton gives `/bin/sh`,
   BusyBox ash); the prompt comes from the overlay's `/etc/profile.d/prompt.sh`. Measured on `.188`.
-- **`make-card-image.sh --bundle <release bundle>` installs every component offline**: it runs
-  `commissioning/commission-offline.sh --base <tree>` against the new image's p6/p2/p3.
-  Measured on `.188`: a card built that way boots to the launcher, touch works, and the launcher's Shutdown tile runs `poweroff`
-  and the panel goes dark.
+- **`make-card-image.sh --bundle <release bundle>` installs every component offline** (`commissioning/commission-offline.sh --base <tree>` against the new image's p6/p2/p3). Measured on `.188`: a card built that way boots to the launcher, touch works, and the launcher's Shutdown tile runs `poweroff` and the panel goes dark.
+- **The image carries its licence documents:** `LICENSE.md`, `manifest.csv`, `licenses/` and `SOURCE-OFFER.txt` in p6 `/usr/share/doc/arca-licenses/` (`licence_docs_install`). `--legal-info` (default: `br-rw/legal-info` of the invoking user), `--source-tag` (default: the bundle's tag) and `--source-url` feed them; without a legal-info tree or a tag the summary prints `WARNING` lines and **that image must not be published**. Measured: a real image held all four, mode 0644, fsck clean.
 
 ## What the image must carry, and what it need not
 
