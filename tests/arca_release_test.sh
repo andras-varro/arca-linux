@@ -48,7 +48,8 @@
 #   E  --source-offer / --source-out / --image: the offer script is run under the release's
 #      own tag, before the build and after the gate; NOTICE names the file only when it is
 #      made; a publish attaches bundle, source file, checksum and image to one release.
-#      The offer script and gh are stubs. E0 and E13 are the controls (no flag, no change).
+#      The offer script and gh are stubs. E0 (stage without the flag) and E7c (a publish
+#      without it is refused, nothing run) are the controls.
 #      RELEASE_SH=<path> grades another copy; the E sweep is the second half of
 #      tests/measure_release_sabotage.sh (ARCA_SAB_COPIES_ONLY=1 runs just that half).
 #
@@ -544,8 +545,9 @@ echo "   (rootfs/make-source-offer.sh and gh are stubs; what is asserted is how 
 # The offer is GPLv2 section 3(a) source for the card image, offered from the place the image
 # is published and under its tag. What can go wrong here is a release that carries the image and
 # not the source, a NOTICE that offers a file the release lacks, or a tag that differs between
-# the three. E0 and E13 are the controls: a release without --source-offer must behave as before,
-# or the cases between them pass against a script that always runs the offer.
+# the three. E0 and E7c are the controls: a stage without --source-offer must behave as before
+# and a publish without it must run nothing, or the cases between them pass against a script
+# that always runs the offer.
 DAY=$(date -u '+%Y%m%d')
 IMG="$TMP/card.img"; echo "pretend image" > "$IMG"
 OFFLOG="$TMP/offer.log"; ORDLOG="$TMP/order.log"; GHLOG="$TMP/gh.log"; GHNOTES="$TMP/gh-notes.log"
@@ -675,6 +677,19 @@ else
     bad "E7 a --source-out whose parent is missing must be refused — exit $ST"
 fi
 
+# E7b: a publish without --source-offer is refused, and nothing ran: the bundle would be
+# published without the source of what it ships. --stage-only is not affected: the cases
+# above it stage without --tag.
+reset_logs
+run_e "$PTREE" --tag v1.4 --out "$TMP/e7b" --component native_apps
+if [ "$ST" -ne 0 ] && printf '%s\n' "$OUT_TXT" | grep -qF -e "--tag needs --source-offer"; then
+    ok "E7b a publish without --source-offer is refused"
+else
+    bad "E7b a publish without --source-offer must be refused — exit $ST"
+fi
+assert_eq "0000" "$(grep -c . "$GATE_MARK")$(grep -c . "$OFFLOG")$(grep -c . "$GHLOG")$([ -e "$TMP/e7b" ] && echo 1 || echo 0)" \
+    "E7c and nothing ran: no gate, no offer, no gh call, no staging directory"
+
 # E8: the gate comes first: a failing gate means the offer is never assembled
 reset_logs
 ARCA_STUB_GATE_MARKER="$GATE_MARK" ARCA_STUB_GATE_RC=1 \
@@ -725,17 +740,6 @@ if grep -qF "${PRODUCT_STEM}-source-v1.2.tar" "$GHNOTES" && grep -qF "card.img" 
 else
     bad "E12f the release notes should name both: $(cat "$GHNOTES")"
 fi
-
-# E13: control — publishing without --source-offer attaches the bundle alone
-reset_logs
-run_e "$PTREE" --tag v1.3 --out "$TMP/e13" --component native_apps
-assert_eq "0" "$ST" "E13 a publish without --source-offer is unchanged"
-if grep '^release create v1.3 ' "$GHLOG" | grep -qF -e "-source-"; then
-    bad "E13b a release without --source-offer must not attach a source file: $(cat "$GHLOG")"
-else
-    ok "E13b and attaches no source file"
-fi
-assert_eq "0" "$(grep -c . "$OFFLOG")" "E13c and never ran the offer script"
 
 assert_eq "$CANARY_MD5" "$(canary_md5)" "E14 the canary is still intact after the source-offer cases"
 

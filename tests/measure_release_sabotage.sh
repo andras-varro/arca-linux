@@ -142,6 +142,7 @@ start_copy; perl -0pi -e 's/apps-\$\{RELEASE_TAG\}/apps-\${TAG:-x}/' "$SAB/cur.s
 start_copy; perl -0pi -e 's/if \[\[ \$SOURCE_OFFER -eq 1 \]\]; then\n        ASSETS\+=/if true; then\n        ASSETS+=/' "$SAB/cur.sh"; report "27. source attached even without the flag"
 start_copy; perl -0pi -e 's/if \[\[ \$SOURCE_OFFER -eq 1 \]\]; then\n    echo ""\n    echo "─/if true; then\n    echo ""\n    echo "─/' "$SAB/cur.sh"; report "28. the offer is run without the flag"
 start_copy; perl -0pi -e 's/if \[\[ \$SOURCE_OFFER -eq 1 \]\]; then\ncat <<\x27NOTICE\x27\nCorresponding/if true; then\ncat <<\x27NOTICE\x27\nCorresponding/' "$SAB/cur.sh"; report "29. NOTICE always names the source file"
+start_copy; perl -0pi -e 's/if \[\[ -n "\$TAG" && \$SOURCE_OFFER -eq 0 \]\]; then\n    err "--tag needs/if false; then\n    err "--tag needs/' "$SAB/cur.sh"; report "30. --tag publishes without --source-offer"
 
 restore
 echo ""

@@ -5,9 +5,9 @@
 #
 # Usage:
 #   ./release.sh --stage-only [--out <dir>]        # build + stage + tar, no network
-#   ./release.sh --tag <tag>  [--out <dir>]        # the above, then gh release create
 #   ./release.sh --stage-only --component native_apps
-#   ./release.sh --tag <tag> --source-offer [--image <card image>]...
+#   ./release.sh --tag <tag> --source-offer [--image <card image>]...   # the above, then gh release create
+#                                    (--tag is refused without --source-offer)
 #   ./release.sh --help
 #
 # ── Why this exists ─────────────────────────────────────────────────────────
@@ -108,13 +108,14 @@ RELEASE_COMPONENTS=(native_apps vnc_client scummvm-arca usb_host bluetooth)
 
 usage() {
     echo "Usage: $0 --stage-only [--out <dir>] [--component <name>]... [--source-offer]"
-    echo "       $0 --tag <tag>  [--out <dir>] [--component <name>]... [--source-offer [--image <file>]...]"
+    echo "       $0 --tag <tag>  --source-offer [--out <dir>] [--component <name>]... [--image <file>]..."
     echo ""
     echo "  --stage-only      Build, stage and tar. No network, no gh."
     echo "  --skip-tests      Stage without running the host gate first. The"
     echo "                    gate (tests/run-all.sh, ~190 s) otherwise blocks"
     echo "                    the release if any suite fails."
     echo "  --tag <tag>       The above, then publish with 'gh release create <tag>'."
+    echo "                    Required: --source-offer. There is no override."
     echo "  --out <dir>       Where to stage (default: build/release)."
     echo "  --component <n>   Only this component; repeatable. Default: all of"
     echo "                    ${RELEASE_COMPONENTS[*]}"
@@ -178,6 +179,12 @@ if [[ $STAGE_ONLY -eq 1 && -n "$TAG" ]]; then
 fi
 if [[ ${#IMAGES[@]} -gt 0 && $SOURCE_OFFER -eq 0 ]]; then
     err "--image needs --source-offer: a card image is not published without its source."
+fi
+# A publish carries the bundle's binaries and, with --image, the card image: both are under
+# GPL/LGPL obligations that the source offer meets. A release without one is refused here,
+# before anything is built. --stage-only publishes nothing and is not affected.
+if [[ -n "$TAG" && $SOURCE_OFFER -eq 0 ]]; then
+    err "--tag needs --source-offer: a release is not published without the source of what it ships. Nothing was built."
 fi
 if [[ $SOURCE_OFFER -eq 1 ]]; then
     [[ -f "$SCRIPT_DIR/rootfs/make-source-offer.sh" ]] \
