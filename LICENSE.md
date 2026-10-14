@@ -109,18 +109,18 @@ actually pin, because "current upstream" is not a fact anyone can check later.
 
 | Component | Version | Licence | Fetched by |
 |---|---|---|---|
-| ScummVM | whatever the developer clones into `scummvm/` (gitignored) | **GPL-3.0-or-later** | manual `git clone`; `scummvm-arca/build-and-deploy.sh` builds it |
-| LibVNCServer / LibVNCClient | 0.9.14 | **GPL-2.0-or-later** | `vnc_client/build-deps.sh` |
-| libjpeg-turbo | 2.1.5.1 | IJG · BSD-3-Clause · zlib | `vnc_client/build-deps.sh` |
-| zlib | 1.2.13 (`vnc_client`), 1.3.1 (ScummVM) | zlib licence | both build scripts |
-| libpng | 1.6.43 | PNG Reference Library License v2 | `scummvm-arca/build-and-deploy.sh` |
+| ScummVM | commit `eaccc4614e88476f73293dd3ad033ffc76c37ab8`, pinned in `scummvm-arca/upstream-commit` (the build refuses any other HEAD) | **GPL-3.0-or-later** | `setup-build-env.sh --scummvm` clones and checks it out into `scummvm/` (gitignored); `scummvm-arca/build-and-deploy.sh` builds it |
+| LibVNCServer / LibVNCClient | 0.9.14 (sha256-pinned tarball) | **GPL-2.0-or-later** | `vnc_client/build-deps.sh` |
+| libjpeg-turbo | 2.1.5.1 (sha256-pinned tarball) | IJG · BSD-3-Clause · zlib | `vnc_client/build-deps.sh` |
+| zlib | 1.2.13 (`vnc_client`), 1.3.1 (ScummVM), both sha256-pinned | zlib licence | both build scripts |
+| libpng | 1.6.43 (sha256-pinned tarball) | PNG Reference Library License v2 | `scummvm-arca/build-and-deploy.sh` |
 | BlueZ | 5.66 (sha256-pinned tarball) | **GPL-2.0-or-later** (SPDX lines of `src/`, `lib/`, `client/`; `COPYING` is GPLv2) | `bluetooth/build-bluez.sh` |
 | BlueALSA (bluez-alsa) | 4.3.1 (sha256-pinned tarball) | **MIT** (`LICENSE`; sources say "licensed under the terms of the MIT license") | `bluetooth/build-bluealsa.sh` |
 | sbc (SBC codec library) | 2.0 (sha256-pinned tarball), linked statically into `bluealsa` | **LGPL-2.1-or-later** (library sources `sbc/*.c`, `sbc/*.h`: "version 2.1 of the License, or (at your option) any later version"; `COPYING.LIB` is LGPL 2.1). `COPYING` is GPLv2 and covers only `src/` tools, which are built `--disable-tools` | `bluetooth/build-bluealsa.sh` |
 | libvterm | 0.3.3 (sha256-pinned tarball), linked statically into `terminal` | **MIT** (`LICENSE`: Copyright (c) 2008 Paul Evans) | `native_apps/build-libvterm.sh` |
 | Linux kernel | 4.14.52 upstream; the image (never the modules) also applies `kernel/patches/` | **GPL-2.0-only** | `usb_host/build-kernel-modules.sh`; the tree lives at `usb_host/linux-4.14.52/` (gitignored) |
 | glibc (on the card) | 2.41 (git snapshot `2.41-161-g5dd252cf`) — the card's `/lib/libc.so.6`, from Buildroot's internal toolchain, **soft-float EABI** (`arm-buildroot-linux-gnueabi`, loader `/lib/ld-linux.so.3`) | **LGPL-2.1-or-later** (library); GPL-2.0-or-later (programs), BSD-3-Clause, MIT parts (Buildroot `legal-info`) | `rootfs/build-rootfs.sh` |
-| glibc (linked into our binaries) | whatever the host's cross toolchain provides: `native_apps` build with `arm-linux-gnueabi-gcc` (soft-float, **dynamic** against the card's glibc); `vnc_client` and `devmem_write` are **static, hard-float** (`gnueabihf`) and so embed the host toolchain's glibc | LGPL-2.1-or-later | the distribution's cross toolchains |
+| glibc (linked into our binaries) | the host cross toolchain's: `native_apps` build with `arm-linux-gnueabi-gcc` (soft-float, **dynamic** against the card's glibc); `vnc_client` and `devmem_write` are **static, hard-float** (`gnueabihf`) and so embed the host toolchain's glibc, **Ubuntu `2.31-0ubuntu9.9` [unverified]**: the version comes from the plan note the source offer was written from, not from a package query of the toolchain that built the binaries; `rootfs/make-source-offer.sh` pins the `.dsc` of that version (`UBUNTU_GLIBC_DSC_SHA256`) and ships it | LGPL-2.1-or-later | the distribution's cross toolchains |
 
 ⚠️ **These are cross-compiled from source on purpose, not vendored.** This host cannot do armhf
 multiarch, so each component builds its own copies
@@ -164,11 +164,14 @@ are on the card too, so they have rows.
 | ethtool | 6.14 | **GPL-2.0-only** |
 | tzdata | 2026b | public domain |
 
-The Linux kernel headers (4.14.52, GPL-2.0 with the syscall exception) are build-time only. ⚠️ The
-`legal-info` run **aborted on them** — the custom 4.14 headers have no checksum entry, so Buildroot's
-hash check refused the tarball; with `-k` the other 25 rows still came out. **Unverified:** that the
-manifest is otherwise complete, and the copyright texts of each package (Buildroot's `licenses/`
-directory holds them; nothing here copies that directory yet).
+The Linux kernel headers (4.14.52, GPL-2.0 with the syscall exception) are build-time only. ⚠️ Buildroot's
+`make legal-info` aborts on them with the stock hash file, which carries the 6.x trees' hashes: a hash file
+under `BR2_GLOBAL_PATCH_DIR` does not fix it (it is checked together with the stock one), so
+`rootfs/external.mk` overrides `LINUX_HEADERS_HASH_FILES` and `LINUX_HEADERS_LICENSE_FILES` with
+`rootfs/package-hashes/linux-headers.hash`, and `rootfs/build-rootfs.sh` runs `legal-info` and fails with it
+(measured: the pre-change tree exits 2). **Unverified:** that the manifest is otherwise complete, and the
+copyright texts of each package (Buildroot's `licenses/` directory holds them; nothing here copies that
+directory onto the card yet).
 
 ---
 
@@ -195,7 +198,7 @@ release published from it is available**, because the offer is honoured for the 
 | `bluetoothd`, `bluetoothctl`, `libbluetooth.so.3` | **GPL-2.0-or-later** | BlueZ 5.66. Written offer in `NOTICE`: the upstream tarball plus `bluetooth/build-bluez.sh`. They link the device's own glib, dbus and readline dynamically. |
 | `bluealsa`, `bluealsa-aplay`, `libasound_module_{pcm,ctl}_bluealsa.so` | **MIT** (BlueALSA 4.3.1); `bluealsa` additionally contains **LGPL-2.1-or-later** sbc 2.0 | Only `bluealsa` links sbc (`libsbc.a`, static) — measured by `grep -a` for `sbc_encode`/`sbc_decode`: present in `bluealsa`, absent from `bluealsa-aplay` and both plugins. LGPL-2.1 §6 relinking: the sbc tarball, BlueALSA's tarball and `bluetooth/build-bluealsa.sh` reproduce the binary and a relink. Written offer in `NOTICE`; BlueALSA's MIT copyright notice is reproduced there too. |
 | the Bluetooth `.ko`s under `/lib/modules/4.14.52/bt` | **GPL-2.0-only** | Kernel modules. ⚠️ **Written source offer required**, in `NOTICE`: upstream Linux 4.14.52 plus `kernel/patches/`, `kernel/patches-modules/` (which modify `btusb.c` and `btrtl.c`) and `kernel/build-bt-modules.sh`. |
-| our `uImage-system` (`kernel/build-image.sh`), `cy8ctmg120_ts.ko`, `ca8_ibe.ko` | **GPL-2.0-only** | Not in a bundle; they enter a card image (`make-card-image.sh`). Source: upstream 4.14.52 + `kernel/patches/`, `kernel/dts/`, `kernel/drivers/`, `kernel/config-changes` — but ⚠️ **the base `.config` is not committed and no written offer exists yet** (see the gaps below). |
+| our `uImage-system` (`kernel/build-image.sh`), `cy8ctmg120_ts.ko`, `ca8_ibe.ko` | **GPL-2.0-only** | Not in a bundle; they enter a card image (`make-card-image.sh`). Source: upstream 4.14.52 + `kernel/patches/`, `kernel/dts/`, `kernel/drivers/`, `kernel/config-changes` and the base config `usb_host/device_config` (committed). The offer tar below carries the source; ⚠️ **no written offer text ships with an image yet** (see the gaps below). |
 | `rtl8761cu_{fw,config}.bin` | **Realtek redistributable firmware licence** (row above) | Staged unmodified with `LICENCE.rtlwifi_firmware.txt` beside them on the device; the notice is reproduced in `NOTICE`. |
 | `devmem_write`, the `native_apps` games and tools, `app_launcher` | MIT. `devmem_write` is statically linked against glibc (LGPL-2.1-or-later); the `native_apps` binaries link the device's own glibc and `libasound` dynamically; `terminal` also links libvterm (MIT) statically, its copyright notice reproduced in `NOTICE` | LGPL-2.1 §6 relinking: the objects and this repository are what a relink needs. |
 | `/opt/sound/fx_*.wav` (eleven sound effects) | **Not for commercial use** + **attribution to ElevenLabs (`elevenlabs.io`) required** (free account — see above) | ⚠️ **The one artifact that makes a bundle non-commercial.** A commercial redistribution must remove or replace them; every game falls back to its note tables without them, so removal breaks nothing. Stated in `NOTICE`. |
@@ -214,28 +217,26 @@ construction, static ones need the objects (see the `devmem_write` row). Licence
 travel with the binaries (BSD, MIT, Apache-2.0, zlib and the OpenSSH family require the notice).
 
 What the repository **does** today: the kernel image's source is upstream 4.14.52 plus the committed
-`kernel/patches/`, `kernel/dts/` and `kernel/config-changes`, built by `kernel/build-image.sh`; the bundle's
-`NOTICE` carries written offers for the bundle's own binaries (rows above); `release.sh` refuses to tag
-what is not on the public remote.
+`kernel/patches/`, `kernel/dts/`, `kernel/config-changes` and the base config `usb_host/device_config`, built by
+`kernel/build-image.sh`; the bundle's `NOTICE` carries written offers for the bundle's own binaries (rows
+above); `release.sh` refuses to tag what is not on the public remote. **The GPL-2.0 §3(a) mechanism for a card
+image is `rootfs/make-source-offer.sh`**: it builds, outside the repo, one tar holding the source of everything
+on the image (Buildroot's `legal-info` sources and licences, the pinned kernel tarball, U-Boot at its pinned
+commit, ScummVM at `scummvm-arca/upstream-commit`, the `vnc_client` dependency tarballs, the BlueZ family, the
+Ubuntu glibc source behind the static binaries, and this repository), each against the sha256 or commit its
+build script pins. `rootfs/check-source-offer.sh` verifies the tar and maps every ELF, `.ko` and p1 file on the
+image to a source row of `rootfs/source-map.tsv`; `tests/arca_source_offer_test.sh` is its regression. Built
+once as a development offer and checked (PASS, no unmapped program).
 
-**Gaps, stated plainly — none is closed:**
+**Gaps, stated plainly:**
 
-- **No source offer for the Buildroot packages.** `release.sh`'s `NOTICE` covers the bundle components
-  only. Nothing generates or publishes Buildroot's `legal-info` output (`sources/`, `licenses/`,
-  `manifest.csv`) with a card image or rootfs tarball, and those package sources are not in this repository
-  (Buildroot fetches them from upstream mirrors). Until a `legal-info` tarball ships beside the image, or an
-  offer naming those exact versions does, **a published card image would not meet the duty.** Whether
-  pointing at upstream's mirrors would suffice is **unverified** and not assumed.
-- **The kernel image's base configuration is not committed.** `kernel/build-image.sh` starts from
-  `usb_host/device_config`, which is gitignored and is the unit's own `/proc/config.gz`; only our
-  changes (`kernel/config-changes`) are in the tree. The "scripts used to control compilation" are
-  incomplete in the repo for anyone who has not got that file.
-- **p1 is ours, and its source offer is not written.** `make-card-image.sh` puts our `MLO` and `u-boot.img` (U-Boot v2026.10 plus
-  `uboot/rw20-board.patch`, built by `uboot/build.sh`; GPL-2.0-or-later) and our kernel on p1 and copies no file of the vendor's.
-  The U-Boot upstream tag plus the committed patch and script rebuild
-  both files, but no written offer for them ships with an image.
-- **`legal-info` has not been run to completion** (the headers hash failure above), and no licence texts
-  are copied into the image or the bundle for the rootfs packages.
+- **The offer is not yet published with an image.** `release.sh` does not call `make-source-offer.sh` for a
+  release, `NOTICE` does not name the offer, and the licence documents (this file, Buildroot's `licenses/`
+  texts) are not copied onto the image or into the bundle. Until they are, **a published card image would not
+  meet the duty.** Whether pointing at upstream's mirrors instead would suffice is **unverified** and not assumed.
+- **The kernel tarball is not checked before the kernel build.** `kernel/build-image.sh` and
+  `usb_host/build-kernel-modules.sh` carry no sha256 for `usb_host/linux-4.14.52.tar.xz`; only Buildroot and the
+  offer check it, against `rootfs/package-hashes/linux-headers.hash`.
 
 The three `.ko`s are the reason the choice of licence for this project's own code mattered at all: a
 GPL-2.0-**only** binary in the same distribution is what rules Apache-2.0 out.

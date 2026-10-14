@@ -77,7 +77,7 @@ possible recursive locking detected` — `sk_lock-AF_BLUETOOTH-BTPROTO_L2CAP` ta
 reconnect. **Second sighting 2026-10-05, ~60 s after boot, during incoming BT connections:** the same splat in
 `hci_rx_work` → `l2cap_recv_frame` → `l2cap_connect` → `l2cap_sock_new_connection_cb` → `bt_accept_enqueue` →
 `lock_sock_nested`, held `conn->chan_lock`, `chan->lock#2/2` and `sk_lock-AF_BLUETOOTH-BTPROTO_L2CAP`, kernel 4.14.52
-tainted `O` (our out-of-tree modules). Console warnings are defects even when harmless. **Measured 2026-10-12, `/proc/config.gz` on `.115`:** `CONFIG_PROVE_LOCKING`, `LOCKDEP`, `DEBUG_LOCK_ALLOC`, `DEBUG_MUTEXES` and `DEBUG_SPINLOCK` are all `=y`, and the syslog there carries the same lockdep trace; these are debug options with a CPU cost on a 600 MHz core. Whether they come from the vendor config or from us is unknown: none of them is named in `kernel/config-changes` (the base `.config` is not in the repo, see D18).
+tainted `O` (our out-of-tree modules). Console warnings are defects even when harmless. **Measured 2026-10-12, `/proc/config.gz` on `.115`:** `CONFIG_PROVE_LOCKING`, `LOCKDEP`, `DEBUG_LOCK_ALLOC`, `DEBUG_MUTEXES` and `DEBUG_SPINLOCK` are all `=y`, and the syslog there carries the same lockdep trace; these are debug options with a CPU cost on a 600 MHz core. Whether they come from the vendor config or from us is unknown: none of them is named in `kernel/config-changes` (the base config is `usb_host/device_config`, tracked, so `grep` it to tell).
 Cause not investigated;
 **[inferred]** candidate: the 4.14 parent/child L2CAP socket false positive that upstream later annotated with a
 nesting subclass. **Next:** read the upstream change to
@@ -292,7 +292,7 @@ Operator ruling 2026-10-12: nobody outside the lab runs this, so units are re-fl
 upgrade or new drivers still ship as an image to flash. Finishing steps, in order:
 
 1. **A downloadable image:** compressed with a checksum on a release page, flashable with any card writer. D18's source
-   offer and F117's trademark search are both prerequisites for publishing it.
+   offer is a prerequisite for publishing it.
 2. **The first boot grows the card:** the image is minimal, and the first boot extends the last partition (p3 data,
    after F148) plus its filesystem to the end of the card, for example with sfdisk and online resize2fs, as the
    Raspberry Pi image does. Whether `resize2fs`/`sfdisk` are in our rootfs is **[unverified]**.
@@ -351,34 +351,6 @@ rest committed as bare PPMs with no generator — and collected by the `*//*.ppm
 the style of `gen_cp_icons.py` for all ten apps, so every PPM has a source, then delete the three old scripts.
 **Done when** the launcher grid on the panel reads as the same family as the Control Panel's. Operator 2026-10-07 also wants a better icon for the Control Panel's System page, done with this rework: its page has `.icon = NULL` (`system_page.c:563`) and `ICONS` in `gen_cp_icons.py:178` has no System entry.
 
-### F117. Rename the project to **Arca** — open, name chosen by the operator 2026-10-10, implemented in the tree 2026-10-12
-
-"RoomWizard" is likely a Steelcase trademark **[unchecked]**, so it has left the code, identifiers, paths, file names and product
-name. Implemented in the tree: all of those. Deployed units are not migrated; they are re-flashed with a new card.
-Operator rule 2026-10-12: "Steelcase RoomWizard rw20" is allowed
-as the motherboard name in software; it is gone everywhere else in code; the docs keep discussing what was learned about the
-Steelcase RoomWizard. One descriptive README line ("runs on Steelcase RoomWizard hardware") may stay, so people can find the
-project; that is general understanding of descriptive use, not legal advice. **Name: Arca** (Latin for chest or box, and it sounds like
-"arcade"), full form **"Arca Linux"**. **Never "ArcaOS"**: that name belongs to Arca Noae's active OS/2-derived system
-(arcanoae.com). **Logo: a cuckoo**, because it moved into Steelcase's nest and pushed the original out. It is our own bird,
-nothing like the dead Cuckoo Sandbox's (`github.com/cuckoosandbox`, archived 2021): `distro/arca-logo.svg`, a
-cuckoo calling out of a clock-house. The operator accepted it as the working logo on 2026-10-10, open to change.
-`distro/render.sh` (WSL, `rsvg-convert`) renders it at 512, 96, 32 and 16 px into the untracked `distro/preview/`. It
-reads at 32 px; at 16 px only the house is left, so a favicon needs a simpler variant. On the boot screen it is
-F101's boot-logo row. Host name: `arca-<4 hex>` (`rootfs/board/arca/overlay/etc/init.d/firstboot-hostname`) fits the generic
-card image's random first-boot name; the prompt is `\u@\h:\w`. **Measured on `.188` 2026-10-13: `/etc/os-release` says `NAME=Buildroot`**, not Arca; the boot
-banner is **[unverified]** (the defconfig sets the issue text to "Arca"); the name stays out of `PS1`.
-
-Collision check 2026-10-10 (shallow, WebFetch only, no search engine): DistroWatch lists no Arca, and GitHub shows no Arca
-distro. Outside IT the word is crowded (NYSE Arca and others), which is why the full form is used on the website and repo.
-**Still open before publishing:** a manual "ARCA" trademark search in classes 9 and 42 (USPTO, EUIPO, WIPO Brand DB), and
-package-name checks (AUR, Debian, PyPI, npm, Docker Hub) once the `arca-*` identifiers are picked.
-
-**Done when** a code-only grep (`git ls-files | grep -v '\.md$'`, leaving out the upstream trees `scummvm/`,
-`usb_host/linux-4.14.52/` and `vnc_client/deps/`) for `roomwizard` and `steelcase` finds only the exception classes: the board
-name `rw20` and captured vendor output; a unit re-flashed with a new card boots under the new paths; and the
-manual trademark search is recorded. **The first two are met (measured on `.188`, card `arca-card-20261013b`, 2026-10-13): ARCABOOT label, `/opt/arca`, `arcamond`, launcher, and Bluetooth once the kernel was rebuilt from the renamed tree** (`device-files/bluetooth` loads modules only when `/proc/version` reads `(arca@build)`; a pre-rename kernel reads `(roomwizard@build)` and Bluetooth silently stays off). Open: the trademark search, and `os-release`.
-
 ## Structural and cleanup
 
 ### C9. A bundle cannot prove its stripped binaries were ever gated — open, measured 2026-08-08
@@ -423,10 +395,7 @@ and it must fire in a file of the same kind, or the scan goes blind where it use
 
 ### D18. A published card image does not yet meet its source offer — open, measured 2026-10-10
 
-`LICENSE.md` (*Gaps*) states the holes. No `legal-info` tarball or source offer ships with a card image or rootfs tarball.
-The kernel's base `.config` (`usb_host/device_config`, the unit's `/proc/config.gz`) is gitignored, so the build scripts are incomplete
-for anyone without it. `make legal-info` aborts on the custom 4.14 `linux-headers` (no hash entry), so it has never run to completion.
-p1 holds only our own `MLO`, `u-boot.img` and kernel, which need the same written offer. **Operator ruling 2026-10-12: the offer is required** for the published image, and the operator assumed the source is in the repo. **Measured:** it is not: the repo holds only our patches, configs and scripts, so the corresponding source of upstream U-Boot v2026.10, of the 4.14.52 kernel and of every GPL package in the Buildroot root filesystem (BusyBox and the rest) must be supplied as well; Buildroot's `make legal-info` is the usual tool. **Done when** a published card image comes with its source offer met.
+`LICENSE.md` (*The source-offer duty*) states what exists: `rootfs/make-source-offer.sh` builds the offer tar and `rootfs/check-source-offer.sh` verifies it. **Still open:** (1) the `release.sh` hook (`--source-offer`, `--image`) that builds the offer under the release's tag and publishes it beside the card image; (2) the `NOTICE` text that names the offer as the written offer; (3) the licence documents (`LICENSE.md`'s per-package obligations and Buildroot's `licenses/` texts) copied onto p6, so the image carries its own notices; (4) publishing, with the image. **Operator ruling 2026-10-12: the offer is required** for the published image. Also open: `kernel/build-image.sh` does not check `usb_host/linux-4.14.52.tar.xz` against a sha256 (`grep -i sha256` finds none; the sha256 sits in `rootfs/package-hashes/linux-headers.hash`, checked by Buildroot and the offer, not by the kernel build). **Done when** a published card image comes with its source offer met.
 
 ---
 

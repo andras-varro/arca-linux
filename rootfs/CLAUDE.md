@@ -30,6 +30,11 @@ Everything that builds the **root filesystem we boot instead of the vendor's Yoc
   RSA key and links ed25519 into p2): measured on `.188`, `ssh-keyscan` offers only `ssh-ed25519`, and the first-boot generation took
   ~1 min with `seedrng: uninitialized urandom read` in dmesg before `crng init done` — the wait is entropy [inferred].
 - **The product name is `rootfs/board/arca/os-release`**, the one source for the device's `/etc/os-release`, `lib/product.sh` and `native_apps/common/product.c`. Buildroot's target-finalize writes its own (`NAME=Buildroot`) before it copies the overlay and runs the post-build hook (Makefile, 2025.02), so `post-build.sh` installs ours last; `check-rootfs.sh` refuses a tar that still says Buildroot. `ID=arca` stays an identifier.
+- **The source offer (GPL-2.0 §3(a)):** `make-source-offer.sh` builds the offer tar outside the repo; `check-source-offer.sh` verifies it and maps every ELF, `.ko`
+  and p1 file on an image to a source; `source-map.tsv` is that map for what Buildroot did not install (⚠️ **a new binary on the card needs a row there**, or the
+  checker fails); `package-hashes/` replaces a package's own hash file. ⚠️ **A `.hash` under `BR2_GLOBAL_PATCH_DIR` does NOT fix the `linux-headers` `legal-info`
+  abort**, because it is checked together with the stock file; `external.mk` overrides `LINUX_HEADERS_HASH_FILES` and `LINUX_HEADERS_LICENSE_FILES` instead, and
+  `build-rootfs.sh` gates it (measured: the pre-change tree exits 2).
 
 - **Root's login shell is `/bin/bash`**, set by `rootfs/board/arca/post-build.sh` (the Buildroot skeleton gives `/bin/sh`,
   BusyBox ash); the prompt comes from the overlay's `/etc/profile.d/prompt.sh`. Measured on `.188`.

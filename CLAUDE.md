@@ -9,6 +9,14 @@ games/apps platform. The device is an embedded Linux box: **TI OMAP3503** ARM Co
 234 MB RAM, 800×480 framebuffer, projected-capacitive touch, kernel 4.14.52, SysVinit. No GPU, no
 DSP — all rendering is software. Display is legacy **omapfb/omapdss**; there is no DRM/KMS.
 
+**Two names, one rule (operator, 2026-10-13).** The product name **Ludbox Linux** appears in user-visible text only (launcher
+title, banners, release and download names `ludbox-*`). **"Arca" is the codename and stays in every identifier**: paths, binaries,
+variables, `ARCABOOT`, `arca@build`, host name `arca-<4 hex>`, the U-Boot prompt, `ID=arca`, log text; dev docs keep "Arca". The
+name has **one home**, `rootfs/board/arca/os-release` (installed by `rootfs/board/arca/post-build.sh`): C reads it through
+`native_apps/common/product.c`, shell through `lib/product.sh`, so never type the product name into a title. "RoomWizard" is
+likely a Steelcase trademark **[unchecked]**: it names the hardware in docs and survives in code only as the board name `rw20` and
+captured vendor output. Logo: a cuckoo, `distro/arca-logo.svg`.
+
 **There is no local app to run.** Everything is cross-compiled on the dev host and deployed over SSH
 to a physical device (reference unit `192.168.50.73`, aka RW09). Verifying a change means deploying it
 and looking at the panel — framebuffer screenshots via `fb565_to_png.py`.

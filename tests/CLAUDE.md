@@ -279,6 +279,7 @@ meant to catch**.
 - **`arca_provision_test.sh`'s fixtures are synthetic with real symlinks**, for the reason above.
 - **`commission_offline_test.sh`** needs root and a staged bundle; every check it makes has a sabotage
   case, and its fixture builder is `tests/make-fake-card.sh`.
+- **`arca_source_offer_test.sh` drives `rootfs/check-source-offer.sh` over a miniature offer and a fixture image**, never a real 0.7 GB offer; each check has a sabotage case, and `CSO=<path>` points the suite at a sabotaged copy of the checker. Blind: the real downloads and a real card image (the map table was graded against the real one by hand).
 - ⚠️ **`setup_build_env_test.sh` drives the probe loop over FIXTURE tables, never the real package set.**
   A run against the real table on a provisioned host reports "0 missing" and proves only that this host is
   provisioned — a silenced instrument. Its `sudo` is a PATH tripwire recording argv on **every** case, so a
