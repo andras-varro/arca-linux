@@ -1913,10 +1913,10 @@ the old image under another name.
 
 **Reading a failed boot by the two side LEDs.** With no SSH to ask, the LEDs and the serial console are the only witnesses; the states below are
 **our** U-Boot's (the vendor chain lights them differently), and the line of the U-Boot build that drives each is in `uboot/BUILD.md`. A good cold boot, from
-power-on (seconds, read off a video, so approximate): green at 1; red at 2; green at 3; off at 4; three short red flashes at 4 to 5; three short green flashes
-at 5; green, then off, at 6; dark and a black screen from 6 to 9; at 9 the screen comes on and the LED turns yellow (Linux has taken the LEDs over
-**[inferred]**); kernel messages from 10; the launcher at about 45. The first stages (red, then both lit) are too short to see. **The last LED state shows
-where it stopped** (steady = working on that stage, or hung there; **blinking is a failure the code detected**):
+power-on (seconds off two videos, approximate): green at 0; yellow (both lit), then red, at 1; green at 2; off at 3 (`ledoff`: the card answered); `redx3` and
+`greenx3` at 3 to 4, which the eye reads as **two** blinks each because the third pulse stays lit — red until `greenx3`, green until Linux takes the pads at
+about 5; dark and a black screen to 8; at 8 the screen comes on, the LED turns yellow (Linux has taken the LEDs over **[inferred]**) and kernel messages start
+(operator, 2026-10-15). **The last LED state shows where it stopped** (steady = working on that stage, or hung there; **blinking is a failure the code detected**):
 
 | LED | Meaning |
 |---|---|

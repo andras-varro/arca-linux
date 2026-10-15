@@ -153,10 +153,10 @@ the unit first (over SSH, from `/home/root/data`).
 
 ### What the two LEDs mean
 
-The LEDs report boot progress before Linux starts. A good cold boot: green at 1 second,
-red at 2, green at 3, off at 4, three short red flashes, three short green flashes, green
-then off at 6, dark until the screen comes on at about 8 to 9 seconds. When Linux takes
-over, the LEDs turn amber (both lit at half brightness). The **last LED state shows where
+The LEDs report boot progress before Linux starts. A good cold boot: green at power-on,
+yellow then red at 1 second, green at 2, off at 3 (the card answered), red blinks twice,
+green blinks twice and stays on, off at about 5, dark until the screen comes on at about 8
+seconds and the LEDs turn amber (both lit at half brightness). The **last LED state shows where
 a failed boot stopped**:
 
 | LED | Meaning |
