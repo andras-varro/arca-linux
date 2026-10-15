@@ -292,17 +292,10 @@ The operator wants games that show no menu or close button at all. Open design q
 ### F149. Flash the card and use it: a downloadable image replaces commissioning — open, operator-approved 2026-10-12
 
 Operator ruling 2026-10-12: nobody outside the lab runs this, so units are re-flashed and never migrated. A kernel
-upgrade or new drivers still ship as an image to flash. Finishing steps, in order:
+upgrade or new drivers still ship as an image to flash.
 
-1. **A downloadable image:** compressed with a checksum on a release page, flashable with any card writer. D18's source
-   offer is a prerequisite for publishing it.
-2. **The first boot grows the card:** built as `growroot` (`rootfs/board/arca/overlay/etc/init.d/growroot`, host test `tests/arca_growroot_test.sh`); the online grow ran clean on `.188` by hand. A freshly flashed card grew by itself at first boot (`.188`, 8 GB; `.115`, 128 GB, timings in `rootfs/CLAUDE.md`).
-3. **What an image ships:** no secrets and no copyrighted data (the existing rule). It runs as root, as the vendor
-   system did. Operator 2026-10-12: SSH needs no image change, only a README paragraph: set a root password, allow
-   password login, copy a public key, then switch to key-only. The password is first set on the Control Panel SSH page (`ssh_page.c`, 6–32 characters).
-4. **A user README:** keep the vendor card and flash a spare; flash, insert, use; configure (Control Panel, VNC client);
-   the apps; updating (F145 once it exists); troubleshooting. A re-flash wipes scores, calibration and settings.
-   Developers get one `DEVELOPING.md` (`deploy-all.sh` and the component scripts over SSH stay as the dev loop).
+**Open: a downloadable image** compressed with a checksum on a release page, flashable with any card writer. D18's source
+offer is a prerequisite for publishing it. Claims in `README.md` still tagged [unverified] are measured as they come up.
 
 **Done when** stock units with spare cards (the operator has six) boot the downloaded image and grow it, and the README is the only
 user-facing guide.
@@ -399,7 +392,7 @@ and it must fire in a file of the same kind, or the scan goes blind where it use
 
 ### D18. A published card image does not yet meet its source offer — open, measured 2026-10-10
 
-`release.sh --source-offer [--image ...]`, the `NOTICE` text and the p6 licence documents exist (`LICENSE.md`, *The source-offer duty*). **Operator ruling 2026-10-12: the offer is required** for the published image. **Still open:** a real publish (`gh release create`) and a real offer through `release.sh --source-offer` are untested: `tests/arca_release_test.sh` stubs both. **Done when** a published card image comes with its source offer, from a real run.
+`release.sh --source-offer [--image ...]`, the `NOTICE` text and the image's licence documents (p3 `/usr/share/doc/arca-licenses/`) exist (`LICENSE.md`, *The source-offer duty*). **Operator ruling 2026-10-12: the offer is required** for the published image. **Still open:** a real publish (`gh release create`) and a real offer through `release.sh --source-offer` are untested: `tests/arca_release_test.sh` stubs both. **Done when** a published card image comes with its source offer, from a real run.
 
 ---
 
