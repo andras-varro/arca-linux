@@ -923,20 +923,22 @@ group_c() {
 # the unproven list, gains and costs) that replaced a false claim held in the system analysis; no stale text in this file to cut.
 # 2026-10-09: rootfs/CLAUDE.md is a NEW entry at 60, with its measured size 46 non-blank lines plus room for the card-image
 # rules still to land; it holds the facts moved in from the closed root-filesystem plan entry (group C rows).
+# 2026-10-14: commissioning/CLAUDE.md (ceiling 120) and COMMISSIONING.md were dissolved. rootfs/CLAUDE.md 60 -> 76 takes the image installer's
+# rules and the host-name writer's rules (they live in rootfs/ now); SYSTEM_ANALYSIS.md 1854 -> 1859 takes the LED reading of a failed boot,
+# which existed only in COMMISSIONING.md. lib/CLAUDE.md took the provision.sh / backup.sh rules into its own slack.
 #
 #
 ceilings() {
     # `CEILINGS_FILE` exists only so --self-test can drive this group over a fixture table.
     if [ -n "${CEILINGS_FILE:-}" ]; then cat "$CEILINGS_FILE"; return; fi
     cat <<'EOF'
-1854	SYSTEM_ANALYSIS.md
+1859	SYSTEM_ANALYSIS.md
 1362	IMPROVEMENT_PLAN.md
 224	HARDWARE.md
 215	README.md
 342	CLAUDE.md
 780	native_apps/CLAUDE.md
 232	lib/CLAUDE.md
-120	commissioning/CLAUDE.md
 106	device-files/CLAUDE.md
 324	tests/CLAUDE.md
 215	scummvm-arca/CLAUDE.md
@@ -944,7 +946,7 @@ ceilings() {
 137	.claude/skills/doc-update/SKILL.md
 180	kernel/README.md
 40	kernel/CLAUDE.md
-60	rootfs/CLAUDE.md
+76	rootfs/CLAUDE.md
 EOF
 }
 

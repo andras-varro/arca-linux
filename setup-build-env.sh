@@ -56,7 +56,7 @@ Exit 0 = every selected prerequisite is present. 1 = something is still missing.
 2 = refused (wrong shell, bad argument, or not a Debian/Ubuntu host).
 
 The measured inventory of this project's dev host, and the shell each claim was
-measured in, live in COMMISSIONING.md -> "The dev host".
+measured in, live in README.md -> "Before anything builds".
 USAGE
 }
 

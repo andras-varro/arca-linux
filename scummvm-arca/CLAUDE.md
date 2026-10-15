@@ -171,7 +171,7 @@ before `initBackend()` (`:572`), and both the read and the write go through
 `createConfigReadStream`/`createConfigWriteStream`, hence through the override above — so the default
 lands in the same one file.
 
-**Saves default to `/home/root/data/scummvm-saves` (on the root partition p3, so a reflash wipes it; it is in the `commissioning/backup.sh` set).**
+**Saves default to `/home/root/data/scummvm-saves` (on the root partition p3, so a reflash wipes it; it is in the `backup.sh` set).**
 `backend-files/arca.cpp` passes it as the `DefaultSaveFileManager` constructor argument, which is ConfMan's default, so a
 `savepath` in `scummvm.ini` still wins. Deployed to `.188`; a real save made at the panel is **unverified**. Before it, the backend had
 no savepath, so saves landed in the cwd (`/` at boot, `/home/root` from SSH) [inferred from source; a save was found in `/home/root`].

@@ -12,8 +12,6 @@ Arca is the project's codename; you will see it in paths and file names.
 | [SYSTEM_ANALYSIS.md](SYSTEM_ANALYSIS.md) | Authoritative device facts: SoC, boot chain, display, audio, GPIO, unused hardware | Before touching anything hardware-related |
 | [HARDWARE.md](HARDWARE.md) | The board itself: parts, connectors, headers, the unpopulated XBee socket, the enclosure — with the teardown photos | Opening a unit, or probing a header |
 | [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md) | The single backlog — bugs and features with `file:line` | Before starting work, so you don't rediscover a known bug |
-| [COMMISSIONING.md](COMMISSIONING.md) | Setup workflow: card image → first boot → deploy | Bringing up a new unit |
-| [SD_CARD_UPGRADE.md](SD_CARD_UPGRADE.md) | Writing the image to a larger card and growing p3 | Only if you run out of disk |
 
 Each component directory also has a `CLAUDE.md` (authoring guidance for that component) and a
 `README.md` (what it is and how to use it):
@@ -78,6 +76,10 @@ absent from a fresh clone. ⚠️ **Run it from WSL** — every tool it looks fo
 it refuses to run there rather than report a host that cannot build anything. The *cross-compiled*
 dependencies are not its job and install themselves.
 
+Measured in this project's WSL (2026-09-06; the cross-compilers re-measured 2026-09-29): `shellcheck` 0.7.0, `gh`, `sfdisk`, `cmake`, `bc`, `bison`,
+`flex`, `git-lfs`, `python3` with `PIL` 10.4.0, and both cross-compilers, `arm-linux-gnueabi-*` (soft-float, dynamic: native apps and ScummVM) and
+`arm-linux-gnueabihf-*` (`vnc_client`), 9.4.0 each. None of it is in Git Bash (`CLAUDE.md`, *Working from this host*).
+
 ```bash
 ./setup-build-env.sh --install-deps --scummvm
 ```
@@ -103,16 +105,22 @@ native app, and gives its first frame one verdict (pass / did-not-start / starte
 
 A card is one whole-card image built by `rootfs/make-card-image.sh` (root, WSL): our boot files on p1 (`MLO`,
 `u-boot.img` and the kernel), our root filesystem, the kernel modules and — with `--bundle` — every component, installed by
-`commissioning/commission-offline.sh`. The unit works at first boot and never needs to be reachable.
+`rootfs/commission-offline.sh`. The unit works at first boot and never needs to be reachable.
 
 ```bash
 sudo ./rootfs/make-card-image.sh --mlo <MLO> --uboot <u-boot.img> --kernel <uImage> --bundle <tar.gz|dir> <rootfs.tar> <out.img>
 ```
 
-`MLO` and `u-boot.img` come from `uboot/build.sh`, `<uImage>` from `kernel/build-image.sh`, `<rootfs.tar>` from `rootfs/build-rootfs.sh`; the
-operator-facing steps are in [COMMISSIONING.md](COMMISSIONING.md). Make a bundle with
-`./release.sh --stage-only`, or publish one with `./release.sh --tag <tag> --source-offer`. For a card larger than the
-image, grow p3 afterwards with `commissioning/clone-to-32gb.sh` ([SD_CARD_UPGRADE.md](SD_CARD_UPGRADE.md)).
+`MLO` and `u-boot.img` come from `uboot/build.sh`, `<uImage>` from `kernel/build-image.sh`, the kernel modules from
+`kernel/build-modules.sh --out <dir>` (`--modules`; `--help` has the default), `<rootfs.tar>` from `rootfs/build-rootfs.sh`. The partition table is
+generated at fixed positions, so no donor card and no vendor file is an input; write the finished image to the card from Windows. Make a bundle with
+`./release.sh --stage-only`, or publish one with `./release.sh --tag <tag> --source-offer`. A larger card needs nothing extra: `S07growroot`
+grows p3 to the end of the card at the first boot.
+
+Every image is the same and carries no unit state: the unit names itself (`arca-<4 hex>`) and generates its SSH host key at the first boot, after
+which `./deploy-all.sh <ip>` works (or the menu item *First boot of an imaged card*). ⚠️ **After reflashing a card, remove the unit's old host key in
+both shells** (Git Bash and WSL keep separate `known_hosts`): `ssh-keygen -R <ip>` and `wsl.exe -e bash -lc "ssh-keygen -R <ip>"`. ⚠️ **A reflash also
+wipes `/home/root/data`** (settings, scores, touch calibration, ScummVM saves) — `./backup.sh <ip>` first (below).
 
 A publish is refused without its source offer: `./release.sh --tag <tag> --source-offer [--image <img>]... [--source-out <dir>]` publishes the bundle,
 `ludbox-source-<tag>.tar`, its `.sha256` and the images under one tag. `--image` needs it too. The offer (`rootfs/make-source-offer.sh`) is
@@ -149,7 +157,7 @@ This is the build/deploy loop, and what you want while writing code. The unit al
 
 ```bash
 # Update the system setup: backs the unit's per-unit state up first, installs, reboots
-./commissioning/provision.sh <ip>
+./provision.sh <ip>
 
 # Build + deploy everything (native_apps first — it provides the launcher)
 ./deploy-all.sh <ip>
@@ -160,14 +168,14 @@ This is the build/deploy loop, and what you want while writing code. The unit al
 and no script writes p1. `provision.sh` deletes no software. Its other flags:
 
 ```bash
-./commissioning/provision.sh <ip> --dry-run        # print the plan; change nothing
-./commissioning/provision.sh <ip> --no-usb         # no USB host mode at all
-./commissioning/provision.sh <ip> --status         # report current state; changes nothing
+./provision.sh <ip> --dry-run        # print the plan; change nothing
+./provision.sh <ip> --no-usb         # no USB host mode at all
+./provision.sh <ip> --status         # report current state; changes nothing
 ```
 
-`./commissioning/backup.sh <ip> [<out.tar.gz>]` copies the unit's per-unit state (host keys,
+`./backup.sh <ip> [<out.tar.gz>]` copies the unit's per-unit state (host keys,
 highscores, VNC config, ScummVM config and saves, calibration) to `backups/`; it is read-only on the unit and the archive holds
-secrets. `provision.sh` runs it first. After a reflash, `./commissioning/restore.sh <ip> <archive> [--dry-run]` stops the app, writes it back and starts the app.
+secrets. `provision.sh` runs it first. Nothing writes the archive back; it is a plain tarball to unpack by hand.
 
 ## Architecture
 
@@ -176,15 +184,11 @@ arca-linux/
 ├── arca.sh                      # Front door: a menu over everything below
 ├── deploy-all.sh                # Build + deploy all components
 ├── release.sh                   # Build + stage a bundle; --tag also publishes it
-├── rootfs/                      # Our own root filesystem: Buildroot tree, make-card-image.sh (whole-card image)
-├── commissioning/
-│   ├── provision.sh             # Update a unit over SSH: backup, install the plan, reboot
-│   ├── commission-offline.sh    # The image step: a release bundle installed onto a mounted card
-│   ├── set-hostname.sh          # /etc/hostname + /etc/hosts
-│   ├── backup.sh, restore.sh    # A unit's per-unit state to/from a host tarball (read-only / stop-extract-start)
-│   └── clone-to-32gb.sh         # Clone a card onto a larger one
+├── rootfs/                      # Our own root filesystem: Buildroot tree, make-card-image.sh (whole-card image), commission-offline.sh (its bundle installer), the set-hostname overlay file
+├── provision.sh                 # Update a unit over SSH: backup, install the plan, reboot
+├── backup.sh                    # A unit's per-unit state to a host tarball (read-only on the unit)
 ├── lib/                         # Sourced, never executed
-│   ├── arca-identify.sh         # Is this our root; which partition, by content/position (root, data, log)
+│   ├── arca-identify.sh         # Is this our root; which partition, by content/position (root, log)
 │   ├── arca-provision.sh        # provision-rules.conf -> a plan
 │   ├── arca-ssh.sh              # The one "can I reach this device" gate
 │   ├── arca-release.sh          # Resolve + fetch + verify a published release
@@ -195,7 +199,6 @@ arca-linux/
 │   ├── xpad-modules             # insmod -f the three controller modules (S89)
 │   └── provision-rules.conf     # What the device ends up with
 ├── LICENSE.md                   # MIT, plus the third-party enumeration
-├── COMMISSIONING.md             # Commissioning workflow
 ├── SYSTEM_ANALYSIS.md           # Hardware analysis
 ├── native_apps/                 # C apps (games, launcher, tools)
 ├── browser_games/               # HTML5 games + LED control
@@ -211,8 +214,8 @@ arca-linux/
 | Layer | Script | Runs |
 |-------|--------|------|
 | **Front door** | `arca.sh` | Whenever you'd rather not remember the flags (composition only) |
-| **Card image** | `rootfs/make-card-image.sh` | Once per card (offline, WSL root); `--bundle` runs `commissioning/commission-offline.sh` over it |
-| **Update a unit** | `commissioning/provision.sh` | Per update (SSH; backs up first, reboots) |
+| **Card image** | `rootfs/make-card-image.sh` | Once per card (offline, WSL root); `--bundle` runs `rootfs/commission-offline.sh` over it |
+| **Update a unit** | `provision.sh` | Per update (SSH; backs up first, reboots) |
 | **Deploy all** | `deploy-all.sh` | After setup (builds + deploys everything) |
 | **Build + stage + publish** | `release.sh` | Per release |
 | **App launcher** | `device-files/arca-app` | Every boot (respawn loop, reads `/opt/arca/default-app`) |
@@ -220,7 +223,7 @@ arca-linux/
 
 Each project's `build-and-deploy.sh` handles building, deploying binaries, and installing
 `.app` manifests to `/opt/arca/apps/` for the visual launcher.
-System setup is done once by `commissioning/provision.sh` — no duplication across projects.
+System setup is done once by `provision.sh` — no duplication across projects.
 
 ## Projects
 

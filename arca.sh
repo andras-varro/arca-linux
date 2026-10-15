@@ -8,15 +8,12 @@
 #
 #   provision.sh                         update a running unit, over SSH, ends in a reboot
 #   deploy-all.sh                        over SSH, per-component
-#   rootfs/make-card-image.sh            a whole card image, offline (runs commission-offline.sh)
+#   rootfs/make-card-image.sh            a whole card image, offline (runs rootfs/commission-offline.sh)
 #
-# Why a composition layer and not one merged script: the three phases have
-# genuinely different connection models, and the cleanup in Phase 2 touches paths
-# spread across FOUR partitions that only a booted kernel assembles into one tree,
-# while rootfs/make-card-image.sh mounts all four partitions of an image itself
-# (commission-offline.sh maps every absolute path onto them); the
-# SSH phases stay as the verified development loop. There are three further
-# reasons in COMMISSIONING.md ("why these are separate").
+# Why a composition layer and not one merged script: the phases have genuinely
+# different connection models (an offline card image on the dev host, SSH to a
+# running unit), so each stays its own script; the SSH phases are the verified
+# development loop.
 #
 # What this script does add is the two things missing between the phases: a
 # wait_for_ssh so the operator is not guessing when a rebooted device is back,
@@ -70,7 +67,7 @@ scripts it calls. To script a step, call that script directly:
   ./rootfs/make-card-image.sh --mlo <f> --uboot <f> --kernel <f> --bundle <b> <rootfs.tar> <out.img>   card image
   ./setup-build-env.sh [--install-deps] [--scummvm]     host build prerequisites
 
-Full guide: COMMISSIONING.md
+Full guide: README.md
 USAGE
 }
 

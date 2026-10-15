@@ -122,18 +122,18 @@ leaves the pad connected, or the pad's behaviour is attributed and the workaroun
 
 ### D7. mDNS does not resolve from WSL, which is where the deploy scripts run — open, confirmed 2026-08-15
 
-A named unit answers to `<name>.local` from Windows (`commissioning/set-hostname.sh`, the avahi link). Two
+A named unit answers to `<name>.local` from Windows (`set-hostname` in the rootfs overlay, the avahi link). Two
 residues:
 
 1. **WSL cannot resolve `.local`.** Its `/etc/nsswitch.conf` is `hosts: files dns` — no mDNS module —
-   so `./commissioning/provision.sh rw09.local` passes validation, reaches the SSH step and then fails to
+   so `./provision.sh rw09.local` passes validation, reaches the SSH step and then fails to
    resolve. ⚠️ **`libnss-mdns` alone is insufficient, measured 2026-09-06:** it is installed and in
    `nsswitch.conf`, avahi runs on the device, and `.local` still does not resolve — WSL2 is NAT'd onto its own
    subnet and mDNS is link-local multicast, so it cannot cross. The fix is `networkingMode=mirrored` in
    `.wslconfig`, which changes networking for every distro on the host and is the operator's call. **Until
    then the mDNS payoff applies to Windows-side `ssh` only, not to the build/deploy path.**
 2. **The reboot path is unproven.** `S30avahi-daemon` is in place but the link was written directly
-   rather than by a full `commissioning/provision.sh` run, so "it comes up on its own after a reboot" has not
+   rather than by a full `provision.sh` run, so "it comes up on its own after a reboot" has not
    been observed.
 
 ### B57. Does MADC ADCIN6 follow what is plugged into the USB port? — open, n=1, needs a joint session (operator replugs while ch6 is read)
@@ -305,11 +305,9 @@ upgrade or new drivers still ship as an image to flash. Finishing steps, in orde
 4. **A user README:** keep the vendor card and flash a spare; flash, insert, use; configure (Control Panel, VNC client);
    the apps; updating (F145 once it exists); troubleshooting. A re-flash wipes scores, calibration and settings.
    Developers get one `DEVELOPING.md` (`deploy-all.sh` and the component scripts over SSH stay as the dev loop).
-5. **Retire commissioning:** first inventory which scripts, tests and doc sections only commissioning uses. The bundle
-   installer's rules compiler is the likely seed of F145 and moves there. Then delete the rest and `COMMISSIONING.md`.
 
-**Done when** stock units with spare cards (the operator has six) boot the downloaded image and grow it, the README is the only
-user-facing guide, and no commissioning-only script, test or document is left.
+**Done when** stock units with spare cards (the operator has six) boot the downloaded image and grow it, and the README is the only
+user-facing guide.
 
 ### F150. Every control draws its own keyboard-focus ring — open, operator request 2026-10-13, not designed
 
@@ -324,7 +322,7 @@ focus through one mechanism, and the Control Panel's generic ring is gone.
 
 ### F151. User data on a USB stick: export/import settings and scores, import games and audio — open, operator idea 2026-10-13, future, not designed
 
-A user with no PC tools has no backup (`commissioning/backup.sh` needs SSH) and no way to put ScummVM games or audio on a
+A user with no PC tools has no backup (`backup.sh` needs SSH) and no way to put ScummVM games or audio on a
 grown p3. Proposed shape: one settings-app page with export and import, not a file manager. **Blocked by the operator ruling of
 2026-09-06 (no USB work beyond USB audio)**: lift it first; needs the `usb-storage` and `vfat`/`exfat` modules (a module build).
 
@@ -336,7 +334,7 @@ eMMC, SMSC LAN8710A PHY, an NXP HDMI framer to micro-HDMI, USB-A host, mini-USB,
 
 **Inferred, not built:** our apps need only `/dev/fb0`, evdev and ALSA, so the differences are board-specific —
 no touch panel, other LED/backlight/watchdog paths, no speaker GPIO or bezel, 5 V power. That points to a
-**board-profile layer** under `common/hardware.c`, `common/touch_input.c` and `commissioning/` rather than
+**board-profile layer** under `common/hardware.c`, `common/touch_input.c` and `provision.sh` rather than
 `#ifdef`s. Our binaries are soft-float against the Arca rootfs while stock BBB Debian is hard-float, so
 this ties to our own root filesystem (`rootfs/`; one rootfs for both boards). A BBB wants a mainline kernel with DRM fbdev emulation; the
 Steelcase RoomWizard stays on 4.14.52 omapfb. **Done when** the first question is answered: which board-specific
@@ -367,7 +365,7 @@ the style of `gen_cp_icons.py` for all ten apps, so every PPM has a source, then
 `scummvm` and `vnc_client` ship stripped. Why, with the byte-level measurement:
 [`SYSTEM_ANALYSIS.md#61-cortex-a8-has-no-hardware-integer-divide`](SYSTEM_ANALYSIS.md#61-cortex-a8-has-no-hardware-integer-divide).
 So all three component build scripts gate the unstripped artifact at build time, and
-`commissioning/commission-offline.sh` reports the stripped remainder as **taken on trust** — loudly, by
+`rootfs/commission-offline.sh` reports the stripped remainder as **taken on trust** — loudly, by
 count and by name — rather than refusing it.
 
 ⚠️ **What is open is that "taken on trust" is the honest description, and it should not have to be.** The

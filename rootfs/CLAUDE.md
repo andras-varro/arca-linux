@@ -24,8 +24,8 @@ Everything that builds the **root filesystem we boot instead of the vendor's Yoc
   (from `kernel/build-image.sh`): `SYSTEM_ANALYSIS.md#4-boot-chain-and-recovery`. Recovery is "reimage the card".
 - **Our links:** `rcS.d` `S01mountall` `S01seedrng` `S02alignment` `S03udev` `S04hostname` `S05sysctl`
   `S04firstboot-hostname` `S06watchdog` `S07growroot` `S07syslog` `S08networking`; `rc5.d` `S02dbus-1` `S09sshd` `S20hwclock.sh` `S30avahi-daemon`
-  (all linked by `rootfs/board/arca/post-build.sh`). `/usr/sbin/set-hostname` is `commissioning/set-hostname.sh` installed under a
-  command name by the same script. **sshd generates an ed25519 host key only** (`overlay/etc/init.d/sshd`; `post-build.sh` removes the
+  (all linked by `rootfs/board/arca/post-build.sh`). `/usr/sbin/set-hostname` is an overlay file (`overlay/usr/sbin/set-hostname`, mode 0755 set by the
+  same script). **sshd generates an ed25519 host key only** (`overlay/etc/init.d/sshd`; `post-build.sh` removes the
   RSA key and links ed25519 into `/home/root/data/ssh`, on p3): measured on `.188`, `ssh-keyscan` offers only `ssh-ed25519`, and the first-boot generation took
   ~1 min with `seedrng: uninitialized urandom read` in dmesg before `crng init done` — the wait is entropy [inferred].
 - **The product name is `rootfs/board/arca/os-release`**, the one source for the device's `/etc/os-release`, `lib/product.sh` and `native_apps/common/product.c`. Buildroot's target-finalize writes its own (`NAME=Buildroot`) before it copies the overlay and runs the post-build hook (Makefile, 2025.02), so `post-build.sh` installs ours last; `check-rootfs.sh` refuses a tar that still says Buildroot. `ID=arca` stays an identifier.
@@ -37,7 +37,7 @@ Everything that builds the **root filesystem we boot instead of the vendor's Yoc
 
 - **Root's login shell is `/bin/bash`**, set by `rootfs/board/arca/post-build.sh` (the Buildroot skeleton gives `/bin/sh`,
   BusyBox ash); the prompt comes from the overlay's `/etc/profile.d/prompt.sh`. Measured on `.188`.
-- **`make-card-image.sh --bundle <release bundle>` installs every component offline** (`commissioning/commission-offline.sh --base <tree>` against the new image's p3 and p2). Measured on `.188`: a card built that way boots to the launcher, touch works, and the launcher's Shutdown tile runs `poweroff` and the panel goes dark.
+- **`make-card-image.sh --bundle <release bundle>` installs every component offline** (`rootfs/commission-offline.sh --base <tree>` against the new image's p3 and p2). Measured on `.188`: a card built that way boots to the launcher, touch works, and the launcher's Shutdown tile runs `poweroff` and the panel goes dark.
 - **The image carries its licence documents:** `LICENSE.md`, `manifest.csv`, `licenses/` and `SOURCE-OFFER.txt` in p3 `/usr/share/doc/arca-licenses/` (`licence_docs_install`). `--legal-info` (default: `br-rw/legal-info` of the invoking user), `--source-tag` (default: the bundle's tag) and `--source-url` feed them; without a legal-info tree or a tag the summary prints `WARNING` lines and **that image must not be published**. Measured: a real image held all four, mode 0644, fsck clean.
 
 ## What the image must carry, and what it need not
@@ -54,12 +54,35 @@ Everything that builds the **root filesystem we boot instead of the vendor's Yoc
 ## Per-unit state (an image carries none)
 
 **`make-card-image.sh` builds one generic image and refuses SSH key material in the rootfs tar, on p3 or from the bundle.** It also refuses a tar that fails `check-rootfs.sh`, before writing any image (measured: a tar older than the ed25519-only commit gives 48/1, "no ssh_host_rsa_key in the image", and is refused; the rebuilt tar gives 49/0). A unit's own
-state travels only through `commissioning/backup.sh` / `restore.sh`, whose list is `ARCA_STATE_BACKUP` in `lib/arca-state.sh` and nowhere
+state travels only through `backup.sh` (repo root; nothing writes it back), whose list is `ARCA_STATE_BACKUP` in `lib/arca-state.sh` and nowhere
 else. The unit names itself on first boot (`S04firstboot-hostname`: `arca-<4 hex>` from the kernel's random pool, applied with
 `/usr/sbin/set-hostname`), and sshd generates its host key then; highscores, host keys (`/home/root/data/ssh`) and cron live under `/home/root/data` on p3, which
 the image creates empty. ⚠️ **`config.c:65` saves by tmp + `rename()`, which replaces a
 symlink instead of writing through it**, so a symlink farm onto another partition does not relocate that file. A fresh p3 means a slow first boot
 (the vendor's keys are identical across units, `SYSTEM_ANALYSIS.md#52-as-we-run-it--game-mode`).
+
+**`set-hostname` is the one writer of the name files.** It writes `/etc/hostname` and rewrites `/etc/hosts` so the unit's own name never sits
+on a non-loopback line (it would resolve to a wrong address); it keys the `/etc/hosts` removal on the name it reads from `/etc/hostname`, never
+a hardcoded one, and refuses to write an `/etc/hosts` that lost `localhost`. `S04firstboot-hostname` and `provision.sh --hostname` call the same
+file, so they cannot drift; `/etc/hostname` is the only home of the name. NAME is one label (`rw09`, not `rw09.local`: mDNS appends `.local`).
+
+## `commission-offline.sh`: the image step, not a user flow
+
+`rootfs/commission-offline.sh --bundle <tar.gz|dir> --base <dir>` installs a release bundle and the provision plan into the partitions
+`make-card-image.sh --bundle` mounted as `<base>/{root,log}`, which is its only caller. **It has no prompt, no clean and no disk scan:** it
+reads no terminal, needs no root of its own, mounts nothing and never writes p1; `lib/arca-identify.sh` refuses a `root` that lacks our
+marker. The retired flags (`--no-clean`, `--keep-<group>`, `--delete-factory`, `--unattended`, `--disk`, `--release`, `--ssh-auth=*`,
+`--sshd-only`) are **refused by name with a non-zero exit** — a flag accepted and ignored reads as a choice honoured. Host name, password and
+ssh identity are not set here. **It verifies what it installed, on the card:** md5 of every installed file against the bundle manifest; `+x`
+(real ext4 honours it, so offline that check is a measurement and on `/mnt/c` it cannot be); `check-arm-safe.sh` over the downloaded binaries;
+every `.app`'s `exec=`/`icon=` and that `default-app` names one; `dash -n` on every `/bin/sh` script it wrote.
+
+⚠️ Three ways that verification can lie, all guarded: `dash -n` misses bashisms (`[[` parses as a command name); a missing
+`arm-linux-gnueabihf-objdump` is a **refusal**, not a pass, so the caller counts the ELF candidates itself and says what it did not check
+(`--arm-check=skip` is the deliberate override); and a **stripped** binary cannot be gated, so the checker returns 2 ("could not judge") and the
+installer proceeds with a loud block naming the count. `scummvm` and `vnc_client` ship stripped, so **every full bundle** takes that path — the
+sound verdict is the build-time one, on the unstripped artifact. Regression: `tests/commission_offline_test.sh` (needs root and a staged
+bundle; every check has a sabotage case); rules in `tests/CLAUDE.md`.
 
 ## Operator rulings
 

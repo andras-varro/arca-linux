@@ -8,8 +8,8 @@ init script — it carries the name it is *deployed* as rather than a `.sh` one)
 `time-sync`, `touch-module`, `arcamond`, `sysctl.conf`, the four USB scripts `enable-usb-host.sh` /
 `usb-host` / `xpad-modules` / `usb-audio-modules`, the Bluetooth files `bluetooth` / `bluetooth.conf` /
 `bluetooth-main.conf` / `bluetooth-input.conf` / `bluealsa.conf` / `20-bluealsa.conf`, `avahi-daemon.conf`,
-plus `provision-rules.conf`. Both `commissioning/provision.sh` (over SSH) and
-`commissioning/commission-offline.sh` (onto a mounted card) install those same bytes, and **neither
+plus `provision-rules.conf`. Both `provision.sh` (over SSH) and
+`rootfs/commission-offline.sh` (onto a mounted card) install those same bytes, and **neither
 decides what to install — both read the rules.**
 ⚠️ **`.gitattributes` pins `device-files/**` to `eol=lf`.** The init scripts have no `.sh` extension —
 `/etc/init.d/audio-enable` is the name the `rc5.d` link points at — and a CRLF shebang is rejected by
@@ -49,7 +49,7 @@ and that grandchild is normally the process holding `/dev/fb0` — its basename 
 file. `app_pids()` walks `/proc/*/exe` against the three deploy directories instead, because the exe
 link is the only identity neither chosen by the process nor limited to the configured app.
 
-Two consequences: **`commissioning/provision.sh <ip>` is what pushes that script**, so a `do_stop()`
+Two consequences: **`provision.sh <ip>` is what pushes that script**, so a `do_stop()`
 change does not reach a device until it is re-run; and to see what is running use
 `/etc/init.d/arca-app status`, because `ps w` on this busybox lists only processes with a TTY.
 See `SYSTEM_ANALYSIS.md#53-app-launcher-and-manifests`.
@@ -57,8 +57,8 @@ See `SYSTEM_ANALYSIS.md#53-app-launcher-and-manifests`.
 ## Redeploying anything here
 
 Changing a file in this directory does **not** go out with a component deploy. Only
-`./commissioning/provision.sh <ip>` (which ends in a reboot) or, for a new card image,
-`commissioning/commission-offline.sh` (run by `rootfs/make-card-image.sh --bundle`) installs it.
+`./provision.sh <ip>` (which ends in a reboot) or, for a new card image,
+`rootfs/commission-offline.sh` (run by `rootfs/make-card-image.sh --bundle`) installs it.
 The exceptions are the four **`usb`-group** scripts and the **`bluetooth`-group** files, which
 `cd usb_host` / `cd bluetooth` `&& ./build-and-deploy.sh <ip>` also installs, and which need no reboot.
 

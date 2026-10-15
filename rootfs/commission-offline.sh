@@ -134,7 +134,7 @@ while [[ $# -gt 0 ]]; do
         --keep-*|--delete-factory)
                           retired "$1" "There is no clean here, so there is nothing to keep or delete." ;;
         --unattended)     retired "$1" "It is always unattended now: this script asks nothing." ;;
-        --disk|--disk=*)  retired "${1%%=*}" "It no longer finds or mounts a card; the caller mounts the four partitions and passes --base." ;;
+        --disk|--disk=*)  retired "${1%%=*}" "It no longer finds or mounts a card; the caller mounts the root and log partitions and passes --base." ;;
         --release|--release=*)
                           retired "${1%%=*}" "It no longer fetches a release; pass the tarball with --bundle." ;;
         --ssh-auth=*|--sshd-only)

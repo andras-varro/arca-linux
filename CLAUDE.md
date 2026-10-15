@@ -42,8 +42,7 @@ scheduled expiry built in: ⚠️ **nothing outside that file may cite one.** A 
 carries its own reason in full, and no ID sits beside it; `tests/doc_check.sh` group B counts any
 citation, resolving or not.
 
-`README.md` is the annotated walkthrough of every script; `COMMISSIONING.md` the operator-facing
-bring-up guide and the argument for its phase split; `LICENSE.md` the per-file licence record.
+`README.md` is the annotated walkthrough of every script; `LICENSE.md` the per-file licence record.
 
 **Adding to, correcting or closing out any of these goes through `/doc-update`.** It carries the order of
 operations that gets skipped: classify *before* opening a file, ask "is this reference **here**?" of the
@@ -58,12 +57,11 @@ don't copy.
 | file | covers |
 |---|---|
 | `native_apps/CLAUDE.md` | the rendering loop, the input model, the touch model, the screen rectangles — the deepest of them |
-| `lib/CLAUDE.md` | the sourced shell libraries: SSH gate, plan compilers, bundle layout, the p1 rules |
-| `commissioning/CLAUDE.md` | the bring-up scripts, the consent gate, offline verification, host naming |
+| `lib/CLAUDE.md` | the sourced shell libraries and the root-level `provision.sh` / `backup.sh`: SSH gate, plan compilers, bundle layout, the p1 rules |
 | `device-files/CLAUDE.md` | what is installed verbatim, and how to author the two rules files |
 | `tests/CLAUDE.md` | the host regressions, what each cannot see, sabotage-harness discipline |
 | `scummvm-arca/CLAUDE.md`, `vnc_client/CLAUDE.md` | those ports |
-| `rootfs/CLAUDE.md` | our own root filesystem (p3): Buildroot tree, ABI, rc links, the generic card image |
+| `rootfs/CLAUDE.md` | our own root filesystem (p3): Buildroot tree, ABI, rc links, the generic card image, its offline installer, host naming |
 | `kernel/CLAUDE.md` | our 4.14.52 image: its patches, DT changes, build script and missing drivers — notes in `kernel/README.md` |
 
 ⚠️ **The vanilla kernel tree is the authority for every subsystem the vendor did not patch, and
@@ -132,7 +130,7 @@ the annotated walkthrough.
 ./arca.sh                     # front door: a menu over everything below
 ./deploy-all.sh <ip>                # build + deploy everything (native_apps first)
 ./deploy-all.sh <ip> <component>    # one component;  --list  to see them
-./commissioning/provision.sh <ip>   # update a unit: backup, install, reboot; --dry-run, --status
+./provision.sh <ip>   # update a unit: backup, install, reboot; --dry-run, --status
 ./release.sh --stage-only           # build all components + stage one offline bundle + tar
 cd native_apps && ./build-and-deploy.sh [<ip>] [set-default]
 ```
@@ -141,7 +139,7 @@ cd native_apps && ./build-and-deploy.sh [<ip>] [set-default]
 `provision.sh` updates a running unit, taking a `backup.sh` archive before its first write. Neither path
 writes a unit's p1 (the card-image builder formats the p1 of an image file). `set-default` is the only mode `native_apps/build-and-deploy.sh` accepts. The boot service is
 installed **only** by the provision rules — never by a component script. All of it:
-`commissioning/CLAUDE.md`.
+`lib/CLAUDE.md` (last section) and `rootfs/CLAUDE.md`.
 
 **Components** (each a subdir with a `build-and-deploy.sh`): `native_apps` (C games + launcher +
 tools), `scummvm-arca` (ScummVM backend port), `vnc_client`, `usb_host` (USB host-mode
@@ -177,7 +175,7 @@ misparses. When in doubt, over-deploy — the failure mode is silent.
 | `common/logger.c`, `common/ui_focus.c`, `common/product.c` | `native_apps` + `vnc_client` — **measured** for `ui_focus.c`, and the same for `product.c`: `vnc_client/Makefile` `SRCS` links them, `configure.patch` does not name them |
 | `common/framebuffer.c`, `common/touch_input.c`, `common/hardware.c`, `common/config.c`, `common/input_scan.c`, `common/overtemp.h`, `common/blank_decide.h` (read by `hardware.c`), `native_apps/sysmon/mon_ring.h` (both read by `framebuffer.c`) | **all three** — `./deploy-all.sh <ip>`; ScummVM is the slow one. ⚠️ **Measured from `scummvm-arca/backend-files/configure.patch`, which is the list** — it appends each of these `.o` to ScummVM's `OBJS`, so a header in that chain counts too |
 | `common/audio_out.c`, `common/audio_gen.c` (+ `audio_out.h`, `audio_gen.h`) | `native_apps` + **ScummVM** — ⚠️ **two, not three: measured 2026-09-09**, `vnc_client/Makefile`'s `SRCS` names neither, and no `audio_out` symbol appears anywhere in that tree. They are on ScummVM's `OBJS` via `configure.patch`, which is why the row above cannot speak for them |
-| anything in `device-files/` (`arca-app`, the rules files, …) | neither — **only** `./commissioning/provision.sh <ip>`, which ends in a reboot (or a new `make-card-image.sh` image, offline) |
+| anything in `device-files/` (`arca-app`, the rules files, …) | neither — **only** `./provision.sh <ip>`, which ends in a reboot (or a new `make-card-image.sh` image, offline) |
 | the four **`usb`-group** device files (`usb-host`, `enable-usb-host.sh`, `xpad-modules`, `usb-audio-modules`) | either of the above, **or** `cd usb_host && ./build-and-deploy.sh <ip>` — it compiles the `usb` group itself and, unlike them, needs no reboot. Same for the **`bluetooth`** group (`bluetooth`, `bluetooth.conf`, `bluetooth-main.conf`, `bluetooth-input.conf`) with `cd bluetooth && ./build-and-deploy.sh <ip>` |
 | `usb_host/devmem_write.c`, `build-kernel-modules.sh` | `cd usb_host && ./build-and-deploy.sh <ip>` |
 
@@ -198,7 +196,7 @@ tool-level traps rather than device facts, and each has cost real time.
   `command -v` sweep run in the wrong shell reports a host with no toolchain at all. That happened
   (2026-08-06): it was recorded as fact and made a plan entry read as a hard blocker on all building.
   **State which shell a prerequisite claim was measured in**, and measure with `wsl.exe -e bash -lc`.
-  The measured inventory lives in `COMMISSIONING.md` → *The dev host*.
+  The measured inventory lives in `README.md` → *Before anything builds*.
 - ⚠️ **`strings` is one of those absences, and it fails *silently* into a wrong answer about the
   device.** `strings <device-binary> 2>/dev/null | grep -q <option>` in Git Bash prints nothing —
   because `strings` does not exist, not because the option is missing — so it reads as "the vendor's
@@ -297,7 +295,7 @@ tool-level traps rather than device facts, and each has cost real time.
   Authoring rules: `native_apps/CLAUDE.md` → *Touch model*.
 - **Don't probe I2C bus 1.** `pv02_app 5` (the vendor light-sensor factory test) can hang the bus, and
   **bus 1 carries the PMIC** — `SYSTEM_ANALYSIS.md#39-i2c`. There is no light sensor to find.
-- ⚠️ **A device can be running an older copy than the repo's until `commissioning/provision.sh` is
+- ⚠️ **A device can be running an older copy than the repo's until `provision.sh` is
   re-run** — check `--status` (read-only, no reboot) **before reproducing anything against a device**, or
   you will draw conclusions about code the device is not running. The *hardware* watchdog
   (`/dev/watchdog`, 60 s) is fed by `/sbin/watchdog` from `rcS.d/S06watchdog` — keep it.
@@ -337,8 +335,8 @@ Full detail, measurements and the flags each component uses:
 | Layer | Script | When |
 |---|---|---|
 | Front door (menu over everything below) | `arca.sh` | whenever you'd rather not remember the flags |
-| Whole-card image; `--bundle` adds the no-prompt installer `commissioning/commission-offline.sh` | `rootfs/make-card-image.sh` | once per card, offline |
-| Update a running unit (backup, install, reboot) | `commissioning/provision.sh` | per update, over SSH |
+| Whole-card image; `--bundle` adds the no-prompt installer `rootfs/commission-offline.sh` | `rootfs/make-card-image.sh` | once per card, offline |
+| Update a running unit (backup, install, reboot) | `provision.sh` | per update, over SSH |
 | Build + deploy all components | `deploy-all.sh` | per deploy |
 | Per-component build/deploy/manifest | `*/build-and-deploy.sh` | per component |
 | Build + stage + publish an offline bundle | `release.sh` | per release |

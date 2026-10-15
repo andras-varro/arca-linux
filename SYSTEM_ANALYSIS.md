@@ -1017,8 +1017,8 @@ external address that is unreachable from anywhere these units are used:
 Two defects in one file. The name is **baked into the image** rather than generated, so every unit
 cloned from it claims `RW09` — which is also where this repo's name for the reference unit came
 from. And on a stock image **the device's own name resolves to a dead address**, so anything that
-resolves its own hostname gets the wrong answer. `commissioning/set-hostname.sh` fixes both files together, to
-loopback-only (`commissioning/provision.sh --hostname` calls it over SSH, and the unit's own
+resolves its own hostname gets the wrong answer. `set-hostname` (the overlay's `/usr/sbin/set-hostname`) fixes both files together, to
+loopback-only (`provision.sh --hostname` calls it over SSH, and the unit's own
 `S04firstboot-hostname` calls it at the first boot of a card image).
 
 **⚠️ The vendor regenerates all four network files on every boot, so editing them is not the last
@@ -1057,11 +1057,11 @@ and **byte-identical on both captured cards** — rewrites these from `/home/roo
   `/etc/hostname` untouched.
 - ⚠️ **`/etc/dhclient.conf`'s `send host-name` is a third copy of the name**, and it is the copy a
   router's device list shows: the vendor image ships `send host-name "RW09";`, and a unit renamed
-  months earlier still announced `RW09`. `commissioning/set-hostname.sh` writes this file too.
+  months earlier still announced `RW09`. `set-hostname` writes this file too.
 
 **mDNS is present but not started.** `/usr/sbin/avahi-daemon` (109 KB) and a complete
 `/etc/init.d/avahi-daemon` are both on the vendor image — there is simply **no `rc5.d` link**, so it
-never runs. One symlink enables it (`commissioning/provision.sh` now adds `S30avahi-daemon`), after which the
+never runs. One symlink enables it (`provision.sh` now adds `S30avahi-daemon`), after which the
 unit answers to `<name>.local` and neither SSH nor the deploy scripts need a DHCP-lease hunt. Its
 `Required-Start` is `$remote_fs dbus`, so dbus must be running too.
 The shipped `enable-wide-area=yes` and
@@ -1414,8 +1414,8 @@ Device:  /dev/rtc0
 Driver:  twl_rtc (TWL4030 integrated)
 ```
 
-Working correctly — `hwclock -r` matches `date`, and `commissioning/provision.sh` already does `hwclock -w`
-after `rdate`. `/etc/localtime` and `/etc/timezone` are written by the Control Panel only (System page APPLY, atomically); nothing in `device-files/` or `commissioning/` writes them [measured by grep].
+Working correctly — `hwclock -r` matches `date`, and `provision.sh` already does `hwclock -w`
+after `rdate`. `/etc/localtime` and `/etc/timezone` are written by the Control Panel only (System page APPLY, atomically); nothing in `device-files/`, `rootfs/board/` or `provision.sh` writes them [measured by grep].
 
 **Hold-up is a supercapacitor, not a battery.** `U17` is a Panasonic/Matsushita **"Gold Cap"
 5.5 V 0.47 F** supercap (`GC5.5V0.47F`). MADC channel 9 reads **3184 mV**, meaning the cap is
@@ -1425,7 +1425,7 @@ charged — not that a cell is healthy.
   Supercaps age (ESR climbs, capacitance falls) over decades, not years. One less worry on
   eight-year-old hardware.
 - **But hold-up is hours-to-days, not months.** **Expect the clock to be wrong after any extended
-  unplugged period.** That is why `commissioning/provision.sh` does time-sync at boot, and it means anything
+  unplugged period.** That is why `provision.sh` does time-sync at boot, and it means anything
   trusting the RTC across a shelf-storage gap needs a sanity check rather than blind faith.
 
 ### 3.11 ADC and temperature (TWL4030 MADC)
@@ -1461,7 +1461,7 @@ in `/etc/securetty`). U-Boot prints there too with `bootdelay=1` — a one-secon
 [Unpopulated and expansion](HARDWARE.md#4-unpopulated-and-expansion).
 
 > **The serial console is not on the recovery path, but the header is now fitted.** Recovery is: pull
-> the SD card, restore it from the image commissioning takes, DHCP, SSH. Since the rules in §1 keep NAND
+> the SD card, reflash the card image, DHCP, SSH. Since the rules in §1 keep NAND
 > and U-Boot untouched, the card *is* the entire failure surface — serial adds boot-time *visibility*,
 > never recovery capability. What it does buy is the only channel that says *why* an image we built
 > failed, and the only way to boot an alternate filename at all ([Kernel policy](#7-kernel-policy)).
@@ -1684,16 +1684,15 @@ tree reads them; the vendor rootfs's `/opt/sbin/getBootStatus.sh` parses them ou
 **Our card** (`rootfs/make-card-image.sh`; the layout is `ARCA_LAYOUT` in `lib/arca-identify.sh`): MBR, three primary partitions, measured on the built image
 (`~/rw-card-out/f148.img`, 3293184 sectors = 1608 MiB, so it fits a nominal 2 GB card **[inferred]**). **Host-verified (`tests/card_layout_test.sh`) and booted
 on one unit (`.188`, 2026-10-13/14, `[n=1]`): the ROM and SPL load from p1 with this table, `root=/dev/mmcblk0p3`, p2 is mounted on `/home/root/log` and receives logs, and the
-SSH host key under `/home/root/data/ssh` kept its fingerprint over two reboots. Not looked at: the Control Panel log and monitor pages reading p2, and a
-`clone-to-32gb.sh`-grown card booting `[unverified]`.**
+SSH host key under `/home/root/data/ssh` kept its fingerprint over two reboots. Not looked at: the Control Panel log and monitor pages reading p2 `[unverified]`.**
 
 | Partition | Type | Start, size | Mount | Contents |
 |---|---|---|---|---|
 | p1 | FAT32, label `ARCABOOT`, type `0c`, bootable | 63, 144522 sectors (70.6 MB), byte-identical to the vendor's | none | Boot files, listed in [§4.1](#41-the-chain). **The DTB is inside `uImage-system`** — no separate `.dtb` file exists. |
 | p2 | ext4, label `arca-log` | 147456, 2097152 sectors = 1 GiB, fixed | `/home/root/log` | System logs |
-| p3 | ext4, label `arca-root` | 2244608, 1048576 sectors = 512 MiB, **last so it can grow** | `/` | Root filesystem; 193,880 KiB used with the full bundle. `/home/root/data` is a **plain directory on it**: settings, scores, calibration, the SSH host key and ScummVM saves live here, so a reflash wipes them (`backup.sh`/`restore.sh` are the only protection) |
+| p3 | ext4, label `arca-root` | 2244608, 1048576 sectors = 512 MiB, **last so it can grow** | `/` | Root filesystem; 193,880 KiB used with the full bundle. `/home/root/data` is a **plain directory on it**: settings, scores, calibration, the SSH host key and ScummVM saves live here, so a reflash wipes them (`backup.sh` is the only protection) |
 
-`resize2fs` offline from 512 MiB to 30 GiB ran clean (measured); an online grow of the mounted root ran clean on `.188` (`[n=1]`, 512 MiB to 6520 MiB in 17 s, no reboot; kernel log "resized filesystem to 1669120"). `rootfs/board/arca/overlay/etc/init.d/growroot` (`S07growroot`) does it at every boot when p3 has a tail: `resizepart` for the kernel, the four size bytes of the MBR entry, then `resize2fs`; a freshly flashed `f149.img` did it by itself at its first boot on `.188` (`[n=1]`, 8 GB card; syslog "resizing filesystem from 131072 to 1669120 blocks"). `commissioning/clone-to-32gb.sh` grows p3 offline.
+`resize2fs` offline from 512 MiB to 30 GiB ran clean (measured); an online grow of the mounted root ran clean on `.188` (`[n=1]`, 512 MiB to 6520 MiB in 17 s, no reboot; kernel log "resized filesystem to 1669120"). `rootfs/board/arca/overlay/etc/init.d/growroot` (`S07growroot`) does it at every boot when p3 has a tail: `resizepart` for the kernel, the four size bytes of the MBR entry, then `resize2fs`; a freshly flashed `f149.img` did it by itself at its first boot on `.188` (`[n=1]`, 8 GB card; syslog "resizing filesystem from 131072 to 1669120 blocks").
 U-Boot's built-in root is `/dev/mmcblk0p3` (`uboot/rw20-board.patch`); `make-card-image.sh` refuses an older `u-boot.img` (`root=` p6) via `arca_uboot_root_ok`.
 
 **The vendor's card** (measured on RW09 and a second unit):
@@ -1775,7 +1774,7 @@ units are mkfs'd independently at the factory, so two RoomWizards on identical f
 **Nothing on the device consumes a UUID.** U-Boot passes `root=` by device name (compiled in: p6 on the vendor card, p3 on ours, and
 there is no `saveenv` — §4.4), and the vendor `/etc/fstab` names `/dev/mmcblk0p{2,3,5,7}`. Both are by position,
 so the root partition *is* the rootfs and cannot be renumbered. Host tooling identifies a card by layout and a rootfs
-by content — `lib/arca-identify.sh`, and `COMMISSIONING.md` → *Finding the card*. A hardcoded UUID
+by content — `lib/arca-identify.sh`, `lib/CLAUDE.md`. A hardcoded UUID
 recognises exactly one unit, and assigning it to a second card so it "matches" produces two cards
 claiming one UUID.
 
@@ -1912,6 +1911,31 @@ run sysargs; bootm 0x82000000`. If it panics, power-cycle and do **not** interru
 untouched `uImage-system` and nothing has changed state. Promote only after several clean boots, keeping
 the old image under another name.
 
+**Reading a failed boot by the two side LEDs.** With no SSH to ask, the LEDs and the serial console are the only witnesses; the states below are
+**our** U-Boot's (the vendor chain lights them differently), and the line of the U-Boot build that drives each is in `uboot/BUILD.md`. A good cold boot, from
+power-on (seconds, read off a video, so approximate): green at 1; red at 2; green at 3; off at 4; three short red flashes at 4 to 5; three short green flashes
+at 5; green, then off, at 6; dark and a black screen from 6 to 9; at 9 the screen comes on and the LED turns yellow (Linux has taken the LEDs over
+**[inferred]**); kernel messages from 10; the launcher at about 45. The first stages (red, then both lit) are too short to see. **The last LED state shows
+where it stopped** (steady = working on that stage, or hung there; **blinking is a failure the code detected**):
+
+| LED | Meaning |
+|---|---|
+| dark from the start | the SPL never reached its first stage: `MLO` missing or unreadable, or the redirector's reset did not happen **[inferred]** |
+| red, then red + green (both lit) | the SPL got through SDRAM; stays red = the SDRAM test failed |
+| red + green steady | the SPL is stuck before handing over: loading `u-boot.img` (missing, unreadable), or an SPL exception |
+| red blinking, 2 Hz | a detected failure in the SPL or in U-Boot; the serial console has the reason |
+| green, then red, then stuck | U-Boot started and is stuck early (relocation, timer, memory, serial) |
+| red + green (U-Boot's) | U-Boot is stuck before MMC and environment init |
+| green | U-Boot is waiting out its `bootdelay`, or has no `bootcmd`, or the card does not answer |
+| dark | the card answered; loading the kernel (or the fallback) failed or hung (also dark for the seconds a 5 MB load takes) |
+| three red flashes | the kernel file was loaded; the command line is being built |
+| three green flashes | `bootm` was reached. Still green = `bootm` hung or the kernel died before touching the pads; dark = Linux took the pads **[inferred]**; dark then red flashes again = the first image was bad and the fallback ran |
+| yellow blinking, 2 Hz | U-Boot ran to its end and nothing booted: neither `uImage-system` nor `uImage-fallback` loaded. Ctrl-C on the serial console stops the blinking at the prompt (steady yellow) |
+
+A flash sequence that freezes part-way means U-Boot's timer is dead **[inferred]**. The red blink in `hang()` and the yellow blink at the end have not run on
+hardware **[unverified]**. Make one change per boot and look at the panel before the next: a failed boot leaves no other diagnostic, so two changes at once
+cannot be told apart; the post-mortem after that is mounting p2 offline and reading `messages`, which helps only if the boot got as far as syslog.
+
 > **JTAG is required only if you damage the 12 KB NAND redirector (`mtd0`)** — a bad `mlo`/`u-boot.bin`
 > on p1 is undone in a card reader ([§1](#what-a-boot-path-write-costs-to-undo)). `P3` is a TI-14 JTAG header
 > **[inferred]** if it ever does.
@@ -2018,7 +2042,7 @@ parent sets a display title: `killall`/`pidof` match a process whose `cmdline` r
 Everything cross-compiles on the host and deploys over SSH. **There is no CI**; what does run before a
 deploy, and what is an interactive diagnostic rather than a test, is in `tests/CLAUDE.md`.
 
-Host toolchain and build prerequisites: `CLAUDE.md`, and `COMMISSIONING.md` → *The dev host*.
+Host toolchain and build prerequisites: `CLAUDE.md`, and `README.md` → *Before anything builds*.
 
 ### 6.1 Cortex-A8 has no hardware integer divide
 

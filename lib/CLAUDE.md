@@ -1,28 +1,29 @@
 # lib/CLAUDE.md
 
-The sourced-not-executed shell libraries. Loaded when you work in `lib/`.
+The sourced-not-executed shell libraries, and the two repo-root scripts that drive them
+(`provision.sh`, `backup.sh`; last section). Loaded when you work in `lib/`.
 
-These live at the top level rather than under `commissioning/` because the component build scripts
-source `arca-bundle.sh` on the *write* side while the commissioner reads it, and every SSH-using script sources
+These live at the top level because the component build scripts
+source `arca-bundle.sh` on the *write* side while the image installer (`rootfs/commission-offline.sh`) reads it, and every SSH-using script sources
 `arca-ssh.sh`. Device facts are in `SYSTEM_ANALYSIS.md`; open work in
 `IMPROVEMENT_PLAN.md`; how to author the rules file these libraries parse is in
 `device-files/CLAUDE.md`.
 
 | file | job |
 |---|---|
-| `arca-identify.sh` | which disk is a card, which partition holds which tree, and the offline path guards (`arca_offline_path`, `arca_offline_base_ok`) |
+| `arca-identify.sh` | the card layout (`ARCA_LAYOUT`), which disk is a card, which partition holds which tree, and the offline path guards (`arca_offline_path`, `arca_offline_base_ok`) |
 | `arca-provision.sh` | compile `provision-rules.conf` to an install plan, and generate the online executor |
 | `arca-bundle.sh` | the release-bundle layout |
 | `arca-release.sh` | fetch a published release — **the one library here that opens a socket** |
 | `arca-ssh.sh` | the one answer to "can I reach this device" |
-| `arca-state.sh` | the per-unit state lists: the BACKUP set and the SSH-key deny the card-image builder applies; `rootfs/` and `commissioning/backup.sh`/`restore.sh` source it, `tests/arca_state_test.sh` covers it |
+| `arca-state.sh` | the per-unit state lists: the BACKUP set and the SSH-key deny the card-image builder applies; `rootfs/` and `backup.sh` source it, `tests/arca_state_test.sh` covers it |
 | `product.sh` | `PRODUCT_NAME` / `PRODUCT_STEM` for banners, release titles and download names, read from `rootfs/board/arca/os-release`; no fallback, it refuses instead |
 | `arca-kernel-src.sh` | `arca_check_kernel_tarball`: the sha256 check `kernel/build-image.sh` and `usb_host/build-kernel-modules.sh` run before `tar xf`; the pin is read from `rootfs/package-hashes/linux-headers.hash` and nowhere else, and a missing pin refuses |
 
 ## One SSH gate, and BatchMode stays on it
 
 **`arca-ssh.sh` is the only implementation of "can I reach this device".** The scripts that source it
-are listed by `grep -rln 'arca-ssh.sh' -- commissioning deploy-all.sh arca.sh */build-and-deploy.sh`
+are listed by `grep -rln 'arca-ssh.sh' -- provision.sh backup.sh deploy-all.sh arca.sh */build-and-deploy.sh`
 and every call goes through `arca_ssh_gate`. They each keep their own
 gate *call*, because a component script must run standalone; what they must not keep is their own
 probe. There used to be eight, already drifted into three wordings of one message.
@@ -65,11 +66,10 @@ the partition numbers in `/etc/fstab` are both by position.
 
 `arca-identify.sh` is the one implementation: **content** for a mounted rootfs (`arca_is_rootfs`), the
 **partition table** for a disk (`arca_is_card_disk`), and **position** for which partition holds which
-tree (`arca_card_partitions` → `ARCA_PART_ROLES` = p3 root, p2 log; `/home/root/data` is a plain directory on p3, so there is no data role). It requires our marker
-(`/etc/arca-rootfs`) of a rootfs; no other tree counts. It excludes `/`
-from its scan on purpose — a content scan that selected the dev host's root would rewrite this host's
-`/etc/shadow`; `arca_host_root_disk` / `arca_is_host_root_disk` are the resolved veto for the disk-level
-equivalent.
+tree (`ARCA_PART_ROLES` = p3 root, p2 log; `/home/root/data` is a plain directory on p3, so there is no data role). It requires our marker
+(`/etc/arca-rootfs`) of a rootfs; no other tree counts. `arca_offline_base_ok` refuses `/` (and an empty
+base, or one with `..`) on purpose — a base that selected the dev host's root would rewrite this host's
+`/etc/shadow`.
 
 ⚠️ **p1 is deliberately absent from `ARCA_PART_ROLES`, and a test asserts its absence.** Nothing can
 reach `mlo`, `u-boot.bin` or `ctrlblock.bin` through those functions — a stronger guarantee than every
@@ -77,11 +77,11 @@ caller remembering not to. The layout itself is `ARCA_LAYOUT` (`ARCA_LAYOUT_GROW
 
 ⚠️ **A rootfs mounted offline shows `/home/root/log` as an EMPTY directory** — it is the mount
 point for p2. An offline tool that mounts only p3 sees none of the logs, and would report success having touched
-them. Use `arca_mount_card` / `arca_check_card_mounts`; the latter's negative half —
+them. Use `arca_check_card_mounts`; its negative half —
 "a rootfs where `log` was expected means the partitions are in the wrong order" — is the half that
 catches the mistake that makes every later path resolve under the wrong tree.
 
-Measurements: `SYSTEM_ANALYSIS.md#42-partitions`. Reasoning: `COMMISSIONING.md` → *Finding the card*.
+Measurements: `SYSTEM_ANALYSIS.md#42-partitions`.
 
 ## p1: nothing scripted writes it
 
@@ -112,7 +112,7 @@ offline.
   link (a glob would eat the link just made), install before link (a link to a not-yet-written file
   dangles on a card).
 - ⚠️ **The online executor is generated, not written twice.** `arca_provision_online_script` emits a
-  POSIX `sh` interpreter that `commissioning/provision.sh` pipes to the device; `install` is the one
+  POSIX `sh` interpreter that `provision.sh` pipes to the device; `install` is the one
   verb it cannot do alone, because the source bytes are on the host, so the caller `scp`s them first
   and the interpreter only sets the declared mode. Check it with `dash -n`, not `bash -n` — it runs
   under BusyBox ash.
@@ -123,7 +123,7 @@ offline.
   read as an executor bug. `ssh -n` fixes one body and not the next; fd 3 is a property of the loop.
   The function also **counts** — install records in versus files copied out, refusing on a mismatch —
   because the old shape was silent exactly where the copying happened. It lives here with
-  `$ARCA_SSH`/`$ARCA_SCP` indirection because `commissioning/provision.sh` and
+  `$ARCA_SSH`/`$ARCA_SCP` indirection because `provision.sh` and
   `usb_host/build-and-deploy.sh` each had a verbatim copy of the loop, i.e. the defect twice, and
   because indirection is what makes the copy step reachable from a test with no device. **Never inline
   it again.**
@@ -133,7 +133,7 @@ offline.
 - ⚠️ **`usb` is a provision group, and a component script compiles it through
   `arca_provision_plan_component`, not through its own `scp`/`ln -sf`.** `arca_provision_plan_component
   FILE GROUP` compiles one optional group's records for `usb_host/build-and-deploy.sh` (`usb`) and `bluetooth/build-and-deploy.sh` (`bluetooth`) — a separate
-  entry point rather than a flag on `arca_provision_plan`, and it refuses `base`, so a commissioning
+  entry point rather than a flag on `arca_provision_plan`, and it refuses `base`, so an install
   path cannot reach a base-less plan by mistyping a group list.
 
 ## Bundles: one layout, declared modes, no configs
@@ -174,7 +174,7 @@ layout lives in **`arca-bundle.sh`** and nowhere else: `<dir>/root/<device-path>
 
 ## `arca-release.sh` fetches, and it is the only file here that opens a socket
 
-The fetch is thin by construction: `deploy-all.sh --from-bundle` and `commission-offline.sh --bundle`
+The fetch is thin by construction: `deploy-all.sh --from-bundle` and `rootfs/commission-offline.sh --bundle`
 both already accept a tarball *or* an unpacked directory, so it resolves, downloads, verifies and hands
 over a path. It installs nothing and never touches a device. `arca-bundle.sh` stays network-free so that
 "does this code reach the network" is answerable from the source list alone.
@@ -210,6 +210,22 @@ over a path. It installs nothing and never touches a device. `arca-bundle.sh` st
   diagnostic and every progress line goes to stderr.
 - **A fetch under `sudo` hands the cached file back to `$SUDO_UID`**, for the reason
   `arca_ssh_key_owner` exists: otherwise the operator needs `sudo` to touch their own `build/`.
+
+## `provision.sh` and `backup.sh`: the developer's update of a running unit
+
+A user flashes an image; these two are for a unit already running our root. `./provision.sh <ip|host>`:
+SSH gate, plan compiled from `device-files/provision-rules.conf`, `--dry-run` prints it and exits, then
+`backup.sh` (**a failed backup aborts the run**), install, sysctl, reboot. It deletes no software and never
+writes p1. `--status` (md5s the deployed scripts against the repo's: `matches repo` or `DRIFTED` per file) and
+`--hostname NAME` (stages and runs the overlay's `set-hostname` over SSH) never back up or reboot; the second
+is what makes renaming a unit in service safe. `--no-<group>` skips one provision group. An unknown flag is
+refused, and `--ssh-auth` / `--sshd-only` by name: the overlay's key-only `sshd_config` is the only sshd
+policy. ⚠️ **Boot service and install live only in `provision.sh` and `rootfs/commission-offline.sh`** —
+`deploy-all.sh` and the `*/build-and-deploy.sh` must not duplicate any of it. Regression:
+`tests/provision_online_test.sh` (fake `ssh`/`scp`; no device).
+
+`backup.sh <ip> [<out.tar.gz>]` writes the BACKUP set of `arca-state.sh` to `backups/`: read-only on the
+unit, and the archive holds secrets (VNC password, SSH host keys). Nothing writes it back.
 
 ## Regressions
 

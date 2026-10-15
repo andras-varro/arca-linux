@@ -62,7 +62,7 @@ that stage, or hung there; blinking = a failure the code detected. SPL_TEXT_BASE
   `udelay()` is not started in the early SPL [inferred from `omap-common/timer.c`, not run], and a `udelay` on a stopped timer never returns. A counter that does not move
   falls back to a spin cap (rate unknown) [inferred]. `yellowblink` loops `while run ledyellow && sleep 0.25 && run ledoff && sleep 0.25`; Ctrl-C makes `sleep`
   fail, ends the loop and leaves yellow steady at the `arca # ` prompt [measured in a sandbox build with a pty feeding ^C, not on the device's UART].
-- Reading the panel (what each steady or blinking state means, and a good boot's sequence): `COMMISSIONING.md` -> *Boot troubleshooting*. Builder's notes only: a frozen
+- Reading the panel (what each steady or blinking state means, and a good boot's sequence): `SYSTEM_ANALYSIS.md` section 4.7, *Reading a failed boot by the two side LEDs*. Builder's notes only: a frozen
   flash sequence (stuck dark part-way) means `sleep` hangs, i.e. the timer is dead [inferred]; the vendor yellow LEDs come from the vendor's own U-Boot, not from this build.
 
 ## uEnv.txt

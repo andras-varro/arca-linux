@@ -177,13 +177,13 @@ enables the joystick subsystem, and cross-compiles the three modules into `modul
 device scripts and the two `rc5.d` links are `usb`-group records in
 [`device-files/provision-rules.conf`](../device-files/provision-rules.conf), compiled by
 `arca_provision_plan_component` and executed through the *same* generated interpreter that
-`commissioning/provision.sh` uses. Do not hand-`scp` them: a second copy of the install would drift from
+`provision.sh` uses. Do not hand-`scp` them: a second copy of the install would drift from
 the rules file, and the modes are **declared** there rather than read off disk. What the plan resolves to:
 
 ```bash
 DEVICE=192.168.50.73
 
-# 0755, from device-files/ — the same bytes commissioning installs
+# 0755, from device-files/ — the same bytes `provision.sh` installs
 ../device-files/enable-usb-host.sh  ->  /usr/local/bin/enable-usb-host.sh
 ../device-files/usb-host            ->  /etc/init.d/usb-host
 ../device-files/xpad-modules        ->  /etc/init.d/xpad-modules
@@ -193,7 +193,7 @@ devmem_write   ->  /usr/local/bin/devmem_write
 modules/*.ko   ->  /lib/modules/4.14.52/extra/
 ```
 
-Run it with `./build-and-deploy.sh $DEVICE`, or get the same result from either commissioning path.
+Run it with `./build-and-deploy.sh $DEVICE`, or get the same result from `provision.sh` or the card-image installer.
 
 ### Step 5: Enable USB host mode and load modules
 
@@ -372,10 +372,12 @@ The DTB `power` property is a separate matter (see Problem 3 above): it sets the
 | `../device-files/xpad-modules` | Device | SysV init.d script for loading controller modules at boot |
 
 The three device scripts live in [`device-files/`](../device-files/) rather than here, and are named as
-they are *deployed*, because three paths now install the same bytes — `commissioning/provision.sh`,
-`commissioning/commission-offline.sh` and this component's `build-and-deploy.sh`. They are declared as
+they are *deployed*, because three paths now install the same bytes — `provision.sh`,
+`rootfs/commission-offline.sh` and this component's `build-and-deploy.sh`. They are declared as
 `usb`-group records in [`device-files/provision-rules.conf`](../device-files/provision-rules.conf); the
-four **built** artifacts travel in the release bundle.
+four **built** artifacts travel in the release bundle. ⚠️ **A bundle install alone gives no USB host mode**: `deploy-all.sh --from-bundle` installs
+only what the manifests name, so those artifacts arrive but nothing installs the device scripts and links; they come from a provision plan
+(`provision.sh`, the card image) or from this component's `build-and-deploy.sh`.
 
 ### Files Deployed to Device
 

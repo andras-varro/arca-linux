@@ -28,7 +28,7 @@ Ask these in order and stop at the first yes. The routing mistake is the expensi
 | work not done yet — a bug, a feature, a phase table | `IMPROVEMENT_PLAN.md` | is there an action in it? if not, it is not an item |
 | how to write code in one directory — an API rule, a call-order constraint, a shape to copy | that directory's `CLAUDE.md` | would a person editing *only that directory* need it? |
 | how our kernel image is built, what each `kernel/patches`/`kernel/dts` change is for, a driver's state, a reverse-engineering method | `kernel/README.md` | what the *vendor* kernel does is a device fact → `SYSTEM_ANALYSIS.md`; only build, patch and method prose stays here |
-| what a script does, or how an operator runs a bring-up | `README.md` / `COMMISSIONING.md` | is the audience an operator rather than an author? |
+| what a script does, or how an operator runs a bring-up | `README.md` | is the audience an operator rather than an author? |
 | a licence fact | `LICENSE.md` | — |
 | something I must know before the first edit, in any directory | root `CLAUDE.md` — **budget 16 lines, the tightest in the repo** | is it worth loading in *every* session? |
 
@@ -51,7 +51,7 @@ that stays 700 lines and one that reaches 891.
 for t in "<token1>" "<token2>"; do
   printf '%-24s ' "$t"
   for f in SYSTEM_ANALYSIS.md HARDWARE.md IMPROVEMENT_PLAN.md CLAUDE.md \
-           native_apps/CLAUDE.md lib/CLAUDE.md commissioning/CLAUDE.md \
+           native_apps/CLAUDE.md lib/CLAUDE.md rootfs/CLAUDE.md \
            device-files/CLAUDE.md tests/CLAUDE.md kernel/CLAUDE.md kernel/README.md; do
     printf '%s:%s ' "$f" "$(grep -cF -- "$t" "$f")"
   done; echo

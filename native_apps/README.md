@@ -251,12 +251,12 @@ and will fail to link.
 ```
 
 This writes `/opt/arca/default-app`; the init service respawns whatever it points at.
-Installing the service itself is done once by `../commissioning/provision.sh`.
+Installing the service itself is done once by `../provision.sh`.
 
 Or manually: `ssh root@<ip> '/etc/init.d/arca-app start|stop|status'`
 
 ## Resources
 
-- **Device / SSH setup:** [COMMISSIONING.md](../COMMISSIONING.md)
+- **Device / SSH setup:** [README.md](../README.md)
 - **Hardware specs:** [SYSTEM_ANALYSIS.md](../SYSTEM_ANALYSIS.md)
 - **ScummVM backend:** [scummvm-arca/SCUMMVM_DEV.md](../scummvm-arca/SCUMMVM_DEV.md)
