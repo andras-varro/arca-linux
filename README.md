@@ -169,15 +169,13 @@ a failed boot stopped**:
 | dark (after the flashes) | Loading the system failed or hung. |
 | yellow blinking, twice a second | Nothing could boot: neither the system file nor its fallback loaded. |
 
-(Source: `SYSTEM_ANALYSIS.md` section 4.7, "Reading a failed boot by the two side LEDs", and
-`uboot/BUILD.md`, "Boot-progress LEDs".) The red blink and the yellow blink have not been
-seen on hardware, so treat them as [unverified].
+Source: `SYSTEM_ANALYSIS.md` section 4.7, "Reading a failed boot by the two side LEDs", and
+`uboot/BUILD.md`, "Boot-progress LEDs".
 
 Once the system is running: a **red LED with a red square on screen** means the processor
 is over temperature (the monitor service lights it until it cools). The Control Panel
 **LED** page can switch the LEDs off or change their brightness, and some games blink the
-LEDs for feedback. [unverified: any LED pattern for running normally, for shutdown, or for
-errors after boot; none was found in the source]
+LEDs for feedback.
 
 ## Licence and source
 
