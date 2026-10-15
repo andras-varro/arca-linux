@@ -926,6 +926,9 @@ group_c() {
 # 2026-10-14: commissioning/CLAUDE.md (ceiling 120) and COMMISSIONING.md were dissolved. rootfs/CLAUDE.md 60 -> 76 takes the image installer's
 # rules and the host-name writer's rules (they live in rootfs/ now); SYSTEM_ANALYSIS.md 1854 -> 1859 takes the LED reading of a failed boot,
 # which existed only in COMMISSIONING.md. lib/CLAUDE.md took the provision.sh / backup.sh rules into its own slack.
+# 2026-10-15 (operator-approved): README.md became the USER guide and the old walkthrough moved, with history, to DEVELOPING.md (git mv).
+# DEVELOPING.md gets a NEW entry at its measured 206 non-blank, its SSH steps replaced by a pointer to README.md (the old README.md ceiling was 215 against 208); the new README.md is 162
+# non-blank and gets zero margin, same as the old one: a user guide that grows without a decision is the shape this group bounds.
 #
 #
 ceilings() {
@@ -935,7 +938,8 @@ ceilings() {
 1859	SYSTEM_ANALYSIS.md
 1362	IMPROVEMENT_PLAN.md
 224	HARDWARE.md
-215	README.md
+162	README.md
+206	DEVELOPING.md
 342	CLAUDE.md
 780	native_apps/CLAUDE.md
 232	lib/CLAUDE.md

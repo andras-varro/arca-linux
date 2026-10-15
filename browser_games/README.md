@@ -603,7 +603,7 @@ If anything goes wrong:
 
 - [System Analysis](../SYSTEM_ANALYSIS.md) - Hardware and firmware analysis
  - Native C games development
-- [README](../README.md) - Device setup and deploy
+- [DEVELOPING](../DEVELOPING.md) - Device setup and deploy
  - Current development status
 
 ---

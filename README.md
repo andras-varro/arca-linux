@@ -1,276 +1,193 @@
 # Ludbox Linux
 
-> **Ludbox Linux and apps for the Steelcase RoomWizard embedded Linux device**
-
-Arca is the project's codename; you will see it in paths and file names.
-
-## Documentation map
-
-| Doc | What it owns | Read it when |
-|---|---|---|
-| [CLAUDE.md](CLAUDE.md) | How to build, deploy, and not break things. The trap list. | Before writing any code |
-| [SYSTEM_ANALYSIS.md](SYSTEM_ANALYSIS.md) | Authoritative device facts: SoC, boot chain, display, audio, GPIO, unused hardware | Before touching anything hardware-related |
-| [HARDWARE.md](HARDWARE.md) | The board itself: parts, connectors, headers, the unpopulated XBee socket, the enclosure — with the teardown photos | Opening a unit, or probing a header |
-| [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md) | The single backlog — bugs and features with `file:line` | Before starting work, so you don't rediscover a known bug |
-
-Each component directory also has a `CLAUDE.md` (authoring guidance for that component) and a
-`README.md` (what it is and how to use it):
-[native_apps](native_apps/CLAUDE.md) · [scummvm-arca](scummvm-arca/CLAUDE.md) ·
-[vnc_client](vnc_client/CLAUDE.md).
-
-**The rule:** component docs describe their own code only. Device facts belong in
-SYSTEM_ANALYSIS.md, open work belongs in IMPROVEMENT_PLAN.md. Link, don't copy.
-
-### The device in one line
-
-TI **OMAP3503** (ARM Cortex-A8 @ 600 MHz, **no GPU, no DSP**), 234 MB RAM, 800×480 LCD via
-legacy `omapfb`/`omapdss` (no DRM/KMS), projected-capacitive touch, Linux 4.14.52, SysVinit.
-All code is cross-compiled on the dev host and deployed over SSH — there is no local app to run.
-
-### Projects
-- **[Native Apps](native_apps/)** — High-performance C apps with direct framebuffer rendering
-- **[Browser Games](browser_games/)** — HTML5 games with LED control
-- **[ScummVM Backend](scummvm-arca/)** — Classic adventure games port
-- **[VNC Client](vnc_client/)** — Remote desktop viewer for Raspberry Pi displays
-
----
-
-## Quick Start
-
-> **Cloning:** the teardown photos in [HardwarePhotos/](HardwarePhotos/) are stored in
-> **Git LFS**. Run `git lfs install` once before cloning, or those files arrive as
-> one-line pointer stubs (`git lfs pull` fixes an existing clone). Nothing in the
-> build or deploy path depends on them — they are documentation only.
-
-### Start here — `./arca.sh`
-
-One menu over every path below. A card image written once produces a working unit at next
-boot. It has **no logic of its own**: each item execs one of the scripts documented further down, and
-every one of those stays non-interactive when called directly.
-
-```bash
-./arca.sh
-```
-
-```
-  2) Update a booted device      ssh; backup, update, reboot
-  3) Deploy apps                 ssh; source, bundle or release
-  5) First boot of an imaged card  boot, wait for ssh, deploy
-
-  6) Build a card image          offline; our root + bundle, one boot (deliver a unit)
-
-  4) Device status               read-only
-  7) Host build prerequisites    this machine; no device, no card
-```
-
-Which item you want depends on whether you are **delivering** a unit (item 6, then 5) or **developing**
-on one (items 2 and 3); they differ in how many boots and how much toolchain they need.
-
-### Before anything builds — `./setup-build-env.sh`
-
-The one home for the **host** package set: the cross toolchain, `build-essential`, `cmake`, `python3`
-with `PIL` for framebuffer decodes, the kernel-module deps `usb_host` needs, and `shellcheck`. It probes
-what is missing, prints the exact `apt` line before running it, and installs only on `--install-deps` or
-a TTY confirmation. `--scummvm` also clones the upstream ScummVM tree, which is gitignored and so is
-absent from a fresh clone. ⚠️ **Run it from WSL** — every tool it looks for is absent from Git Bash, so
-it refuses to run there rather than report a host that cannot build anything. The *cross-compiled*
-dependencies are not its job and install themselves.
-
-Measured in this project's WSL (2026-09-06; the cross-compilers re-measured 2026-09-29): `shellcheck` 0.7.0, `gh`, `sfdisk`, `cmake`, `bc`, `bison`,
-`flex`, `git-lfs`, `python3` with `PIL` 10.4.0, and both cross-compilers, `arm-linux-gnueabi-*` (soft-float, dynamic: native apps and ScummVM) and
-`arm-linux-gnueabihf-*` (`vnc_client`), 9.4.0 each. None of it is in Git Bash (`CLAUDE.md`, *Working from this host*).
-
-```bash
-./setup-build-env.sh --install-deps --scummvm
-```
-
-### Before anything deploys — `./tests/run-all.sh`
-
-The host gate: every test that needs no device, in one command. It runs the shell suites in `tests/`, the
-host-gcc regressions under `native_apps/tests/`, and `shellcheck` over every tracked script. `deploy-all.sh` and
-`release.sh` **run it first and refuse to build if it fails**; `--skip-tests` on either is the override. `--list`
-shows what it will run, `--self-test` runs its own negative controls, and exit **2** means it could not judge rather
-than that a test failed. One suite needs root and reports itself SKIPPED without it, which the summary names — a skip
-is never counted as a pass. Authoring rules: `tests/CLAUDE.md`.
-
-The device half: `native_apps/smoke-first-screen.sh <ip> [binary ...]` (`--list`, `--out DIR`) stops the app loop, launches each
-native app, and gives its first frame one verdict (pass / did-not-start / started-died / black-screen / could-not-tell).
-
-```bash
-./tests/run-all.sh                  # everything
-./tests/run-all.sh --scope=deploy   # skip the documentation checks
-```
-
-### Delivering a unit — build a card image, one boot
-
-A card is one whole-card image built by `rootfs/make-card-image.sh` (root, WSL): our boot files on p1 (`MLO`,
-`u-boot.img` and the kernel), our root filesystem, the kernel modules and — with `--bundle` — every component, installed by
-`rootfs/commission-offline.sh`. The unit works at first boot and never needs to be reachable.
-
-```bash
-sudo ./rootfs/make-card-image.sh --mlo <MLO> --uboot <u-boot.img> --kernel <uImage> --bundle <tar.gz|dir> <rootfs.tar> <out.img>
-```
-
-`MLO` and `u-boot.img` come from `uboot/build.sh`, `<uImage>` from `kernel/build-image.sh`, the kernel modules from
-`kernel/build-modules.sh --out <dir>` (`--modules`; `--help` has the default), `<rootfs.tar>` from `rootfs/build-rootfs.sh`. The partition table is
-generated at fixed positions, so no donor card and no vendor file is an input; write the finished image to the card from Windows. Make a bundle with
-`./release.sh --stage-only`, or publish one with `./release.sh --tag <tag> --source-offer`. A larger card needs nothing extra: `S07growroot`
-grows p3 to the end of the card at the first boot.
-
-Every image is the same and carries no unit state: the unit names itself (`arca-<4 hex>`) and generates its SSH host key at the first boot, after
-which `./deploy-all.sh <ip>` works (or the menu item *First boot of an imaged card*). ⚠️ **After reflashing a card, remove the unit's old host key in
-both shells** (Git Bash and WSL keep separate `known_hosts`): `ssh-keygen -R <ip>` and `wsl.exe -e bash -lc "ssh-keygen -R <ip>"`. ⚠️ **A reflash also
-wipes `/home/root/data`** (settings, scores, touch calibration, ScummVM saves) — `./backup.sh <ip>` first (below).
-
-A publish is refused without its source offer: `./release.sh --tag <tag> --source-offer [--image <img>]... [--source-out <dir>]` publishes the bundle,
-`ludbox-source-<tag>.tar`, its `.sha256` and the images under one tag. `--image` needs it too. The offer (`rootfs/make-source-offer.sh`) is
-assembled after the host gate and before the component builds; `--stage-only --source-offer` makes a development offer (`--allow-dev`: dirty tree or unpushed commit accepted; the name gets `-dev` only on a dirty tree).
-
-### Installing from a published release — no cross-compiler
-
-Every other mode builds, so every other mode needs the ARM cross-compilers. Someone handed a device
-has no toolchain, so a published release is installable directly over SSH:
-
-```bash
-./deploy-all.sh --from-release latest <ip>       # over SSH, to a set-up unit
-./deploy-all.sh --from-release v1.0.0 <ip>       # a specific tag
-```
-
-The tarball's sha256 is checked against the digest GitHub publishes, and it is cached under
-`build/release-cache/<tag>/`, so a second unit costs no second download. Digest mismatch refuses and
-deletes the partial file. `v1.0.0` is the first published release (~125 MiB, one asset); the fetch
-rules are in [lib/CLAUDE.md](lib/CLAUDE.md).
-
-`--from-bundle <tar.gz|dir>` is the same install with a local bundle instead of a download.
-
-### Getting SSH access to a generic card
-
-A card built by `make-card-image.sh` carries no key and refuses SSH until the panel opens it. Measured on `.188`: on the Control Panel
-**SSH** page set a root password (on-screen keyboard), tap **ROOT LOGIN ALLOW**, then **KEY + PASSWORD**; from the PC run
-`ssh-copy-id root@<ip>` (password login, then key login both work). Then optionally tap **KEY ONLY** — confirmed working after
-`ssh-copy-id` (measured 2026-10-11); **OFF** also works and keeps the port closed across a reboot.
-
-### Developing on a unit — update, then deploy
-
-This is the build/deploy loop, and what you want while writing code. The unit already runs our own root
-(from an imaged card, above) and is reachable by key-only SSH.
-
-```bash
-# Update the system setup: backs the unit's per-unit state up first, installs, reboots
-./provision.sh <ip>
-
-# Build + deploy everything (native_apps first — it provides the launcher)
-./deploy-all.sh <ip>
-./deploy-all.sh <ip> vnc_client      # or one component;  --list  to see them
-```
-
-⚠️ **Only our own kernel image is supported**; installing it is a manual step ([kernel/README.md](kernel/README.md)),
-and no script writes p1. `provision.sh` deletes no software. Its other flags:
-
-```bash
-./provision.sh <ip> --dry-run        # print the plan; change nothing
-./provision.sh <ip> --no-usb         # no USB host mode at all
-./provision.sh <ip> --status         # report current state; changes nothing
-```
-
-`./backup.sh <ip> [<out.tar.gz>]` copies the unit's per-unit state (host keys,
-highscores, VNC config, ScummVM config and saves, calibration) to `backups/`; it is read-only on the unit and the archive holds
-secrets. `provision.sh` runs it first. Nothing writes the archive back; it is a plain tarball to unpack by hand.
-
-## Architecture
-
-```
-arca-linux/
-├── arca.sh                      # Front door: a menu over everything below
-├── deploy-all.sh                # Build + deploy all components
-├── release.sh                   # Build + stage a bundle; --tag also publishes it
-├── rootfs/                      # Our own root filesystem: Buildroot tree, make-card-image.sh (whole-card image), commission-offline.sh (its bundle installer), the set-hostname overlay file
-├── provision.sh                 # Update a unit over SSH: backup, install the plan, reboot
-├── backup.sh                    # A unit's per-unit state to a host tarball (read-only on the unit)
-├── lib/                         # Sourced, never executed
-│   ├── arca-identify.sh         # Is this our root; which partition, by content/position (root, log)
-│   ├── arca-provision.sh        # provision-rules.conf -> a plan
-│   ├── arca-ssh.sh              # The one "can I reach this device" gate
-│   ├── arca-release.sh          # Resolve + fetch + verify a published release
-│   └── arca-bundle.sh           # The release-bundle layout, both directions
-├── device-files/                # Installed onto the device verbatim
-│   ├── arca-app                 # App respawn loop; arcamond = init for the history daemon
-│   ├── enable-usb-host.sh       # The /dev/mem MUSB host-mode patch; usb-host runs it (S90)
-│   ├── xpad-modules             # insmod -f the three controller modules (S89)
-│   └── provision-rules.conf     # What the device ends up with
-├── LICENSE.md                   # MIT, plus the third-party enumeration
-├── SYSTEM_ANALYSIS.md           # Hardware analysis
-├── native_apps/                 # C apps (games, launcher, tools)
-├── browser_games/               # HTML5 games + LED control
-├── scummvm-arca/                # ScummVM backend
-├── usb_host/                    # USB host mode + Xbox controller modules
-├── bluetooth/                   # BlueZ + btmon, BT modules (incl. rfcomm), RTL8761CU firmware, boot start; BlueALSA (a2dp-source, hfp-ag)
-├── uboot/                       # Our own mainline U-Boot v2026.10 board port (rw20-board.patch), build.sh and BUILD.md; host build only
-└── vnc_client/                  # VNC remote desktop viewer
-```
-
-### Separation of Concerns
-
-| Layer | Script | Runs |
-|-------|--------|------|
-| **Front door** | `arca.sh` | Whenever you'd rather not remember the flags (composition only) |
-| **Card image** | `rootfs/make-card-image.sh` | Once per card (offline, WSL root); `--bundle` runs `rootfs/commission-offline.sh` over it |
-| **Update a unit** | `provision.sh` | Per update (SSH; backs up first, reboots) |
-| **Deploy all** | `deploy-all.sh` | After setup (builds + deploys everything) |
-| **Build + stage + publish** | `release.sh` | Per release |
-| **App launcher** | `device-files/arca-app` | Every boot (respawn loop, reads `/opt/arca/default-app`) |
-| **Project deploy** | `*/build-and-deploy.sh` | Per project (build + deploy + app manifests) |
-
-Each project's `build-and-deploy.sh` handles building, deploying binaries, and installing
-`.app` manifests to `/opt/arca/apps/` for the visual launcher.
-System setup is done once by `provision.sh` — no duplication across projects.
-
-## Projects
-
-1. **Native Apps** — Direct framebuffer C apps (Snake, Tetris, Pong, App Launcher, Hardware Test). USB input fully supported: keyboard, mouse, and Xbox 360 controller via unified evdev polling.
-2. **Browser Games** — HTML5 brick breaker with LED feedback
-3. **ScummVM** — Custom backend for classic point-and-click adventures (OPL/AdLib music, touch controls, virtual keyboard). Independent evdev input: keyboard, mouse, and gamepad.
-4. **VNC Client** — Lightweight VNC viewer for Raspberry Pi remote desktop (weather/clock) with keyboard/mouse forwarding (~5% CPU, bilinear scaling)
-
-The **App Launcher** is a visual grid shell deployed by `native_apps/build-and-deploy.sh`.
-It scans manifest files from all projects and displays them as touch-friendly icon tiles.
-The init script respawns it automatically when an app exits. Keyboard and Xbox pad drive the launcher and the Control Panel (arrows, Enter/Space, Esc/Backspace back); Up from a top row reaches the exit X. The Input page's keyboard, pad and mouse testers exit by holding Esc / pad Select or Start / both mouse buttons for 1.5 s.
-
-For hardware specs, see **[Subsystems](SYSTEM_ANALYSIS.md#3-subsystems)** in the device reference.
-
-
----
-
-## Project Status
-
-See **[IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md)** for the current backlog. Highlights:
-
-- Known bugs are catalogued there with `file:line` references.
-- **We build our own 4.14.52 image; a mainline port stays out of scope** — built from the vanilla tree
-  as it stands the image has no built-in touch driver (it ships as a loadable `.ko`; `kernel/README.md`), and a mainline port would additionally break the
-  runtime bpp switching ScummVM and the VNC client depend on. See [Kernel policy](SYSTEM_ANALYSIS.md#7-kernel-policy).
-
-## A note on secrets
-
-`vnc_client/vnc_client.conf` is **gitignored** because it holds a plaintext VNC password.
-Copy the template to create your own:
-
-```bash
-cp vnc_client/vnc_client.conf.example vnc_client/vnc_client.conf
-# then edit host/password
-```
-
-## Licence, and one no-warranty note
-
-This project's own code is **MIT**. Two things it distributes are not, and both carry obligations that
-MIT does not — the `scummvm` binary and its data (GPL-3.0-or-later), and the three controller kernel
-modules (GPL-2.0-only, written source offer). Everything is enumerated in
-[LICENSE.md](LICENSE.md), which is also where MIT's *scope* is stated: it governs the source and does not
-decide the licence of a binary it is linked into.
-
-⚠️ **No warranty, meant literally.** Our kernel replaces the vendor's on the boot partition, and
-recovering a unit that will not boot means reaching the card — which means opening the case. That is
-feasible and it takes experience; an inexperienced attempt can break the enclosure.
-
-Steelcase and RoomWizard are trademarks of their respective owner. This project is unaffiliated with,
-and not endorsed by, Steelcase.
+Ludbox Linux turns a Steelcase RoomWizard wall display into a small games and apps box:
+seven touch games, a touch instrument, a terminal, a classic-adventure engine (ScummVM),
+a remote-desktop viewer and a settings app. It runs from its own microSD card, so the
+display's original software stays untouched on the card it came with.
+
+Everything runs on the display's own 600 MHz processor with no graphics chip, so expect
+simple games, not modern ones. No Wi-Fi is fitted; the unit uses its Ethernet cable,
+which is also its power (PoE).
+
+> **No warranty.** Opening the unit is feasible but takes care, and an inexperienced
+> attempt can break the enclosure or the touch cable. Steelcase and RoomWizard are
+> trademarks of their respective owner; this project is unaffiliated with, and not
+> endorsed by, Steelcase.
+
+## 1. Before you start
+
+- **Keep the card the unit came with and flash a spare.** Never write over the original.
+  Put it back and the unit returns to its old software.
+- You need a microSD card of **2 GB or more** and a card writer for your PC. The image is
+  1.57 GiB; the system grows to fill a bigger card on first boot.
+- ⚠️ **The card socket is inside the unit, but easy to reach.** The microSD card sits on
+  the main board and you get at it by removing the **back** cover with plastic prying
+  tools. No screwdriver is needed. First unplug the RJ45 (PoE) cable, since that is the
+  only power lead. Then pry around the back cover and pop the box open; the card is
+  right there. Go gently: plastic clips break.
+
+## 2. Flash, insert, use
+
+1. Download the image from the project's **Releases** page on GitHub, with its checksum
+   file, and check the checksum. [unverified: the release page, the image's file name and
+   its compression do not exist yet]
+2. Write the image to the spare card with a card writer (Raspberry Pi Imager, balenaEtcher
+   or Rufus, using its "write a disk image" option). This erases the card.
+3. Put the card back in the unit. Refit the back cover; it can sit loosely without fully
+   clicking in, which is handy if you re-flash the card later.
+4. Connect the **PoE (power over Ethernet) adapter**: the unit gets its power over the
+   Ethernet cable. For network, plug a network cable into the adapter's data side (the
+   network needs a DHCP server). It also works with no network at all: every app starts, the network apps say so, and plugging the cable in later brings the network up.
+5. **The first boot is slower.** On a large card (128 GB) it takes about **3 minutes**
+   before the launcher appears; later boots are fast. What you will see: the two LEDs
+   flash for the first few seconds; after about 8 seconds the screen comes on and boot
+   text scrolls; it pauses a little (around 11 seconds) at "starting udevd"; then the
+   unit names itself (`arca-` plus four random hex digits; "arca" is the project's
+   codename and shows up in names like this) and spends about 2 minutes 20 seconds
+   growing its storage to fill the card, with little on screen. After that it starts the
+   network. With no DHCP server it waits about 15 seconds, then carries on without it.
+   The launcher is up at about 3 minutes. A smaller card grows faster. [unverified: times
+   on cards other than 128 GB]
+6. The launcher appears: a grid of tiles. Tap one to start it. Leaving an app returns to
+   the launcher.
+7. If the status line says **NOT CALIBRATED**, open Control Panel, **Input**,
+   **CALIBRATE**, and tap the targets as shown. Touch calibration is fitted per unit and
+   is not part of the image.
+
+Besides touch, a USB keyboard, mouse and Xbox 360 controller work in the launcher, the
+Control Panel and the games (arrows, Enter/Space, Esc/Backspace to go back). The unit's USB
+port is micro-USB, so you need a micro-USB-to-USB (OTG) adapter and/or a USB hub. An Xbox
+controller needs a **powered** hub.
+
+## 3. The apps
+
+| Tile | What it is |
+|---|---|
+| Snake, Tetris, Pong, Brick Breaker, SameGame, Frogger, Office Runner | Games. They take touch, keyboard and pad. Scores are kept. |
+| Tap-a-Theremin | A touch instrument: slide a finger to change the pitch. |
+| Terminal | A text login on the unit's screen. Root needs a password first (section 5). |
+| Control Panel | Settings and tests for the unit itself (section 4). |
+| VNC Client | Shows another computer's screen (section 4). |
+| ScummVM | Runs classic point-and-click adventures. **No game data is included.** |
+
+**ScummVM games: you bring your own.** There is no on-screen way to add them yet, and
+USB thumb drives are not supported yet (on the roadmap). The only route today is a copy
+over SSH (section 5), for example
+`scp -r <game-folder> root@<ip>:/home/root/data/games/<game-folder>/`, then **Add Game**
+in ScummVM's own launcher. Free, legal games (Beneath a Steel Sky, Flight of the Amazon
+Queen and others) are listed at <https://www.scummvm.org/games/>; prefer the floppy
+versions, which are a few MiB. The ScummVM in the default build has the SCUMM, HE, AGI,
+SCI, AGOS, Sky and Queen engines; other engines are not in it.
+[unverified: that the published image was built with the default engine set, and that the
+Add Game browser on the panel can reach `/home/root/data/games`; the path is the one the
+ScummVM port's own README gives]
+
+## 4. Configure
+
+Open **Control Panel** from the launcher. Its pages, from the source:
+
+| Page | What it does |
+|---|---|
+| Audio | Sound on or off, music and effects, output device (speaker, USB audio, a paired Bluetooth headset), a test chime. |
+| Display | Backlight, portrait or landscape, which screen area is visible and which is touchable, display tests. |
+| LED | The two indicator LEDs: on or off, brightness, tests. |
+| USB | The devices on the USB port; RESCAN revives a port that came up dead. |
+| Bluetooth | Scan, pair, connect, remove; use a headset for audio. Needs a USB Bluetooth adapter, since the unit has no radio. Tested with the TRENDnet TWB-107UB; other adapters are [unverified]. |
+| Input | Touch calibration and diagnostics; keyboard, mouse and pad testers; which pad is player 1 to 4. |
+| Network | Gateway, DNS, and each interface's state, IP address and MAC. |
+| SSH | Remote login: mode, root login, root password, host name. |
+| Monitor | Uptime, load, temperature, memory and storage, with graphs. |
+| System | Date, time and time zone. |
+| Log | The unit's logs, read-only. |
+| Information | Kernel, host name, boot target and other identity figures; **RESET DEFAULTS** (backs the settings file up first). |
+
+**VNC Client** shows another computer's desktop, for example a Raspberry Pi running a VNC
+server such as x11vnc. No server is configured out of the box, so the first launch cannot
+connect: on the reconnect screen tap **SETTINGS**, enter host, port and password, then
+**SAVE & RECONNECT**. Inside a session, hold the top-left corner for 3 seconds to reopen
+the settings. VNC passwords are cut to 8 characters, so use a throwaway LAN password.
+[unverified: connecting to a server that has no password]
+
+## 5. Reaching the unit over SSH (optional)
+
+You need SSH only to add ScummVM games or copy files off; the screen is enough for
+everything else. The image ships with **root locked and SSH closed to everyone**. The
+root password is first set **on the unit itself: Control Panel, SSH page, PASSWORD** (typed
+twice on the on-screen keyboard, 6 to 32 characters). The Terminal app prints the same
+hint while root is locked ("bad salt" means exactly this).
+
+1. SSH page: **PASSWORD**, set one.
+2. **ROOT LOGIN**: tap **ALLOW** and confirm.
+3. **MODE**: choose **KEY + PASSWORD** and confirm.
+4. From your PC run `ssh-copy-id root@<ip>` (Linux, macOS, WSL) and give the password. The
+   IP is on the Control Panel **Network** page, the host name on **Information**;
+   `ssh root@arca-xxxx.local` may work too.
+   [unverified: that `.local` names resolve from Windows and macOS PCs, and a Windows
+   command for copying the key without `ssh-copy-id`]
+5. Check that `ssh root@<ip>` logs in with the key, then on the SSH page choose
+   **KEY ONLY**. **OFF** closes the port instead, also across reboots.
+
+After you flash a card again, the unit has a new host key: run `ssh-keygen -R <ip>` or SSH
+refuses with a warning.
+
+## 6. Updating
+
+There is no update mechanism yet. **To update, flash the new image to the card again.**
+⚠️ A re-flash wipes everything on the card: **high scores, touch calibration, settings,
+the SSH password and keys, and ScummVM games and saves.** Copy what you want to keep off
+the unit first (over SSH, from `/home/root/data`).
+
+## 7. Troubleshooting
+
+| Symptom | Try |
+|---|---|
+| Blank screen just after power-up | Normal for the first 8 seconds. The first boot on a large card takes about 3 minutes. If it lasts much longer, see the LED table below, then re-flash the card and check the download's checksum. |
+| Does not boot from the new card | Re-seat the card and re-flash it. Put the original card back to confirm the unit itself is fine. |
+| Touch is off | Control Panel, **Input**, **CALIBRATE**. |
+| Cannot find the unit on the network | Check the Control Panel **Network** page, or your router's device list for `arca-xxxx`. The unit needs a DHCP server. |
+| Terminal says "bad salt" | Root has no password yet: section 5, step 1. |
+| SSH warns the host key changed | You re-flashed: `ssh-keygen -R <ip>`. |
+| VNC cannot connect | Check host, port and password in its settings; the server must be reachable from the unit's network. |
+| Silent | Control Panel, **Audio**: check the output device and press TEST. |
+| Go back to the original software | Power off and put the original card back. |
+
+### What the two LEDs mean
+
+The LEDs report boot progress before Linux starts. A good cold boot: green at 1 second,
+red at 2, green at 3, off at 4, three short red flashes, three short green flashes, green
+then off at 6, dark until the screen comes on at about 8 to 9 seconds. When Linux takes
+over, the LEDs turn amber (both lit at half brightness). The **last LED state shows where
+a failed boot stopped**:
+
+| LED | Meaning |
+|---|---|
+| dark from the start | The first boot stage never ran: the card's boot files are missing or unreadable. |
+| red, then red + green | Early boot is working. Staying red means the memory test failed. |
+| red + green, steady | Stuck before handing over: the boot loader file is missing or unreadable. |
+| red blinking, twice a second | A failure was detected in early boot. |
+| green, steady | Waiting for the card, or the card does not answer. |
+| dark (after the flashes) | Loading the system failed or hung. |
+| yellow blinking, twice a second | Nothing could boot: neither the system file nor its fallback loaded. |
+
+(Source: `SYSTEM_ANALYSIS.md` section 4.7, "Reading a failed boot by the two side LEDs", and
+`uboot/BUILD.md`, "Boot-progress LEDs".) The red blink and the yellow blink have not been
+seen on hardware, so treat them as [unverified].
+
+Once the system is running: a **red LED with a red square on screen** means the processor
+is over temperature (the monitor service lights it until it cools). The Control Panel
+**LED** page can switch the LEDs off or change their brightness, and some games blink the
+LEDs for feedback. [unverified: any LED pattern for running normally, for shutdown, or for
+errors after boot; none was found in the source]
+
+## Licence and source
+
+The project's own code is **MIT**. The image also carries GPL, LGPL and other open-source
+programs (the Linux kernel, BusyBox, ScummVM, BlueZ and more), each under its own licence.
+Their licence texts are on the card in `/usr/share/doc/arca-licenses/` (`LICENSE.md`,
+`manifest.csv`, `licenses/`, `SOURCE-OFFER.txt`). **The complete corresponding source of
+every image is attached to the same GitHub release as a source archive with its checksum;
+that is the written offer under GPL-2.0 section 3(a).** The full list is in `LICENSE.md`.
+[unverified: the exact wording and asset name; take both from the release that is actually
+published]
+
+Developers: building, deploying and the repository layout are in [DEVELOPING.md](DEVELOPING.md).

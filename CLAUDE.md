@@ -42,7 +42,7 @@ scheduled expiry built in: ⚠️ **nothing outside that file may cite one.** A 
 carries its own reason in full, and no ID sits beside it; `tests/doc_check.sh` group B counts any
 citation, resolving or not.
 
-`README.md` is the annotated walkthrough of every script; `LICENSE.md` the per-file licence record.
+`DEVELOPING.md` is the annotated walkthrough of every script; `README.md` is the user guide (flash, use, configure; no developer content); `LICENSE.md` the per-file licence record.
 
 **Adding to, correcting or closing out any of these goes through `/doc-update`.** It carries the order of
 operations that gets skipped: classify *before* opening a file, ask "is this reference **here**?" of the
@@ -121,7 +121,7 @@ line endings. Use `Edit`, or `sed -i`.
 Everything builds with the ARM cross-compiler and deploys over SSH. There is **no CI**, but
 `./tests/run-all.sh` is the host gate — every test that needs no device, plus `shellcheck` — and
 `deploy-all.sh` and `release.sh` both **run it and refuse to build if it fails**; `--skip-tests` opts
-out. Authoring and running rules: `tests/CLAUDE.md`. `--help` on any script is current; `README.md` has
+out. Authoring and running rules: `tests/CLAUDE.md`. `--help` on any script is current; `DEVELOPING.md` has
 the annotated walkthrough.
 
 ```bash
@@ -196,7 +196,7 @@ tool-level traps rather than device facts, and each has cost real time.
   `command -v` sweep run in the wrong shell reports a host with no toolchain at all. That happened
   (2026-08-06): it was recorded as fact and made a plan entry read as a hard blocker on all building.
   **State which shell a prerequisite claim was measured in**, and measure with `wsl.exe -e bash -lc`.
-  The measured inventory lives in `README.md` → *Before anything builds*.
+  The measured inventory lives in `DEVELOPING.md` → *Before anything builds*.
 - ⚠️ **`strings` is one of those absences, and it fails *silently* into a wrong answer about the
   device.** `strings <device-binary> 2>/dev/null | grep -q <option>` in Git Bash prints nothing —
   because `strings` does not exist, not because the option is missing — so it reads as "the vendor's

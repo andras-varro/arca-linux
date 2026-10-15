@@ -365,7 +365,7 @@ Finding the source of a program on the card
 
 Rebuilding
 ----------
-Each component builds with the script that sits beside it in repo/ (see README.md in
+Each component builds with the script that sits beside it in repo/ (see DEVELOPING.md in
 repo/ for the order): rootfs/build-rootfs.sh, kernel/build-image.sh, uboot/build.sh,
 native_apps/build-and-deploy.sh, vnc_client, scummvm-arca, bluetooth, usb_host. The
 scripts fetch the same tarballs that are in this tar and check them against the hashes

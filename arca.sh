@@ -67,7 +67,7 @@ scripts it calls. To script a step, call that script directly:
   ./rootfs/make-card-image.sh --mlo <f> --uboot <f> --kernel <f> --bundle <b> <rootfs.tar> <out.img>   card image
   ./setup-build-env.sh [--install-deps] [--scummvm]     host build prerequisites
 
-Full guide: README.md
+Full guide: DEVELOPING.md
 USAGE
 }
 

@@ -2042,7 +2042,7 @@ parent sets a display title: `killall`/`pidof` match a process whose `cmdline` r
 Everything cross-compiles on the host and deploys over SSH. **There is no CI**; what does run before a
 deploy, and what is an interactive diagnostic rather than a test, is in `tests/CLAUDE.md`.
 
-Host toolchain and build prerequisites: `CLAUDE.md`, and `README.md` → *Before anything builds*.
+Host toolchain and build prerequisites: `CLAUDE.md`, and `DEVELOPING.md` → *Before anything builds*.
 
 ### 6.1 Cortex-A8 has no hardware integer divide
 

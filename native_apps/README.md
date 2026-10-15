@@ -257,6 +257,6 @@ Or manually: `ssh root@<ip> '/etc/init.d/arca-app start|stop|status'`
 
 ## Resources
 
-- **Device / SSH setup:** [README.md](../README.md)
+- **Device / SSH setup:** [DEVELOPING.md](../DEVELOPING.md) (SSH setup: [README.md](../README.md), section 5)
 - **Hardware specs:** [SYSTEM_ANALYSIS.md](../SYSTEM_ANALYSIS.md)
 - **ScummVM backend:** [scummvm-arca/SCUMMVM_DEV.md](../scummvm-arca/SCUMMVM_DEV.md)
