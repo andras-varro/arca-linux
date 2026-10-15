@@ -29,7 +29,7 @@
 *.conf text eol=lf
 *.app  text eol=lf
 # device-files/ is installed onto the device VERBATIM by two consumers
-# (commissioning/provision.sh over SSH, commissioning/commission-offline.sh onto
+# (provision.sh over SSH, rootfs/commission-offline.sh onto
 # a mounted card), and its init scripts have no .sh extension because
 # /etc/init.d/audio-enable is the name the rc5.d link points at. So the rule above
 # does not cover them, and a CRLF here breaks the boot exactly as described at the

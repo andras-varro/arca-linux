@@ -560,7 +560,7 @@ tests/.sab-*
 # The operator's own priority list; personal, never tracked
 prio.lst
 
-# commissioning/backup.sh output: per-unit state of a unit, INCLUDING SECRETS (VNC
+# backup.sh output: per-unit state of a unit, INCLUDING SECRETS (VNC
 # password, SSH host keys). Never committed.
 backups/
 

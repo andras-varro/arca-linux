@@ -32,7 +32,7 @@ already have built. Copies each resulting .ko to <dir>.
 
 --deploy <ip>  also copy each .ko to /lib/modules/4.14.52/extra/ on root@<ip>, check its md5
                there, and restart /etc/init.d/touch-module if that is installed. The loader
-               and its boot link come from commissioning/provision.sh, not from here.
+               and its boot link come from provision.sh, not from here.
 EOF
 }
 
@@ -90,4 +90,4 @@ for ko in "${BUILT_KOS[@]}"; do
     echo "deployed: ${DEVICE_MODDIR}/${name}  md5 ${got}"
 done
 # A loaded module keeps running the old code until it is reloaded.
-ssh "$DEVICE" "[ -x /etc/init.d/touch-module ] && /etc/init.d/touch-module restart || echo 'touch-module not installed: run commissioning/provision.sh ${DEVICE_IP}'"
+ssh "$DEVICE" "[ -x /etc/init.d/touch-module ] && /etc/init.d/touch-module restart || echo 'touch-module not installed: run provision.sh ${DEVICE_IP}'"

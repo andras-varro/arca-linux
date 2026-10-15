@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# commission_offline_test.sh — regression for commissioning/commission-offline.sh's VERIFY pass
+# commission_offline_test.sh — regression for rootfs/commission-offline.sh's VERIFY pass
 #
 # Host-only. No SD card and no device: the card is the synthetic tree from
 # tests/make-fake-card.sh, mounted nowhere and handed over with --base.
@@ -27,7 +27,7 @@
 # itself.
 #
 # The sabotages run against COPIES — a copy of the bundle, and a copy of just the
-# scripts commissioning/commission-offline.sh reads (not the repo, which carries 4 GB of card
+# scripts rootfs/commission-offline.sh reads (not the repo, which carries 4 GB of card
 # images). SCRIPT_DIR is derived from the script's own location, so a copied tree
 # is a genuinely different installation.
 #
@@ -63,13 +63,13 @@ fi
 TMP=$(mktemp -d /tmp/arca-comm-test.XXXXXX)
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
-# A copy of only what commissioning/commission-offline.sh reads. `cp -a` on device-files/ so the
+# A copy of only what rootfs/commission-offline.sh reads. `cp -a` on device-files/ so the
 # init scripts keep their bytes — that copy is also what brings arca-app and the
 # other files the provision plan installs from there; nothing here needs the 4 GB card
 # images.
 REPO="$TMP/repo"
-mkdir -p "$REPO/native_apps" "$REPO/commissioning" "$REPO/lib"
-for f in commissioning/commission-offline.sh \
+mkdir -p "$REPO/native_apps" "$REPO/rootfs" "$REPO/lib"
+for f in rootfs/commission-offline.sh \
          lib/arca-identify.sh lib/product.sh lib/arca-provision.sh lib/arca-bundle.sh; do
     cp "$REPO_DIR/$f" "$REPO/$f"
 done
@@ -84,7 +84,7 @@ run() {
     local bundle="$1" repo="$2"; shift 2
     bash "$SCRIPT_DIR/make-fake-card.sh" "$TMP/card" >/dev/null || return 1
     set +e
-    OUT=$(bash "$repo/commissioning/commission-offline.sh" \
+    OUT=$(bash "$repo/rootfs/commission-offline.sh" \
               --bundle "$bundle" --base "$TMP/card" "$@" 2>&1 < /dev/null)
     ST=$?
     set -e
@@ -146,7 +146,7 @@ echo "0. the fixture tree covers everything the tool sources"
 # fixture is what is broken, not the tool, and 0b names the file. A near-total red
 # here is a copy-list symptom until 0b says otherwise.
 SRC_LINES=$(grep -hoE '\.[[:space:]]+"[^"]*/lib/[^"]+"' \
-                "$REPO"/commissioning/*.sh "$REPO"/lib/*.sh \
+                "$REPO"/rootfs/*.sh "$REPO"/lib/*.sh \
             | sed 's|.*/\(lib/[^"]*\)"|\1|' | sort -u)
 SRC_N=$(printf '%s\n' "$SRC_LINES" | grep -c . )
 # Ask which part of the count is the harness: a grep whose pattern has rotted
@@ -221,8 +221,8 @@ expect_fires 'md5 mismatch' "2a a corrupted staged file is caught by md5"
 B="$TMP/b-nochmod"; cp -a "$BUNDLE_SRC" "$B"
 R="$TMP/repo-nochmod"; cp -a "$REPO" "$R"
 sed -i 's/^    chmod "\$mode" "\$dest"$/    : "no chmod — deliberately broken copy"/' \
-    "$R/commissioning/commission-offline.sh"
-grep -q 'no chmod — deliberately broken' "$R/commissioning/commission-offline.sh" \
+    "$R/rootfs/commission-offline.sh"
+grep -q 'no chmod — deliberately broken' "$R/rootfs/commission-offline.sh" \
     || bad "2b harness: the chmod sabotage did not apply"
 # The bundle's staged files must not already be executable, or the check would
 # pass for the wrong reason — cp -a from /mnt/c carries 0777.
@@ -295,7 +295,7 @@ expect_fires 'no ELF binaries' "2g a bundle with no ARM binaries is refused, not
 # say so loudly rather than report a pass over zero artifacts. Simulated through
 # the OBJDUMP override, because uninstalling binutils to test this is absurd.
 set +e
-OUT=$(OBJDUMP=definitely-no-such-objdump bash "$REPO/commissioning/commission-offline.sh" \
+OUT=$(OBJDUMP=definitely-no-such-objdump bash "$REPO/rootfs/commission-offline.sh" \
           --bundle "$BUNDLE" --base "$TMP/card" 2>&1); ST=$?
 set -e
 if [ "$ST" -ne 0 ] && printf '%s\n' "$OUT" | grep -q 'IS NOT INSTALLED' \
@@ -307,7 +307,7 @@ fi
 
 bash "$SCRIPT_DIR/make-fake-card.sh" "$TMP/card" >/dev/null
 set +e
-OUT=$(OBJDUMP=definitely-no-such-objdump bash "$REPO/commissioning/commission-offline.sh" \
+OUT=$(OBJDUMP=definitely-no-such-objdump bash "$REPO/rootfs/commission-offline.sh" \
           --bundle "$BUNDLE" --base "$TMP/card" --arm-check=skip 2>&1); ST=$?
 set -e
 if [ "$ST" -eq 0 ] && printf '%s\n' "$OUT" | grep -q 'NOT CHECKED'; then
@@ -332,7 +332,7 @@ echo "3. the card itself"
 bash "$SCRIPT_DIR/make-fake-card.sh" "$TMP/card" >/dev/null
 mv "$TMP/card/root" "$TMP/card/.r"; mv "$TMP/card/log" "$TMP/card/root"; mv "$TMP/card/.r" "$TMP/card/log"
 set +e
-OUT=$(bash "$REPO/commissioning/commission-offline.sh" \
+OUT=$(bash "$REPO/rootfs/commission-offline.sh" \
           --bundle "$BUNDLE" --base "$TMP/card" 2>&1); ST=$?
 set -e
 expect_fires 'do not look right|does not look like' "3a the four mounts in the wrong order are refused"
@@ -340,7 +340,7 @@ expect_fires 'do not look right|does not look like' "3a the four mounts in the w
 # A base that is not a card at all.
 mkdir -p "$TMP/notacard"
 set +e
-OUT=$(bash "$REPO/commissioning/commission-offline.sh" \
+OUT=$(bash "$REPO/rootfs/commission-offline.sh" \
           --bundle "$BUNDLE" --base "$TMP/notacard" 2>&1); ST=$?
 set -e
 expect_fires 'do not look right|does not look like' "3b a directory that is not a card is refused"
@@ -403,7 +403,7 @@ done
 bash "$SCRIPT_DIR/make-fake-card.sh" "$TMP/card" >/dev/null
 _sum0=$(find "$TMP/card" -type f -o -type l | sort | md5sum)
 set +e
-OUT=$(bash "$REPO/commissioning/commission-offline.sh" --bundle "$BUNDLE" --base "$TMP/card" --no-clean 2>&1 < /dev/null); ST=$?
+OUT=$(bash "$REPO/rootfs/commission-offline.sh" --bundle "$BUNDLE" --base "$TMP/card" --no-clean 2>&1 < /dev/null); ST=$?
 set -e
 if [ "$ST" -ne 0 ] && [ "$(find "$TMP/card" -type f -o -type l | sort | md5sum)" = "$_sum0" ]; then
     ok "6b a refused flag writes nothing to the card"
@@ -415,7 +415,7 @@ fi
 # EOF and either refuse (the old backup question) or hang a terminal.
 bash "$SCRIPT_DIR/make-fake-card.sh" "$TMP/card" >/dev/null
 set +e
-OUT=$(timeout 120 bash "$REPO/commissioning/commission-offline.sh" --bundle "$BUNDLE" --base "$TMP/card" < /dev/null 2>&1); ST=$?
+OUT=$(timeout 120 bash "$REPO/rootfs/commission-offline.sh" --bundle "$BUNDLE" --base "$TMP/card" < /dev/null 2>&1); ST=$?
 set -e
 if [ "$ST" -eq 0 ] && ! printf '%s\n' "$OUT" | grep -qiE 'backup\?|\(yes/no\)|\(y/n\)|\[y/N\]'; then
     ok "6c </dev/null runs to completion with no prompt"
@@ -424,7 +424,7 @@ else
     printf '%s\n' "$OUT" | tail -5 | sed 's/^/        /'
 fi
 # And nothing in the script can ask: no bare `read` (a read from a file is not a prompt).
-if grep -nE "^[[:space:]]*read[[:space:]]" "$REPO/commissioning/commission-offline.sh" | grep -v "<" | grep -q .; then
+if grep -nE "^[[:space:]]*read[[:space:]]" "$REPO/rootfs/commission-offline.sh" | grep -v "<" | grep -q .; then
     bad "6d commission-offline.sh contains a terminal read"
 else
     ok "6d commission-offline.sh contains no terminal read"
@@ -436,7 +436,7 @@ bash "$SCRIPT_DIR/make-fake-card.sh" "$TMP/card" >/dev/null
 rm -f "$TMP/card/root/etc/arca-rootfs"
 printf 'SteelCase RW20 Embedded Platform (Yocto) 3.1.4 \\n \\l\n' > "$TMP/card/root/etc/issue"
 set +e
-OUT=$(bash "$REPO/commissioning/commission-offline.sh" --bundle "$BUNDLE" --base "$TMP/card" 2>&1 < /dev/null); ST=$?
+OUT=$(bash "$REPO/rootfs/commission-offline.sh" --bundle "$BUNDLE" --base "$TMP/card" 2>&1 < /dev/null); ST=$?
 set -e
 expect_fires 'etc/arca-rootfs' "6e a root without our marker is refused, naming the marker"
 

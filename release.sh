@@ -25,7 +25,7 @@
 # libasound.so.2), which its stock rootfs provides — so there is nothing to ship beside them.
 #
 # rootfs/make-card-image.sh --bundle is the first non-developer consumer — it hands the bundle to
-# commissioning/commission-offline.sh, and an offline image build has no toolchain to fall back on,
+# rootfs/commission-offline.sh, and an offline image build has no toolchain to fall back on,
 # so a bundle IS its only source of binaries.
 #
 # ── What is NOT published, and why ──────────────────────────────────────────

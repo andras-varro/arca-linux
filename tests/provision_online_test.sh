@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# provision_online_test.sh — regression for the ORDER of commissioning/provision.sh
+# provision_online_test.sh — regression for the ORDER of provision.sh
 #
 # Host-only, no device, no root. Run it:
 #
@@ -10,7 +10,7 @@
 # a sequence, and a sequence is only visible from outside: this suite puts a fake
 # `ssh` and `scp` first on PATH, runs the REAL script against them, and reads the
 # one log every fake call appends to. The fake ssh answers just enough for
-# commissioning/backup.sh to succeed (a hostname, a one-file state list, a small tar
+# backup.sh to succeed (a hostname, a one-file state list, a small tar
 # on stdout); everything else it records and accepts.
 #
 #   A  a full run: the backup fetch precedes the first write; no vendor-clean plan
@@ -31,7 +31,7 @@
 
 set -u
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PROVISION="$REPO_DIR/commissioning/provision.sh"
+PROVISION="$REPO_DIR/provision.sh"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
 PASS=0; FAIL=0

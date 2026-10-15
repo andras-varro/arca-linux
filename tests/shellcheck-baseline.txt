@@ -1,7 +1,5 @@
 browser_games/compile_servlet.sh SC2034 1
 browser_games/compile_servlet.sh SC2086 1
-commissioning/commission-offline.sh SC2034 2
-commissioning/provision.sh SC2029 2
 deploy-all.sh SC2207 1
 device-files/enable-usb-host.sh SC2181 2
 lib/arca-release.sh SC2016 1
@@ -23,7 +21,9 @@ probes/xbee_probe.sh SC2004 1
 probes/xbee_probe.sh SC2046 1
 probes/xbee_socket_continuity.sh SC2034 1
 probes/xbee_uart_break_semantics.sh SC2034 1
+provision.sh SC2029 2
 release.sh SC2001 2
+rootfs/commission-offline.sh SC2034 2
 scummvm-arca/build-and-deploy.sh SC2012 2
 scummvm-arca/build-and-deploy.sh SC2029 4
 scummvm-arca/build-and-deploy.sh SC2086 1

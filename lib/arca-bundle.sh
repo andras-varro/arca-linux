@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # lib/arca-bundle.sh — the bundle layout that release.sh stages and publishes and
-#                    that commissioning/commission-offline.sh installs.
+#                    that rootfs/commission-offline.sh installs.
 #
 # SOURCED, not executed:   . "$REPO_ROOT/lib/arca-bundle.sh"
 #
@@ -20,7 +20,7 @@
 # Deliberate, decided 2026-09-01: no device scripts go in.  A holder of nothing but
 # the tarball therefore gets xpad.ko/joydev.ko/ff-memless.ko/devmem_write and nothing
 # that loads them at boot, and gets no arca-app either.
-# That is not a gap to fix.  commissioning/commission-offline.sh is the only consumer
+# That is not a gap to fix.  rootfs/commission-offline.sh is the only consumer
 # that installs those, it runs from a clone, so it has device-files/ beside it either
 # way — a self-sufficient tarball would buy a second copy of them and a second path
 # for an exec= to drift along.
@@ -219,7 +219,7 @@ EOF
 # arca_bundle_install_ssh TARGET DIR
 #
 # Install a staged bundle onto a running device over SSH.  The SSH twin of
-# commissioning/commission-offline.sh's install loop, for a device that is already
+# rootfs/commission-offline.sh's install loop, for a device that is already
 # up and reachable.
 #
 # ── Why this has to exist ───────────────────────────────────────────────────
@@ -289,7 +289,7 @@ arca_bundle_install_ssh() {
     rm -f "$dir/.chmod.out"
 
     # md5 every installed file against the manifest, on the device.  Same assertion
-    # commissioning/commission-offline.sh makes on the card, and the reason a truncated transfer
+    # rootfs/commission-offline.sh makes on the card, and the reason a truncated transfer
     # is caught here rather than by a blank screen later.
     local remote_md5 checked=0
     remote_md5=$(arca_bundle_entries "$dir" | awk -v p="$P" '{print p $2}' \

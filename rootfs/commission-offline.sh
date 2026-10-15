@@ -1,17 +1,17 @@
 #!/bin/bash
 #
-# commissioning/commission-offline.sh — the IMAGE STEP: install a release bundle and the
+# rootfs/commission-offline.sh — the IMAGE STEP: install a release bundle and the
 #                         provision plan into a card's partitions, mounted by the caller.
 #
 # The only caller is rootfs/make-card-image.sh --bundle, which loop-mounts the four
 # partitions of a card IMAGE it is building (our own Buildroot root on p3, marker
 # etc/arca-rootfs) and hands them over with --base. Nothing here reads a
 # terminal, scans a disk or mounts anything; it needs no root of its own and no network.
-# A unit already in service is updated online with commissioning/provision.sh.
+# A unit already in service is updated online with provision.sh.
 #
 # Usage:
-#   ./commissioning/commission-offline.sh --bundle <file.tar.gz|dir> --base <dir> [options]
-#   ./commissioning/commission-offline.sh --bundle <b> --base <dir> --dry-run
+#   ./rootfs/commission-offline.sh --bundle <file.tar.gz|dir> --base <dir> [options]
+#   ./rootfs/commission-offline.sh --bundle <b> --base <dir> --dry-run
 #
 #   --bundle <path>     A release tarball from `./release.sh --stage-only`, or a staged
 #                       bundle directory. THE source of binaries: this host has no
@@ -35,7 +35,7 @@
 #                              by UUID. p1 is not reachable from there at all.
 #   what to install            device-files/provision-rules.conf — the boot scripts,
 #                              the rc*.d links and the config fix-ups, shared with
-#                              commissioning/provision.sh so the two cannot drift.
+#                              provision.sh so the two cannot drift.
 #                              Modes are DECLARED there, never read off disk.
 #   which binaries             the bundle's own manifest (lib/arca-bundle.sh). Modes are
 #                              DECLARED there too.
@@ -93,7 +93,7 @@ usage() {
 Usage: $0 --bundle <file.tar.gz|dir> --base <dir> [options]
 
 The image step of rootfs/make-card-image.sh --bundle. Asks nothing, mounts nothing,
-needs no network. A unit in service is updated with commissioning/provision.sh.
+needs no network. A unit in service is updated with provision.sh.
 
   --bundle <path>    Release tarball or staged bundle directory (REQUIRED)
   --base <dir>       The card, already mounted as <dir>/{root,log}
@@ -346,7 +346,7 @@ put() {
 #
 # ⚠️ The decisions are NOT here. Every file, link, mode and config edit lives in
 # device-files/provision-rules.conf with a reason per entry, read by BOTH this
-# script and commissioning/provision.sh, so the two cannot drift.
+# script and provision.sh, so the two cannot drift.
 # They HAD drifted: the online path removed stale rc*.d links before relinking and
 # this one did not, so a card carrying an old S50arca-app came out of offline
 # commissioning with two links to one init script at two priorities.

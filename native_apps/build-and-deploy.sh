@@ -8,11 +8,11 @@
 #   ./build-and-deploy.sh --bundle <dir>       # build + stage into an offline bundle
 #
 # System setup (init service, audio, time-sync) is handled
-# separately by commissioning/provision.sh.  Run that once before deploying for the first time.
+# separately by provision.sh.  Run that once before deploying for the first time.
 #
 # --bundle stages the same artifacts this script would scp, under
 # <dir>/root/<device-path>, with a declared-mode manifest — the layout
-# ../release.sh publishes and ../commissioning/commission-offline.sh installs
+# ../release.sh publishes and ../rootfs/commission-offline.sh installs
 # from.  It always builds first: this component's
 # targets take well under a minute, so there is no reason for a
 # stage-what-is-already-there mode and therefore no way to bundle a stale
@@ -43,7 +43,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # The .app manifests are data in one file, written locally, and copied by BOTH
 # the deploy path and --bundle.  They used to be nine heredocs inside an
 # `ssh … <<REMOTE` block, so they existed only when a device was reachable and
-# ../commissioning/commission-offline.sh had no way to produce the same bytes.
+# ../rootfs/commission-offline.sh had no way to produce the same bytes.
 # shellcheck source=app-manifests.sh
 . "$SCRIPT_DIR/app-manifests.sh"
 # shellcheck source=sound-sets.sh
@@ -538,7 +538,7 @@ arca_bundle_clear_stamp "$DEVICE" \
 # starts the launcher this deploy is about to replace.
 if ! ssh "$DEVICE" "[ -x /etc/init.d/arca-app ]" 2>/dev/null; then
     warn "System setup not detected on device."
-    warn "Run commissioning/provision.sh first:  ../commissioning/provision.sh $DEVICE_IP"
+    warn "Run provision.sh first:  ../provision.sh $DEVICE_IP"
     echo ""
     read -r -p "Continue deploying anyway? (y/n): " confirm
     [[ "$confirm" != "y" ]] && exit 1
@@ -555,7 +555,7 @@ info "Stopping running apps (device init script)..."
 ssh "$DEVICE" 'if [ -x /etc/init.d/arca-app ]; then
     /etc/init.d/arca-app stop
 else
-    echo "  /etc/init.d/arca-app not installed - run ../commissioning/provision.sh <ip>"
+    echo "  /etc/init.d/arca-app not installed - run ../provision.sh <ip>"
 fi' || warn "stop reported a failure - a surviving process may hold the binaries"
 ok "Launcher stopped"
 
@@ -717,7 +717,7 @@ fi
 # The manifests were WRITTEN to build/apps/ during the build, from
 # app-manifests.sh's data, and are copied here.  They used to be nine
 # `cat > … << APP` heredocs inside this ssh block, which meant
-# ../commissioning/commission-offline.sh could not produce the same bytes
+# ../rootfs/commission-offline.sh could not produce the same bytes
 # without a second copy of them.
 info "Installing app manifests..."
 ssh "$DEVICE" "mkdir -p /opt/arca/apps"

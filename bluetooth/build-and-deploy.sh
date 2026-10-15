@@ -28,7 +28,7 @@
 #     /etc/bluetooth/main.conf (AutoEnable: the dongle re-enumerates with the USB tree)
 #     and /etc/bluetooth/input.conf (ClassicBondedOnly: HID only from bonded devices)
 #
-# The device files are installed by this script AND by commissioning/provision.sh /
+# The device files are installed by this script AND by provision.sh /
 # commission-offline.sh, from the same records — the way usb_host handles the `usb`
 # group. The .conf files cannot travel in the bundle: release.sh refuses any *.conf.
 #
@@ -71,7 +71,7 @@ usage() {
     echo ""
     echo "  The init script, its rc5.d link, the dbus policies, main.conf and input.conf are"
     echo "  device-files/provision-rules.conf's \`bluetooth\` group: this script runs"
-    echo "  that plan, and ./commissioning/provision.sh <ip> and commission-offline.sh"
+    echo "  that plan, and ./provision.sh <ip> and commission-offline.sh"
     echo "  install it too, from the same records."
     exit 1
 }
@@ -249,7 +249,7 @@ if [[ -z "$DEVICE_IP" ]]; then
 fi
 
 # ── 4. the `bluetooth` group of the provision plan ──────────────────────────
-# The same records and the same generated executor commissioning/provision.sh uses.
+# The same records and the same generated executor provision.sh uses.
 ts "[4/6] Init script, boot link, dbus policies, main.conf, input.conf (provision-rules.conf, group bluetooth)"
 # shellcheck source=../lib/arca-identify.sh
 . "$REPO_ROOT/lib/arca-identify.sh"

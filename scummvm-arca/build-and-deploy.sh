@@ -14,7 +14,7 @@
 #
 # --bundle stages this component's artifacts under <dir>/root/<device-path> with
 # a declared-mode manifest — the layout ../release.sh publishes and
-# ../commissioning/commission-offline.sh installs from.  This link takes
+# ../rootfs/commission-offline.sh installs from.  This link takes
 # ~1m35s–2m20s, so ARCA_BUNDLE_NO_BUILD=1 stages the binary already in
 # $SCUMMVM_DIR instead of relinking — it refuses if there is nothing there, so it
 # cannot silently bundle a component that was never built.  It CAN bundle a stale
@@ -28,7 +28,7 @@
 #   - SSH access to device
 #
 # System setup (bloatware cleanup, init service, audio, time-sync) is handled
-# separately by commissioning/provision.sh.  Run that once before deploying for the first time.
+# separately by provision.sh.  Run that once before deploying for the first time.
 #
 
 # Source-path directive: resolves the `source=` hints below against this script's directory.
@@ -670,7 +670,7 @@ deploy_to_device() {
     # Verify system setup has been done
     if ! ssh "$DEVICE" "[ -x /etc/init.d/arca-app ]" 2>/dev/null; then
         log_warning "System setup not detected on device."
-        log_warning "Run commissioning/provision.sh first:  ../commissioning/provision.sh $DEVICE_IP"
+        log_warning "Run provision.sh first:  ../provision.sh $DEVICE_IP"
         echo ""
         read -r -p "Continue deploying anyway? (y/n): " confirm
         [[ "$confirm" != "y" ]] && exit 1
@@ -688,7 +688,7 @@ deploy_to_device() {
     ssh "$DEVICE" 'if [ -x /etc/init.d/arca-app ]; then
     /etc/init.d/arca-app stop
 else
-    echo "  /etc/init.d/arca-app not installed - run ../commissioning/provision.sh <ip>"
+    echo "  /etc/init.d/arca-app not installed - run ../provision.sh <ip>"
 fi' || log_warning "stop reported a failure - a surviving process may hold the binary"
     
     # Copy binary to device
@@ -759,7 +759,7 @@ fi' || log_warning "stop reported a failure - a surviving process may hold the b
 # ── the .app manifest, written once ─────────────────────────────────────────
 # One heredoc, into a file, used by BOTH deploy_to_device and stage_bundle.  It
 # used to live inside `ssh "$DEVICE" bash <<REMOTE`, so it existed only when a
-# device was reachable and ../commissioning/commission-offline.sh could not
+# device was reachable and ../rootfs/commission-offline.sh could not
 # produce the same bytes.
 #
 # args=none: ScummVM opens /dev/fb0 and the evdev devices itself — it has its own

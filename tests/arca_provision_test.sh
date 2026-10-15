@@ -30,7 +30,7 @@
 #
 # /mnt/c reports every file 0777 and discards chmod, and WSL's own /tmp does honour
 # modes — so group D runs under $(mktemp -d) and CAN assert a mode. What it cannot
-# do is prove the DEVICE gets it; that assertion is commissioning/commission-offline.sh's verify
+# do is prove the DEVICE gets it; that assertion is rootfs/commission-offline.sh's verify
 # phase against real ext4.
 
 # Source-path directive: resolves the source= hints below against this script's directory.
@@ -432,7 +432,7 @@ OFF=$(ARCA_PROVISION_DRY=1 arca_provision_apply_offline "$CARD" "$TMP/plan" "$RE
         | arca_provision_canonical)
 
 # The ONLINE executor, run here as the device would run it: arca_provision_online_script
-# emits the interpreter that commissioning/provision.sh pipes to `ssh <target> sh -s`, and it is
+# emits the interpreter that provision.sh pipes to `ssh <target> sh -s`, and it is
 # run against a chroot-shaped copy so nothing touches this host. That is what makes
 # this a comparison of the two EXECUTORS rather than of one executor and a wish.
 ONLINE_ROOT="$TMP/online"
@@ -475,7 +475,7 @@ echo "F. the online path's copy step — the one-of-eight install defect"
 # E compares two --dry-run PLANS; a dry run copies nothing, so the scp step is
 # precisely the part of the online path that has no offline counterpart to be
 # compared against. That is how the defect shipped past 94 passing cases:
-# commissioning/provision.sh installed 1 of its 8 files, because `ssh` inside
+# provision.sh installed 1 of its 8 files, because `ssh` inside
 # `while read … done < "$PLAN"` reads its own stdin and forwarded the whole rest of
 # the plan to the remote `mkdir`.
 #

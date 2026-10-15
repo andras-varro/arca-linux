@@ -6,7 +6,7 @@
 # existing script with arguments, so anything that works today keeps working
 # exactly as it did, and those scripts stay non-interactive when called directly:
 #
-#   commissioning/provision.sh           update a running unit, over SSH, ends in a reboot
+#   provision.sh                         update a running unit, over SSH, ends in a reboot
 #   deploy-all.sh                        over SSH, per-component
 #   rootfs/make-card-image.sh            a whole card image, offline (runs commission-offline.sh)
 #
@@ -64,8 +64,8 @@ USAGE
 arguments of its own beyond --help, and reimplements none of the flags of the
 scripts it calls. To script a step, call that script directly:
 
-  ./commissioning/provision.sh <target> [flags]         update a unit (ssh, reboots)
-  ./commissioning/provision.sh <target> --hostname NAME name only, no reboot
+  ./provision.sh <target> [flags]                       update a unit (ssh, reboots)
+  ./provision.sh <target> --hostname NAME               name only, no reboot
   ./deploy-all.sh <target> [component]                  deploy (ssh)
   ./rootfs/make-card-image.sh --mlo <f> --uboot <f> --kernel <f> --bundle <b> <rootfs.tar> <out.img>   card image
   ./setup-build-env.sh [--install-deps] [--scummvm]     host build prerequisites
@@ -83,7 +83,7 @@ esac
 # ── the one piece of real logic: waiting for a device ────────────────────────
 # Lives here rather than in the three scripts because it is only needed BETWEEN
 # phases — a device that has just been powered on, or has just been rebooted by
-# commissioning/provision.sh. Polling SSH itself (not ping) is deliberate: ping answers
+# provision.sh. Polling SSH itself (not ping) is deliberate: ping answers
 # while sshd is still starting, which is exactly the window that produces a
 # confusing "Cannot reach <ip>" from the next phase.
 #
@@ -144,7 +144,7 @@ confirm() {
 
 # ── Image a card ────────────────────────────────────────────────────────────
 # A composition like everything else here: it execs rootfs/make-card-image.sh, which builds
-# the whole image file and itself runs commissioning/commission-offline.sh over the
+# the whole image file and itself runs rootfs/commission-offline.sh over the
 # partitions it mounts. Nothing is written to a physical card by this item.
 do_image_card() {
     hdr "6. Build a card IMAGE (our own root, bundle installed, offline)"
@@ -213,24 +213,24 @@ MENU
         read -r -p "Choice: " choice
         case "$choice" in
             a) ask_target || { pause; continue; }
-               bash "$SCRIPT_DIR/commissioning/provision.sh" "$TARGET" || err "Setup failed."
+               bash "$SCRIPT_DIR/provision.sh" "$TARGET" || err "Setup failed."
                pause ;;
             b) ask_target || { pause; continue; }
-               bash "$SCRIPT_DIR/commissioning/provision.sh" "$TARGET" --dry-run \
+               bash "$SCRIPT_DIR/provision.sh" "$TARGET" --dry-run \
                    || err "Dry run failed."
                pause ;;
             c) ask_target || { pause; continue; }
                local name
                read -r -p "New host name (single label, e.g. rw09): " name
                if [ -n "$name" ]; then
-                   bash "$SCRIPT_DIR/commissioning/provision.sh" "$TARGET" --hostname "$name" \
+                   bash "$SCRIPT_DIR/provision.sh" "$TARGET" --hostname "$name" \
                        || err "Could not set the host name."
                else
                    warn "No name given; skipped."
                fi
                pause ;;
             d) ask_target || { pause; continue; }
-               bash "$SCRIPT_DIR/commissioning/provision.sh" "$TARGET" --status || err "Status failed."
+               bash "$SCRIPT_DIR/provision.sh" "$TARGET" --status || err "Status failed."
                pause ;;
             back|q|Q|"") return 0 ;;
             *) err "Not a choice: $choice"; pause ;;
@@ -307,7 +307,7 @@ SRC
 do_status() {
     hdr "4. Device status (read-only)"
     ask_target || return 0
-    bash "$SCRIPT_DIR/commissioning/provision.sh" "$TARGET" --status || err "Status failed."
+    bash "$SCRIPT_DIR/provision.sh" "$TARGET" --status || err "Status failed."
 }
 
 # ── First boot of an imaged card ────────────────────────────────────────────

@@ -13,7 +13,7 @@
 # network" is answerable by looking at the source list.
 #
 # It is also THIN on purpose.  deploy-all.sh --from-bundle and
-# commissioning/commission-offline.sh --bundle both already accept either a
+# rootfs/commission-offline.sh --bundle both already accept either a
 # tarball or an unpacked directory, install from the manifest and verify md5.  So
 # a fetch is: resolve, download, verify, hand over the path.  Nothing here
 # installs anything, and nothing here touches a device.

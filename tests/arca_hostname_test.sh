@@ -2,7 +2,7 @@
 #
 # arca_hostname_test.sh — regression for the host-name tools of the generic image:
 #
-#   A  commissioning/set-hostname.sh (installed on the unit as /usr/sbin/set-hostname):
+#   A  rootfs/board/arca/overlay/usr/sbin/set-hostname (installed on the unit as /usr/sbin/set-hostname):
 #      a valid name lands in /etc/hostname and /etc/hosts; every invalid name exits
 #      non-zero with ONE stderr line and leaves both files untouched.
 #   B  rootfs/board/arca/overlay/etc/init.d/firstboot-hostname: the placeholder
@@ -22,7 +22,7 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-SETTER="$REPO_DIR/commissioning/set-hostname.sh"
+SETTER="$REPO_DIR/rootfs/board/arca/overlay/usr/sbin/set-hostname"
 FIRST="$REPO_DIR/rootfs/board/arca/overlay/etc/init.d/firstboot-hostname"
 SSHD="$REPO_DIR/rootfs/board/arca/overlay/etc/init.d/sshd"
 

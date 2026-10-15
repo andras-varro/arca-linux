@@ -62,7 +62,7 @@ usage() {
     echo ""
     echo "  The four device scripts and the three rc5.d links are NOT installed from"
     echo "  here in isolation — they are device-files/provision-rules.conf's \`usb\`"
-    echo "  group, and this script runs that same plan. ./commissioning/provision.sh"
+    echo "  group, and this script runs that same plan. ./provision.sh"
     echo "  <ip> and commission-offline.sh install it too, from the same records."
     exit 1
 }
@@ -253,7 +253,7 @@ fi
 #
 # ⚠️ The decisions are NOT here. The three device scripts, their modes and the two
 # rc5.d links are records in device-files/provision-rules.conf, read by this
-# script, by commissioning/provision.sh and by commission-offline.sh — so the three
+# script, by provision.sh and by commission-offline.sh — so the three
 # paths cannot drift. The executor is the SAME
 # generated interpreter provision.sh pipes to the device.
 #
@@ -280,7 +280,7 @@ info "$(arca_provision_plan_summary "$USB_PLAN")"
 # `install` is the one verb the remote interpreter cannot do alone: the source
 # bytes are on this host, so they go over scp first and it only sets the mode.
 # ⚠️ The loop is lib/arca-provision.sh's, not a copy, and history says why: this script and
-# commissioning/provision.sh each had one, both reading the plan on stdin with an
+# provision.sh each had one, both reading the plan on stdin with an
 # `ssh` in the body, and both therefore installed exactly one file.
 arca_provision_push_installs "$USB_PLAN" "$REPO_ROOT" "$DEVICE" \
     || err "could not copy the usb provision sources to the device"

@@ -9,11 +9,11 @@
 #   ./build-and-deploy.sh --bundle <dir>         # build + stage into an offline bundle
 #
 # System setup (bloatware cleanup, init service, audio, time-sync) is handled
-# separately by commissioning/provision.sh.  Run that once before deploying for the first time.
+# separately by provision.sh.  Run that once before deploying for the first time.
 #
 # --bundle stages this component's artifacts under <dir>/root/<device-path> with
 # a declared-mode manifest — the layout ../release.sh publishes and
-# ../commissioning/commission-offline.sh installs from.  It stages the
+# ../rootfs/commission-offline.sh installs from.  It stages the
 # binary, the icon and the .app manifest and DELIBERATELY NOT vnc_client.conf:
 # that file holds a plaintext VNC password, and a release must publish binaries
 # only, never device config.
@@ -140,7 +140,7 @@ echo ""
 # ── 3c. the .app manifest, written once ─────────────────────────────────────
 # One heredoc, into a file, used by BOTH the deploy path and --bundle.  It used
 # to live inside `ssh "$DEVICE" bash <<REMOTE`, so it existed only when a device
-# was reachable; ../commissioning/commission-offline.sh needs the same bytes with
+# was reachable; ../rootfs/commission-offline.sh needs the same bytes with
 # no device.
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT INT TERM
@@ -222,7 +222,7 @@ info "Stopping running apps (device init script)..."
 ssh "$DEVICE" 'if [ -x /etc/init.d/arca-app ]; then
     /etc/init.d/arca-app stop
 else
-    echo "  /etc/init.d/arca-app not installed - run ../commissioning/provision.sh <ip>"
+    echo "  /etc/init.d/arca-app not installed - run ../provision.sh <ip>"
 fi' || warn "stop reported a failure - a surviving process may hold the binary"
 ok "Stopped"
 

@@ -2,7 +2,7 @@
 #
 # make-fake-card.sh — build a synthetic MOUNTED card of OUR root image under $1.
 #
-# NOT a repo tool: a scratch fixture builder for exercising commissioning/commission-offline.sh
+# NOT a repo tool: a scratch fixture builder for exercising rootfs/commission-offline.sh
 # without a card and without a device. It mirrors what rootfs/make-card-image.sh hands that
 # script: p3 is our Buildroot root (marker etc/arca-rootfs, the rcS.d/rc5.d links and
 # the key-only sshd_config that rootfs/board/arca/{post-build.sh,overlay} produce),

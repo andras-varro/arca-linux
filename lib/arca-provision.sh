@@ -13,8 +13,8 @@
 # Every file, link, mode and config edit lives in device-files/provision-rules.conf
 # with a reason per entry, read by BOTH consumers:
 #
-#   commissioning/provision.sh           live, over SSH
-#   commissioning/commission-offline.sh  offline, card in a reader
+#   provision.sh           live, over SSH
+#   rootfs/commission-offline.sh  offline, card in a reader
 #
 # so the two cannot drift. They HAD drifted: the online path removed stale rc*.d
 # links before relinking and the offline path did not.
@@ -23,12 +23,12 @@
 #
 # The offline executor is a shell function here. The online one CANNOT be, because
 # the work happens on the far side of an ssh pipe — so arca_provision_online_script
-# emits the interpreter as text and commissioning/provision.sh pipes it to `ssh <t> sh -s`
+# emits the interpreter as text and provision.sh pipes it to `ssh <t> sh -s`
 # together with the plan. Consequences worth knowing:
 #
 #   - It is /bin/sh for BusyBox ash, not bash. No [[, no arrays, no local.
 #   - `install` is the one verb it cannot do alone: the source bytes are on the
-#     host. commissioning/provision.sh scp's them first and the interpreter only chmods.
+#     host. provision.sh scp's them first and the interpreter only chmods.
 #   - It honours $ARCA_PROVISION_ROOT, which is "" on a device. That is what lets
 #     tests/arca_provision_test.sh group E run it against a copied tree and compare
 #     its dry run with the offline one — a comparison of two executors rather than
@@ -461,7 +461,7 @@ arca_provision_plan_summary() {
 # tomorrow's — fd 3 is a property of the loop, so a second stdin-reading command
 # added here cannot reintroduce it.
 #
-# One implementation for both callers — commissioning/provision.sh (the whole
+# One implementation for both callers — provision.sh (the whole
 # plan) and usb_host/build-and-deploy.sh (the usb group). They had a verbatim copy
 # each, so they had the defect twice; and $ARCA_SSH/$ARCA_SCP (the convention
 # lib/arca-bundle.sh's arca_bundle_install_ssh uses too) is what lets the regression

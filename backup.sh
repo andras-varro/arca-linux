@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-# commissioning/backup.sh — copy a unit's per-unit state to this host.
+# backup.sh — copy a unit's per-unit state to this host.
 #
-# Usage: commissioning/backup.sh <ip|host> [<out.tar.gz>]
+# Usage: backup.sh <ip|host> [<out.tar.gz>]
 #
 # Takes the BACKUP set of lib/arca-state.sh — settings, touch calibration, input
 # mapping, Bluetooth pairings and audio state, high scores, the SSH host keys and
@@ -23,11 +23,11 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$SCRIPT_DIR"
 
 usage() {
     cat <<'USAGE'
-Usage: commissioning/backup.sh <ip|host> [<out.tar.gz>]
+Usage: backup.sh <ip|host> [<out.tar.gz>]
 
 Copies the unit's per-unit state (lib/arca-state.sh, BACKUP set) to this host.
 Read-only on the unit. Default output: backups/<hostname>-<YYYYmmdd-HHMMSS>.tar.gz.
@@ -45,9 +45,9 @@ OUT="${2:-}"
 
 die() { echo "FAIL: $*" >&2; exit 1; }
 
-# shellcheck source=../lib/arca-ssh.sh
+# shellcheck source=lib/arca-ssh.sh
 . "$REPO_ROOT/lib/arca-ssh.sh"
-# shellcheck source=../lib/arca-state.sh
+# shellcheck source=lib/arca-state.sh
 . "$REPO_ROOT/lib/arca-state.sh"
 
 command -v gzip > /dev/null || die "gzip not installed on this host"

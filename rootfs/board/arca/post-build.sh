@@ -11,13 +11,13 @@ set -eu
 TARGET=${1:?usage: post-build.sh <target dir>}
 OVERLAY=$(cd "$(dirname "$0")" && pwd)/overlay
 
-# Modes. Init scripts are executable, every other overlay file is plain data.
+# Modes. Init scripts and usr/sbin commands are executable, every other overlay file is plain data.
 (cd "$OVERLAY" && find . -type d) | while read -r d; do
     chmod 0755 "$TARGET/$d"
 done
 (cd "$OVERLAY" && find . -type f) | while read -r f; do
     case "$f" in
-        ./etc/init.d/*) chmod 0755 "$TARGET/$f" ;;
+        ./etc/init.d/*|./usr/sbin/*) chmod 0755 "$TARGET/$f" ;;
         *) chmod 0644 "$TARGET/$f" ;;
     esac
 done
@@ -93,10 +93,6 @@ rm -f "$TARGET/etc/ssh/ssh_host_rsa_key" "$TARGET/etc/ssh/ssh_host_rsa_key.pub"
 rm -f "$TARGET/etc/ssh/ssh_host_ed25519_key" "$TARGET/etc/ssh/ssh_host_ed25519_key.pub"
 ln -s /home/root/data/ssh/ssh_host_ed25519_key "$TARGET/etc/ssh/ssh_host_ed25519_key"
 ln -s /home/root/data/ssh/ssh_host_ed25519_key.pub "$TARGET/etc/ssh/ssh_host_ed25519_key.pub"
-
-# The on-device host-name tool is the commissioning script itself (one implementation of the
-# name rules and the /etc/hosts rewrite), installed under a command name.
-install -D -m 0755 "$(cd "$OVERLAY/../../../.." && pwd)/commissioning/set-hostname.sh" "$TARGET/usr/sbin/set-hostname"
 
 # Identity marker: lib/arca-identify.sh's arca_is_rootfs recognises this tree by it, since
 # none of the vendor's marker files are here.

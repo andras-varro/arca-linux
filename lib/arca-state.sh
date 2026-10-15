@@ -7,7 +7,7 @@
 #
 # ONE home for the BACKUP list: everything that makes a unit THIS unit — settings,
 # calibration, pairings, high scores, SSH identity, and the operator's own private config
-# (the VNC password, ScummVM's ini and saves). Read by commissioning/backup.sh, the only reader.
+# (the VNC password, ScummVM's ini and saves). Read by backup.sh, the only reader.
 #
 # A card image carries NONE of it: rootfs/make-card-image.sh builds one generic image from our
 # own parts, and a unit's state travels only through backup.sh. What the

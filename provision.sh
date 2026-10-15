@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# commissioning/provision.sh — UPDATE a unit that runs our own root filesystem, over SSH
+# provision.sh — UPDATE a unit that runs our own root filesystem, over SSH
 #
 # Re-runnable. It installs the files and links device-files/provision-rules.conf
 # declares (boot scripts, the app launcher's init service, audio + time-sync, mDNS,
@@ -8,10 +8,10 @@
 # and reboots. It deletes no software: the unit's root is ours, not the vendor's.
 #
 # Usage:
-#   ./commissioning/provision.sh <target>                 # backup, update, reboot
-#   ./commissioning/provision.sh <target> --dry-run       # print the provision plan; change nothing
-#   ./commissioning/provision.sh <target> --status        # show device status only (read-only)
-#   ./commissioning/provision.sh <target> --hostname rw09 # set the host name only, no reboot
+#   ./provision.sh <target>                 # backup, update, reboot
+#   ./provision.sh <target> --dry-run       # print the provision plan; change nothing
+#   ./provision.sh <target> --status        # show device status only (read-only)
+#   ./provision.sh <target> --hostname rw09 # set the host name only, no reboot
 #
 # <target> is an IPv4 address or a host name — `rw09.local` works once mDNS is
 # enabled (this script does that) and the unit has a unique name (--hostname).
@@ -20,7 +20,7 @@
 #   - A unit running our root image (rootfs/), reachable by SSH as root
 #
 # What it does:
-#   0. Backs the unit's per-unit state up to this host (commissioning/backup.sh)
+#   0. Backs the unit's per-unit state up to this host (backup.sh)
 #      BEFORE the first write; a failed backup aborts the run.
 #   1. Installs the provision plan: device-files/arca-app as
 #      /etc/init.d/arca-app, the audio-enable + time-sync boot scripts, avahi
@@ -42,22 +42,22 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$SCRIPT_DIR"
 
 # What is INSTALLED is DATA in one file, device-files/provision-rules.conf, shared
-# with commissioning/commission-offline.sh so that the live and offline passes cannot
+# with rootfs/commission-offline.sh so that the live and offline passes cannot
 # drift. lib/arca-provision.sh is the parser and the plan compiler; the executors
 # differ ("/" is the correct prefix on a device and a refused one offline, and on
 # this path the work happens on the far side of an ssh pipe), but there is one
 # implementation of each, and arca_provision_online_script is the one this script
 # ships to the device.
-# shellcheck source=../lib/arca-identify.sh
+# shellcheck source=lib/arca-identify.sh
 . "$REPO_ROOT/lib/arca-identify.sh"
-# shellcheck source=../lib/arca-provision.sh
+# shellcheck source=lib/arca-provision.sh
 . "$REPO_ROOT/lib/arca-provision.sh"
-# shellcheck source=../lib/arca-ssh.sh
+# shellcheck source=lib/arca-ssh.sh
 . "$REPO_ROOT/lib/arca-ssh.sh"
-# shellcheck source=../lib/product.sh
+# shellcheck source=lib/product.sh
 . "$REPO_ROOT/lib/product.sh"
 
 # ── the non-positional flags are extracted before positional parsing ────────
@@ -112,7 +112,7 @@ usage() {
     echo "       $0 <target> --hostname NAME"
     echo ""
     echo "  With no flags this UPDATES a unit that runs our own root: it backs the"
-    echo "  unit's per-unit state up to this host (commissioning/backup.sh), installs"
+    echo "  unit's per-unit state up to this host (backup.sh), installs"
     echo "  the provision plan, applies sysctl and reboots. It deletes no software."
     echo "  p1 is never written."
     echo ""
@@ -138,7 +138,7 @@ usage() {
 # and ends in a reboot.
 #
 # An IPv4 address OR a DNS name is accepted. The name form is what makes
-# `./commissioning/provision.sh rw09.local` work, which is the whole point of enabling
+# `./provision.sh rw09.local` work, which is the whole point of enabling
 # avahi below — an IPv4-only gate here silently defeated it. (This used to be
 # IPv4-only and there was a SECOND, weaker validator further down that did
 # accept a name; the strict one exited first, so the permissive one was dead
@@ -232,7 +232,7 @@ if [[ "$FLAG" == "--hostname" ]]; then
     # Validated HERE, at parse time, for two reasons: a typo should not need a
     # reachable device to be caught, and the name is later interpolated into an
     # ssh command string, so nothing unexpected should ever get that far.
-    # commissioning/set-hostname.sh validates again on the device and remains the authority.
+    # rootfs/board/arca/overlay/usr/sbin/set-hostname validates again on the device and remains the authority.
     if [[ ! "$NEW_HOSTNAME" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]]; then
         echo "Not a valid host name: $NEW_HOSTNAME"
         echo "  RFC-1123, single label: letters, digits and hyphens, alphanumeric at both ends."
@@ -279,13 +279,13 @@ apply_plan() {
 # ── hostname-only mode ──────────────────────────────────────────────────────
 # Targeted and reboot-free, so it can be run against an already-commissioned
 # unit — including one that is a live display and must not be rebooted, which is
-# the case this flag exists for. The work itself is commissioning/set-hostname.sh, staged
+# the case this flag exists for. The work itself is rootfs/board/arca/overlay/usr/sbin/set-hostname, staged
 # to /tmp rather than installed: a one-shot that nothing on the device calls again
 # (so it stays out of report_script_versions' drift list).
 if [[ "$FLAG" == "--hostname" ]]; then
     echo ""
     info "Setting host name to '$NEW_HOSTNAME'..."
-    scp -q "$SCRIPT_DIR/set-hostname.sh" "$DEVICE:/tmp/set-hostname.sh"
+    scp -q "$REPO_ROOT/rootfs/board/arca/overlay/usr/sbin/set-hostname" "$DEVICE:/tmp/set-hostname.sh"
     ssh "$DEVICE" "chmod +x /tmp/set-hostname.sh"
     ssh "$DEVICE" "/tmp/set-hostname.sh $NEW_HOSTNAME"
     ssh "$DEVICE" "rm -f /tmp/set-hostname.sh"
@@ -303,7 +303,7 @@ REMOTE
         ok "mDNS is enabled — after the next reboot, try: ssh root@$NEW_HOSTNAME.local"
     else
         warn "mDNS is NOT enabled on this device, so <name>.local will not resolve."
-        warn "Run a full './commissioning/provision.sh $DEVICE_IP' to install it (that reboots)."
+        warn "Run a full './provision.sh $DEVICE_IP' to install it (that reboots)."
     fi
     echo ""
     exit 0
@@ -341,11 +341,11 @@ echo "════════════════════════�
 
 # ⚠️ The decisions are NOT here. Every file, link, mode and config edit lives in
 # device-files/provision-rules.conf with a reason per entry, read by this script AND
-# by commissioning/commission-offline.sh, so the two cannot drift.
+# by rootfs/commission-offline.sh, so the two cannot drift.
 #
 # What used to be here: five scp calls, an `ssh <<'REMOTE'` block of ln -sf, a second
 # one for avahi, a four-command sed block over sshd_config, and a third for the
-# sysctl file — every one of them written out a second time in commissioning/commission-offline.sh.
+# sysctl file — every one of them written out a second time in rootfs/commission-offline.sh.
 # They HAD drifted: this path deleted stale rc*.d links before relinking and the
 # offline path did not.
 #

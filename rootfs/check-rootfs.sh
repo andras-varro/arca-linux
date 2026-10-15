@@ -101,7 +101,7 @@ done
 has usr/sbin/set-hostname && entry usr/sbin/set-hostname | grep -q '^-..x'
 check "usr/sbin/set-hostname present and executable (the Control Panel and first boot exec it)" $?
 member_has usr/sbin/set-hostname 'is not a valid host name'
-check "usr/sbin/set-hostname is commissioning/set-hostname.sh (carries its name validation)" $?
+check "usr/sbin/set-hostname is the overlay script (carries its name validation)" $?
 member_has etc/init.d/sshd 'sshd_off'
 check "init.d/sshd honours the /etc/ssh/sshd_off marker" $?
 ! tar -tf "$TAR" | grep -E '(^|/)\.ssh/.|(^|/)authorized_keys' | grep -q .

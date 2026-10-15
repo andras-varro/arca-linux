@@ -26,7 +26,7 @@ HARNESS_ERR=0
 
 # The seven files whose gate F16 rewired. Restoring them all from HEAD~ is how the
 # pre-fix measurement is taken without unstaging anything.
-SITES="commissioning/provision.sh deploy-all.sh arca.sh
+SITES="provision.sh deploy-all.sh arca.sh
        native_apps/build-and-deploy.sh vnc_client/build-and-deploy.sh
        usb_host/build-and-deploy.sh scummvm-arca/build-and-deploy.sh"
 

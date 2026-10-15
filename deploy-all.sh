@@ -25,7 +25,7 @@
 # for — so before this existed, the offline card pass was the only way to put
 # binaries on a unit even for someone who already had SSH to it.
 #
-# It is the SSH twin of commissioning/commission-offline.sh's install loop and shares its
+# It is the SSH twin of rootfs/commission-offline.sh's install loop and shares its
 # authority: arca_bundle_install_ssh in lib/arca-bundle.sh, one implementation, modes
 # DECLARED by the manifest rather than carried by the transfer.
 #
@@ -37,7 +37,7 @@
 # cannot be reached is worth finding out about before 126 MB, not after.
 #
 # Prerequisites:
-#   - Device set up with commissioning/provision.sh (one-time)
+#   - Device set up with provision.sh (one-time)
 #   - ARM cross-compiler installed          — except for --from-bundle/--from-release
 #   - WSL (for ScummVM builds)              — except for --from-bundle/--from-release
 #   ./setup-build-env.sh installs the host half of those; it is the one place the
@@ -262,7 +262,7 @@ if [[ -n "$FROM_BUNDLE" || -n "$FROM_RELEASE" ]]; then
         info "Stopping the running app"
         ssh "$DEVICE" '/etc/init.d/arca-app stop' 2>&1 | sed 's/^/    /' || true
     else
-        warn "no /etc/init.d/arca-app — run ./commissioning/provision.sh $DEVICE_IP first"
+        warn "no /etc/init.d/arca-app — run ./provision.sh $DEVICE_IP first"
     fi
 
     echo ""

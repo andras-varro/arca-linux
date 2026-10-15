@@ -44,7 +44,7 @@
 # key on the first boot.
 #
 # With --bundle <dir|tar> (a release.sh --stage-only bundle) it then mounts p3 and p2
-# as <base>/{root,log} and runs commissioning/commission-offline.sh
+# as <base>/{root,log} and runs rootfs/commission-offline.sh
 # over them: the boot scripts, their links and every component's files go in, and that
 # script's own verify pass checks them. It asks nothing and cleans nothing: the tree is
 # ours, with no vendor stack. p1 is not mounted by that step.
@@ -68,7 +68,7 @@ Usage: make-card-image.sh --mlo <MLO> --uboot <u-boot.img> --kernel <uImage> [--
                    /lib/modules/4.14.52/extra/ (default: ~/rw-kmods of the
                    invoking user, $SUDO_USER under sudo). cy8ctmg120_ts.ko is required.
   --bundle <b>     a release.sh --stage-only bundle (directory or .tar.gz),
-                   installed with commissioning/commission-offline.sh (no prompt),
+                   installed with rootfs/commission-offline.sh (no prompt),
                    so the card boots with every component
                    and no provision.sh or deploy-all.sh afterwards. Needs
                    arm-linux-gnueabihf-objdump (that script's ARM check).
@@ -443,7 +443,7 @@ if [ -n "$BUNDLE" ]; then
         mkdir -p "$MNT/base/${rp%%:*}" || die "mkdir base"
         mount "$(arca_part_dev "$LOOP" "${rp#*:}")" "$MNT/base/${rp%%:*}" || die "mount p${rp#*:} as ${rp%%:*}"
     done
-    if ! bash "$SCRIPT_DIR/../commissioning/commission-offline.sh" --bundle "$BUNDLE" \
+    if ! bash "$SCRIPT_DIR/commission-offline.sh" --bundle "$BUNDLE" \
             --base "$MNT/base" < /dev/null; then
         rm -f "$OUTABS"
         die "commission-offline.sh failed (above); the image is deleted, write nothing"

@@ -525,7 +525,7 @@ echo "E. every call site is wired to the shared gate"
 # nothing.
 
 GATE_USERS="
-commissioning/provision.sh
+provision.sh
 deploy-all.sh
 arca.sh
 native_apps/build-and-deploy.sh

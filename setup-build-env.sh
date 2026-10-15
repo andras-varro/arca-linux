@@ -3,7 +3,7 @@
 #
 # Two delivery modes, and only one of them has a toolchain. DELIVERY: someone clones the
 # repo, puts a card in a reader, answers a few questions, puts the card back, and the
-# device works — they may never build anything, and commissioning/commission-offline.sh
+# device works — they may never build anything, and rootfs/commission-offline.sh
 # serves them. DEVELOPMENT: we build and deploy onto an already-clean device, which is
 # what deploy-all.sh does. This script exists to make the second reachable on a fresh
 # machine, from one package set in one place.
@@ -115,7 +115,7 @@ esac
 #   py    an importable module rather than a program.
 #
 # ⚠️ binutils-arm-linux-gnueabihf is named EXPLICITLY even though the gcc package pulls it
-# in. commissioning/commission-offline.sh needs arm-linux-gnueabihf-objdump on a delivery
+# in. rootfs/commission-offline.sh needs arm-linux-gnueabihf-objdump on a delivery
 # host that has no compiler at all, and a missing objdump there is a refusal rather than a
 # pass — so the package has to be nameable on its own.
 #

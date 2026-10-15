@@ -1,14 +1,14 @@
 #!/bin/sh
 #
-# commissioning/set-hostname.sh — set an Arca's host name, in /etc/hostname and /etc/hosts
+# rootfs/board/arca/overlay/usr/sbin/set-hostname — set an Arca's host name, in /etc/hostname and /etc/hosts
 #
 # ONE implementation, called from two places with different connection models:
 #
 #   S04firstboot-hostname       on the unit at the first boot of a card image, as /usr/sbin/set-hostname
 #                               (the image carries no name of its own); and, offline against a
-#                               mounted card:  sudo ./commissioning/set-hostname.sh NAME /mnt/rw
+#                               mounted card:  sudo ./rootfs/board/arca/overlay/usr/sbin/set-hostname NAME /mnt/rw
 #   provision.sh --hostname     over SSH, against the live root:
-#                                 ./commissioning/set-hostname.sh NAME
+#                                 ./rootfs/board/arca/overlay/usr/sbin/set-hostname NAME
 #
 # It lives in its own file rather than in either caller because the two paths
 # would otherwise carry the same 30 lines of /etc/hosts rewriting and drift
@@ -19,7 +19,7 @@
 # /etc/dhclient.conf, and its networking init script adds `hostname <name>`, read from
 # /etc/hostname, to each dhcp stanza.
 #
-# Usage: commissioning/set-hostname.sh NAME [ROOTFS]
+# Usage: set-hostname NAME [ROOTFS]
 #   NAME    RFC-1123 single label. No dots — mDNS appends .local itself, and a
 #           dotted name in /etc/hosts is part of what made the shipped mapping
 #           confusing to read.
