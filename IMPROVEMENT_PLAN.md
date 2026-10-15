@@ -292,8 +292,8 @@ upgrade or new drivers still ship as an image to flash. Finishing steps, in orde
 2. **The first boot grows the card:** built as `growroot` (`rootfs/board/arca/overlay/etc/init.d/growroot`, host test `tests/arca_growroot_test.sh`); the online grow ran clean on `.188` by hand. A freshly flashed card grew by itself at first boot (`.188`, 8 GB; `.115`, 128 GB in 1 m 31 s, operator-timed 2026-10-15).
 3. **What an image ships:** no secrets and no copyrighted data (the existing rule). It runs as root, as the vendor
    system did. Operator 2026-10-12: SSH needs no image change, only a README paragraph: set a root password, allow
-   password login, copy a public key, then switch to key-only. Where a user first sets that password is **[unverified]**.
-   Version identity (agreed): the image version in `/etc/os-release` and in the Control Panel **[unverified]**.
+   password login, copy a public key, then switch to key-only. The password is first set on the Control Panel SSH page (`ssh_page.c`, 6–32 characters).
+   Version identity: `post-build.sh` writes `VERSION_ID` (`git describe` against `v*` tags) into os-release, and the Control Panel Information page shows it; **not yet seen in a built image**.
 4. **A user README:** keep the vendor card and flash a spare; flash, insert, use; configure (Control Panel, VNC client);
    the apps; updating (F145 once it exists); troubleshooting. A re-flash wipes scores, calibration and settings.
    Developers get one `DEVELOPING.md` (`deploy-all.sh` and the component scripts over SSH stay as the dev loop).

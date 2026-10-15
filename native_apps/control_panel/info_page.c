@@ -1,7 +1,8 @@
 /* info_page.c — control_panel's Information page: what this unit is.
  *
  * Opened from the home grid's Information tile, and the one home for the
- * static identity figures: kernel release and build, hostname, boot target,
+ * static identity figures: the image version (only when /etc/os-release has
+ * one), kernel release and build, hostname, boot target,
  * CPU, framebuffer format, and the config-file keys no settings page shows.
  * Exposed only as cp_info_page (cp_page.h); its state lives in this file.
  *
@@ -21,6 +22,7 @@
 #include "cp_page.h"
 #include "cp_ui.h"
 #include "../common/common.h"
+#include "../common/product.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -35,6 +37,7 @@ static const char *const shown_elsewhere[] = {
 #define NUM_SHOWN_ELSEWHERE ((int)(sizeof(shown_elsewhere) / sizeof(shown_elsewhere[0])))
 
 static struct {
+    char image[64];      /* VERSION_ID of /etc/os-release; empty = the image carries none */
     char kernel[64];     /* the release, third field of /proc/version */
     char built[128];     /* everything after its last ") ": "#1 SMP <date>" */
     char hostname[64];
@@ -95,6 +98,8 @@ static void read_config_keys(void) {
 }
 
 static void info_read(void) {
+    const char *ver = product_version();
+    snprintf(info.image, sizeof(info.image), "%s", ver ? ver : "");
     read_kernel();
     if (read_file_line("/etc/hostname", info.hostname, sizeof(info.hostname)) < 0)
         snprintf(info.hostname, sizeof(info.hostname), "N/A");
@@ -142,11 +147,12 @@ static void fmt_fb_memory(unsigned stride, unsigned long size, char *buf, size_t
 static Button reset_btn;
 
 enum {
-    ROW_KERNEL, ROW_BUILT, ROW_HOSTNAME, ROW_DEFAULT_APP,
+    ROW_IMAGE, ROW_KERNEL, ROW_BUILT, ROW_HOSTNAME, ROW_DEFAULT_APP,
     ROW_CPU, ROW_BOGOMIPS, ROW_FB_FORMAT, ROW_FB_MEMORY,
     ROW_CONFIG_FILE, ROW_COUNT
 };
 static const char *const row_labels[ROW_COUNT] = {
+    [ROW_IMAGE]       = "IMAGE:",
     [ROW_KERNEL]      = "KERNEL:",
     [ROW_BUILT]       = "BUILT:",
     [ROW_HOSTNAME]    = "HOSTNAME:",
@@ -165,6 +171,7 @@ static int  keys_y, key_lines;    /* scale-1 config lines: first y, how many fit
 
 static const char *row_value(int row, const Framebuffer *fb, char *buf, size_t len) {
     switch (row) {
+    case ROW_IMAGE:       return info.image;
     case ROW_KERNEL:      return info.kernel;
     case ROW_BUILT:       return info.built;
     case ROW_HOSTNAME:    return info.hostname;
@@ -195,6 +202,12 @@ static int fit_x(int row) {
     return value_x;
 }
 
+/* The IMAGE row exists only when /etc/os-release has a VERSION_ID: no version, no row
+ * (not a greyed or "N/A" one), and the rows below close up. */
+static bool row_present(int row) {
+    return row != ROW_IMAGE || info.image[0] != '\0';
+}
+
 static int place_row(int row, int y) {
     label_y[row] = y;
     if (stacked) { value_y[row] = y + INFO_ROW_H; return y + 2 * INFO_ROW_H; }
@@ -213,7 +226,8 @@ static void info_page_layout(void) {
     int y = CONTENT_Y + CONTENT_TOP_GAP;
 
     sec_sys_y = y;  y += INFO_HEADER_H;
-    for (int r = ROW_KERNEL; r <= ROW_DEFAULT_APP; r++) y = place_row(r, y);
+    for (int r = ROW_IMAGE; r <= ROW_DEFAULT_APP; r++)
+        if (row_present(r)) y = place_row(r, y);
     y += INFO_GAP;
 
     sec_hw_y = y;   y += INFO_HEADER_H;
@@ -256,6 +270,7 @@ static void info_page_layout(void) {
         int right  = CONTENT_LEFT + 10 + text_measure_width(INFO_WIDE_LABEL, 2);
         int clipped = 0;
         for (int r = 0; r < ROW_COUNT; r++) {
+            if (!row_present(r)) continue;
             const char *v;
             if (r == ROW_FB_FORMAT)      { fmt_fb_format(32, false, s, sizeof(s)); v = s; }
             else if (r == ROW_FB_MEMORY) { fmt_fb_memory(99999, 9999999, s, sizeof(s)); v = s; }
@@ -292,6 +307,7 @@ static void info_page_draw(Framebuffer *fb) {
     draw_section_header(fb, sec_hw_y, "HARDWARE");
     draw_section_header(fb, sec_cfg_y, "CONFIG");
     for (int r = 0; r < ROW_COUNT; r++) {
+        if (!row_present(r)) continue;
         fb_draw_text(fb, CONTENT_LEFT + 10, label_y[r], row_labels[r], COLOR_LABEL, 2);
         fit_value(row_value(r, fb, s, sizeof(s)), fit_x(r), 2, cut, sizeof(cut));
         fb_draw_text(fb, value_x, value_y[r], cut, COLOR_WHITE, 2);

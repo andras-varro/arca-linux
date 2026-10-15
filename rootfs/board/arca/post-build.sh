@@ -107,6 +107,17 @@ install -D -m 0644 "$(cd "$OVERLAY/.." && pwd)/os-release" "$TARGET/usr/lib/os-r
 ln -sfn ../usr/lib/os-release "$TARGET/etc/os-release"
 grep -q '^NAME=' "$TARGET/etc/os-release" || { echo "post-build: os-release not installed" >&2; exit 1; }
 
+# The image's own version, appended to the installed copy only (the source file stays version-free):
+# `git describe` against release tags (v<N>…, never a marker tag such as last-vendor-rootfs) of the
+# repo this script sits in, so a dirty tree says so. The Control Panel's
+# Information page shows it (native_apps/common/product.c, product_version()). Without git or a
+# repo the value is the word "unknown", never empty, so an image without a provenance still says so.
+REPO_ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
+IMAGE_VERSION=$(git -C "$REPO_ROOT" describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null | tr -cd 'A-Za-z0-9._+~-') || IMAGE_VERSION=""
+[ -n "$IMAGE_VERSION" ] || { IMAGE_VERSION=unknown; echo "post-build: git describe failed, VERSION_ID=unknown" >&2; }
+printf 'VERSION_ID="%s"\n' "$IMAGE_VERSION" >> "$TARGET/usr/lib/os-release"
+grep -q '^VERSION_ID="[^"]\{1,\}"$' "$TARGET/etc/os-release" || { echo "post-build: VERSION_ID not written" >&2; exit 1; }
+
 # Root: home on the card's tree, bash as the login shell (the skeleton gives BusyBox
 # ash via /bin/sh), password locked (key-only login).
 sed -i 's|^root:\([^:]*\):0:0:root:[^:]*:[^:]*$|root:\1:0:0:root:/home/root:/bin/bash|' "$TARGET/etc/passwd"

@@ -1,5 +1,5 @@
 /**
- * product.h — the product name, read from the device's /etc/os-release.
+ * product.h — the product name and image version, read from the device's /etc/os-release.
  *
  * The name is data in ONE repo file, rootfs/board/arca/os-release, which the
  * rootfs build installs as /etc/os-release.  Nothing in C spells it: a title,
@@ -23,5 +23,16 @@ const char *product_name(void);
  * no NAME= line, or its NAME is empty.  The result lives in a static buffer
  * that the next call overwrites. */
 const char *product_name_from(const char *path);
+
+/* The VERSION_ID= value of /etc/os-release (the image's own version, appended by
+ * rootfs/board/arca/post-build.sh from `git describe`), quotes stripped, read once
+ * and kept.  NULL when the file has no VERSION_ID= line or its value is empty: a
+ * caller omits what it cannot show.  The pointer stays valid for the process. */
+const char *product_version(void);
+
+/* The same parse of an arbitrary os-release file, re-read on every call (the test
+ * seam).  NULL when the file is unreadable, has no VERSION_ID= line, or the value is
+ * empty.  The result lives in a static buffer that the next call overwrites. */
+const char *product_version_from(const char *path);
 
 #endif
