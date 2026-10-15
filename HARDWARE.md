@@ -138,10 +138,10 @@ because on an XBee the antenna is part of the module. Vendor software confirms t
 `XB24-ACI-001 revC` — MaxStream, © 2007, `FCC ID OUR-XBEE`: the 1 mW chip-antenna 802.15.4 **Series 1**
 part — read off the can, with 64-bit addresses `0013A200 4060D747` and `0013A200 403BEA96`. So the series
 question is settled and the vendor's settable `ATMY`/`ATCH` are the right command set
-([Serial ports](SYSTEM_ANALYSIS.md#312-serial-ports)). ⚠️ **Orientation is still unverified**, and `J5`
-pin 1 is a live 3.3 V rail whatever UART3 does, so a reversed insertion is already a completed
-experiment. Neither module ever answered, and the open `DOUT` net below is why — no module was ever
-given a receive path. No unit now has a module fitted; the modules are loose spares.
+([Serial ports](SYSTEM_ANALYSIS.md#312-serial-ports)). **The XBee does not work, and why is not established**
+(operator, 2026-10-15): both modules were seated the right way round and exercised at length, and neither
+ever answered. The open `DOUT` net below is the one measured fault, not a proven cause. No unit now has a
+module fitted; the modules are loose spares.
 
 **Pinout, partly measured 2026-07-30.** `J5` carries XBee pins **1–10** (pin 1 is the dotted end), `J6`
 carries **11–20**. Numbering runs down one strip and back up the other like a DIP, so pins 1 and 10 are
@@ -158,11 +158,10 @@ at opposite ends of `J5`, *not* across from each other — the usual way to get 
 
 The **power** question is therefore settled, and so is the pinmux — the pads come up in `uart3` mode
 ([Serial ports](SYSTEM_ANALYSIS.md#312-serial-ports)). An XBee fed reversed dies instantly, which is why
-the orientation was measured before anything was inserted — and why, on the unit that now has one seated,
-the module's health is an open question rather than an assumption. **The two data nets are now measured,
-and they disagree.**
+the orientation was measured before anything was inserted. **The two data nets are measured, and they
+disagree.**
 
-⚠️ **`DIN` reaches the SoC and `DOUT` does not, so a module can be talked to and can never answer.**
+⚠️ **`DIN` reaches the SoC and `DOUT` does not.**
 Measured on a powered, opened unit with the socket empty, black lead on pin 10 throughout, and **pin 1
 re-read as 3.3 V beside each reading** so a poor probe contact cannot pass as a result — it produced one
 spurious 4.4 V before that control was added. Holding UART3's transmitter low through `LCR` bit 6 takes
