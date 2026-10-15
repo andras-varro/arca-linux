@@ -33,14 +33,12 @@ resource: price the check before requesting it, group requests into **one checkl
 only part of it is gated, and record the answer with the confidence it was given — "I think it works" is a
 hedge, and a verdict is a weaker answer than a description, so say which one the next item needs.
 
-### B72. Two panel checks the user README rests on — open, operator request 2026-10-15
+### B72. Which free ScummVM games run on the stock image — open, operator request 2026-10-15
 
-1. **No network:** boot a flashed unit on PoE with the injector's data side unplugged. Expected to reach the
-   launcher, because `udhcpc` gives up after ~15 s and backgrounds (seen with a cable in, `rootfs/CLAUDE.md`) [inferred].
-2. **The free ScummVM games** (scummvm.org's freeware downloads), copied over SSH to `/home/root/data/games`: which
-   start and play on the stock image's engine set. The README names them only once this answers.
+**The free ScummVM games** (scummvm.org's freeware downloads), copied over SSH to `/home/root/data/games`: which
+start and play on the stock image's engine set. The README names them only once this answers.
 
-**Done when** both are answered and the README says so.
+**Done when** the README names the ones that run.
 
 ---
 
