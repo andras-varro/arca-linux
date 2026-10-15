@@ -246,12 +246,12 @@ Bezel material is `>PC/ABS<`, moulded part `560-0540-0x`. The only bonded joint 
 which is meant to be permanent. The bosses, the clips and the side LED bars in their channels are all in
 [`bezel_with_touch_screen.jpg`](HardwarePhotos/bezel_with_touch_screen.jpg).
 
-**The one destructive risk is the touch flex.** Disconnect `J2` before separating the bezel from the
-board — see [Physical safety](SYSTEM_ANALYSIS.md#physical-safety).
+**The one destructive risk is the touch flex:** disconnect `J2` before separating the bezel ([Physical safety](SYSTEM_ANALYSIS.md#physical-safety)).
 
-Removing **only the rear cover** exposes the entire bottom face — SoC, RAM, NAND, Ethernet, PoE,
-`J5`/`J6` — without going near the bezel or the touch flex. That is the safe way to inspect a working
-unit.
+Removing **only the rear cover** — unplug the RJ45, pry it off with plastic tools, no screwdriver (operator,
+2026-10-15) — exposes the entire bottom face: SoC, RAM, NAND, Ethernet, PoE, `J5`/`J6` and the microSD in `J1`,
+without going near the bezel or the touch flex. That is the safe way to inspect a unit or swap its card; the
+cover can sit loose between re-flashes.
 
 ## 6. Display module and touch assembly
 

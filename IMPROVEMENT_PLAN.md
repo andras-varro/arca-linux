@@ -27,11 +27,20 @@ Device facts live there; this file holds only what we intend to *do* about them.
 
 ## Needs a human at the panel
 
-**Nothing is outstanding.** There is no `/dev/uinput`, so nothing past an app's first screen is
+**B72 is outstanding.** There is no `/dev/uinput`, so nothing past an app's first screen is
 script-verifiable (`CLAUDE.md` → *Non-obvious constraints*), and panel time is the project's scarce
 resource: price the check before requesting it, group requests into **one checklist**, split an item when
 only part of it is gated, and record the answer with the confidence it was given — "I think it works" is a
 hedge, and a verdict is a weaker answer than a description, so say which one the next item needs.
+
+### B72. Two panel checks the user README rests on — open, operator request 2026-10-15
+
+1. **No network:** boot a flashed unit on PoE with the injector's data side unplugged. Expected to reach the
+   launcher, because `udhcpc` gives up after ~15 s and backgrounds (seen with a cable in, `rootfs/CLAUDE.md`) [inferred].
+2. **The free ScummVM games** (scummvm.org's freeware downloads), copied over SSH to `/home/root/data/games`: which
+   start and play on the stock image's engine set. The README names them only once this answers.
+
+**Done when** both are answered and the README says so.
 
 ---
 
@@ -289,11 +298,10 @@ upgrade or new drivers still ship as an image to flash. Finishing steps, in orde
 
 1. **A downloadable image:** compressed with a checksum on a release page, flashable with any card writer. D18's source
    offer is a prerequisite for publishing it.
-2. **The first boot grows the card:** built as `growroot` (`rootfs/board/arca/overlay/etc/init.d/growroot`, host test `tests/arca_growroot_test.sh`); the online grow ran clean on `.188` by hand. A freshly flashed card grew by itself at first boot (`.188`, 8 GB; `.115`, 128 GB in 1 m 31 s, operator-timed 2026-10-15).
+2. **The first boot grows the card:** built as `growroot` (`rootfs/board/arca/overlay/etc/init.d/growroot`, host test `tests/arca_growroot_test.sh`); the online grow ran clean on `.188` by hand. A freshly flashed card grew by itself at first boot (`.188`, 8 GB; `.115`, 128 GB, timings in `rootfs/CLAUDE.md`).
 3. **What an image ships:** no secrets and no copyrighted data (the existing rule). It runs as root, as the vendor
    system did. Operator 2026-10-12: SSH needs no image change, only a README paragraph: set a root password, allow
    password login, copy a public key, then switch to key-only. The password is first set on the Control Panel SSH page (`ssh_page.c`, 6–32 characters).
-   Version identity: `post-build.sh` writes `VERSION_ID` (`git describe` against `v*` tags) into os-release, and the Control Panel Information page shows it; measured in a built rootfs tar (`VERSION_ID="v1.0.0-471-g9020256"`), **not yet seen on a panel**.
 4. **A user README:** keep the vendor card and flash a spare; flash, insert, use; configure (Control Panel, VNC client);
    the apps; updating (F145 once it exists); troubleshooting. A re-flash wipes scores, calibration and settings.
    Developers get one `DEVELOPING.md` (`deploy-all.sh` and the component scripts over SSH stay as the dev loop).
