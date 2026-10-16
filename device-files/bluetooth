@@ -43,6 +43,10 @@
 MODDIR=/lib/modules/4.14.52/bt
 ORDER="$MODDIR/load-order.txt"
 DAEMON=/usr/libexec/bluetooth/bluetoothd
+# Plugins this kernel cannot serve, each of which logs an error at every start: the LE-audio
+# trio needs -E (experimental D-Bus), network needs bnep.ko, which is not built. Measured on
+# .188: with this list bluetoothd logs "Excluding (cli) <name>" at info level instead.
+NOPLUGIN=vcp,mcp,bap,network
 BLUEALSA=/usr/bin/bluealsa
 # Pairing records. bluetoothd creates what it needs below this, but not this itself.
 STORAGE=${BT_STORAGE:-/var/lib/bluetooth}
@@ -223,9 +227,9 @@ case "$1" in
       mkdir -p "$STORAGE" && chmod 700 "$STORAGE"
       if sed "/^\[General\]/a Name=$(hostname)" "$CONF" > "$RUNCONF" 2>/dev/null &&
          grep -q '^Name=' "$RUNCONF"; then
-        "$DAEMON" -f "$RUNCONF" </dev/null >/dev/null 2>&1 &
+        "$DAEMON" -P "$NOPLUGIN" -f "$RUNCONF" </dev/null >/dev/null 2>&1 &
       else
-        "$DAEMON" </dev/null >/dev/null 2>&1 &
+        "$DAEMON" -P "$NOPLUGIN" </dev/null >/dev/null 2>&1 &
       fi
       echo "  bluetoothd started (pid $!)"
     fi

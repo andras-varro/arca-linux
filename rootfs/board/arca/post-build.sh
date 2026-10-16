@@ -50,7 +50,12 @@ link rc5.d S09sshd        sshd
 # further install. After dbus; provision-rules.conf makes the same link (ln -sf, idempotent).
 link rc5.d S30avahi-daemon avahi-daemon
 link rc5.d S20hwclock.sh  hwclock.sh
+# bluetooth and avahi stop before dbus, or their "Lost/Disconnected from D-Bus" lines are
+# logged as errors at every shutdown. The bluetooth script comes from the provision rules;
+# on an image without it the link dangles and rc skips it.
 for lvl in rc0.d rc6.d; do
+    link $lvl K05bluetooth  bluetooth
+    link $lvl K06avahi-daemon avahi-daemon
     link $lvl K10sshd       sshd
     link $lvl K20dbus-1     dbus-1
     link $lvl K30hwclock.sh hwclock.sh

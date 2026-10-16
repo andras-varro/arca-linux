@@ -58,6 +58,7 @@ l rcS.d networking S08networking
 l rc5.d dbus-1 S02dbus-1;       l rc5.d sshd S09sshd
 l rc5.d hwclock.sh S20hwclock.sh
 for lvl in rc0.d rc6.d; do
+    l $lvl bluetooth K05bluetooth; l $lvl avahi-daemon K06avahi-daemon
     l $lvl sshd K10sshd;          l $lvl dbus-1 K20dbus-1
     l $lvl hwclock.sh K30hwclock.sh; l $lvl syslog K40syslog
     l $lvl seedrng K50seedrng;    l $lvl watchdog K99watchdog

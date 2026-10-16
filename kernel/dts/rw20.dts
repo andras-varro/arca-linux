@@ -176,6 +176,11 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinmux_spk_mute_pins>;
 	};
+
+	/* omap3.dtsi's PMU names no CPU for its interrupt, so perf logs "guessing" at boot. */
+	pmu@54000000 {
+		interrupt-affinity = <&cpu>;
+	};
 };
 
 /*
@@ -548,6 +553,8 @@
 	vmmc_aux-supply = <&vsim>;
 	bus-width = <4>;
 	cd-gpios = <&gpio4 31 GPIO_ACTIVE_LOW>;
+	/* The slot has no write-protect line; without this every card insert logs a warning. */
+	disable-wp;
 };
 
 &mmc2 {

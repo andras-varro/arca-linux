@@ -22,14 +22,15 @@ ARCH="arm"
 OUT_DIR=""
 REUSE=0
 
-# scripts/config verb + symbol. RFKILL stays off on purpose. BT_RFCOMM is built for BlueALSA's hfp-ag.
+# scripts/config verb + symbol. RFKILL is a module so bluetoothd finds /dev/rfkill; without it
+# bluetoothd logs an error at every start. BT_RFCOMM is built for BlueALSA's hfp-ag.
 # BT_HS off removes A2MP, the BleedingTooth entry point (CVE-2020-12351/12352: no pairing needed, only
 # the BD_ADDR); HID pads and A2DP never use High Speed.
 CONFIG_WANT=(
     "module BT" "enable BT_BREDR" "enable BT_LE" "disable BT_HS" "module BT_HIDP"
     "module BT_HCIBTUSB" "enable BT_HCIBTUSB_BCM" "enable BT_HCIBTUSB_RTL"
     "module UHID" "module CRYPTO_USER_API_HASH" "module CRYPTO_USER_API_SKCIPHER"
-    "module INPUT_UINPUT" "disable RFKILL" "module BT_RFCOMM"
+    "module INPUT_UINPUT" "module RFKILL" "module BT_RFCOMM"
 )
 # Modules wanted by name. Their symbol dependencies are added from each .modinfo depends= field.
 ROOTS=(bluetooth btusb hidp rfcomm uhid uinput algif_hash algif_skcipher)
