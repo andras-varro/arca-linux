@@ -291,8 +291,8 @@ The operator wants games that show no menu or close button at all. Open design q
 Operator ruling 2026-10-12: nobody outside the lab runs this, so units are re-flashed and never migrated. A kernel
 upgrade or new drivers still ship as an image to flash.
 
-**Open: a downloadable image** compressed with a checksum on a release page, flashable with any card writer. D18's source
-offer is a prerequisite for publishing it. Claims in `README.md` still tagged [unverified] are measured as they come up.
+**Open: the operator's units flashed from the release download** (the image is on the v2.0.0 release page with its source
+offer). Claims in `README.md` still tagged [unverified] are measured as they come up.
 
 **Done when** stock units with spare cards (the operator has six) boot the downloaded image and grow it, and the README is the only
 user-facing guide.
@@ -386,10 +386,6 @@ close can fail the gate on unrelated documentation.** Narrow the scan rather tha
 on a line that also carries a key-binding marker (`Ctrl+`, `Alt+`, `Shift+`), or one inside a two-column
 key table, is not a citation. ⚠️ Needs a control in both directions — a real bare citation must still fire,
 and it must fire in a file of the same kind, or the scan goes blind where it used to see.
-
-### D18. A published card image does not yet meet its source offer — open, measured 2026-10-10
-
-`release.sh --source-offer [--image ...]`, the `NOTICE` text and the image's licence documents (p3 `/usr/share/doc/arca-licenses/`) exist (`LICENSE.md`, *The source-offer duty*). **Operator ruling 2026-10-12: the offer is required** for the published image. **Still open:** a real publish (`gh release create`) and a real offer through `release.sh --source-offer` are untested: `tests/arca_release_test.sh` stubs both. **Done when** a published card image comes with its source offer, from a real run.
 
 ---
 

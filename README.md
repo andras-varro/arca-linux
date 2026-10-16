@@ -28,9 +28,9 @@ which is also its power (PoE).
 
 ## 2. Flash, insert, use
 
-1. Download the image from the project's **Releases** page on GitHub, with its checksum
-   file, and check the checksum. [unverified: the release page, the image's file name and
-   its compression do not exist yet]
+1. Download `ludbox-<version>.img.xz` and its `.sha256` file from the project's **Releases**
+   page on GitHub, and check the checksum. The file holds the `.xz` hash and, after
+   decompressing, the raw `.img` hash. [unverified: which writers take the `.xz` directly]
 2. Write the image to the spare card with a card writer (Raspberry Pi Imager, balenaEtcher
    or Rufus, using its "write a disk image" option). This erases the card.
 3. Put the card back in the unit. Refit the back cover; it can sit loosely without fully
