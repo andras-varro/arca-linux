@@ -1,0 +1,425 @@
+/* list_view — see list_view.h.  The top half is pure; the drawing is last. */
+#include "list_view.h"
+#include "common.h"
+#include <stdlib.h>
+#include <string.h>
+
+#define LV_REPEAT_DELAY_MS 400
+#define LV_REPEAT_EVERY_MS  80
+#define LV_THUMB_MIN        12
+
+/* The look follows the Bluetooth page rows. */
+#define LV_COLOR_BG       RGB(18, 18, 28)
+#define LV_COLOR_ROW      RGB(30, 30, 45)
+#define LV_COLOR_ROW_BD   RGB(50, 50, 70)
+#define LV_COLOR_CUR      RGB(30, 70, 120)
+#define LV_COLOR_CUR_OFF  RGB(42, 52, 76)
+#define LV_COLOR_MARK     RGB(255, 210, 60)
+#define LV_COLOR_DIM      RGB(110, 110, 120)
+#define LV_COLOR_LABEL    RGB(180, 180, 180)
+#define LV_COLOR_EDGE_ON  RGB(90, 150, 255)
+#define LV_COLOR_EDGE_OFF RGB(70, 70, 90)
+
+/* ── Pure arithmetic ────────────────────────────────────────────────────── */
+
+int lv_vis_rows(int rect_h, int row_h) {
+    int inner = rect_h - 2 * LV_BORDER;
+    if (row_h <= 0 || inner < row_h) return 0;
+    return inner / row_h;
+}
+
+int lv_max_top(int count, int vis) {
+    int m = count - vis;
+    return m > 0 ? m : 0;
+}
+
+int lv_clamp_top(int top, int count, int vis) {
+    int m = lv_max_top(count, vis);
+    if (top > m) top = m;
+    if (top < 0) top = 0;
+    return top;
+}
+
+int lv_clamp_cursor(int cur, int count) {
+    if (count <= 0) return -1;
+    if (cur < 0) return 0;
+    if (cur > count - 1) return count - 1;
+    return cur;
+}
+
+int lv_top_for_cursor(int top, int cursor, int count, int vis) {
+    if (cursor >= 0 && vis > 0) {
+        if (cursor < top) top = cursor;
+        else if (cursor >= top + vis) top = cursor - vis + 1;
+    }
+    return lv_clamp_top(top, count, vis);
+}
+
+int lv_cursor_after(int cur, int count, int vis, LvKey key) {
+    int page = vis > 1 ? vis - 1 : 1;
+    if (count <= 0) return -1;
+    if (cur < 0) cur = 0;
+    switch (key) {
+    case LV_KEY_UP:   cur -= 1; break;
+    case LV_KEY_DOWN: cur += 1; break;
+    case LV_KEY_PGUP: cur -= page; break;
+    case LV_KEY_PGDN: cur += page; break;
+    case LV_KEY_HOME: cur = 0; break;
+    case LV_KEY_END:  cur = count - 1; break;
+    default: break;
+    }
+    return lv_clamp_cursor(cur, count);
+}
+
+int lv_hit_row(int top, int y, int row_h, int vis, int count) {
+    if (row_h <= 0 || y < 0) return -1;
+    int r = y / row_h;
+    if (r >= vis) return -1;
+    r += top;
+    return (r >= 0 && r < count) ? r : -1;
+}
+
+void lv_thumb(int count, int vis, int top, int track_h, int *off, int *len) {
+    int l = track_h, o = 0;
+    if (count > vis && vis > 0 && track_h > 0) {
+        l = track_h * vis / count;
+        if (l < LV_THUMB_MIN) l = LV_THUMB_MIN;
+        if (l > track_h) l = track_h;
+        top = lv_clamp_top(top, count, vis);
+        o = (track_h - l) * top / lv_max_top(count, vis);
+    }
+    *off = o;
+    *len = l;
+}
+
+bool lv_repeat_due(uint32_t since, uint32_t last, uint32_t now) {
+    return (uint32_t)(now - since) >= LV_REPEAT_DELAY_MS &&
+           (uint32_t)(now - last) >= LV_REPEAT_EVERY_MS;
+}
+
+void lv_fit(char *dest, int size, const char *src, int max_w, int scale) {
+    if (!dest || size <= 0) return;
+    int len = (int)strlen(src);
+    int cw = text_measure_width("M", scale);
+    int keep = len, ndots = 0;
+    if (max_w > 0 && cw > 0 && text_measure_width(src, scale) > max_w) {
+        int fit = max_w / cw;                 /* characters that fit */
+        ndots = fit < 3 ? fit : 3;
+        keep = fit > 3 ? fit - 3 : 0;
+    }
+    int room = size - 1;
+    if (keep + ndots > room) {
+        ndots = 3 < room ? 3 : room;
+        keep = room - ndots;
+    }
+    memcpy(dest, src, (size_t)keep);
+    for (int i = 0; i < ndots; i++) dest[keep + i] = '.';
+    dest[keep + ndots] = '\0';
+}
+
+void lv_drag_begin(LvDrag *d, int y) {
+    d->active = true;
+    d->dragging = false;
+    d->down_y = y;
+    d->anchor_y = y;
+}
+
+int lv_drag_move(LvDrag *d, int y, int row_h) {
+    if (!d->active || row_h <= 0) return 0;
+    if (!d->dragging) {
+        int dy = y - d->down_y;
+        if (dy < 0) dy = -dy;
+        if (dy <= LV_DRAG_DEADZONE) return 0;
+        d->dragging = true;
+        d->anchor_y = y;     /* the dead zone itself is not scrolled */
+        return 0;
+    }
+    int steps = (y - d->anchor_y) / row_h;      /* toward zero, as log_page.c */
+    d->anchor_y += steps * row_h;
+    return -steps;
+}
+
+/* ── The widget ─────────────────────────────────────────────────────────── */
+
+void lv_init(ListView *lv, LvSource src, UiRect rect, int row_h) {
+    memset(lv, 0, sizeof(*lv));
+    lv->src = src;
+    lv->rect = rect;
+    lv->row_h = row_h;
+    lv->scale = row_h >= 28 ? 2 : 1;
+    lv->held_key = -1;
+    lv_sync(lv);
+}
+
+void lv_free(ListView *lv) {
+    free(lv->marks);
+    lv->marks = NULL;
+    lv->marks_cap = 0;
+}
+
+int lv_visible_rows(const ListView *lv) {
+    return lv_vis_rows(lv->rect.h, lv->row_h);
+}
+
+static void marks_clear_from(ListView *lv, int n) {
+    for (int i = n; i < lv->marks_cap; i++)
+        lv->marks[i >> 3] &= (uint8_t)~(1u << (i & 7));
+}
+
+void lv_sync(ListView *lv) {
+    int n = lv->src.count ? lv->src.count(lv->src.ctx) : 0;
+    if (n < 0) n = 0;
+    if (n < lv->count) marks_clear_from(lv, n);
+    lv->count = n;
+    if (n > lv->marks_cap) {
+        int bytes = (n + 7) >> 3;
+        uint8_t *p = realloc(lv->marks, (size_t)bytes);
+        if (p) {
+            memset(p + (lv->marks_cap >> 3), 0, (size_t)(bytes - (lv->marks_cap >> 3)));
+            lv->marks = p;
+            lv->marks_cap = bytes * 8;
+        }
+    }
+    lv->cursor = lv_clamp_cursor(lv->cursor, n);
+    lv->top = lv_top_for_cursor(lv->top, lv->cursor, n, lv_visible_rows(lv));
+}
+
+void lv_reset(ListView *lv) {
+    if (lv->marks) marks_clear_from(lv, 0);
+    lv->count = 0;
+    lv->cursor = 0;
+    lv->top = 0;
+    lv->drag.active = lv->drag.dragging = false;
+    lv->held_key = -1;
+    lv_sync(lv);
+    lv->top = 0;
+}
+
+void lv_move_to(ListView *lv, int index) {
+    lv->cursor = lv_clamp_cursor(index, lv->count);
+    lv->top = lv_top_for_cursor(lv->top, lv->cursor, lv->count, lv_visible_rows(lv));
+}
+
+bool lv_is_marked(const ListView *lv, int index) {
+    if (!lv->marks || index < 0 || index >= lv->count || index >= lv->marks_cap) return false;
+    return (lv->marks[index >> 3] >> (index & 7)) & 1;
+}
+
+int lv_marked_next(const ListView *lv, int from) {
+    if (from < 0) from = 0;
+    for (int i = from; i < lv->count; i++)
+        if (lv_is_marked(lv, i)) return i;
+    return -1;
+}
+
+int lv_mark_count(const ListView *lv) {
+    int n = 0;
+    for (int i = lv_marked_next(lv, 0); i >= 0; i = lv_marked_next(lv, i + 1)) n++;
+    return n;
+}
+
+static void mark_toggle(ListView *lv, int i) {
+    if (!lv->marks || i < 0 || i >= lv->count || i >= lv->marks_cap) return;
+    lv->marks[i >> 3] ^= (uint8_t)(1u << (i & 7));
+}
+
+LvEvent lv_key(ListView *lv, LvKey key) {
+    int old_cur = lv->cursor, old_top = lv->top;
+    bool marks_changed = false;
+
+    switch (key) {
+    case LV_KEY_MARK:
+    case LV_KEY_MARK_NEXT:
+        if (lv->cursor >= 0 && lv->marks) {
+            mark_toggle(lv, lv->cursor);
+            marks_changed = true;
+            if (key == LV_KEY_MARK_NEXT)
+                lv_move_to(lv, lv_cursor_after(lv->cursor, lv->count,
+                                               lv_visible_rows(lv), LV_KEY_DOWN));
+        }
+        break;
+    case LV_KEY_MARK_ALL:
+        if (lv->marks) {
+            for (int i = 0; i < lv->count; i++)
+                lv->marks[i >> 3] |= (uint8_t)(1u << (i & 7));
+            marks_changed = lv->count > 0;
+        }
+        break;
+    case LV_KEY_MARK_CLEAR:
+        marks_changed = lv_mark_count(lv) > 0;
+        if (lv->marks) marks_clear_from(lv, 0);
+        break;
+    default:
+        lv_move_to(lv, lv_cursor_after(lv->cursor, lv->count, lv_visible_rows(lv), key));
+        break;
+    }
+    return (marks_changed || lv->cursor != old_cur || lv->top != old_top)
+           ? LV_EV_CHANGED : LV_EV_NONE;
+}
+
+static LvEvent touch_input_frame(ListView *lv, const TouchState *ts) {
+    LvEvent ev = LV_EV_NONE;
+    int vis = lv_visible_rows(lv);
+    int first_y = lv->rect.y + LV_BORDER;
+    bool inside = ts->x >= lv->rect.x && ts->x < lv->rect.x + lv->rect.w &&
+                  ts->y >= lv->rect.y && ts->y < lv->rect.y + lv->rect.h;
+
+    if (ts->pressed && inside) lv_drag_begin(&lv->drag, ts->y);
+
+    if (lv->drag.active && (ts->held || ts->pressed)) {
+        int d = lv_drag_move(&lv->drag, ts->y, lv->row_h);
+        if (d != 0) {
+            int before = lv->top;
+            lv->top = lv_clamp_top(lv->top + d, lv->count, vis);
+            if (lv->top != before) ev = LV_EV_CHANGED;
+        }
+    }
+
+    if (lv->drag.active && ts->released) {
+        if (!lv->drag.dragging) {
+            int idx = lv_hit_row(lv->top, lv->drag.down_y - first_y, lv->row_h,
+                                 vis, lv->count);
+            if (idx >= 0) {
+                bool again = (idx == lv->cursor);
+                lv_move_to(lv, idx);
+                ev = (again && lv->active) ? LV_EV_ACTIVATE : LV_EV_TAP;
+            }
+        }
+        lv->drag.active = lv->drag.dragging = false;
+    } else if (lv->drag.active && !ts->held && !ts->pressed) {
+        lv->drag.active = lv->drag.dragging = false;   /* the release was missed */
+    }
+    return ev;
+}
+
+LvEvent lv_input(ListView *lv, const TouchState *ts, const InputState *in,
+                 uint32_t now_ms) {
+    LvEvent ev = LV_EV_NONE;
+    if (ts) ev = touch_input_frame(lv, ts);
+    if (!in || !lv->active) {
+        lv->held_key = -1;
+        return ev;
+    }
+
+    if (in->buttons[BTN_ID_ACTION].pressed && lv->cursor >= 0) return LV_EV_ACTIVATE;
+
+    static const struct { int btn; LvKey key; } map[] = {
+        { BTN_ID_UP, LV_KEY_UP }, { BTN_ID_DOWN, LV_KEY_DOWN },
+    };
+    for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
+        const ButtonState *b = &in->buttons[map[i].btn];
+        if (b->pressed) {
+            lv->held_key = (int)map[i].key;
+            lv->held_since = lv->held_last = now_ms;
+            if (lv_key(lv, map[i].key) == LV_EV_CHANGED) ev = LV_EV_CHANGED;
+        } else if (b->held && lv->held_key == (int)map[i].key) {
+            if (lv_repeat_due(lv->held_since, lv->held_last, now_ms)) {
+                lv->held_last = now_ms;
+                if (lv_key(lv, map[i].key) == LV_EV_CHANGED) ev = LV_EV_CHANGED;
+            }
+        } else if (lv->held_key == (int)map[i].key) {
+            lv->held_key = -1;
+        }
+    }
+    return ev;
+}
+
+/* ── Drawing ────────────────────────────────────────────────────────────── */
+
+static void draw_glyph(Framebuffer *fb, LvGlyph g, int x, int y, int s) {
+    switch (g) {
+    case LV_GLYPH_FOLDER: {
+        uint32_t c = RGB(235, 170, 40);
+        fb_fill_rect(fb, x, y + s / 6, s / 2, s / 5, c);                 /* tab */
+        fb_fill_rect(fb, x, y + s / 4, s, s - s / 4 - s / 8, c);         /* body */
+        break;
+    }
+    case LV_GLYPH_FILE: {
+        int w = s * 2 / 3, fx = x + (s - w) / 2;
+        fb_fill_rect(fb, fx, y, w, s, RGB(205, 205, 215));
+        for (int i = 0; i < 3; i++)
+            fb_fill_rect(fb, fx + w / 6, y + s / 4 + i * (s / 5), w - w / 3, 2,
+                         RGB(90, 90, 110));
+        break;
+    }
+    case LV_GLYPH_UP: {
+        uint32_t c = RGB(0, 200, 80);
+        int half = s / 2;
+        for (int r = 0; r < half; r++)                                     /* head */
+            fb_fill_rect(fb, x + half - r - 1, y + r, 2 * r + 2, 1, c);
+        fb_fill_rect(fb, x + half - s / 8, y + half, s / 4, s - half, c);  /* stem */
+        break;
+    }
+    default:
+        fb_fill_rect(fb, x, y, s, s, RGB(25, 25, 35));
+        fb_draw_rect(fb, x, y, s, s, LV_COLOR_ROW_BD);
+        break;
+    }
+}
+
+static void draw_row(Framebuffer *fb, const ListView *lv, int index, int x, int y, int w) {
+    LvRow r;
+    memset(&r, 0, sizeof(r));
+    lv->src.row(lv->src.ctx, index, &r);
+
+    int h = lv->row_h - 2;
+    bool cur = (index == lv->cursor);
+    bool marked = lv_is_marked(lv, index);
+    uint32_t fill = !cur ? LV_COLOR_ROW : lv->active ? LV_COLOR_CUR : LV_COLOR_CUR_OFF;
+    uint32_t edge = (cur && lv->active) ? BTN_COLOR_HIGHLIGHT : LV_COLOR_ROW_BD;
+    uint32_t ink = (r.flags & LV_ROW_DIM) ? LV_COLOR_DIM : marked ? LV_COLOR_MARK : COLOR_WHITE;
+    fb_fill_rect(fb, x, y, w, h, fill);
+    fb_draw_rect(fb, x, y, w, h, edge);
+    if (marked) fb_fill_rect(fb, x + 1, y + 1, 3, h - 2, LV_COLOR_MARK);
+
+    int isz = lv->row_h - 8;
+    if (isz < 8) isz = 8;
+    int ix = x + 8, iy = y + (h - isz) / 2;
+    if (r.icon && r.icon->pixels && r.icon->w > 0 && r.icon->h > 0)
+        fb_blit_sprite_scaled(fb, r.icon->pixels, r.icon->w, 0, 0, r.icon->w, r.icon->h,
+                              ix, iy, isz, isz, 0xFFFFFFFF);
+    else
+        draw_glyph(fb, r.glyph, ix, iy, isz);
+
+    int tx = ix + isz + 8;
+    int right = x + w - 8;
+    int ty = y + (h - text_measure_height(lv->scale)) / 2;
+    int title_w = right - tx;
+    if (r.detail && r.detail[0]) {
+        int dw = text_measure_width(r.detail, lv->scale);
+        fb_draw_text(fb, right - dw, ty, r.detail,
+                     (r.flags & LV_ROW_DIM) ? LV_COLOR_DIM : LV_COLOR_LABEL, lv->scale);
+        title_w = right - dw - 10 - tx;
+    }
+    char cut[128];
+    lv_fit(cut, sizeof(cut), r.title ? r.title : "", title_w, lv->scale);
+    fb_draw_text(fb, tx, ty, cut, ink, lv->scale);
+}
+
+void lv_draw(Framebuffer *fb, ListView *lv, const char *empty_msg) {
+    const UiRect *R = &lv->rect;
+    int vis = lv_visible_rows(lv);
+    fb_fill_rect(fb, R->x, R->y, R->w, R->h, LV_COLOR_BG);
+    fb_draw_rect(fb, R->x, R->y, R->w, R->h, lv->active ? LV_COLOR_EDGE_ON : LV_COLOR_EDGE_OFF);
+
+    if (lv->count <= 0) {
+        if (empty_msg && empty_msg[0])
+            text_draw_centered(fb, R->x + R->w / 2, R->y + R->h / 2, empty_msg,
+                               LV_COLOR_LABEL, lv->scale);
+        return;
+    }
+
+    int x = R->x + LV_BORDER, w = R->w - 2 * LV_BORDER - LV_BAR_W;
+    int top = lv_clamp_top(lv->top, lv->count, vis);
+    for (int i = 0; i < vis && top + i < lv->count; i++)
+        draw_row(fb, lv, top + i, x, R->y + LV_BORDER + i * lv->row_h + 1, w);
+
+    if (lv->count > vis && vis > 0) {
+        int track = vis * lv->row_h, off, len;
+        int bx = R->x + R->w - LV_BORDER - LV_BAR_W + 1;
+        lv_thumb(lv->count, vis, top, track, &off, &len);
+        fb_fill_rect(fb, bx, R->y + LV_BORDER, LV_BAR_W - 2, track, LV_COLOR_ROW);
+        fb_fill_rect(fb, bx, R->y + LV_BORDER + off, LV_BAR_W - 2, len,
+                     lv->active ? LV_COLOR_EDGE_ON : LV_COLOR_EDGE_OFF);
+    }
+}

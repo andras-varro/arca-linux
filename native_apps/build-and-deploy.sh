@@ -204,6 +204,7 @@ step "14/31" "ppm";          $CC "${WARN[@]}" -O2 -c common/ppm.c             -o
                               $CC "${WARN[@]}" -O2 -c common/icon_grid.c       -o build/icon_grid.o
                               $CC "${WARN[@]}" -O2 -I. -c common/top_bar.c         -o build/top_bar.o
                               $CC "${WARN[@]}" -O2 -c common/ui_focus.c        -o build/ui_focus.o
+                              $CC "${WARN[@]}" -O2 -c common/list_view.c       -o build/list_view.o
                               $CC "${WARN[@]}" -O2 -c common/pointer.c         -o build/pointer.o
                               $CC "${WARN[@]}" -O2 -c common/start_menu.c      -o build/start_menu.o
 step "15/31" "logger";       $CC "${WARN[@]}" -O2 -c common/logger.c          -o build/logger.o
