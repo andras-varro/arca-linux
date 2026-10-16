@@ -30,6 +30,7 @@ See [CLAUDE.md](CLAUDE.md) for how to write code here, and [../IMPROVEMENT_PLAN.
 | `app_launcher` | Launcher | Visual grid launcher — keyboard/mouse/gamepad nav, auto-starts on boot |
 | `control_panel` | Tool | **Unified hardware app** — the one you want; `control_panel <page>` opens one page directly (over SSH: `/etc/init.d/arca-app stop`, then `/opt/games/control_panel /dev/fb0 /dev/input/event0 system`, then `start`; pages `audio display led usb bluetooth input network monitor system information`, case-insensitive; `--list-pages` prints them). Home icon grid; tabs: Settings, Tests, Display; pages: LED, Monitor, Network, Information, USB, System (SSH mode read-only, clock, date/time editor) |
 | `theremin` | Toy | "Tap-a-Theremin" — touch-controlled tone generator |
+| `file_manager` | Tool | "Files" — two-pane file manager over the data, games and audio folders and USB sticks; copy, move, delete, rename, make folder (touch, keyboard F-keys, pad); logic in `file_manager/fm_core.c`, host test `tests/file_manager_test.c` |
 | `touch_raw` | Tool | Digitizer reach: no calibration, no bezel — live crosshair + interior-only fit (hidden) |
 
 Tools marked *hidden* have no manifest, so they get no launcher tile but remain runnable over SSH.

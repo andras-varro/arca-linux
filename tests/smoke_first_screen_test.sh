@@ -104,7 +104,7 @@ T=$(smoke_targets)
 has "$T" '^app_launcher|/opt/arca/app_launcher|$'  "A7 app_launcher runs bare, as the init script starts it"
 has "$T" '^control_panel|/opt/games/control_panel|/dev/fb0 /dev/input/touchscreen0$' "A8 control_panel's empty args= becomes fb,touch"
 has "$T" '^snake|/opt/games/snake|/dev/fb0 /dev/input/touchscreen0$' "A9 a game gets <fb> <touch>"
-assert_eq 13 "$(printf '%s\n' "$T" | grep -c .)" "A11 13 targets: launcher + 10 manifests + 2 tools"
+assert_eq 14 "$(printf '%s\n' "$T" | grep -c .)" "A11 14 targets: launcher + 11 manifests + 2 tools"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo ""; echo "B. the five outcomes"
@@ -181,7 +181,7 @@ echo ""; echo "F. the runner end to end, through an ssh stub"
 SC="$TMP/sc"; mkdir -p "$TMP/bin"
 # ⚠️ The stub MUST slurp its stdin unless given -n, as a real ssh does with a non-tty
 # stdin. The runner calls ssh inside a `while read` loop; a stub that never reads would
-# let a missing -n through and F31 (all 13 graded) would pass vacuously.
+# let a missing -n through and F31 (all 14 graded) would pass vacuously.
 # It models the framebuffer's CONTENTS across calls in $SC/fbstate: it starts holding
 # a colourful frame (the previous app's), the launch applies the runner's own dd to it
 # and then the app's drawing ($SC/draw.raw, absent = an app that draws nothing), and
@@ -312,7 +312,7 @@ assert_eq 0 "$RC" "F30 ...and exits 0"
 
 scenario "$ALIVE" "$I32" "$TMP/c32.raw"
 run_runner 1.2.3.4
-assert_eq 13 "$(printf '%s\n' "$OUT" | grep -cE '^  [a-z_]+ +pass ')" "F31 no subset: every one of the 13 targets is graded"
+assert_eq 14 "$(printf '%s\n' "$OUT" | grep -cE '^  [a-z_]+ +pass ')" "F31 no subset: every one of the 14 targets is graded"
 run_runner
 assert_eq 2 "$RC" "F32 no <ip> is a usage error"
 

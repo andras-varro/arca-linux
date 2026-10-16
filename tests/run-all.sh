@@ -169,6 +169,7 @@ CTEST_ROWS=(
     "usb_bus_test|-I.|control_panel/usb_bus.c"
     "log_filter_test|-I.|control_panel/log_filter.c"
     "term_keymap_test|-I.|terminal/term_keymap.c"
+    "file_manager_test|-I.|file_manager/fm_core.c"
     "vnc_pad_test|-I common -I ../vnc_client|../vnc_client/vnc_pad.c common/ui_focus.c common/input_scan.c"
 )
 
