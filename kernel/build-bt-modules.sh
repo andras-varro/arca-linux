@@ -2,8 +2,9 @@
 # build-bt-modules.sh - Build Bluetooth (+ uhid, uinput, AF_ALG) modules that load on OUR image
 # Run this script in WSL (Linux), after build-image.sh. The image's config has CONFIG_BT unset, so
 # these modules cannot come from ~/rw-kbuild-image: this script copies that tree to its own work
-# dir, enables BT there as modules, builds, and keeps only the .ko set Bluetooth needs. The image
-# tree is read, never written; the script checks that at the end.
+# dir, enables BT there as modules, builds, and keeps only the .ko set Bluetooth needs. `--set storage`
+# does the same for usb-storage.ko + nls_utf8.ko (USB mass-storage sticks; USB_STORAGE and NLS_UTF8
+# are unset in the image). The image tree is read, never written; the script checks that at the end.
 #
 # The copy's vmlinux is NOT the image. A module built here is safe only if every symbol it imports
 # from vmlinux exists in the image's vmlinux with the same CRC, so that is checked against the
@@ -15,12 +16,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 IMAGE_WORK="${HOME}/rw-kbuild-image"
-WORK_DIR="${HOME}/rw-kbuild-bt"
+WORK_DIR=""      # default per --set, below
 PATCH_DIR="${SCRIPT_DIR}/patches-modules"
 CROSS_COMPILE="arm-linux-gnueabihf-"
 ARCH="arm"
 OUT_DIR=""
 REUSE=0
+SET=bt
 
 # scripts/config verb + symbol. RFKILL is a module so bluetoothd finds /dev/rfkill; without it
 # bluetoothd logs an error at every start. BT_RFCOMM is built for BlueALSA's hfp-ag.
@@ -43,9 +45,14 @@ ROOTS=(bluetooth btusb hidp rfcomm uhid uinput algif_hash algif_skcipher)
 # .188, insmod refuses it ("host not compliant with requirements: 2") and drbg loads without it.
 RUNTIME_ROOTS=(cryptomgr cmac ecb sha256_generic ecdh_generic hmac drbg)
 
+# --set storage: USB mass-storage. SCSI, SD, FAT and NLS 437/8859-1 are built in; only these two
+# are missing. nls_utf8 is what a vfat mount with iocharset=utf8 asks for.
+STORAGE_CONFIG_WANT=("module USB_STORAGE" "module NLS_UTF8")
+STORAGE_ROOTS=(usb_storage nls_utf8)
+
 usage() {
     cat <<'EOF'
-Usage: build-bt-modules.sh --out <dir> [--image <work>] [--work <dir>] [--reuse]
+Usage: build-bt-modules.sh --out <dir> [--set bt|storage] [--image <work>] [--work <dir>] [--reuse]
 
 Copies ~/rw-kbuild-image/linux-4.14.52 (built by build-image.sh) to <work>/linux-4.14.52, applies
 kernel/patches-modules/*.patch there, enables BT/btusb/hidp/uhid/uinput/AF_ALG as modules,
@@ -63,7 +70,9 @@ differs from the image's, which the CRC check then has to clear.
                 there are removed.
   --image <work> The image's build tree parent: the --work given to build-image.sh, which must
                 be the image the unit boots (default: ~/rw-kbuild-image).
-  --work <dir>  Work dir in the WSL filesystem (default: ~/rw-kbuild-bt). Refused under /mnt.
+  --set <name>  bt (default): the Bluetooth closure. storage: usb-storage.ko and nls_utf8.ko.
+  --work <dir>  Work dir in the WSL filesystem (default: ~/rw-kbuild-bt, or ~/rw-kbuild-storage for
+                --set storage). Refused under /mnt.
   --reuse       Keep an existing copy (incremental rebuild) instead of re-copying the image tree.
   -h, --help    This text.
 
@@ -75,6 +84,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --out)     shift; OUT_DIR="${1:?--out needs a directory}" ;;
         --work)    shift; WORK_DIR="${1:?--work needs a directory}" ;;
+        --set)     shift; SET="${1:?--set needs bt or storage}" ;;
         --image)   shift; IMAGE_WORK="${1:?--image needs a directory}" ;;
         --reuse)   REUSE=1 ;;
         -h|--help) usage; exit 0 ;;
@@ -83,6 +93,12 @@ while [ $# -gt 0 ]; do
     shift
 done
 [ -n "$OUT_DIR" ] || { usage; exit 1; }
+case "$SET" in
+    bt)      : "${WORK_DIR:=${HOME}/rw-kbuild-bt}" ;;
+    storage) : "${WORK_DIR:=${HOME}/rw-kbuild-storage}"
+             CONFIG_WANT=("${STORAGE_CONFIG_WANT[@]}"); ROOTS=("${STORAGE_ROOTS[@]}"); RUNTIME_ROOTS=() ;;
+    *)       echo "ERROR: --set must be bt or storage, not $SET"; exit 1 ;;
+esac
 IMAGE_DIR="${IMAGE_WORK}/linux-4.14.52"
 REF_KO="${IMAGE_WORK}/modules/cy8ctmg120_ts/cy8ctmg120_ts.ko"
 KDIR="${WORK_DIR}/linux-4.14.52"
@@ -133,8 +149,10 @@ else
 fi
 cp "${IMAGE_DIR}/.config" "${KDIR}/.config"
 
-echo; echo "[2/7] Applying module-only patches from ${PATCH_DIR}..."
+echo; echo "[2/7] Applying module-only patches from ${PATCH_DIR} (set: ${SET})..."
 mapfile -t PATCHES < <(find "$PATCH_DIR" -maxdepth 1 -name '*.patch' 2>/dev/null | sort)
+# The patches are Bluetooth/HID fixes; the storage set has none of its own.
+[ "$SET" = bt ] || PATCHES=()
 for p in "${PATCHES[@]}"; do
     # --forward on the reverse probe: without it `-R --batch` on an unpatched tree exits 0.
     if patch -d "$KDIR" -p1 -R --forward --dry-run -s < "$p" &>/dev/null; then
@@ -230,7 +248,7 @@ if [ -f "$REF_KO" ]; then
     want_vm="$(ko_field "$REF_KO" vermagic)"
     echo "  Reference vermagic ($(basename "$REF_KO")): ${want_vm}"
 else
-    want_vm="$(cat "${IMAGE_DIR}/include/config/kernel.release") SMP mod_unload modversions ARMv7 p2v8"
+    want_vm="$(cat "${IMAGE_DIR}/include/config/kernel.release") SMP mod_unload modversions ARMv7 p2v8 "   # the real vermagic ends in a space
     echo "  WARNING: ${REF_KO} missing; comparing with the expected string '${want_vm}'"
 fi
 for m in "${ORDER[@]}"; do

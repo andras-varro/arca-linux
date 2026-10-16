@@ -1,0 +1,58 @@
+#!/bin/sh
+# Load the USB mass-storage modules: usb-storage.ko and nls_utf8.ko.
+#
+# SCSI, the SCSI disk driver, FAT/VFAT/MSDOS and the 437 / ISO-8859-1 code pages are compiled
+# into this kernel; USB_STORAGE and NLS_UTF8 are not, so a stick needs these two modules. They
+# are built against OUR image by kernel/build-bt-modules.sh --set storage, which writes
+# load-order.txt (dependencies first), and the usb_host component installs both. insmod,
+# never insmod -f: the build checks every imported symbol CRC against the image.
+#
+# Loading registers a USB interface driver, which re-probes devices already on the bus, so
+# this does not have to run before the stick is plugged in. Mounting is not done here.
+#
+# start exits 0 whatever happens: a unit without the modules must still boot.
+
+MODDIR=/lib/modules/4.14.52/storage
+ORDER="$MODDIR/load-order.txt"
+
+case "$1" in
+  start)
+    echo "Loading USB storage modules..."
+    if [ ! -f "$ORDER" ]; then
+      echo "  $ORDER absent (usb_host component not deployed to this unit)"
+    else
+      while read -r ko; do
+        [ -n "$ko" ] || continue
+        m=${ko%.ko}
+        m=$(echo "$m" | tr - _)
+        if lsmod | cut -d' ' -f1 | grep -qx "$m"; then
+          echo "  $ko: already loaded"
+        elif insmod "$MODDIR/$ko" 2>/tmp/usb-storage-insmod.err; then
+          echo "  $ko: loaded"
+        else
+          echo "  $ko: FAILED -- $(cat /tmp/usb-storage-insmod.err)"
+        fi
+      done < "$ORDER"
+    fi
+    echo "USB storage modules done"
+    ;;
+  stop)
+    echo "Unloading USB storage modules..."
+    # Reverse of load-order.txt, with the underscore names rmmod uses.
+    if [ -f "$ORDER" ]; then
+      for ko in $(sed '1!G;h;$!d' "$ORDER"); do
+        rmmod "$(echo "${ko%.ko}" | tr - _)" 2>/dev/null
+      done
+    fi
+    ;;
+  restart)
+    $0 stop
+    sleep 1
+    $0 start
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+    ;;
+esac
+exit 0

@@ -17,7 +17,8 @@
 #   1. device-files/enable-usb-host.sh + device-files/usb-host — the boot-time
 #      host-mode bring-up and the RESCAN/recover paths, i.e.
 #      device-files/provision-rules.conf's `usb` group.
-#   2. xpad.ko / joydev.ko / ff-memless.ko and the USB-audio set, force-loaded
+#   2. xpad.ko / joydev.ko / ff-memless.ko and the USB-audio set, force-loaded (and the
+#      usb-storage.ko + nls_utf8.ko pair, to /lib/modules/4.14.52/storage)
 #      -> THE CONTROLLER AS /dev/input/event*. Build artifacts, so they travel in
 #      the bundle (../lib/arca-bundle.sh) to /lib/modules/4.14.52/extra on p6.
 #
@@ -117,6 +118,17 @@ for _mod in "${USB_MODULES[@]}"; do
 done
 unset _mod
 
+# The USB mass-storage pair is built against OUR kernel image by ../kernel/build-bt-modules.sh
+# --set storage (the other seven come from build-kernel-modules.sh), into modules-storage/ with
+# its load-order.txt, and goes to /lib/modules/4.14.52/storage. Order matters only to the init
+# script, which reads the load-order.txt that travels with them.
+STORAGE_DIR="$SCRIPT_DIR/modules-storage"
+STORAGE_MODULES=(usb-storage.ko nls_utf8.ko)
+for _mod in "${STORAGE_MODULES[@]}" load-order.txt; do
+    USB_ARTIFACTS+=("0644|$STORAGE_DIR/$_mod|/lib/modules/$KERNEL_VERSION/storage/$_mod")
+done
+unset _mod
+
 echo ""
 echo "════════════════════════════════════════"
 echo " $PRODUCT_NAME USB Host + Controller + Audio"
@@ -190,6 +202,35 @@ for mod in "${USB_MODULES[@]}"; do
 done
 ok "${USB_MODULES[*]}"
 echo ""
+ts "[2/7] kernel modules (USB mass storage, kernel/build-bt-modules.sh --set storage)"
+_storage_ok=1
+for _mod in "${STORAGE_MODULES[@]}" load-order.txt; do
+    [[ -f "$STORAGE_DIR/$_mod" ]] || _storage_ok=0
+done
+if [[ -n "$(find "$REPO_ROOT/kernel/build-bt-modules.sh" -newer "$STORAGE_DIR/load-order.txt" -print -quit 2>/dev/null)" ]]; then
+    _storage_ok=0
+fi
+if [[ $_storage_ok -eq 0 ]]; then
+    # Built against the image the unit boots: ~/rw-kbuild-image, or the --work dir of another
+    # build-image.sh run named in ARCA_KBUILD_IMAGE (a test kernel). Modules must match the kernel
+    # they load on (module_layout CRC). Or run the builder by hand with
+    # --out usb_host/modules-storage, and this step then finds the result.
+    KIMG="${ARCA_KBUILD_IMAGE:-$HOME/rw-kbuild-image}"
+    [[ -f "$KIMG/linux-4.14.52/vmlinux" ]] \
+        || err "$KIMG is not built, and the storage modules are built against it.
+     Run kernel/build-image.sh first (in WSL), then re-run this."
+    REUSE=()
+    [[ -f "$HOME/rw-kbuild-storage/linux-4.14.52/Makefile" ]] && REUSE=(--reuse)
+    bash "$REPO_ROOT/kernel/build-bt-modules.sh" --set storage --image "$KIMG" --out "$STORAGE_DIR" "${REUSE[@]}"
+fi
+for _mod in "${STORAGE_MODULES[@]}"; do
+    [[ -f "$STORAGE_DIR/$_mod" ]] || err "module $_mod not in $STORAGE_DIR"
+    grep -qx "$_mod" "$STORAGE_DIR/load-order.txt" || err "$_mod missing from $STORAGE_DIR/load-order.txt"
+done
+unset _mod
+ok "${STORAGE_MODULES[*]}"
+echo ""
+
 
 # ── 3. the ARM-safety gate, on all eight ─────────────────────────────────────
 #
@@ -294,7 +335,7 @@ echo ""
 
 # ── 5. the eight built artifacts ─────────────────────────────────────────────
 ts "[5/7] Built artifacts"
-ssh "$DEVICE" "mkdir -p /usr/local/bin /lib/modules/$KERNEL_VERSION/extra"
+ssh "$DEVICE" "mkdir -p /usr/local/bin /lib/modules/$KERNEL_VERSION/extra /lib/modules/$KERNEL_VERSION/storage"
 for a in "${USB_ARTIFACTS[@]}"; do
     mode="${a%%|*}"; rest="${a#*|}"; src="${rest%%|*}"; dev="${rest#*|}"
     scp -q "$src" "$DEVICE:$dev" || err "could not copy $src to $dev"
@@ -320,6 +361,7 @@ echo ""
 ts "[6/7] Enabling host mode and loading the modules now"
 ssh "$DEVICE" "/etc/init.d/xpad-modules start" || warn "module load reported a failure"
 ssh "$DEVICE" "/etc/init.d/usb-audio-modules start" || warn "usb-audio module load reported a failure"
+ssh "$DEVICE" "/etc/init.d/usb-storage-modules start" || warn "usb-storage module load reported a failure"
 ssh "$DEVICE" "/etc/init.d/usb-host start" || warn "usb-host start reported a failure"
 echo ""
 
@@ -356,7 +398,7 @@ esac
 
 echo ""
 echo "--- modules ---"
-lsmod 2>/dev/null | grep -E "^Module|xpad|joydev|ff_memless" || echo "  (none)"
+lsmod 2>/dev/null | grep -E "^Module|xpad|joydev|ff_memless|usb_storage|nls_utf8" || echo "  (none)"
 
 echo ""
 echo "--- USB devices ---"
@@ -371,7 +413,7 @@ done
 
 echo ""
 echo "--- boot links ---"
-for l in /etc/rc5.d/S89xpad-modules /etc/rc5.d/S90usb-host; do
+for l in /etc/rc5.d/S88usb-storage-modules /etc/rc5.d/S89xpad-modules /etc/rc5.d/S90usb-host; do
     if [ -L "$l" ]; then
         echo "  $l -> $(readlink "$l")"
     else

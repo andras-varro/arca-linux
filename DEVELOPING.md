@@ -194,7 +194,7 @@ arca-linux/
 ├── device-files/                # Installed onto the device verbatim
 │   ├── arca-app                 # App respawn loop; arcamond = init for the history daemon
 │   ├── enable-usb-host.sh       # The /dev/mem MUSB host-mode patch; usb-host runs it (S90)
-│   ├── xpad-modules             # insmod -f the three controller modules (S89)
+│   ├── xpad-modules             # insmod -f the controller modules (S89); usb-storage-modules (S88): sticks
 │   └── provision-rules.conf     # What the device ends up with
 ├── LICENSE.md                   # MIT, plus the third-party enumeration
 ├── SYSTEM_ANALYSIS.md           # Hardware analysis

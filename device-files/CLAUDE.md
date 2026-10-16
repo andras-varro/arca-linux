@@ -5,8 +5,8 @@ installs. Loaded when you work in `device-files/`.
 
 Anything installed by more than one path lives here, never in a heredoc: `arca-app` (the boot
 init script — it carries the name it is *deployed* as rather than a `.sh` one), `audio-enable`,
-`time-sync`, `touch-module`, `arcamond`, `sysctl.conf`, the four USB scripts `enable-usb-host.sh` /
-`usb-host` / `xpad-modules` / `usb-audio-modules`, the Bluetooth files `bluetooth` / `bluetooth.conf` /
+`time-sync`, `touch-module`, `arcamond`, `sysctl.conf`, the five USB scripts `enable-usb-host.sh` /
+`usb-host` / `xpad-modules` / `usb-audio-modules` / `usb-storage-modules`, the Bluetooth files `bluetooth` / `bluetooth.conf` /
 `bluetooth-main.conf` / `bluetooth-input.conf` / `bluealsa.conf` / `20-bluealsa.conf`, `avahi-daemon.conf`,
 plus `provision-rules.conf`. Both `provision.sh` (over SSH) and
 `rootfs/commission-offline.sh` (onto a mounted card) install those same bytes, and **neither
