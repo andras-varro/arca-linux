@@ -27,18 +27,11 @@ Device facts live there; this file holds only what we intend to *do* about them.
 
 ## Needs a human at the panel
 
-**B72 is outstanding.** There is no `/dev/uinput`, so nothing past an app's first screen is
+**Nothing is outstanding.** There is no `/dev/uinput`, so nothing past an app's first screen is
 script-verifiable (`CLAUDE.md` → *Non-obvious constraints*), and panel time is the project's scarce
 resource: price the check before requesting it, group requests into **one checklist**, split an item when
 only part of it is gated, and record the answer with the confidence it was given — "I think it works" is a
 hedge, and a verdict is a weaker answer than a description, so say which one the next item needs.
-
-### B72. Which free ScummVM games run on the stock image — open, operator request 2026-10-15
-
-**The free ScummVM games** (scummvm.org's freeware downloads), copied over SSH to `/home/root/data/games`: which
-start and play on the stock image's engine set. The README names them only once this answers.
-
-**Done when** the README names the ones that run.
 
 ---
 
@@ -161,6 +154,10 @@ Seen in the Control Panel log viewer; boot-console errors are defects here. **Me
 ### B69. Does the SD slot's card-detect switch work, and is it on the pad the DT names? — open, unverified
 
 `kernel/dts/rw20.dts:550` has `cd-gpios = <&gpio4 31 GPIO_ACTIVE_LOW>` (gpio_127, the vendor's value, kept) while the pad it muxes as a GPIO (`rw20.dts:278`) is `sdmmc1_dat4` = gpio_126. **[unverified]** Whether the switch is read at all has not been checked; the card boots, so nothing observed depends on it. **Done when** a card insert and removal is observed in the kernel log, or the property is shown to be inert.
+
+### B73. Network copies run at ~3 MB/s with the CPU saturated — open, measured 2026-10-15 on unit .115
+
+**Measured:** eth0 is 100 Mbit full duplex (driver `smsc911x`). An SSH copy of 32 MB from the host ran at ~3.1 MB/s with `aes128-ctr` and `chacha20-poly1305`, ~2.1 MB/s with `aes128-gcm`. `/proc/stat` over 6 s during a transfer: ~60% softirq, ~22% system, ~20% user, 0% idle. A 64 MB card write with `conv=fsync` took 4.16 s (~15 MB/s), so the card is not the limit. **Read from source:** vanilla 4.14.52 `drivers/net/ethernet/smsc/smsc911x.c` has no DMA path (no occurrence of "dma"); RX copies with `ioread32_rep`. **[inferred, not measured]** A DMA path via the OMAP sDMA may gain little for ~1.5 KB frames; the GPMC timings the bootloader left for the Ethernet chip select (`HARDWARE.md` names the part: LAN9221, `U15`) may be slower than the chip needs, and PIO cost scales with them. **Done when** the GPMC timing registers for that chip select are read on the device and compared with the LAN9221 datasheet minimum, and either tightened and the copy re-measured, or recorded as already at minimum.
 
 ## Features
 
@@ -311,11 +308,11 @@ follow its shape. Navigation stays as it is: the pages' `*_page_focusables` rect
 from, or a draw callback owned by the widget. **Done when** buttons, toggles, sliders, launcher tiles, dialog buttons and the bar draw
 focus through one mechanism, and the Control Panel's generic ring is gone.
 
-### F151. User data on a USB stick: export/import settings and scores, import games and audio — open, operator idea 2026-10-13, future, not designed
+### F151. User data on a USB stick: a file manager plus export/import of settings and scores — open, operator priority 2026-10-15, not designed
 
 A user with no PC tools has no backup (`backup.sh` needs SSH) and no way to put ScummVM games or audio on a
-grown p3. Proposed shape: one settings-app page with export and import, not a file manager. **Blocked by the operator ruling of
-2026-09-06 (no USB work beyond USB audio)**: lift it first; needs the `usb-storage` and `vfat`/`exfat` modules (a module build).
+grown p3. Proposed shape: a file manager (browse a stick, copy games and audio into place) plus export and import of settings and
+scores. The operator ruling of 2026-10-15 lifted the 2026-09-06 USB ruling for USB storage. Needs the `usb-storage` and `vfat`/`exfat` modules (a module build).
 
 ### F106. Support BeagleBone Black boards — open, operator idea 2026-10-01, future
 
@@ -419,7 +416,8 @@ appended DTB, which needs no kernel source ([`#312-serial-ports`](SYSTEM_ANALYSI
 and that is a result rather than a gap — three mechanisms read out of the MUSB driver were each applied
 and **refuted on hardware**, and the answer that ships is the one-tap RESCAN, verified on a panel. Before
 anyone proposes a fourth theory, read the refuted table in `usb_host/README.md`, which names the one
-never-attempted candidate and the question any candidate must answer first.
+never-attempted candidate and the question any candidate must answer first. **The operator ruling of 2026-10-15 lifts this
+for USB storage** (the file manager and export/import under F151); the enumeration-at-probe closure above stands.
 
 **Bundles hold built artifacts only — settled**, because the one consumer that installs device scripts runs
 from a clone and has `device-files/` beside it either way.

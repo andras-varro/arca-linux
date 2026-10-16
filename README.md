@@ -72,15 +72,17 @@ controller needs a **powered** hub.
 
 **ScummVM games: you bring your own.** There is no on-screen way to add them yet, and
 USB thumb drives are not supported yet (on the roadmap). The only route today is a copy
-over SSH (section 5), for example
-`scp -r <game-folder> root@<ip>:/home/root/data/games/<game-folder>/`, then **Add Game**
-in ScummVM's own launcher. Free, legal games (Beneath a Steel Sky, Flight of the Amazon
-Queen and others) are listed at <https://www.scummvm.org/games/>; prefer the floppy
-versions, which are a few MiB. The ScummVM in the default build has the SCUMM, HE, AGI,
-SCI, AGOS, Sky and Queen engines; other engines are not in it.
-[unverified: that the published image was built with the default engine set, and that the
-Add Game browser on the panel can reach `/home/root/data/games`; the path is the one the
-ScummVM port's own README gives]
+over SSH (section 5), for example `scp -r <game-folder> root@<ip>:/home/root/data/games/<game-folder>/`,
+then **Add Game** in ScummVM's own launcher. Copy with `scp` or an SFTP client
+(`sftp://root@<ip>/...`), not a file manager's `fish://` mode: fish writes byte by byte and
+the copy crawls with the CPU at 100%. Free, legal games (Beneath a Steel Sky, Flight of the
+Amazon Queen and others) are listed at <https://www.scummvm.org/games/>; prefer the floppy
+versions, which are a few MiB. Beneath a Steel Sky (CD 1.2) was tested on the stock image and
+starts. The ScummVM in the default build has the SCUMM, HE, AGI, SCI, AGOS, Sky and Queen
+engines; other engines are not in it. [unverified: that the published image was built with
+the default engine set (a Sky-engine game runs on it, which answers only that engine), and
+which folder Add Game on the panel can reach; a game copied to `/home/root/games` was added
+and started, while the path in the ScummVM port's own README is `/home/root/data/games`]
 
 ## 4. Configure
 
