@@ -1,0 +1,201 @@
+#!/bin/sh
+# arca-storage - mount, list and eject USB sticks for the file manager and the Control Panel.
+#
+# Usage:
+#   arca-storage mount           mount each unmounted vfat stick partition on /media/usbN
+#   arca-storage list            print the current /media/usb* mounts
+#   arca-storage eject [<mnt>]   sync, unmount <mnt> (or every /media/usb* mount), remove its mountpoint
+#
+# Stdout is a contract that callers parse, one line per device or mount:
+#   MOUNTED <mountpoint> <dev>        the stick was mounted by this run
+#   ALREADY <mountpoint> <dev>        the device was already mounted (wherever it is)
+#   UNSUPPORTED <dev> <fstype>        recognised, but not vfat; <fstype> is "unknown" when not recognised
+#   FAILED <dev> <reason>             could not read or mount the device
+#   GONE <mountpoint>                 a /media/usbN whose device node has disappeared; lazily unmounted
+#   EJECTED <mountpoint>              unmounted and its mountpoint removed
+#   BUSY <mountpoint>                 the unmount failed (files still open)
+# Exit 0 unless a FAILED or BUSY line was printed. Usage errors exit 2; eject of a path that is
+# not mounted exits 1 with a message on stderr.
+#
+# Devices: /dev/sd[a-z][0-9]* partitions. A whole /dev/sd[a-z] is considered only when it has no
+# partitions (a superfloppy stick). The unit fits no SATA or SCSI disk, so every sd* node is a
+# USB stick and no further filter is applied.
+#
+# Filesystems: vfat only. The 4.14 kernel this image runs has no exFAT, and NTFS and ext are not
+# offered, so a stick formatted with them is reported UNSUPPORTED instead of being mounted. The
+# type is read from the boot sector, not from blkid: the busybox blkid on this image prints no
+# TYPE even for the FAT boot partition. FAT12/16 carry "FAT1" at byte 54, FAT32 carries "FAT32"
+# at byte 82, exFAT and NTFS carry their name at byte 3, and ext has 0xEF53 at byte 1080.
+#
+# Why eject matters: vfat holds written data in the page cache and updates the FAT in memory.
+# Pulling a stick before it is synced loses the last writes and can leave the FAT inconsistent.
+# The vfat mount is made with "flush" so writes reach the stick promptly, and eject syncs and
+# unmounts before the stick is safe to remove.
+#
+# Stale mounts: a /media/usbN whose device node has gone (the stick was pulled) is unmounted with
+# umount -l and reported GONE by mount and list, so the next call clears it without an eject.
+
+usage() {
+  echo "usage: arca-storage mount | list | eject [<mountpoint>]" >&2
+  exit 2
+}
+
+# "<source> <target>" for each /media/usbN line in /proc/mounts
+usb_mounts() {
+  awk '$2 ~ "^/media/usb[0-9]+$" { print $1, $2 }' /proc/mounts
+}
+
+# Mountpoint of a device, if it is mounted anywhere
+mounted_at() {
+  awk -v d="$1" '$1 == d { print $2; exit }' /proc/mounts
+}
+
+# Lowest N such that /media/usbN is not a mount target
+next_index() {
+  n=0
+  while grep -qF " /media/usb$n " /proc/mounts; do
+    n=$((n + 1))
+  done
+  echo "$n"
+}
+
+prune() {
+  usb_mounts | while read -r src tgt; do
+    if [ ! -b "$src" ]; then
+      umount -l "$tgt" 2>/dev/null
+      rmdir "$tgt" 2>/dev/null
+      echo "GONE $tgt"
+    fi
+  done
+}
+
+has_partitions() {
+  for p in "$1"[0-9]*; do
+    [ -b "$p" ] && return 0
+  done
+  return 1
+}
+
+stick_devices() {
+  for d in /dev/sd[a-z][0-9]*; do
+    [ -b "$d" ] && echo "$d"
+  done
+  for d in /dev/sd[a-z]; do
+    [ -b "$d" ] || continue
+    has_partitions "$d" || echo "$d"
+  done
+}
+
+# Prints the filesystem type of a device, or fails if the device cannot be read
+probe_fstype() {
+  s=$(dd if="$1" bs=1 skip=54 count=5 2>/dev/null) || return 1
+  case $s in FAT1[26]*) echo vfat; return 0 ;; esac
+  s=$(dd if="$1" bs=1 skip=82 count=5 2>/dev/null) || return 1
+  case $s in FAT32*) echo vfat; return 0 ;; esac
+  s=$(dd if="$1" bs=1 skip=3 count=8 2>/dev/null) || return 1
+  case $s in
+    EXFAT*) echo exfat; return 0 ;;
+    NTFS*) echo ntfs; return 0 ;;
+  esac
+  s=$(dd if="$1" bs=1 skip=1080 count=2 2>/dev/null | od -An -tx1 | tr -d ' \n')
+  case $s in 53ef) echo ext; return 0 ;; esac
+  echo unknown
+}
+
+cmd_mount() {
+  rc=0
+  prune
+  for dev in $(stick_devices); do
+    tgt=$(mounted_at "$dev")
+    if [ -n "$tgt" ]; then
+      echo "ALREADY $tgt $dev"
+      continue
+    fi
+    if ! fs=$(probe_fstype "$dev"); then
+      echo "FAILED $dev cannot read boot sector"
+      rc=1
+      continue
+    fi
+    if [ "$fs" != vfat ]; then
+      echo "UNSUPPORTED $dev $fs"
+      continue
+    fi
+    mp="/media/usb$(next_index)"
+    if ! mkdir -p "$mp" 2>/dev/null; then
+      echo "FAILED $dev cannot create $mp"
+      rc=1
+      continue
+    fi
+    if err=$(mount -t vfat -o noatime,iocharset=utf8,shortname=mixed,flush "$dev" "$mp" 2>&1); then
+      echo "MOUNTED $mp $dev"
+    else
+      rmdir "$mp" 2>/dev/null
+      echo "FAILED $dev $(echo "$err" | tr '\n' ' ')"
+      rc=1
+    fi
+  done
+  return $rc
+}
+
+cmd_list() {
+  prune
+  usb_mounts | while read -r src tgt; do
+    echo "MOUNTED $tgt $src"
+  done
+  return 0
+}
+
+cmd_eject() {
+  rc=0
+  prune
+  if [ $# -gt 0 ]; then
+    case $1 in
+      /media/usb*) rest=${1#/media/usb} ;;
+      *) echo "arca-storage: not a /media/usb mountpoint: $1" >&2; return 2 ;;
+    esac
+    case $rest in
+      ''|*[!0-9]*) echo "arca-storage: not a /media/usb mountpoint: $1" >&2; return 2 ;;
+    esac
+    if ! grep -qF " $1 " /proc/mounts; then
+      echo "arca-storage: $1 is not mounted" >&2
+      return 1
+    fi
+    targets=$1
+  else
+    targets=$(usb_mounts | cut -d' ' -f2)
+  fi
+  sync
+  for tgt in $targets; do
+    if umount "$tgt" 2>/dev/null; then
+      rmdir "$tgt" 2>/dev/null
+      echo "EJECTED $tgt"
+    else
+      echo "BUSY $tgt"
+      rc=1
+    fi
+  done
+  return $rc
+}
+
+[ $# -ge 1 ] || usage
+cmd=$1
+shift
+case $cmd in
+  mount)
+    [ $# -eq 0 ] || usage
+    cmd_mount
+    exit $?
+    ;;
+  list)
+    [ $# -eq 0 ] || usage
+    cmd_list
+    exit $?
+    ;;
+  eject)
+    cmd_eject "$@"
+    exit $?
+    ;;
+  *)
+    usage
+    ;;
+esac
