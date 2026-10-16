@@ -149,7 +149,14 @@ differ in more than the device, so the link is unproven. It needs a joint sessio
 
 ### B68. The syslog shows red lines at every boot — open, operator-observed 2026-10-12
 
-Seen in the Control Panel log viewer; boot-console errors are defects here. **Measured in the syslog:** `bluetoothd` `daemon.err` 18 and `warn` 11 ("error updating services: Host is down"); `omap_hwmod`: mcbsp sidetone "broken dt data"; `twl4030` madc: "supply not found"; `twl4030` bci: "battery temperature out of range"; `sr_init`: "No PMIC hook". **[inferred]** The bci line is there because the board has no battery and the DT node from the mainline `omap34xx`/`twl` includes is not disabled in `kernel/dts/rw20.dts`; the others are untraced. Lockdep's trace is its own entry (B47). **Done when** each line is removed at its cause, or recorded as unavoidable with the reason.
+Boot-console errors are defects here. Every line the current image logs (`grep -E '\.(err|warn) ' /var/log/messages` on `.188`, 2026-10-15) is fixed in the tree or recorded as benign in [SYSTEM_ANALYSIS.md](SYSTEM_ANALYSIS.md#7-kernel-policy), except the ones below. **Not yet in an image:** the two `rw20.dts` warnings are fixed but booted only on `.188` as `uImage-b68` (`kernel/README.md`); the rc0/rc6 K links come with the next rootfs build (made by hand on `.188`). **Open:**
+
+1. `twl4030_madc: supply vusb3v1 not found, using dummy regulator`. The fix at cause is `&twl_madc { vusb3v1-supply = <&vusb3v1>; };`, but MADC would then hold the LDO the USB PHY driver also switches on permanently, and ADCIN3..6 readings may change (B57) [inferred from `twl4030-madc.c:889`]. **Operator's call** before it is tried.
+2. bluetoothd `Failed to reset Adv Monitors: Unknown Command (0x01)`: BlueZ 5.66 sends `MGMT_OP_REMOVE_ADV_MONITOR` on every index-added (`src/adapter.c` `reset_adv_monitors`) and our kernel's mgmt 1.14 lacks it. The fix is a BlueZ patch gating it on the supported-commands list, the way `read_commands_complete` sets `KERNEL_*` flags; `bluetooth/build-bluez.sh` has no patch step yet, and a patched BlueZ must reach the source offer. **Operator's call.**
+3. `snd_hwdep: no symbol version for module_layout`: cause not established. First step: `grep -a module_layout` on the deployed `snd-hwdep.ko` and compare with the build that made it.
+4. avahi `No NSS support for mDNS detected`: `BR2_PACKAGE_NSS_MDNS=y` silences it at a rootfs rebuild; the unit publishes and never resolves `.local` itself.
+
+**Done when** each line is removed at its cause, or recorded as benign with the reason.
 
 ### B69. Does the SD slot's card-detect switch work, and is it on the pad the DT names? — open, unverified
 
@@ -239,12 +246,9 @@ deployed on** — panel and touch working.
    image build and one p1 write; the operator has allowed a reboot and a p1 write of `.188` for them. ⚠️ Until the
    module is loaded, `app_launcher` still exits after boot on the missing `/dev/input/touchscreen0` and
    the respawn loop clears fb0 every ~30 s — stop the init script before judging a panel frame.
-2. **Explain the dmesg line our image adds**, `omap2_set_init_voltage: unable
-   to find boot up OPP` for `vdd_mpu_iva`/`vdd_core` — first check whether the vendor kernel's dmesg
-   prints the same line; if it does, this is not ours.
 
-**Which boot channel — writing an image needs no console.** Booting an alternate filename requires the
-`rw20 #` prompt, so it requires the console; overwriting `uImage-system` does not, and recovery for that is a
+**Which boot channel — writing an image needs no console.** On our U-Boot an alternate filename needs only a
+`kernel=` line in p1's `uEnv.txt`, with `uImage-fallback` behind it (measured 2026-10-15, `.188`); overwriting `uImage-system` needs nothing, and recovery for that is a
 card pull plus copying a backup back onto p1
 ([`#4-boot-chain-and-recovery`](SYSTEM_ANALYSIS.md#4-boot-chain-and-recovery)). The operator accepts the
 overwrite ("I can re-flash easily"), which does not retire
