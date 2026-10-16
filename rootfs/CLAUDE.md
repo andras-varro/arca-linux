@@ -21,7 +21,7 @@ Everything that builds the **root filesystem we boot instead of the vendor's Yoc
   `make-card-image.sh` writes the partition table itself from `ARCA_LAYOUT` in `lib/arca-identify.sh` (p1 boot, p2 log 1 GiB, p3 root 512 MiB; identical on every
   card; `/home/root/data` is a plain directory on p3, so a reflash wipes it), formats p1 and puts on it only `MLO` (first), `u-boot.img`, `uImage-system`,
   `uImage-fallback` (a second copy of the same kernel) and `uEnv.txt`. Inputs are `--mlo`/`--uboot` (from `uboot/build.sh`) and `--kernel`
-  (from `kernel/build-image.sh`): `SYSTEM_ANALYSIS.md#4-boot-chain-and-recovery`. Recovery is "reimage the card".
+  (from `kernel/build-image.sh`): `SYSTEM_ANALYSIS.md#4-boot-chain-and-recovery`. Recovery is "reimage the card", and so is an upgrade: **units are re-flashed, never migrated** (operator ruling 2026-10-12), so nothing carries in-place upgrade code; a new kernel or new drivers ship as an image.
 - **Our links:** `rcS.d` `S01mountall` `S01seedrng` `S02alignment` `S03udev` `S04hostname` `S05sysctl`
   `S04firstboot-hostname` `S06watchdog` `S07growroot` `S07syslog` `S08networking`; `rc5.d` `S02dbus-1` `S09sshd` `S20hwclock.sh` `S30avahi-daemon`
   (all linked by `rootfs/board/arca/post-build.sh`). `/usr/sbin/set-hostname` is an overlay file (`overlay/usr/sbin/set-hostname`, mode 0755 set by the

@@ -290,17 +290,6 @@ An option for the clocks that print the time (`native_apps/common/top_bar.c:251`
 
 The operator wants games that show no menu or close button at all. Open design question: how a touch-only player pauses and exits (pad and keyboard keep their keys). The games do not carry the shared top bar, so their own exit X is part of the same question. **Done when** the question is answered with the operator and one game follows the answer.
 
-### F149. Flash the card and use it: a downloadable image replaces commissioning — open, operator-approved 2026-10-12
-
-Operator ruling 2026-10-12: nobody outside the lab runs this, so units are re-flashed and never migrated. A kernel
-upgrade or new drivers still ship as an image to flash.
-
-**Open: the operator's units flashed from the release download** (the image is on the v2.0.0 release page with its source
-offer). Claims in `README.md` still tagged [unverified] are measured as they come up.
-
-**Done when** stock units with spare cards (the operator has six) boot the downloaded image and grow it, and the README is the only
-user-facing guide.
-
 ### F150. Every control draws its own keyboard-focus ring — open, operator request 2026-10-13, not designed
 
 Apply the top bar's pattern (`top_bar_draw_focus`, `native_apps/common/top_bar.c:267`; the caller picks only the target) to every
@@ -312,11 +301,42 @@ follow its shape. Navigation stays as it is: the pages' `*_page_focusables` rect
 from, or a draw callback owned by the widget. **Done when** buttons, toggles, sliders, launcher tiles, dialog buttons and the bar draw
 focus through one mechanism, and the Control Panel's generic ring is gone.
 
-### F151. User data on a USB stick: a file manager plus export/import of settings and scores — open, operator priority 2026-10-15, not designed
+### F151. User data on a USB stick: a file manager plus export/import of settings and scores — open, operator priority 2026-10-15, designed 2026-10-16
 
 A user with no PC tools has no backup (`backup.sh` needs SSH) and no way to put ScummVM games or audio on a
-grown p3. Proposed shape: a file manager (browse a stick, copy games and audio into place) plus export and import of settings and
-scores. The operator ruling of 2026-10-15 lifted the 2026-09-06 USB ruling for USB storage. Needs the `usb-storage` and `vfat`/`exfat` modules (a module build).
+grown p3. The operator ruling of 2026-10-15 lifted the 2026-09-06 USB ruling for USB storage. Steps, in order:
+
+1. **Kernel: `usb-storage`, `vfat` + `nls_cp437`/`nls_iso8859-1`/`nls_utf8` as modules** (a module build). exFAT is out of tree on 4.14 and
+   comes later; a stick it cannot mount is reported as "unsupported format", not hidden.
+2. **One mount helper** (a `device-files/` script, `/media/usb<N>`, `sync`-safe unmount) shared by the file manager and the
+   Control Panel's export/import, so neither owns mounting.
+3. **`common/list_view.c` — a reusable list widget**, the first scrolling list in `common/` (`ui_layout.c` has no caller; the Bluetooth
+   and log pages page by hand). The widget owns scroll (drag + page keys), the cursor, multi-select marks, the focus stop and the
+   hit test; the caller supplies a row source (`count()`, `row(i)` → icon or thumbnail key, title, right-aligned detail, flags) and a row
+   height, so a file row (~40 px) and an album row (~64 px) are one widget. **Thumbnails come from a `common/thumb_cache.c`** — an LRU of
+   decoded, pre-scaled tiles filled by a provider callback within a per-frame time budget, a placeholder until then — so a slow
+   source (a decode, a network fetch) never stalls a frame. Formats beyond PPM need a decoder (`ppm.c` is the only one today);
+   stb_image (public domain) is the default candidate, a licence row in `LICENSE.md`.
+4. **`native_apps/file_manager/` — a two-pane, Norton Commander-style app** on two `list_view`s: Tab/tap picks the active pane, the
+   action bar at the bottom works on the marked items (or the cursor row) into the other pane. Operations: copy, move, delete (confirm),
+   make directory, rename (`keyboard_enter`), mark/unmark and mark-all, sort (name/size/date), free space per pane, **Eject** (sync +
+   unmount; required before pulling a vfat stick), a progress dialog with cancel for copy/move, an overwrite prompt. Keys:
+   F5 copy, F6 move, F7 mkdir, F8 delete, F2 rename, Insert mark; the pad maps the same actions. Roots: the stick and `/home/root/data`
+   plus the ScummVM games and audio directories; nothing outside them (no `/`, no p1). A launcher tile; no file viewer or editor.
+5. **Export/import of settings and scores** on a Control Panel page (settings belong there), as an archive on the stick.
+
+**Done when** a stick copied with ScummVM game files lands them where ScummVM finds them, the stick ejects cleanly, and a settings
+export from one unit imports on another. Open: the USB-to-card copy rate and CPU, unmeasured (musb has a DMA path, the Ethernet does not).
+
+### F152. A Jellyfin music client playing to a Bluetooth speaker — open, operator wish 2026-10-16, nice to have, not designed
+
+Browse and search a local Jellyfin server and stream a track to the A2DP sink BlueALSA already serves
+(BlueALSA: `SYSTEM_ANALYSIS.md#36-usb`). Builds on F151's `list_view` + `thumb_cache` (search results with album art). **[inferred, not
+measured]** The network is not the limit: an SSH copy saturated the CPU at ~3.1 MB/s, while a 320 kbit/s stream is ~40 KB/s (~1-2% of
+that cost) and 48 kHz stereo PCM ~192 KB/s (~6%). The unknowns are decode and SBC encode on one 600 MHz core: no MP3/AAC/FLAC decoder
+exists in `native_apps/common` (`audio_wav.c` only), there is no HTTP client or JSON parser and no libcurl in the rootfs. Having the
+server transcode to one codec (or to PCM) keeps the device to one decoder. **Done when** the first question is answered: CPU of
+BlueALSA plus a decoder for a server-transcoded stream, measured on `.188` with a speaker connected.
 
 ### F106. Support BeagleBone Black boards — open, operator idea 2026-10-01, future
 
