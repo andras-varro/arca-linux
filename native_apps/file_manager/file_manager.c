@@ -298,6 +298,17 @@ static void pane_open_roots(Pane *p) {
         if (cur[0] && !strcmp(roots[i].path, cur)) { lv_move_to(&p->lv, i); break; }
 }
 
+/* Simple mode drops DATA's ssh/ (the unit's SSH keys, not the user's files); expert shows it.
+ * A mode toggle reloads every pane, so it reappears without a rescan. */
+static void hide_simple(Pane *p) {
+    if (expert || strcmp(p->path, DATA_DIR)) return;
+    int i = fm_dir_find(&p->dir, "ssh");
+    if (i < 0) return;
+    free(p->dir.e[i].name);
+    memmove(&p->dir.e[i], &p->dir.e[i + 1], (size_t)(p->dir.n - i - 1) * sizeof p->dir.e[0]);
+    p->dir.n--;
+}
+
 /* Read p->path.  On failure step to the parent (or the root list) with a message. */
 static void pane_load(Pane *p, const char *select_name, int fallback_cursor) {
     for (;;) {
@@ -306,6 +317,7 @@ static void pane_load(Pane *p, const char *select_name, int fallback_cursor) {
         if (rc == 0) {
             fm_dir_free(&p->dir);
             p->dir = d;
+            hide_simple(p);
             break;
         }
         set_status(ST_WARN, "CANNOT OPEN %.60s: %s", fm_base(p->path), strerror(-rc));
