@@ -32,6 +32,10 @@
 # The vfat mount is made with "flush" so writes reach the stick promptly, and eject syncs and
 # unmounts before the stick is safe to remove.
 #
+# Names: "utf8", never "iocharset=utf8". Both give UTF-8 file names, but iocharset=utf8 makes the
+# mount case sensitive and logs a kernel warning on every mount (fs/fat/inode.c); "utf8" keeps the
+# built-in iso8859-1 table for case folding.
+#
 # Stale mounts: a /media/usbN whose device node has gone (the stick was pulled) is unmounted with
 # umount -l and reported GONE by mount and list, so the next call clears it without an eject.
 
@@ -126,7 +130,7 @@ cmd_mount() {
       rc=1
       continue
     fi
-    if err=$(mount -t vfat -o noatime,iocharset=utf8,shortname=mixed,flush "$dev" "$mp" 2>&1); then
+    if err=$(mount -t vfat -o noatime,utf8,shortname=mixed,flush "$dev" "$mp" 2>&1); then
       echo "MOUNTED $mp $dev"
     else
       rmdir "$mp" 2>/dev/null
