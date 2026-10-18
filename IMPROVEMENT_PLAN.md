@@ -311,15 +311,31 @@ directories in simple mode; expert mode adds `/` with protected paths refused. E
 
 Open, in order:
 
-1. **Panel check of Files' expert mode** (EXPERT/SIMPLE button, F4; committed 29cce38): panel check pending.
-2. **Export/import of settings and scores** on a Control Panel page (settings belong there), as an archive on the stick, via `arca-storage`.
-3. **The "g glyph" question**: the operator is checking the previous session for what it was.
-4. **Decision pending, needs the operator's go-ahead: remove `nls_utf8.ko`.** Nothing uses it now: `arca-storage` mounts vfat with
-   `utf8`, not `iocharset=utf8`. It is listed in `kernel/build-bt-modules.sh` (`--set storage`), `usb_host/build-and-deploy.sh`,
-   `device-files/usb-storage-modules`, the `provision-rules.conf` text, `LICENSE.md`, `release.sh` and `kernel/README.md`.
-5. **Proposal, unmeasured: fsck before mount.** The kernel logs "Volume was not properly unmounted" for a dirty stick, and the rootfs
-   has no `fsck.fat`. Adding `dosfstools` to the Buildroot image would let `arca-storage` run `fsck.fat -a` before mounting.
-6. **Root-containment sabotage check for Files is not applied**, so nothing yet proves Files stays inside its roots.
+1. **Export/import of settings and scores: a selectable, extensible backup.** Operator 2026-10-18: the set is chosen in the UI, never
+   baked in; new software extends it in a documented way; no compatibility with `backup.sh` is wanted (never used). Agreed design:
+   - **Item files are the one home for "what is state":** `/opt/arca/backup.d/<id>.item`, INI like the `.app` manifests, with `name=`,
+     `paths=` (relative to `/`, globs), `unit=yes|no` (measured on or tied to this unit), `secret=yes|no`. Each component writes its
+     own to a file and copies it: native_apps (scores, `arca_config.conf`, input mapping), scummvm-arca (ini, saves), vnc_client (its
+     conf, `secret=yes`), device-files (host name, timezone, touch calibration, SSH keys, Bluetooth pairings, `unit=yes`). The format
+     is documented beside the `.app` format.
+   - **Engine `device-files/arca-backup`**, POSIX sh beside `arca-storage`, fixed stdout lines: `items`, `export <dir> <id>…`,
+     `archives <dir>`, `contents <archive>`, `import <archive> <id>…`. Plain tar (no gzip on the unit per `backup.sh`'s header,
+     [unverified] on today's rootfs), `ludbox-backup-<host>-<date>.tar` with an info member (host, version, date, ids). **Import
+     writes only paths the importing unit's own item files declare for the selected ids, and refuses absolute or `..` members.**
+   - **Control Panel page BACKUP:** items as a marked `list_view` (its first Control Panel user); EXPORT TO USB; IMPORT lists the
+     stick's archives, then the chosen one's items. Secret items start unmarked, and so do `unit=yes` items from another unit, with
+     a warning. Pad and keyboard. The page reaches the stick through `arca-storage` and runs the engine through `cp_exec`.
+   - **Then `backup.sh` goes:** the item files replace `ARCA_STATE_BACKUP` and `arca_state_lister` in `lib/arca-state.sh`, and
+     `provision.sh`'s pre-write backup calls the engine over SSH. `arca_state_ssh_keys_deny` (the image builder's) stays.
+   - Split into a core worker (format, engine, host test on a fake root, each component's items and install path, the offline
+     bundle) and a UI worker (the page).
+2. **fsck before mount: `dosfstools`.** Operator 2026-10-18: yes, and deploy it to running units, not only in a new image.
+   `BR2_PACKAGE_DOSFSTOOLS` and `_FSCK_FAT` in `rootfs/configs/arca_defconfig` for future cards; for running units, build it in the
+   Buildroot tree (ABI: `rootfs/CLAUDE.md`) and ship it with the `usb` group. `arca-storage` then runs `fsck.fat -a` before mounting,
+   which answers the kernel's "Volume was not properly unmounted". Unmeasured: the added mount time on a big stick, and what `-a`
+   changes on a dirty one.
+3. **Panel check, when the unit is free: "FIRST N SHOWN"** appears only past `FM_MAX_ENTRIES` (`fm_core.h`) entries. To make such a
+   folder: `mkdir /tmp/big && cd /tmp/big && i=0; while [ $i -lt 4100 ]; do : > f$i; i=$((i+1)); done`, then open it in expert mode.
 
 **Done when** a stick copied with ScummVM game files lands them where ScummVM finds them, the stick ejects cleanly, and a settings
 export from one unit imports on another. Open measurement: the USB-to-card copy rate and CPU, unmeasured (musb has a DMA path, the

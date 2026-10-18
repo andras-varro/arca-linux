@@ -15,7 +15,7 @@ directory are in [`CLAUDE.md`](CLAUDE.md).
 | `dts/rw20.dts` | our board's device tree on the mainline `omap34xx.dtsi`, GPL-2.0-only; `build-image.sh` compiles it inside the kernel tree |
 | `drivers/cy8ctmg120_ts/` | out-of-tree touch driver (`.c` + `Kbuild`), GPL-2.0-only, adapted from vanilla `cy8ctmg110_ts.c`; binds the unchanged `panjit_ts` DT node and names its input device `panjit_ts` |
 | `build-modules.sh` | builds every `drivers/*/` with a `Kbuild` via `M=` against the tree `build-image.sh` left in WSL `$HOME`; `--out <dir>` receives the `.ko`, which loads only on our image |
-| `build-bt-modules.sh` | `--set bt` (default) builds the 18 Bluetooth modules (`BT=m` and dependencies) from a copy of the image's tree, so no p1 write; `kernel/patches-modules/*.patch` are applied here only and `build-image.sh` never reads them. `--set storage` builds `usb-storage.ko` + `nls_utf8.ko` (USB sticks; `USB_STORAGE` and `NLS_UTF8` are unset in the image) the same way; `usb_host/build-and-deploy.sh` runs it, `ARCA_KBUILD_IMAGE` names a test-kernel tree |
+| `build-bt-modules.sh` | `--set bt` (default) builds the 18 Bluetooth modules (`BT=m` and dependencies) from a copy of the image's tree, so no p1 write; `kernel/patches-modules/*.patch` are applied here only and `build-image.sh` never reads them. `--set storage` builds `usb-storage.ko` (USB sticks; `USB_STORAGE` is unset in the image) the same way; `usb_host/build-and-deploy.sh` runs it, `ARCA_KBUILD_IMAGE` names a test-kernel tree |
 | `tools/i2c_touch_read.c` | userspace burst reader for the touch controller over `/dev/i2c-N`; it never writes to the part |
 
 ## Building an image

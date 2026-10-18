@@ -18,7 +18,7 @@
 #      host-mode bring-up and the RESCAN/recover paths, i.e.
 #      device-files/provision-rules.conf's `usb` group.
 #   2. xpad.ko / joydev.ko / ff-memless.ko and the USB-audio set, force-loaded (and the
-#      usb-storage.ko + nls_utf8.ko pair, to /lib/modules/4.14.52/storage)
+#      usb-storage.ko, to /lib/modules/4.14.52/storage)
 #      -> THE CONTROLLER AS /dev/input/event*. Build artifacts, so they travel in
 #      the bundle (../lib/arca-bundle.sh) to /lib/modules/4.14.52/extra on p6.
 #
@@ -118,12 +118,12 @@ for _mod in "${USB_MODULES[@]}"; do
 done
 unset _mod
 
-# The USB mass-storage pair is built against OUR kernel image by ../kernel/build-bt-modules.sh
+# The USB mass-storage module is built against OUR kernel image by ../kernel/build-bt-modules.sh
 # --set storage (the other seven come from build-kernel-modules.sh), into modules-storage/ with
 # its load-order.txt, and goes to /lib/modules/4.14.52/storage. Order matters only to the init
 # script, which reads the load-order.txt that travels with them.
 STORAGE_DIR="$SCRIPT_DIR/modules-storage"
-STORAGE_MODULES=(usb-storage.ko nls_utf8.ko)
+STORAGE_MODULES=(usb-storage.ko)
 for _mod in "${STORAGE_MODULES[@]}" load-order.txt; do
     USB_ARTIFACTS+=("0644|$STORAGE_DIR/$_mod|/lib/modules/$KERNEL_VERSION/storage/$_mod")
 done
@@ -398,7 +398,7 @@ esac
 
 echo ""
 echo "--- modules ---"
-lsmod 2>/dev/null | grep -E "^Module|xpad|joydev|ff_memless|usb_storage|nls_utf8" || echo "  (none)"
+lsmod 2>/dev/null | grep -E "^Module|xpad|joydev|ff_memless|usb_storage" || echo "  (none)"
 
 echo ""
 echo "--- USB devices ---"

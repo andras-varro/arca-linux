@@ -1,10 +1,10 @@
 #!/bin/sh
-# Load the USB mass-storage modules: usb-storage.ko and nls_utf8.ko.
+# Load the USB mass-storage module: usb-storage.ko.
 #
 # SCSI, the SCSI disk driver, FAT/VFAT/MSDOS and the 437 / ISO-8859-1 code pages are compiled
-# into this kernel; USB_STORAGE and NLS_UTF8 are not, so a stick needs these two modules. They
-# are built against OUR image by kernel/build-bt-modules.sh --set storage, which writes
-# load-order.txt (dependencies first), and the usb_host component installs both. insmod,
+# into this kernel; USB_STORAGE is not, so a stick needs this module. It is
+# built against OUR image by kernel/build-bt-modules.sh --set storage, which writes
+# load-order.txt (dependencies first), and the usb_host component installs it. insmod,
 # never insmod -f: the build checks every imported symbol CRC against the image.
 #
 # Loading registers a USB interface driver, which re-probes devices already on the bus, so

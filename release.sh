@@ -565,7 +565,7 @@ usb_host
 --------
 `devmem_write` is this project's own code (MIT).
 
-⚠️ `ff-memless.ko`, `joydev.ko`, `xpad.ko`, `usb-storage.ko` and `nls_utf8.ko` are LINUX KERNEL MODULES and are
+⚠️ `ff-memless.ko`, `joydev.ko`, `xpad.ko` and `usb-storage.ko` are LINUX KERNEL MODULES and are
 licensed under the GNU General Public License, version 2 (GPL-2.0-only), as is
 the kernel they are built against.  WRITTEN OFFER FOR SOURCE: the complete
 corresponding source is the unmodified upstream Linux 4.14.52 tree, as published
@@ -574,9 +574,9 @@ at
     https://cdn.kernel.org/pub/linux/kernel/v4.x/linux-4.14.52.tar.xz
 
 together with the kernel configuration and build script in this project's
-repository at `usb_host/build-kernel-modules.sh` (usb-storage.ko and nls_utf8.ko:
+repository at `usb_host/build-kernel-modules.sh` (usb-storage.ko:
 `kernel/build-bt-modules.sh --set storage`).  No kernel source was modified;
-the five modules are upstream drivers compiled for this device's kernel
+the four modules are upstream drivers compiled for this device's kernel
 configuration, which is read off the device itself.  This offer is honoured for
 the lifetime of the release.
 

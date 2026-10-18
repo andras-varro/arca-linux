@@ -3,8 +3,7 @@
 # Run this script in WSL (Linux), after build-image.sh. The image's config has CONFIG_BT unset, so
 # these modules cannot come from ~/rw-kbuild-image: this script copies that tree to its own work
 # dir, enables BT there as modules, builds, and keeps only the .ko set Bluetooth needs. `--set storage`
-# does the same for usb-storage.ko + nls_utf8.ko (USB mass-storage sticks; USB_STORAGE and NLS_UTF8
-# are unset in the image). The image tree is read, never written; the script checks that at the end.
+# does the same for usb-storage.ko (USB mass-storage sticks; USB_STORAGE is unset in the image). The image tree is read, never written; the script checks that at the end.
 #
 # The copy's vmlinux is NOT the image. A module built here is safe only if every symbol it imports
 # from vmlinux exists in the image's vmlinux with the same CRC, so that is checked against the
@@ -45,10 +44,11 @@ ROOTS=(bluetooth btusb hidp rfcomm uhid uinput algif_hash algif_skcipher)
 # .188, insmod refuses it ("host not compliant with requirements: 2") and drbg loads without it.
 RUNTIME_ROOTS=(cryptomgr cmac ecb sha256_generic ecdh_generic hmac drbg)
 
-# --set storage: USB mass-storage. SCSI, SD, FAT and NLS 437/8859-1 are built in; only these two
-# are missing. nls_utf8 is what a vfat mount with iocharset=utf8 asks for.
-STORAGE_CONFIG_WANT=("module USB_STORAGE" "module NLS_UTF8")
-STORAGE_ROOTS=(usb_storage nls_utf8)
+# --set storage: USB mass-storage. SCSI, SD, FAT and NLS 437/8859-1 are built in; only USB_STORAGE
+# is missing. The UTF-8 NLS table is not wanted: arca-storage mounts vfat with the `utf8` option, which
+# uses the kernel's built-in UTF-8 conversion, so no module is loaded for it.
+STORAGE_CONFIG_WANT=("module USB_STORAGE")
+STORAGE_ROOTS=(usb_storage)
 
 usage() {
     cat <<'EOF'
@@ -70,7 +70,7 @@ differs from the image's, which the CRC check then has to clear.
                 there are removed.
   --image <work> The image's build tree parent: the --work given to build-image.sh, which must
                 be the image the unit boots (default: ~/rw-kbuild-image).
-  --set <name>  bt (default): the Bluetooth closure. storage: usb-storage.ko and nls_utf8.ko.
+  --set <name>  bt (default): the Bluetooth closure. storage: usb-storage.ko.
   --work <dir>  Work dir in the WSL filesystem (default: ~/rw-kbuild-bt, or ~/rw-kbuild-storage for
                 --set storage). Refused under /mnt.
   --reuse       Keep an existing copy (incremental rebuild) instead of re-copying the image tree.
