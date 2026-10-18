@@ -1108,6 +1108,7 @@ boot by `/etc/init.d/usb-host` (S90).
 > ⚠️ `CONFIG_DMADEVICES=y` and `CONFIG_TI_EDMA=y` *are* set and are a **red herring** — that is the
 > **system** EDMA via dmaengine, not the Inventra engine inside the MUSB block that OMAP3 uses.
 > Our own image sets `CONFIG_USB_INVENTRA_DMA` and DMA works there; the config symbol is the safe route [inferred] — a force-loaded module could not safely supply the controller, since a misbehaving DMA engine scribbles into RAM where today's stubs fall back to PIO ([kernel/README.md](kernel/README.md)).
+> **A USB stick copies to the card at about 4 MB/s, with the core about 90 % in system time** (100 MB `cp` from `/media/usb0` to `/home/root/data` in 24 s, .115 on our image, 2026-10-18, `[n=1]`); whether this path runs DMA was not checked.
 
 **Hack 2 — three cross-compiled kernel modules for Xbox controllers.** `CONFIG_INPUT_JOYSTICK`,
 `CONFIG_INPUT_JOYDEV` and `CONFIG_INPUT_FF_MEMLESS` are all unset, and the Xbox 360 pad

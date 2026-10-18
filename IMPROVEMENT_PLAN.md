@@ -311,18 +311,11 @@ directories in simple mode; expert mode adds `/` with protected paths refused. E
 
 Open, in order:
 
-1. **Panel check of the Backup follow-ups, deployed to .115 2026-10-18, unverified at the panel.** The page now scans `/dev` for
-   `sd*` once a second (no fork) and runs `arca-storage mount` only when a new node appears; mdev's timing on plug/unplug is
-   unmeasured. Check: opening Backup shows READING… before the list; unplugging turns STICK: usb0 into NO USB STICK within ~2 s
-   with the marks kept; plugging in shows READING USB… then STICK: usb0; a marked row shows only the bar and the yellow name, and
-   the pad cursor stays distinguishable from it; the reboot dialog has no "unsaved play" line; the Backup and System tiles show
-   their icons (tray with arrow, chip).
-2. **Panel check, still open (the operator's /tmp/big went with a reboot): "FIRST N SHOWN"** appears only past `FM_MAX_ENTRIES` (`fm_core.h`) entries. To make such a
-   folder: `mkdir /tmp/big && cd /tmp/big && i=0; while [ $i -lt 4100 ]; do : > f$i; i=$((i+1)); done`, then open it in expert mode.
+1. **ScummVM games from a stick, at the panel:** copy a game folder (a freeware one from scummvm.org, e.g. Beneath a Steel Sky) with
+   Files into the ScummVM games directory, eject, then add and start it in ScummVM.
+2. **Cross-unit import:** export on one unit, import that archive on another (.188 when it is back, or after a reflash).
 
-**Done when** a stick copied with ScummVM game files lands them where ScummVM finds them, the stick ejects cleanly, and a settings
-export from one unit imports on another. Open measurement: the USB-to-card copy rate and CPU, unmeasured (musb has a DMA path, the
-Ethernet does not).
+**Done when** both pass.
 
 ### F152. A Jellyfin music client playing to a Bluetooth speaker — open, operator wish 2026-10-16, nice to have, not designed
 
