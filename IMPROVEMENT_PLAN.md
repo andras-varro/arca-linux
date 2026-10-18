@@ -304,29 +304,26 @@ focus through one mechanism, and the Control Panel's generic ring is gone.
 ### F151. User data on a USB stick: a file manager plus export/import of settings and scores — open, operator priority 2026-10-15, designed 2026-10-16
 
 A user with no PC tools has no backup (`backup.sh` needs SSH) and no way to put ScummVM games or audio on a
-grown p3. The operator ruling of 2026-10-15 lifted the 2026-09-06 USB ruling for USB storage. Steps, in order:
+grown p3. The operator ruling of 2026-10-15 lifted the 2026-09-06 USB ruling for USB storage.
 
-1. **Kernel: `usb-storage`, `vfat` + `nls_cp437`/`nls_iso8859-1`/`nls_utf8` as modules** (a module build). exFAT is out of tree on 4.14 and
-   comes later; a stick it cannot mount is reported as "unsupported format", not hidden.
-2. **One mount helper** (a `device-files/` script, `/media/usb<N>`, `sync`-safe unmount) shared by the file manager and the
-   Control Panel's export/import, so neither owns mounting.
-3. **`common/list_view.c` — a reusable list widget**, the first scrolling list in `common/` (`ui_layout.c` has no caller; the Bluetooth
-   and log pages page by hand). The widget owns scroll (drag + page keys), the cursor, multi-select marks, the focus stop and the
-   hit test; the caller supplies a row source (`count()`, `row(i)` → icon or thumbnail key, title, right-aligned detail, flags) and a row
-   height, so a file row (~40 px) and an album row (~64 px) are one widget. **Thumbnails come from a `common/thumb_cache.c`** — an LRU of
-   decoded, pre-scaled tiles filled by a provider callback within a per-frame time budget, a placeholder until then — so a slow
-   source (a decode, a network fetch) never stalls a frame. Formats beyond PPM need a decoder (`ppm.c` is the only one today);
-   stb_image (public domain) is the default candidate, a licence row in `LICENSE.md`.
-4. **`native_apps/file_manager/` — a two-pane, Norton Commander-style app** on two `list_view`s: Tab/tap picks the active pane, the
-   action bar at the bottom works on the marked items (or the cursor row) into the other pane. Operations: copy, move, delete (confirm),
-   make directory, rename (`keyboard_enter`), mark/unmark and mark-all, sort (name/size/date), free space per pane, **Eject** (sync +
-   unmount; required before pulling a vfat stick), a progress dialog with cancel for copy/move, an overwrite prompt. Keys:
-   F5 copy, F6 move, F7 mkdir, F8 delete, F2 rename, Insert mark; the pad maps the same actions. Roots: the stick and `/home/root/data`
-   plus the ScummVM games and audio directories; nothing outside them (no `/`, no p1). A launcher tile; no file viewer or editor.
-5. **Export/import of settings and scores** on a Control Panel page (settings belong there), as an archive on the stick.
+Design facts the open items need: `native_apps/file_manager/` roots are the stick, `/home/root/data` and the ScummVM games and audio
+directories in simple mode; expert mode adds `/` with protected paths refused. Eject (sync + unmount) is required before pulling a vfat stick.
+
+Open, in order:
+
+1. **Panel check of Files' expert mode** (EXPERT/SIMPLE button, F4; committed 29cce38): panel check pending.
+2. **Export/import of settings and scores** on a Control Panel page (settings belong there), as an archive on the stick, via `arca-storage`.
+3. **The "g glyph" question**: the operator is checking the previous session for what it was.
+4. **Decision pending, needs the operator's go-ahead: remove `nls_utf8.ko`.** Nothing uses it now: `arca-storage` mounts vfat with
+   `utf8`, not `iocharset=utf8`. It is listed in `kernel/build-bt-modules.sh` (`--set storage`), `usb_host/build-and-deploy.sh`,
+   `device-files/usb-storage-modules`, the `provision-rules.conf` text, `LICENSE.md`, `release.sh` and `kernel/README.md`.
+5. **Proposal, unmeasured: fsck before mount.** The kernel logs "Volume was not properly unmounted" for a dirty stick, and the rootfs
+   has no `fsck.fat`. Adding `dosfstools` to the Buildroot image would let `arca-storage` run `fsck.fat -a` before mounting.
+6. **Root-containment sabotage check for Files is not applied**, so nothing yet proves Files stays inside its roots.
 
 **Done when** a stick copied with ScummVM game files lands them where ScummVM finds them, the stick ejects cleanly, and a settings
-export from one unit imports on another. Open: the USB-to-card copy rate and CPU, unmeasured (musb has a DMA path, the Ethernet does not).
+export from one unit imports on another. Open measurement: the USB-to-card copy rate and CPU, unmeasured (musb has a DMA path, the
+Ethernet does not).
 
 ### F152. A Jellyfin music client playing to a Bluetooth speaker — open, operator wish 2026-10-16, nice to have, not designed
 
