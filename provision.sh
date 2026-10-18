@@ -20,8 +20,9 @@
 #   - A unit running our root image (rootfs/), reachable by SSH as root
 #
 # What it does:
-#   0. Backs the unit's per-unit state up to this host (backup.sh)
-#      BEFORE the first write; a failed backup aborts the run.
+#   0. Backs the unit's per-unit state up to this host (the repo's device-files/arca-backup
+#      engine, every item, secrets included; backups/) BEFORE the first write; a failed
+#      backup aborts the run.
 #   1. Installs the provision plan: device-files/arca-app as
 #      /etc/init.d/arca-app, the audio-enable + time-sync boot scripts, avahi
 #      (mDNS), the USB host-mode scripts and their boot links (--no-usb skips), the
@@ -112,7 +113,7 @@ usage() {
     echo "       $0 <target> --hostname NAME"
     echo ""
     echo "  With no flags this UPDATES a unit that runs our own root: it backs the"
-    echo "  unit's per-unit state up to this host (backup.sh), installs"
+    echo "  unit's per-unit state up to this host (arca-backup, all items, to backups/), installs"
     echo "  the provision plan, applies sysctl and reboots. It deletes no software."
     echo "  p1 is never written."
     echo ""
@@ -397,11 +398,55 @@ echo ""
 echo "════════════════════════════════════════"
 echo " 0. Backup"
 echo "════════════════════════════════════════"
-if ! bash "$SCRIPT_DIR/backup.sh" "$DEVICE_IP"; then
+#
+# The engine is device-files/arca-backup, and it is run from THIS repo's copy, scp'd to a
+# scratch directory on the unit: a unit that predates the engine does not have
+# /usr/sbin/arca-backup (this very run installs it), and a copy from the repo is the one
+# whose behaviour the host knows. It reads the repo's item files from the same scratch
+# directory (ARCA_BACKUP_ITEMS), so nothing is written outside it before the backup exists.
+# Every id is exported, secrets included.
+BACKUP_FILE=""
+backup_unit() {
+    local rd="/tmp/arca-prov-backup.$$" bk="$REPO_ROOT/backups" f ids line out rc=0
+    local items=("$REPO_ROOT"/*/backup.d/*.item)
+    [[ -f "${items[0]}" ]] || { warn "no */backup.d/*.item in the repo"; return 1; }
+    command -v gzip > /dev/null || { warn "gzip not installed on this host"; return 1; }
+    mkdir -p "$bk" || return 1
+    ssh -n "$DEVICE" "rm -rf $rd; mkdir -p $rd/items" || return 1
+    scp -q "$DEVICE_FILES/arca-backup" "$DEVICE:$rd/arca-backup" || rc=1
+    [[ $rc -eq 0 ]] && { scp -q "${items[@]}" "$DEVICE:$rd/items/" || rc=1; }
+    if [[ $rc -eq 0 ]]; then
+        line="$(ssh -n "$DEVICE" "ARCA_ROOT= ARCA_BACKUP_ITEMS=$rd/items sh $rd/arca-backup items")" || rc=1
+        ids="$(printf '%s\n' "$line" | awk '$1 == "item" { printf "%s ", $2 }')"
+        [[ -n "$ids" ]] || rc=1
+    fi
+    if [[ $rc -eq 0 ]]; then
+        out="$(ssh -n "$DEVICE" "ARCA_ROOT= ARCA_BACKUP_ITEMS=$rd/items sh $rd/arca-backup export $rd/out $ids")" || rc=1
+        [[ $rc -eq 0 ]] || printf '%s\n' "$out" | sed -n 's/^error /  backup engine: /p' >&2
+    fi
+    if [[ $rc -eq 0 ]]; then
+        f="$(printf '%s\n' "$out" | sed -n 's/^exported //p' | head -n 1)"
+        case "$f" in "$rd"/out/ludbox-backup-*.tar.gz) ;; *) rc=1 ;; esac
+    fi
+    if [[ $rc -eq 0 ]]; then
+        BACKUP_FILE="$bk/${f##*/}"
+        if [[ -e "$BACKUP_FILE" ]]; then rc=1
+        elif scp -q "$DEVICE:$f" "$BACKUP_FILE.part" && tar -tzf "$BACKUP_FILE.part" > /dev/null; then
+            chmod 600 "$BACKUP_FILE.part" 2> /dev/null || true
+            mv -- "$BACKUP_FILE.part" "$BACKUP_FILE" || rc=1
+        else
+            rc=1
+        fi
+        rm -f "$BACKUP_FILE.part"
+    fi
+    ssh -n "$DEVICE" "rm -rf $rd" || rc=1
+    return "$rc"
+}
+if ! backup_unit; then
     rm -f "$PROV_PLAN"
     err "backup of $DEVICE failed — nothing was written to the device"
 fi
-ok "Backup taken"
+ok "Backup taken: $BACKUP_FILE"
 
 # The install verb's SOURCE bytes are on this host, so they go over scp first and
 # the remote interpreter only sets the declared mode. That asymmetry is the whole

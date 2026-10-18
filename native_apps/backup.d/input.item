@@ -1,0 +1,5 @@
+name=Input mapping
+paths=etc/input_config.conf
+unit=no
+secret=no
+reboot=no

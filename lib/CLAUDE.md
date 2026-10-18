@@ -1,7 +1,7 @@
 # lib/CLAUDE.md
 
-The sourced-not-executed shell libraries, and the two repo-root scripts that drive them
-(`provision.sh`, `backup.sh`; last section). Loaded when you work in `lib/`.
+The sourced-not-executed shell libraries, and the repo-root script that drives them
+(`provision.sh`; last section). Loaded when you work in `lib/`.
 
 These live at the top level because the component build scripts
 source `arca-bundle.sh` on the *write* side while the image installer (`rootfs/commission-offline.sh`) reads it, and every SSH-using script sources
@@ -16,14 +16,14 @@ source `arca-bundle.sh` on the *write* side while the image installer (`rootfs/c
 | `arca-bundle.sh` | the release-bundle layout |
 | `arca-release.sh` | fetch a published release — **the one library here that opens a socket** |
 | `arca-ssh.sh` | the one answer to "can I reach this device" |
-| `arca-state.sh` | the per-unit state lists: the BACKUP set and the SSH-key deny the card-image builder applies; `rootfs/` and `backup.sh` source it, `tests/arca_state_test.sh` covers it |
+| `arca-state.sh` | the per-unit state lists: the SSH-key deny the card-image builder applies and `arca_state_unsafe_paths`; `rootfs/` sources it, `tests/arca_state_test.sh` covers it |
 | `product.sh` | `PRODUCT_NAME` / `PRODUCT_STEM` for banners, release titles and download names, read from `rootfs/board/arca/os-release`; no fallback, it refuses instead |
 | `arca-kernel-src.sh` | `arca_check_kernel_tarball`: the sha256 check `kernel/build-image.sh` and `usb_host/build-kernel-modules.sh` run before `tar xf`; the pin is read from `rootfs/package-hashes/linux-headers.hash` and nowhere else, and a missing pin refuses |
 
 ## One SSH gate, and BatchMode stays on it
 
 **`arca-ssh.sh` is the only implementation of "can I reach this device".** The scripts that source it
-are listed by `grep -rln 'arca-ssh.sh' -- provision.sh backup.sh deploy-all.sh arca.sh */build-and-deploy.sh`
+are listed by `grep -rln 'arca-ssh.sh' -- provision.sh deploy-all.sh arca.sh */build-and-deploy.sh`
 and every call goes through `arca_ssh_gate`. They each keep their own
 gate *call*, because a component script must run standalone; what they must not keep is their own
 probe. There used to be eight, already drifted into three wordings of one message.
@@ -211,11 +211,11 @@ over a path. It installs nothing and never touches a device. `arca-bundle.sh` st
 - **A fetch under `sudo` hands the cached file back to `$SUDO_UID`**, for the reason
   `arca_ssh_key_owner` exists: otherwise the operator needs `sudo` to touch their own `build/`.
 
-## `provision.sh` and `backup.sh`: the developer's update of a running unit
+## `provision.sh`: the developer's update of a running unit
 
-A user flashes an image; these two are for a unit already running our root. `./provision.sh <ip|host>`:
+A user flashes an image; this is for a unit already running our root. `./provision.sh <ip|host>`:
 SSH gate, plan compiled from `device-files/provision-rules.conf`, `--dry-run` prints it and exits, then
-`backup.sh` (**a failed backup aborts the run**), install, sysctl, reboot. It deletes no software and never
+step 0 (below; **a failed backup aborts the run**), install, sysctl, reboot. It deletes no software and never
 writes p1. `--status` (md5s the deployed scripts against the repo's: `matches repo` or `DRIFTED` per file) and
 `--hostname NAME` (stages and runs the overlay's `set-hostname` over SSH) never back up or reboot; the second
 is what makes renaming a unit in service safe. `--no-<group>` skips one provision group. An unknown flag is
@@ -224,8 +224,10 @@ policy. ⚠️ **Boot service and install live only in `provision.sh` and `rootf
 `deploy-all.sh` and the `*/build-and-deploy.sh` must not duplicate any of it. Regression:
 `tests/provision_online_test.sh` (fake `ssh`/`scp`; no device).
 
-`backup.sh <ip> [<out.tar.gz>]` writes the BACKUP set of `arca-state.sh` to `backups/`: read-only on the
-unit, and the archive holds secrets (VNC password, SSH host keys). Nothing writes it back.
+**Step 0 runs the repo's `device-files/arca-backup` and every `*/backup.d/*.item` from a scratch dir on the unit** (`ARCA_BACKUP_ITEMS`),
+exports every item, secrets included, and copies `ludbox-backup-<host>-<stamp>.tar.gz` to `backups/` (mode 600, refuses to overwrite);
+any failure aborts with nothing written. The item format and the engine are in `SYSTEM_ANALYSIS.md#53-app-launcher-and-manifests`;
+users export and import from Control Panel → Backup.
 
 ## Regressions
 

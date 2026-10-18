@@ -1,0 +1,5 @@
+name=High scores
+paths=home/root/data/*.hig
+unit=no
+secret=no
+reboot=no

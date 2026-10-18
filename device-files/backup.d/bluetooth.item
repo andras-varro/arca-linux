@@ -1,0 +1,5 @@
+name=Bluetooth pairings
+paths=var/lib/bluetooth var/lib/bluealsa
+unit=yes
+secret=no
+reboot=yes

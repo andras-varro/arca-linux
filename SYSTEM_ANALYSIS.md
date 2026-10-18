@@ -1690,7 +1690,7 @@ SSH host key under `/home/root/data/ssh` kept its fingerprint over two reboots. 
 |---|---|---|---|---|
 | p1 | FAT32, label `ARCABOOT`, type `0c`, bootable | 63, 144522 sectors (70.6 MB), byte-identical to the vendor's | none | Boot files, listed in [§4.1](#41-the-chain). **The DTB is inside `uImage-system`** — no separate `.dtb` file exists. |
 | p2 | ext4, label `arca-log` | 147456, 2097152 sectors = 1 GiB, fixed | `/home/root/log` | System logs |
-| p3 | ext4, label `arca-root` | 2244608, 1048576 sectors = 512 MiB, **last so it can grow** | `/` | Root filesystem; 193,880 KiB used with the full bundle. `/home/root/data` is a **plain directory on it**: settings, scores, calibration, the SSH host key and ScummVM saves live here, so a reflash wipes them (`backup.sh` is the only protection) |
+| p3 | ext4, label `arca-root` | 2244608, 1048576 sectors = 512 MiB, **last so it can grow** | `/` | Root filesystem; 193,880 KiB used with the full bundle. `/home/root/data` is a **plain directory on it**: settings, scores, calibration, the SSH host key and ScummVM saves live here, so a reflash wipes them (Control Panel → Backup, §5.3) |
 
 `resize2fs` offline from 512 MiB to 30 GiB ran clean (measured); an online grow of the mounted root ran clean on `.188` (`[n=1]`, 512 MiB to 6520 MiB in 17 s, no reboot; kernel log "resized filesystem to 1669120"). `rootfs/board/arca/overlay/etc/init.d/growroot` (`S07growroot`) does it at every boot when p3 has a tail: `resizepart` for the kernel, the four size bytes of the MBR entry, then `resize2fs`; a freshly flashed `f149.img` did it by itself at its first boot on `.188` (`[n=1]`, 8 GB card; syslog "resizing filesystem from 131072 to 1669120 blocks").
 U-Boot's built-in root is `/dev/mmcblk0p3` (`uboot/rw20-board.patch`); `make-card-image.sh` refuses an older `u-boot.img` (`root=` p6) via `arca_uboot_root_ok`.
@@ -2011,14 +2011,12 @@ Manifest format is INI: `name=`, `exec=`, `icon=` (PPM P6), `args=` (one of `fb,
 `touch` / `none`). **Each component's deploy script writes its own manifests and icons** — that is
 how projects plug into the launcher with no central registry.
 
-Device paths worth knowing:
-
-```
-/opt/games/                       native binaries
-/opt/arca/apps/             .app manifests
-/opt/arca/icons/            PPM icons
-/opt/arca/default-app       boot target
-```
+**Backup items follow the same pattern.** `/opt/arca/backup.d/<id>.item` (`<id>` is `[a-z0-9_-]+`) says what part of the state
+one component owns: INI like the manifest, `name=` (shown in the UI), `paths=` (space separated, relative to `/`, no whitespace
+inside a path, globs allowed, a directory carries everything under it), and `unit=` / `secret=` / `reboot=` each `yes|no`
+(measured on or tied to this unit / holds a password or key / takes effect only after a reboot). The component's deploy script
+and `--bundle` copy its `backup.d/*.item`; `device-files/backup.d/` goes through `provision-rules.conf`. `device-files/arca-backup`
+reads these files and nothing else, so a new app is backed up by shipping one.
 
 **Seeing what is running: use `ps`, never `ps w`.** This busybox (v1.31.1) treats `ps w` as "processes
 with a controlling TTY" — on RW09 **3 lines against plain `ps`'s 51**, the two gettys and the header. An

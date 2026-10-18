@@ -1,0 +1,5 @@
+name=Host name
+paths=etc/hostname etc/hosts
+unit=yes
+secret=no
+reboot=yes

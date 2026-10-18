@@ -1,0 +1,5 @@
+name=Touch calibration
+paths=etc/touch_calibration.conf etc/touch_calibration.conf.bak*
+unit=yes
+secret=no
+reboot=no

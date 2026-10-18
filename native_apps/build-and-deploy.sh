@@ -292,7 +292,7 @@ $CC "${WARN[@]}" -O2 -I. \
 # The standalone unified_calibrate was folded into it and deleted — it was a
 # second, independent copy of the same 9-tap fit, carrying the same defect.
 step "27/32" "control_panel"
-$CC "${WARN[@]}" -O2 -I. control_panel/control_panel.c control_panel/cp_page_name.c control_panel/usb_bus.c control_panel/touch_wizard.c control_panel/led_page.c control_panel/monitor_page.c control_panel/cpu_load.c control_panel/soc_temp.c control_panel/mon_graph.c sysmon/mon_ring.c control_panel/info_page.c control_panel/network_page.c control_panel/usb_page.c control_panel/input_page.c control_panel/audio_page.c control_panel/display_page.c control_panel/bluetooth_page.c control_panel/system_page.c control_panel/log_page.c control_panel/log_filter.c control_panel/ssh_page.c control_panel/cp_exec.c control_panel/sys_settings.c control_panel/bt_ctl.c common/status_line.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" $CALIB_OBJ build/ui_layout.o build/ui_flow.o build/ui_focus.o build/ppm.o build/icon_grid.o build/top_bar.o build/pointer.o build/product.o -o build/control_panel -lm "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. control_panel/control_panel.c control_panel/cp_page_name.c control_panel/usb_bus.c control_panel/touch_wizard.c control_panel/led_page.c control_panel/monitor_page.c control_panel/cpu_load.c control_panel/soc_temp.c control_panel/mon_graph.c sysmon/mon_ring.c control_panel/info_page.c control_panel/network_page.c control_panel/usb_page.c control_panel/input_page.c control_panel/audio_page.c control_panel/display_page.c control_panel/bluetooth_page.c control_panel/system_page.c control_panel/log_page.c control_panel/log_filter.c control_panel/ssh_page.c control_panel/cp_exec.c control_panel/backup_page.c control_panel/backup_parse.c file_manager/fm_core.c build/list_view.o control_panel/sys_settings.c control_panel/bt_ctl.c common/status_line.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" $CALIB_OBJ build/ui_layout.o build/ui_flow.o build/ui_focus.o build/ppm.o build/icon_grid.o build/top_bar.o build/pointer.o build/product.o -o build/control_panel -lm "${AUDIO_LIBS[@]}"
 
 # Touch diagnostic. It was previously absent from this script, which is why a
 # deployed copy of the old trace tool was stale (pre-bezel); that tool now lives in
@@ -457,6 +457,14 @@ if [[ -n "$BUNDLE_DIR" ]]; then
     for f in build/apps/*.app; do
         [ -f "$f" ] || continue
         arca_bundle_add "$BUNDLE_DIR" native_apps 0644 "$f" "/opt/arca/apps/$(basename "$f")" \
+            || err "staging failed: $f"
+    done
+
+    # The backup items (format: SYSTEM_ANALYSIS.md#53-app-launcher-and-manifests): data files in
+    # this tree, copied as they are by both paths.
+    for f in backup.d/*.item; do
+        [ -f "$f" ] || continue
+        arca_bundle_add "$BUNDLE_DIR" native_apps 0644 "$f" "/opt/arca/backup.d/$(basename "$f")" \
             || err "staging failed: $f"
     done
 
@@ -739,6 +747,14 @@ for name in "$@"; do
 done
 REMOTE
 ok "App manifests installed ($(ls build/apps/*.app | wc -l) file(s))"
+echo ""
+
+# Deploy the backup items: what the Control Panel's export/import page offers to save.
+info "Installing backup items..."
+ssh "$DEVICE" "mkdir -p /opt/arca/backup.d"
+scp backup.d/*.item "$DEVICE:/opt/arca/backup.d/"
+ssh "$DEVICE" "chmod 644 /opt/arca/backup.d/*.item"
+ok "Backup items installed ($(find backup.d -name '*.item' | wc -l) file(s))"
 echo ""
 
 # Deploy the per-game sound sets

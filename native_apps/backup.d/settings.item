@@ -1,0 +1,5 @@
+name=Settings and boot app
+paths=opt/games/arca_config.conf opt/arca/default-app
+unit=no
+secret=no
+reboot=no

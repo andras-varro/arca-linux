@@ -186,7 +186,7 @@ void OSystem_Arca::initBackend() {
 	// Create save file manager
 	// Saves go to /home/root/data/scummvm-saves, a plain directory on the root
 	// partition p3 (a reflash wipes it; captured by
-	// backup.sh).  The constructor argument is upstream's idiom: it does
+	// the ScummVM backup item).  The constructor argument is upstream's idiom: it does
 	// ConfMan.registerDefault("savepath", ...), so an explicit savepath in
 	// scummvm.ini still wins.  Without it saves landed in the process cwd
 	// ("/" at boot, /home/root from SSH).

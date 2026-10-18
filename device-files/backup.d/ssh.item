@@ -1,0 +1,5 @@
+name=SSH keys and authorized keys
+paths=home/root/.ssh home/root/data/ssh
+unit=yes
+secret=yes
+reboot=yes

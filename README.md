@@ -99,8 +99,8 @@ Open **Control Panel** from the launcher. Its pages, from the source:
 | Network | Gateway, DNS, and each interface's state, IP address and MAC. |
 | SSH | Remote login: mode, root login, root password, host name. |
 | Monitor | Uptime, load, temperature, memory and storage, with graphs. |
-| System | Date, time and time zone. |
-| Log | The unit's logs, read-only. |
+| System, Log | Date, time and time zone; the unit's logs, read-only. |
+| Backup | Export your settings, scores, saves and keys to a USB stick (a `ludbox-backup` folder), or import them back after re-flashing a card; REBOOT NOW appears only if an imported item needs it. The export holds passwords and keys, so keep the stick private. |
 | Information | Kernel, host name, boot target and other identity figures; **RESET DEFAULTS** (backs the settings file up first). |
 
 **VNC Client** shows another computer's desktop, for example a Raspberry Pi running a VNC

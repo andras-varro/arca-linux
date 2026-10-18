@@ -121,7 +121,7 @@ grows p3 to the end of the card at the first boot.
 Every image is the same and carries no unit state: the unit names itself (`arca-<4 hex>`) and generates its SSH host key at the first boot, after
 which `./deploy-all.sh <ip>` works (or the menu item *First boot of an imaged card*). ⚠️ **After reflashing a card, remove the unit's old host key in
 both shells** (Git Bash and WSL keep separate `known_hosts`): `ssh-keygen -R <ip>` and `wsl.exe -e bash -lc "ssh-keygen -R <ip>"`. ⚠️ **A reflash also
-wipes `/home/root/data`** (settings, scores, touch calibration, ScummVM saves) — `./backup.sh <ip>` first (below).
+wipes `/home/root/data`** (settings, scores, touch calibration, ScummVM saves) — export it first (Control Panel → Backup, or the archive `provision.sh` takes: `lib/CLAUDE.md`).
 
 A publish is refused without its source offer: `./release.sh --tag <tag> --source-offer [--image <img>]... [--source-out <dir>]` publishes the bundle,
 `ludbox-source-<tag>.tar`, its `.sha256` and the images under one tag. `--image` needs it too. The offer (`rootfs/make-source-offer.sh`) is
@@ -171,10 +171,6 @@ and no script writes p1. `provision.sh` deletes no software. Its other flags:
 ./provision.sh <ip> --status         # report current state; changes nothing
 ```
 
-`./backup.sh <ip> [<out.tar.gz>]` copies the unit's per-unit state (host keys,
-highscores, VNC config, ScummVM config and saves, calibration) to `backups/`; it is read-only on the unit and the archive holds
-secrets. `provision.sh` runs it first. Nothing writes the archive back; it is a plain tarball to unpack by hand.
-
 ## Architecture
 
 ```
@@ -184,7 +180,6 @@ arca-linux/
 ├── release.sh                   # Build + stage a bundle; --tag also publishes it
 ├── rootfs/                      # Our own root filesystem: Buildroot tree, make-card-image.sh (whole-card image), commission-offline.sh (its bundle installer), the set-hostname overlay file
 ├── provision.sh                 # Update a unit over SSH: backup, install the plan, reboot
-├── backup.sh                    # A unit's per-unit state to a host tarball (read-only on the unit)
 ├── lib/                         # Sourced, never executed
 │   ├── arca-identify.sh         # Is this our root; which partition, by content/position (root, log)
 │   ├── arca-provision.sh        # provision-rules.conf -> a plan

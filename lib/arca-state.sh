@@ -1,84 +1,16 @@
 #!/bin/bash
 #
-# lib/arca-state.sh — which of a unit's files are PER-UNIT STATE, and the one gate a card
-# image has against key material.
+# lib/arca-state.sh — the one gate a card image has against key material, and a path-safety
+# filter for tar listings.
 #
 # SOURCED, not executed:   . "$SCRIPT_DIR/lib/arca-state.sh"
 #
-# ONE home for the BACKUP list: everything that makes a unit THIS unit — settings,
-# calibration, pairings, high scores, SSH identity, and the operator's own private config
-# (the VNC password, ScummVM's ini and saves). Read by backup.sh, the only reader.
-#
-# A card image carries NONE of it: rootfs/make-card-image.sh builds one generic image from our
-# own parts, and a unit's state travels only through backup.sh. What the
-# image builder takes from this file is arca_state_ssh_keys_deny, below.
-#
-# ── Where ScummVM's saves go ────────────────────────────────────────────────
-#
-# Our backend's default savepath is home/root/data/scummvm-saves (on the root partition, p3; backend-files/
-# arca.cpp). Binaries built before it had none, and a save then landed in the
-# process's CURRENT DIRECTORY: "/" when booted, /home/root from an SSH shell — which
-# is why kq2.000 turned up loose in /home/root. Saves have no fixed name (<target>.NNN
-# for AGI, <target>.sNN for SCUMM), so the backup also takes every regular file
-# directly in those two directories (ARCA_STATE_LOOSE_DIRS), for units with old saves.
+# A card image carries NONE of a unit's per-unit state: rootfs/make-card-image.sh builds one
+# generic image from our own parts. What the image builder takes from this file is
+# arca_state_ssh_keys_deny, below. WHAT a unit's state is lives elsewhere: the item files
+# <component>/backup.d/*.item, read on the unit by device-files/arca-backup.
 #
 # Paths are relative to /, never absolute, and contain no whitespace.
-
-# The BACKUP set. Exact paths, file or directory (a directory carries everything under
-# it); globs are expanded by the device's shell.
-ARCA_STATE_BACKUP=(
-    etc/hostname
-    etc/hosts
-    etc/timezone
-    etc/localtime
-    etc/touch_calibration.conf
-    'etc/touch_calibration.conf.bak*'
-    etc/input_config.conf
-    opt/games/arca_config.conf
-    opt/arca/default-app
-    opt/vnc_client/vnc_client.conf
-    opt/games/scummvm.ini
-    var/lib/alsa/asound.state
-    var/lib/bluetooth
-    var/lib/bluealsa
-    home/root/.ssh
-    'home/root/data/*.hig'
-    home/root/data/ssh
-    home/root/data/scummvm-saves
-)
-
-# Directories whose loose REGULAR files are backed up (ScummVM saves; see above).
-# "." is / itself. uImage-* in /home/root is a staged kernel, not state.
-ARCA_STATE_LOOSE_DIRS=(home/root .)
-
-# arca_state_lister <backup>
-#   Prints a POSIX sh script (it runs under BusyBox ash on the unit) that lists,
-#   one per line and relative to /, the members of the set that EXIST there. A
-#   symlink such as etc/localtime is listed as itself (-L), so tar archives the
-#   link. Exit 2 on an unknown set.
-arca_state_lister() {
-    local set="$1" paths d
-    case "$set" in
-        backup) paths="${ARCA_STATE_BACKUP[*]}" ;;
-        *) echo "arca_state_lister: unknown set '$set' (backup)" >&2; return 2 ;;
-    esac
-    echo 'cd / || exit 1'
-    # Unquoted on purpose: the globs in the list expand on the unit. A glob that
-    # matches nothing stays literal and fails the -e test.
-    printf 'for f in %s; do\n' "$paths"
-    cat <<'REMOTE'
-    if [ -e "$f" ] || [ -L "$f" ]; then echo "$f"; fi
-done
-REMOTE
-    for d in "${ARCA_STATE_LOOSE_DIRS[@]}"; do
-        if [ "$d" = . ]; then printf 'for f in *; do\n'; else printf 'for f in %s/*; do\n' "$d"; fi
-        cat <<'REMOTE'
-    case "$f" in home/root/uImage-*) continue ;; esac
-    if [ -f "$f" ] && [ ! -L "$f" ]; then echo "$f"; fi
-done
-REMOTE
-    done
-}
 
 # arca_state_unsafe_paths
 #   stdin: a tar listing (tar -tf). Prints every entry that is absolute or has a

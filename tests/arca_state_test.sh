@@ -10,8 +10,6 @@
 #
 #   A  Paths that would escape the extraction root (absolute, '..') are flagged by
 #      arca_state_unsafe_paths; ordinary ones are not.
-#   B  The generated lister, run under dash against a synthetic tree, lists what
-#      exists and nothing that does not.
 #   D  arca_state_ssh_keys_deny: a card image may carry no SSH key material.
 #
 # The count at the end includes a floor: a file that silently ran zero cases
@@ -62,54 +60,6 @@ expect_out "$TMP/empty" "$TMP/a3.out" "A3 ordinary paths, including a name start
 expect_rc 0 "$rc" "A4 and exit 0"
 
 echo ""
-echo "B  the generated lister against a synthetic tree"
-R="$TMP/root"
-mkdir -p "$R/etc" "$R/opt/games/scumm" "$R/opt/vnc_client" "$R/opt/arca" "$R/var/lib/bluetooth/AA" \
-    "$R/home/root/.ssh" "$R/home/root/data/ssh" "$R/home/root/subdir"
-for f in etc/hostname etc/hosts etc/timezone etc/touch_calibration.conf etc/touch_calibration.conf.bak1 \
-         etc/input_config.conf opt/games/arca_config.conf opt/games/scummvm.ini opt/games/scumm/x.la0 \
-         opt/vnc_client/vnc_client.conf opt/arca/default-app var/lib/bluetooth/AA/info \
-         home/root/.ssh/authorized_keys home/root/data/snake.hig home/root/data/ssh/ssh_host_rsa_key \
-         home/root/kq2.000 home/root/uImage-test home/root/subdir/x ft.s01; do
-    : > "$R/$f"
-done
-ln -s /usr/share/zoneinfo/UTC "$R/etc/localtime"
-ln -s /nowhere "$R/home/root/dangling"
-SH=$(command -v dash || command -v sh)
-arca_state_lister backup > "$TMP/lister.backup"
-if $SH -n "$TMP/lister.backup"; then ok "B0 backup lister parses under $SH"; else bad "B0 backup lister does not parse under $SH"; fi
-# Re-root it: the shipped script's first line is `cd / || exit 1`.
-sed "1s|^cd / |cd \"$R\" |" "$TMP/lister.backup" > "$TMP/lister.backup.rooted"
-if ! cmp -s "$TMP/lister.backup" "$TMP/lister.backup.rooted"; then
-    ok "B0 backup lister re-rooted (its first line is the cd)"
-else
-    bad "B0 backup lister: first line is not 'cd / ...', cannot re-root"
-fi
-$SH "$TMP/lister.backup.rooted" > "$TMP/listed.backup"
-cat > "$TMP/want.backup" <<'EOF'
-etc/hostname
-etc/timezone
-etc/localtime
-etc/touch_calibration.conf
-etc/input_config.conf
-opt/games/arca_config.conf
-opt/arca/default-app
-var/lib/bluetooth
-home/root/.ssh
-etc/hosts
-etc/touch_calibration.conf.bak1
-opt/vnc_client/vnc_client.conf
-opt/games/scummvm.ini
-home/root/data/snake.hig
-home/root/data/ssh
-home/root/kq2.000
-ft.s01
-EOF
-expect_out "$TMP/want.backup" "$TMP/listed.backup" "B1 backup lister: what exists, a symlink as itself, the private files, p2, and loose saves (not uImage-*, subdirs, dangling links)"
-arca_state_lister image > /dev/null 2>&1; rc=$?
-expect_rc 2 "$rc" "B2 the retired image set is refused, exit 2"
-
-echo ""
 echo "D  arca_state_ssh_keys_deny: a card image carries no SSH key material"
 printf '%s\n' ./ ./etc/ssh/sshd_config ./home/root/.ssh/ ./home/root/.ssh/authorized_keys ./usr/bin/ssh > "$TMP/g1.lst"
 arca_state_ssh_keys_deny < "$TMP/g1.lst" > "$TMP/g1.out"; rc=$?
@@ -138,8 +88,8 @@ expect_rc 0 "$rc" "D7 and exits 0"
 echo ""
 TOTAL=$((PASS + FAIL))
 echo "  $PASS passed, $FAIL failed"
-# groups A, B, D: 4 + 4 + 9 = 17 (group B has the zero-numbered B0 twice, group D has 3b/3c)
-MIN_CASES=17
+# groups A, D: 4 + 9 = 13 (group D has 3b/3c)
+MIN_CASES=13
 if [ "$TOTAL" -lt "$MIN_CASES" ]; then
     echo -e "  ${RED}HARNESS ERROR${NC}: only $TOTAL cases ran, expected at least $MIN_CASES."
     exit 2

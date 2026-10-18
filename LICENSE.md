@@ -40,7 +40,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 Everything committed in this repository **except the files named in the next section**: the C sources
 and shared library under `native_apps/`, `vnc_client/`'s client and its renderer/input/settings, the
 ScummVM backend port under `scummvm-arca/backend-files/`, `usb_host/`'s `devmem_write.c` and Python
-tooling, every shell script (`arca.sh`, `deploy-all.sh`, `release.sh`, `provision.sh`, `backup.sh`, `lib/`, `rootfs/`'s scripts,
+tooling, every shell script (`arca.sh`, `deploy-all.sh`, `release.sh`, `provision.sh`, `lib/`, `rootfs/`'s scripts,
 `device-files/`, `tests/`), `kernel/`'s `build-image.sh`, `build-modules.sh` and `tools/*.c`, `uboot/BUILD.md` and `gen-mux.py`, the `.ppm`
 launcher icons, and the documentation. `kernel/dts/rw20.dts` is **not** MIT: its SPDX line says GPL-2.0-only and it includes the kernel
 tree's own `.dtsi` files; it carries the vendor panel's timing
@@ -263,7 +263,7 @@ publishing a prebuilt one is not an available shortcut.
 The MIT text above disclaims warranty, and that disclaimer is meant literally here. Two specifics:
 
 - **Imaging a card replaces everything on it, and there is no in-place rollback.** Keep the card
-  image you wrote; `provision.sh` takes a `backup.sh` archive before it
+  image you wrote; `provision.sh` exports a backup archive before it
   changes a running unit. Neither writes the boot partition.
 - **Recovering a unit that will not boot means reaching the SD card, and that means opening the case.**
   It is feasible and it takes experience; an inexperienced attempt can break the enclosure. Nobody

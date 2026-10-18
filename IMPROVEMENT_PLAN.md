@@ -303,7 +303,7 @@ focus through one mechanism, and the Control Panel's generic ring is gone.
 
 ### F151. User data on a USB stick: a file manager plus export/import of settings and scores — open, operator priority 2026-10-15, designed 2026-10-16
 
-A user with no PC tools has no backup (`backup.sh` needs SSH) and no way to put ScummVM games or audio on a
+A user with no PC tools has no backup (the old backup needed SSH) and no way to put ScummVM games or audio on a
 grown p3. The operator ruling of 2026-10-15 lifted the 2026-09-06 USB ruling for USB storage.
 
 Design facts the open items need: `native_apps/file_manager/` roots are the stick, `/home/root/data` and the ScummVM games and audio
@@ -311,24 +311,10 @@ directories in simple mode; expert mode adds `/` with protected paths refused. E
 
 Open, in order:
 
-1. **Export/import of settings and scores: a selectable, extensible backup.** Operator 2026-10-18: the set is chosen in the UI, never
-   baked in; new software extends it in a documented way; no compatibility with `backup.sh` is wanted (never used). Agreed design:
-   - **Item files are the one home for "what is state":** `/opt/arca/backup.d/<id>.item`, INI like the `.app` manifests, with `name=`,
-     `paths=` (relative to `/`, globs), `unit=yes|no` (measured on or tied to this unit), `secret=yes|no`. Each component writes its
-     own to a file and copies it: native_apps (scores, `arca_config.conf`, input mapping), scummvm-arca (ini, saves), vnc_client (its
-     conf, `secret=yes`), device-files (host name, timezone, touch calibration, SSH keys, Bluetooth pairings, `unit=yes`). The format
-     is documented beside the `.app` format.
-   - **Engine `device-files/arca-backup`**, POSIX sh beside `arca-storage`, fixed stdout lines: `items`, `export <dir> <id>…`,
-     `archives <dir>`, `contents <archive>`, `import <archive> <id>…`. Plain tar (no gzip on the unit per `backup.sh`'s header,
-     [unverified] on today's rootfs), `ludbox-backup-<host>-<date>.tar` with an info member (host, version, date, ids). **Import
-     writes only paths the importing unit's own item files declare for the selected ids, and refuses absolute or `..` members.**
-   - **Control Panel page BACKUP:** items as a marked `list_view` (its first Control Panel user); EXPORT TO USB; IMPORT lists the
-     stick's archives, then the chosen one's items. Secret items start unmarked, and so do `unit=yes` items from another unit, with
-     a warning. Pad and keyboard. The page reaches the stick through `arca-storage` and runs the engine through `cp_exec`.
-   - **Then `backup.sh` goes:** the item files replace `ARCA_STATE_BACKUP` and `arca_state_lister` in `lib/arca-state.sh`, and
-     `provision.sh`'s pre-write backup calls the engine over SSH. `arca_state_ssh_keys_deny` (the image builder's) stays.
-   - Split into a core worker (format, engine, host test on a fake root, each component's items and install path, the offline
-     bundle) and a UI worker (the page).
+1. **Backup: the operator's tap-through on .115.** Control Panel → Backup, the engine `device-files/arca-backup` and the item files
+   (format: `SYSTEM_ANALYSIS.md#53-app-launcher-and-manifests`) are in the tree. On .115 the engine was hand-installed (not yet by
+   `provision.sh`) and measured under BusyBox: export, contents and import work, and the hostile archives are refused. Unmeasured:
+   the page on the panel with a stick, pad and keyboard. Unverified: `provision.sh`'s new step 0 against a real unit.
 2. **fsck before mount: `dosfstools`.** Operator 2026-10-18: yes, and deploy it to running units, not only in a new image.
    `BR2_PACKAGE_DOSFSTOOLS` and `_FSCK_FAT` in `rootfs/configs/arca_defconfig` for future cards; for running units, build it in the
    Buildroot tree (ABI: `rootfs/CLAUDE.md`) and ship it with the `usb` group. `arca-storage` then runs `fsck.fat -a` before mounting,

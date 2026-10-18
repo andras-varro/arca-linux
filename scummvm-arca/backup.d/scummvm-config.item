@@ -1,0 +1,5 @@
+name=ScummVM configuration
+paths=opt/games/scummvm.ini
+unit=no
+secret=no
+reboot=no

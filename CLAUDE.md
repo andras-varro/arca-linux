@@ -57,7 +57,7 @@ don't copy.
 | file | covers |
 |---|---|
 | `native_apps/CLAUDE.md` | the rendering loop, the input model, the touch model, the screen rectangles — the deepest of them |
-| `lib/CLAUDE.md` | the sourced shell libraries and the root-level `provision.sh` / `backup.sh`: SSH gate, plan compilers, bundle layout, the p1 rules |
+| `lib/CLAUDE.md` | the sourced shell libraries and the root-level `provision.sh`: SSH gate, plan compilers, bundle layout, the p1 rules |
 | `device-files/CLAUDE.md` | what is installed verbatim, and how to author the two rules files |
 | `tests/CLAUDE.md` | the host regressions, what each cannot see, sabotage-harness discipline |
 | `scummvm-arca/CLAUDE.md`, `vnc_client/CLAUDE.md` | those ports |
@@ -136,7 +136,7 @@ cd native_apps && ./build-and-deploy.sh [<ip>] [set-default]
 ```
 
 **Units run only our own root filesystem** (`rootfs/`); a card comes from `rootfs/make-card-image.sh`, and
-`provision.sh` updates a running unit, taking a `backup.sh` archive before its first write. Neither path
+`provision.sh` updates a running unit, taking a state backup before its first write (`lib/CLAUDE.md`). Neither path
 writes a unit's p1 (the card-image builder formats the p1 of an image file). `set-default` is the only mode `native_apps/build-and-deploy.sh` accepts. The boot service is
 installed **only** by the provision rules — never by a component script. All of it:
 `lib/CLAUDE.md` (last section) and `rootfs/CLAUDE.md`.

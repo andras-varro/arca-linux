@@ -98,6 +98,7 @@ extern const CpPage cp_audio_page;     /* audio_page.c */
 extern const CpPage cp_display_page;   /* display_page.c */
 extern const CpPage cp_bluetooth_page; /* bluetooth_page.c */
 extern const CpPage cp_system_page;    /* system_page.c */
+extern const CpPage cp_backup_page;    /* backup_page.c */
 
 /* The Audio page's OUT setting, for another page that offers a shortcut to it
  * (the Bluetooth page's USE FOR AUDIO).  One writer: cp_audio_set_output()

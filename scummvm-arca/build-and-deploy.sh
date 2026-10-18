@@ -746,6 +746,11 @@ fi' || log_warning "stop reported a failure - a surviving process may hold the b
     ssh "$DEVICE" "chmod 644 /opt/arca/apps/scummvm.app"
     rm -rf "$MANIFEST_DIR"
     log_success "App manifest installed"
+    # The backup items: data files in this tree, the same ones --bundle stages.
+    ssh "$DEVICE" "mkdir -p /opt/arca/backup.d"
+    scp "$SCRIPT_DIR"/backup.d/*.item "$DEVICE:/opt/arca/backup.d/"
+    ssh "$DEVICE" "chmod 644 /opt/arca/backup.d/scummvm-*.item"
+    log_success "Backup items installed"
     log_info "Run on device: ssh $DEVICE '$DEVICE_PATH/scummvm'"
 
     # Restart launcher (picks up updated manifest/icon)
@@ -819,6 +824,12 @@ stage_bundle() {
     arca_bundle_add "$dir" scummvm 0644 "$MANIFEST_DIR/scummvm.app" \
         /opt/arca/apps/scummvm.app || { log_error "staging failed: scummvm.app"; exit 1; }
     rm -rf "$MANIFEST_DIR"
+
+    local item
+    for item in "$SCRIPT_DIR"/backup.d/*.item; do
+        arca_bundle_add "$dir" scummvm 0644 "$item" "/opt/arca/backup.d/$(basename "$item")" \
+            || { log_error "staging failed: $item"; exit 1; }
+    done
 
     n=$(arca_bundle_finish "$dir" scummvm)
     log_success "Staged $n file(s) → $dir"

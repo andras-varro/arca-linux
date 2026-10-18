@@ -10,22 +10,22 @@
 # a sequence, and a sequence is only visible from outside: this suite puts a fake
 # `ssh` and `scp` first on PATH, runs the REAL script against them, and reads the
 # one log every fake call appends to. The fake ssh answers just enough for
-# backup.sh to succeed (a hostname, a one-file state list, a small tar
-# on stdout); everything else it records and accepts.
+# the arca-backup engine to succeed (an item list, an export path, a small archive
+# for the fake scp to hand back); everything else it records and accepts.
 #
 #   A  a full run: the backup fetch precedes the first write; no vendor-clean plan
 #      is ever sent; disable-steelcase.sh is never run; the reboot is the last remote command
 #      and happens once; an archive was produced.
 #   B  --dry-run: prints the provision plan, makes no remote call but the SSH probe,
 #      takes no backup.
-#   C  negative control: the backup fails (the fake lister exits 1) -> provision
+#   C  negative control: the backup fails (the fake engine reports an error) -> provision
 #      aborts non-zero before any write, and never reboots.
 #   D  --status is read-only: no backup, no write, no reboot.
 #   E  the clean and sshd-policy vocabulary is gone (sshd_config is the root overlay's alone): each removed option is refused, with no
 #      remote call at all.
 #   F  harness witness: the fakes were reached.
 #
-# ⚠️ The archive lands in the repo's backups/ (backup.sh's default, gitignored). This
+# ⚠️ The archive lands in the repo's backups/ (provision.sh's destination, gitignored). This
 # test snapshots that directory and removes only what it created.
 # Host-only: a fake ssh proves ORDER, not that the device accepted anything.
 
@@ -70,7 +70,7 @@ mkdir -p "$TMP/bin" "$TMP/fix/etc"
 echo rwtest > "$TMP/fix/etc/hostname"
 cat > "$TMP/bin/ssh" <<'FAKE'
 #!/bin/bash
-# fake ssh: log "SSH<TAB><command, newlines collapsed>", answer what backup.sh asks.
+# fake ssh: log "SSH<TAB><command, newlines collapsed>", answer what the backup step asks.
 while [ $# -gt 0 ]; do
     case "$1" in -o|-i|-p|-l) shift 2 ;; -*) shift ;; *) break ;; esac
 done
@@ -79,9 +79,11 @@ cmd="$*"
 printf 'SSH\t%s\n' "$(printf '%s' "$cmd" | tr '\n' ' ')" >> "$FAKE_LOG"
 case "$cmd" in
     "cat > "*)  cat > /dev/null ;;
-    "head -n 1 /etc/hostname"*) echo rwtest ;;
-    "cd / || exit 1"*) [ -n "${FAKE_LISTER_FAIL:-}" ] && exit 1; echo etc/hostname ;;
-    "cd / && tar -cf -"*) tar -cf - -C "$FAKE_FIX" etc/hostname ;;
+    *"arca-backup items") [ -n "${FAKE_LISTER_FAIL:-}" ] && { echo "error no items"; exit 1; }
+        echo "item settings unit=no secret=no reboot=no Settings" ;;
+    *"arca-backup export "*) set -- $cmd; while [ "$1" != export ]; do shift; done
+        echo "exported $2/ludbox-backup-rwtest-20260101-0000.tar.gz" ;;
+    "ls /opt/arca/backup.d/"*) ;;
     *) [ -t 0 ] || cat > /dev/null ;;
 esac
 exit 0
@@ -89,6 +91,8 @@ FAKE
 cat > "$TMP/bin/scp" <<'FAKE'
 #!/bin/bash
 printf 'SCP\t%s\n' "$*" >> "$FAKE_LOG"
+for a in "$@"; do last="$a"; done
+case "$*" in *:/tmp/arca-prov-backup.*) tar -czf "$last" -C "$FAKE_FIX" etc/hostname ;; esac
 exit 0
 FAKE
 chmod +x "$TMP/bin/ssh" "$TMP/bin/scp"
@@ -105,6 +109,9 @@ run() {
 first() { grep -nE "$2" "$TMP/$1.log" | head -1 | cut -d: -f1; }
 # a line that WRITES to the device: an scp, a plan/script upload, a mkdir, sysctl, reboot
 WRITE_RE='^SCP|cat > /tmp/arca-|mkdir -p|sysctl|reboot'
+# first line (number) of run $1 that writes to the device; the backup step's own scratch
+# directory (arca-prov-backup) is not a write to the unit's state and is excluded
+first_write() { grep -nE "$WRITE_RE" "$TMP/$1.log" | grep -v arca-prov-backup | head -1 | cut -d: -f1; }
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo ""
@@ -112,7 +119,7 @@ echo "A. a full run — backup first, no clean, reboot last"
 # ═══════════════════════════════════════════════════════════════════════════
 run full 192.168.50.99
 [ "$RC" -eq 0 ]; chk "A1 exits 0"
-TAR=$(first full 'tar -cf -'); WR=$(first full "$WRITE_RE"); PL=$(first full 'cat > /tmp/arca-provision-plan')
+TAR=$(first full 'arca-backup export'); WR=$(first_write full); PL=$(first full 'cat > /tmp/arca-provision-plan')
 [ -n "$TAR" ]; chk "A2 the backup fetch happened"
 [ -n "$WR" ] && [ -n "$PL" ]; chk "A3 a write happened (witness for A4)"
 [ -n "$TAR" ] && [ -n "$WR" ] && [ "$TAR" -lt "$WR" ]; chk "A4 the backup fetch precedes the first write"
@@ -124,8 +131,8 @@ LAST=$(grep '^SSH' "$TMP/full.log" | tail -1 | cut -f2)
 [ "$(grep -cP "^SSH\treboot$" "$TMP/full.log")" -eq 1 ]; chk "A8 reboot happens once"
 NEWBK=$(new_backups)
 [ "$NEWBK" -ge 1 ]; chk "A9 an archive was produced"
-# backup.sh names its archive <unit>-<YYYYmmdd-HHMMSS>.tar.gz and refuses an existing
-# name ("exists", before it ever calls the lister). The whole suite takes about a second,
+# provision.sh keeps the engine's archive name (a fixed one in the fake) and refuses an existing
+# name, so run C could collide with one A made. The whole suite takes about a second,
 # so run C could land in the same second as run A and die there, with C1 still passing
 # and C2 failing. Remove what A made, so no later run can collide with it.
 for f in "$BK"/*; do
@@ -139,8 +146,8 @@ echo "B. --dry-run — prints the plan, changes nothing, takes no backup"
 # ═══════════════════════════════════════════════════════════════════════════
 run dry 192.168.50.99 --dry-run
 [ "$RC" -eq 0 ]; chk "B1 exits 0"
-! grep -q "tar -cf -" "$TMP/dry.log"; chk "B2 no backup fetch"
-! grep -qE "$WRITE_RE" "$TMP/dry.log"; chk "B3 no write of any kind"
+! grep -q "arca-backup" "$TMP/dry.log"; chk "B2 no backup fetch"
+[ -z "$(first_write dry)" ]; chk "B3 no write of any kind"
 [ "$(grep -vcP "^SSH\ttrue$" "$TMP/dry.log")" -eq 0 ]; chk "B4 the only remote call is the SSH probe"
 grep -q "Provision plan" "$TMP/dry.out"; chk "B5 it prints the provision plan"
 grep -qE "^ *install" "$TMP/dry.out"; chk "B6 it prints plan records (an install line)"
@@ -151,8 +158,8 @@ echo "C. negative control — a failing backup stops the run before any write"
 # ═══════════════════════════════════════════════════════════════════════════
 FAKE_LISTER_FAIL=1 run nobk 192.168.50.99
 [ "$RC" -ne 0 ]; chk "C1 exits non-zero"
-grep -q "cd / || exit 1" "$TMP/nobk.log"; chk "C2 the backup was attempted (lister ran)"
-! grep -qE "$WRITE_RE" "$TMP/nobk.log"; chk "C3 no write reached the device"
+grep -q "arca-backup items" "$TMP/nobk.log"; chk "C2 the backup was attempted (engine ran)"
+[ -z "$(first_write nobk)" ]; chk "C3 no write reached the device"
 ! grep -q "arca-provision-plan" "$TMP/nobk.log"; chk "C4 no plan was written"
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -161,8 +168,8 @@ echo "D. --status — read-only"
 # ═══════════════════════════════════════════════════════════════════════════
 run stat 192.168.50.99 --status
 [ "$RC" -eq 0 ]; chk "D1 exits 0"
-! grep -q "tar -cf -" "$TMP/stat.log"; chk "D2 no backup fetch"
-! grep -qE "$WRITE_RE" "$TMP/stat.log"; chk "D3 no write, no reboot"
+! grep -q "arca-backup" "$TMP/stat.log"; chk "D2 no backup fetch"
+[ -z "$(first_write stat)" ]; chk "D3 no write, no reboot"
 [ "$(grep -c "^SSH" "$TMP/stat.log")" -ge 2 ]; chk "D4 it did query the device (witness)"
 
 # ═══════════════════════════════════════════════════════════════════════════

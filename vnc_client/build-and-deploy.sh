@@ -168,6 +168,8 @@ if [[ -n "$BUNDLE_DIR" ]]; then
         || err "staging failed: vnc_client"
     arca_bundle_add "$BUNDLE_DIR" vnc_client 0644 "$STAGE/vnc_client.app" \
         /opt/arca/apps/vnc_client.app || err "staging failed: vnc_client.app"
+    arca_bundle_add "$BUNDLE_DIR" vnc_client 0644 backup.d/vnc.item \
+        /opt/arca/backup.d/vnc.item || err "staging failed: vnc.item"
     if [ -f vnc_client.ppm ]; then
         arca_bundle_add "$BUNDLE_DIR" vnc_client 0644 vnc_client.ppm \
             /opt/arca/icons/vnc_client.ppm || err "staging failed: icon"
@@ -265,6 +267,12 @@ fi
 scp "$STAGE/vnc_client.app" "$DEVICE:/opt/arca/apps/vnc_client.app"
 ssh "$DEVICE" "chmod 644 /opt/arca/apps/vnc_client.app"
 ok "App manifest installed"
+
+# The backup item (data file in this tree; --bundle stages the same file).
+ssh "$DEVICE" "mkdir -p /opt/arca/backup.d"
+scp backup.d/vnc.item "$DEVICE:/opt/arca/backup.d/vnc.item"
+ssh "$DEVICE" "chmod 644 /opt/arca/backup.d/vnc.item"
+ok "Backup item installed"
 
 echo ""
 

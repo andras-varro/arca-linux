@@ -114,6 +114,7 @@ static const CpPage *const home_pages[] = {
     &cp_ssh_page,
     &cp_monitor_page,
     &cp_system_page,
+    &cp_backup_page,
     &cp_log_page,
     &cp_info_page,
 };

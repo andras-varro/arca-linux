@@ -1,0 +1,5 @@
+name=VNC client settings and password
+paths=opt/vnc_client/vnc_client.conf
+unit=no
+secret=yes
+reboot=no

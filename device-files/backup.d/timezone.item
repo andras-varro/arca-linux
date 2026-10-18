@@ -1,0 +1,5 @@
+name=Time zone
+paths=etc/timezone etc/localtime
+unit=no
+secret=no
+reboot=no

@@ -1,0 +1,293 @@
+#!/bin/sh
+# arca-backup - selectable export/import of a unit's settings and scores, for the Control Panel.
+#
+# Usage:
+#   arca-backup items                        list the backup items this unit declares
+#   arca-backup export <dir> <id>...         write <dir>/ludbox-backup-<host>-<stamp>.tar.gz
+#   arca-backup archives <dir>               list the backup archives in <dir>, newest first
+#   arca-backup contents <archive>           what an archive holds, as THIS unit understands it
+#   arca-backup import <archive> <id>...     restore the selected items from an archive
+#
+# Stdout is a contract that callers parse, one line per fact:
+#   item <id> unit=<yes|no> secret=<yes|no> reboot=<yes|no> <name...>
+#   exported <full path>
+#   archive <filename>
+#   info host=<h> version=<v> date=<d>
+#   unknown <id>                  (contents: an id the archive has and this unit does not declare)
+#   imported <id>
+#   done reboot=<yes|no>
+#   error <text>                  (and a nonzero exit; nothing is written after it)
+#
+# What "state" is: the item files /opt/arca/backup.d/<id>.item, one per item, installed by the
+# component that owns the files (format: SYSTEM_ANALYSIS.md#53-app-launcher-and-manifests). This
+# script knows no path of its own. ARCA_ROOT (default empty, meaning /) moves the whole tree
+# for the host test and nothing else.
+#
+# Import writes ONLY paths the importing unit's own item files declare for the selected ids, and
+# an archive is refused whole if any member is absolute, has a ".." component, is a hard link, or
+# is a symlink that a later member is written through. Existing files are overwritten, never deleted.
+# A glob in paths= matches whole path components only ("home/root/data/*.hig" does not reach
+# "home/root/data/x/y.hig" by itself; a declared directory carries everything under it).
+#
+# BusyBox tar flags only: c x t v f C T. This BusyBox tar has no -z (measured on .115, 2026-10-18), so
+# gzip runs as a separate step and every reader works on the decompressed copy $TMP/a.tar.
+# The info member is tmp/ludbox-backup.info, written under the root's tmp for the length of the
+# export so every member shares one -C and nothing lands in /. Import never extracts it.
+
+ROOT="${ARCA_ROOT:-}"
+ITEMDIR="${ARCA_BACKUP_ITEMS:-$ROOT/opt/arca/backup.d}"   # override: provision.sh runs the repo's items
+INFO=tmp/ludbox-backup.info
+TMP=""
+
+die() {
+  echo "error $*"
+  exit 1
+}
+
+cleanup() {
+  [ -n "$TMP" ] && rm -rf "$TMP"
+  rm -f "$ROOT/$INFO"
+}
+trap cleanup EXIT
+trap 'exit 1' INT TERM
+
+mktmp() {
+  TMP="${TMPDIR:-/tmp}/arca-backup.$$"
+  rm -rf "$TMP"
+  mkdir -p "$TMP" || die "cannot create $TMP"
+}
+
+# getkey <file> <key>: first value of key=value
+getkey() {
+  sed -n "s/^$2=//p" "$1" | head -n 1 | tr -d '\r'
+}
+
+valid_id() {
+  case "$1" in
+    "" | *[!a-z0-9_-]*) return 1 ;;
+  esac
+  return 0
+}
+
+item_file() {
+  valid_id "$1" || return 1
+  [ -f "$ITEMDIR/$1.item" ] || return 1
+  echo "$ITEMDIR/$1.item"
+}
+
+yesno() {
+  [ "$1" = yes ] && echo yes || echo no
+}
+
+# item_line <id>: the "item" contract line
+item_line() {
+  f="$ITEMDIR/$1.item"
+  n=$(getkey "$f" name)
+  echo "item $1 unit=$(yesno "$(getkey "$f" unit)") secret=$(yesno "$(getkey "$f" secret)") reboot=$(yesno "$(getkey "$f" reboot)") ${n:-$1}"
+}
+
+cmd_items() {
+  for f in "$ITEMDIR"/*.item; do
+    [ -f "$f" ] || continue
+    id=${f##*/}
+    id=${id%.item}
+    valid_id "$id" || continue
+    item_line "$id"
+  done
+}
+
+host_name() {
+  if [ -n "$ROOT" ]; then
+    cat "$ROOT/etc/hostname" 2> /dev/null
+  else
+    hostname 2> /dev/null
+  fi
+}
+
+os_version() {
+  sed -n 's/^VERSION_ID=//p' "$ROOT/etc/os-release" 2> /dev/null | head -n 1 | tr -d "\"'"
+}
+
+cmd_export() {
+  [ $# -ge 2 ] || die "usage: export <dir> <id>..."
+  dir=$1
+  shift
+  for id in "$@"; do
+    item_file "$id" > /dev/null || die "unknown item $id"
+  done
+  mktmp
+  : > "$TMP/list"
+  for id in "$@"; do
+    paths=$(getkey "$ITEMDIR/$id.item" paths)
+    # shellcheck disable=SC2086
+    (cd "${ROOT:-/}" && for p in $paths; do
+      for g in $p; do
+        { [ -e "$g" ] || [ -L "$g" ]; } && echo "$g"
+      done
+    done) >> "$TMP/list"
+  done
+  mkdir -p "$ROOT/tmp" || die "cannot create $ROOT/tmp"
+  host=$(host_name)
+  host=${host:-unit}
+  stamp=$(date +%Y%m%d-%H%M)
+  {
+    echo "host=$host"
+    echo "version=$(os_version)"
+    echo "date=$stamp"
+    echo "ids=$*"
+  } > "$ROOT/$INFO" || die "cannot write the info member"
+  echo "$INFO" >> "$TMP/list"
+  mkdir -p "$dir" || die "cannot create $dir"
+  out="$dir/ludbox-backup-$host-$stamp.tar.gz"
+  sort -u "$TMP/list" > "$TMP/list.u"
+  { tar -cf "$TMP/out.tar" -C "${ROOT:-/}" -T "$TMP/list.u" && gzip -c "$TMP/out.tar" > "$out"; } || {
+    rm -f "$out"
+    die "tar failed"
+  }
+  echo "exported $out"
+}
+
+cmd_archives() {
+  [ $# -eq 1 ] || die "usage: archives <dir>"
+  [ -d "$1" ] || return 0
+  # Newest first by modification time.
+  # shellcheck disable=SC2012
+  ls -t "$1" 2> /dev/null | while read -r n; do
+    case "$n" in
+      ludbox-backup-*.tar.gz) echo "archive $n" ;;
+    esac
+  done
+}
+
+# read_info <archive>: sets TMP, INFO_HOST/VERSION/DATE/IDS
+read_info() {
+  [ -f "$1" ] || die "no such archive $1"
+  mktmp
+  gzip -dc "$1" > "$TMP/a.tar" 2> /dev/null || die "not a backup archive $1"
+  tar -xf "$TMP/a.tar" -C "$TMP" "$INFO" 2> /dev/null || die "not a backup archive $1"
+  [ -f "$TMP/$INFO" ] || die "not a backup archive $1"
+  INFO_HOST=$(getkey "$TMP/$INFO" host)
+  INFO_VERSION=$(getkey "$TMP/$INFO" version)
+  INFO_DATE=$(getkey "$TMP/$INFO" date)
+  INFO_IDS=$(getkey "$TMP/$INFO" ids)
+}
+
+cmd_contents() {
+  [ $# -eq 1 ] || die "usage: contents <archive>"
+  read_info "$1"
+  echo "info host=$INFO_HOST version=$INFO_VERSION date=$INFO_DATE"
+  for id in $INFO_IDS; do
+    if item_file "$id" > /dev/null; then
+      item_line "$id"
+    else
+      echo "unknown $id"
+    fi
+  done
+}
+
+# slashes <string>: number of "/" in it
+slashes() {
+  u=$1
+  c=0
+  while [ "$u" != "${u#*/}" ]; do
+    u=${u#*/}
+    c=$((c + 1))
+  done
+  echo "$c"
+}
+
+# member_matches <member> <pattern>: the member is the pattern or lies under it
+member_matches() {
+  mm=$1
+  pp=$2
+  nn=$(slashes "$pp")
+  cc=$(slashes "$mm")
+  while [ "$cc" -gt "$nn" ]; do
+    mm=${mm%/*}
+    cc=$((cc - 1))
+  done
+  # shellcheck disable=SC2254
+  case "$mm" in
+    $pp) return 0 ;;
+  esac
+  return 1
+}
+
+# check_safe <archive>: refuse the whole archive on a member that could land outside the item paths
+check_safe() {
+  tar -tf "$TMP/a.tar" > "$TMP/members" 2> "$TMP/tarerr" || die "cannot read archive $1"
+  # BusyBox and GNU tar both strip a leading "/" or "../" and say so on stderr: that is an unsafe member.
+  bad=$(sed -n "s/^tar: [Rr]emoving leading '\(.*\)' from \(member\|hard link\)[ a-z]*$/\1/p" "$TMP/tarerr" | head -n 1)
+  [ -z "$bad" ] || die "unsafe member $bad"
+  while IFS= read -r m; do
+    case "$m" in
+      /* | .. | ../* | */.. | */../*) die "unsafe member $m" ;;
+    esac
+  done < "$TMP/members"
+  # Links: a hard link (GNU: type h or "link to"; BusyBox: a "-" line with "name -> target"), or a
+  # symlink that another member is written through.
+  tar -tvf "$TMP/a.tar" 2> /dev/null | awk '
+    { t = substr($0, 1, 1); n = $6 }
+    t == "h" || (t != "l" && $7 == "->") || /link to / { print "H " n; next }
+    t == "l" { sub(/\/$/, "", n); links[n] = 1 }
+    { names[NR] = $6 }
+    END {
+      for (i = 1; i <= NR; i++) {
+        s = names[i]
+        while (sub(/\/[^\/]*$/, "", s)) if (s in links) { print "L " names[i]; break }
+      }
+    }' > "$TMP/badlinks"
+  if [ -s "$TMP/badlinks" ]; then
+    read -r _ bad < "$TMP/badlinks"
+    die "unsafe member $bad"
+  fi
+}
+
+cmd_import() {
+  [ $# -ge 2 ] || die "usage: import <archive> <id>..."
+  arc=$1
+  shift
+  read_info "$arc"
+  check_safe "$arc"
+  for id in "$@"; do
+    item_file "$id" > /dev/null || die "unknown item $id"
+    case " $INFO_IDS " in
+      *" $id "*) ;;
+      *) die "item not in archive $id" ;;
+    esac
+  done
+  reboot=no
+  for id in "$@"; do
+    paths=$(getkey "$ITEMDIR/$id.item" paths)
+    : > "$TMP/sel"
+    while IFS= read -r m; do
+      s=${m#./}
+      s=${s%/}
+      [ -n "$s" ] || continue
+      [ "$s" = "$INFO" ] && continue
+      for p in $paths; do
+        if member_matches "$s" "$p"; then
+          echo "$m" >> "$TMP/sel"
+          break
+        fi
+      done
+    done < "$TMP/members"
+    if [ -s "$TMP/sel" ]; then
+      tar -xf "$TMP/a.tar" -C "${ROOT:-/}" -T "$TMP/sel" || die "tar failed on $id"
+    fi
+    [ "$(getkey "$ITEMDIR/$id.item" reboot)" = yes ] && reboot=yes
+    echo "imported $id"
+  done
+  echo "done reboot=$reboot"
+}
+
+cmd=$1
+[ $# -gt 0 ] && shift
+case "$cmd" in
+  items) cmd_items ;;
+  export) cmd_export "$@" ;;
+  archives) cmd_archives "$@" ;;
+  contents) cmd_contents "$@" ;;
+  import) cmd_import "$@" ;;
+  *) die "usage: arca-backup items | export <dir> <id>... | archives <dir> | contents <archive> | import <archive> <id>..." ;;
+esac

@@ -1,0 +1,5 @@
+name=ScummVM saved games
+paths=home/root/data/scummvm-saves home/root/*.[0-9][0-9][0-9] home/root/*.s[0-9][0-9] *.[0-9][0-9][0-9] *.s[0-9][0-9]
+unit=no
+secret=no
+reboot=no

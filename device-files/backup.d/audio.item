@@ -1,0 +1,5 @@
+name=Audio state
+paths=var/lib/alsa/asound.state
+unit=yes
+secret=no
+reboot=no
