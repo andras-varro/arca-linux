@@ -26,6 +26,9 @@
  *   M  cancel removes the half-written target;
  *   N  a write error (the file-size limit stands in for a full stick) stops the
  *      job as FM_J_ERROR with err_fatal, leaves no partial file, and cancels.
+ *   O  expert mode's pure pieces: mode text (setuid/setgid/sticky, device
+ *      types), the long detail line in a fixed zone, the link-to-folder
+ *      resolver, fm_dir_read's mode and link_dir, pseudo and protected paths.
  * "Failing before" = compile against a sabotaged COPY of fm_core.c (see the
  * sabotage notes in the commit that added this file): each group has a case
  * that a broken fm_core.c turns red. */
@@ -205,9 +208,9 @@ static void group_c(void) {
 /* ── D ───────────────────────────────────────────────────────────────────── */
 
 static void group_d(void) {
-    FmEntry d1 = { "Zdir", FM_T_DIR, 0, 10 }, d2 = { "adir", FM_T_DIR, 0, 99 };
-    FmEntry f1 = { "b.txt", FM_T_FILE, 500, 100 }, f2 = { "A.txt", FM_T_FILE, 900, 50 },
-            f3 = { "c.txt", FM_T_FILE, 500, 200 };
+    FmEntry d1 = { "Zdir", FM_T_DIR, 0, 10, 0, false }, d2 = { "adir", FM_T_DIR, 0, 99, 0, false };
+    FmEntry f1 = { "b.txt", FM_T_FILE, 500, 100, 0, false }, f2 = { "A.txt", FM_T_FILE, 900, 50, 0, false },
+            f3 = { "c.txt", FM_T_FILE, 500, 200, 0, false };
     FmSort s;
     for (s = FM_SORT_NAME; s < FM_SORT_COUNT; s++) {
         CHECK(fm_entry_cmp(&d1, &f2, s) < 0 && fm_entry_cmp(&f2, &d1, s) > 0, "D folder before file, sort %s", fm_sort_label(s));
@@ -218,7 +221,7 @@ static void group_d(void) {
     CHECK(fm_entry_cmp(&f1, &f3, FM_SORT_SIZE) < 0, "D size tie falls to name");
     CHECK(fm_entry_cmp(&f3, &f1, FM_SORT_DATE) < 0, "D date: 200 before 100 (newest first)");
     CHECK(fm_entry_cmp(&f1, &f1, FM_SORT_NAME) == 0, "D equal to itself");
-    FmEntry lo = { "a", FM_T_FILE, 0, 0 }, up = { "A", FM_T_FILE, 0, 0 };
+    FmEntry lo = { "a", FM_T_FILE, 0, 0, 0, false }, up = { "A", FM_T_FILE, 0, 0, 0, false };
     CHECK(fm_entry_cmp(&lo, &up, FM_SORT_NAME) != 0, "D 'a' and 'A' are not equal (bytes break the tie)");
     CHECK(!strcmp(fm_sort_label(FM_SORT_NAME), "NAME") && !strcmp(fm_sort_label(FM_SORT_SIZE), "SIZE") &&
           !strcmp(fm_sort_label(FM_SORT_DATE), "DATE"), "D labels");
@@ -615,6 +618,129 @@ static void group_n(void) {
     fm_job_free(&j);
 }
 
+/* ── O: expert mode's pure pieces (mode text, long detail, link target,
+ *      pseudo and protected paths) ──────────────────────────────────────── */
+
+static void group_o(void) {
+    char m[11], o[128];
+
+    /* mode strings */
+    fm_mode_string(S_IFREG | 0644, m); CHECK(!strcmp(m, "-rw-r--r--"), "O mode 0644 file -> '%s'", m);
+    fm_mode_string(S_IFDIR | 0755, m); CHECK(!strcmp(m, "drwxr-xr-x"), "O mode 0755 dir -> '%s'", m);
+    fm_mode_string(S_IFLNK | 0777, m); CHECK(!strcmp(m, "lrwxrwxrwx"), "O mode symlink -> '%s'", m);
+    fm_mode_string(S_IFREG | 04755, m); CHECK(!strcmp(m, "-rwsr-xr-x"), "O setuid with x is 's' -> '%s'", m);
+    fm_mode_string(S_IFREG | 02755, m); CHECK(!strcmp(m, "-rwxr-sr-x"), "O setgid with x is 's' -> '%s'", m);
+    fm_mode_string(S_IFREG | 04644, m); CHECK(!strcmp(m, "-rwSr--r--"), "O setuid without x is 'S' -> '%s'", m);
+    fm_mode_string(S_IFDIR | 01777, m); CHECK(!strcmp(m, "drwxrwxrwt"), "O sticky with x is 't' -> '%s'", m);
+    fm_mode_string(S_IFDIR | 01776, m); CHECK(!strcmp(m, "drwxrwxrwT"), "O sticky without x is 'T' -> '%s'", m);
+    fm_mode_string(S_IFCHR | 0600, m); CHECK(!strcmp(m, "crw-------"), "O char device -> '%s'", m);
+    fm_mode_string(S_IFBLK | 0600, m); CHECK(m[0] == 'b', "O block device type 'b' -> '%s'", m);
+    fm_mode_string(S_IFIFO | 0600, m); CHECK(m[0] == 'p', "O fifo type 'p' -> '%s'", m);
+    fm_mode_string(S_IFSOCK | 0600, m); CHECK(m[0] == 's', "O socket type 's' -> '%s'", m);
+    fm_mode_string(0, m); CHECK(!strcmp(m, "?---------"), "O unknown type '?' -> '%s'", m);
+
+    /* detail_long, in a fixed zone so the clock text is fixed */
+    setenv("TZ", "UTC", 1); tzset();
+    struct tm tmv;
+    memset(&tmv, 0, sizeof tmv);
+    tmv.tm_year = 126; tmv.tm_mon = 9; tmv.tm_mday = 18; tmv.tm_hour = 14; tmv.tm_min = 8;
+    long long when = (long long)timegm(&tmv);
+    FmEntry fe = { "f", FM_T_FILE, 1536, when, S_IFREG | 0644, false };
+    fm_entry_detail_long(&fe, o, sizeof o);
+    CHECK(!strcmp(o, "-rw-r--r-- 1.5K 2026-10-18 14:08"), "O detail_long file -> '%s'", o);
+    FmEntry fd = { "d", FM_T_DIR, 4096, when, S_IFDIR | 0755, false };
+    fm_entry_detail_long(&fd, o, sizeof o);
+    CHECK(!strcmp(o, "drwxr-xr-x <DIR> 2026-10-18 14:08"), "O detail_long folder -> '%s'", o);
+    FmEntry fl = { "l", FM_T_LINK, 7, when, S_IFLNK | 0777, true };
+    fm_entry_detail_long(&fl, o, sizeof o);
+    CHECK(!strcmp(o, "lrwxrwxrwx <LNK> 2026-10-18 14:08"), "O detail_long link -> '%s'", o);
+    setenv("TZ", "UTC-2", 1); tzset();          /* UTC+2: the clock text follows the zone */
+    fm_entry_detail_long(&fe, o, sizeof o);
+    CHECK(!strcmp(o, "-rw-r--r-- 1.5K 2026-10-18 16:08"), "O detail_long uses localtime -> '%s'", o);
+    setenv("TZ", "UTC", 1); tzset();
+    /* truncation: always NUL-terminated, never overrun */
+    char small[10];
+    memset(small, 'Z', sizeof small);
+    fm_entry_detail_long(&fe, small, sizeof small);
+    CHECK(small[sizeof small - 1] == '\0' && !strncmp(small, "-rw-r--r-", 9),
+          "O detail_long truncated at 10 is NUL-terminated -> '%s'", small);
+    fm_entry_detail_long(&fe, small, 0);       /* must not write or crash */
+    memset(small, 'Z', sizeof small);
+    fm_entry_detail_long(&fe, small, 0);
+    CHECK(small[0] == 'Z', "O detail_long with n=0 writes nothing");
+
+    /* link target: a symlink to a folder, to a file, dangling, and too small */
+    char a[FM_PATH_MAX], l[FM_PATH_MAX], f[FM_PATH_MAX], lf[FM_PATH_MAX], dead[FM_PATH_MAX], ld[FM_PATH_MAX];
+    P(a, TMP, "lt_dir"); mk(a);
+    P(l, TMP, "lt_link_dir"); (void)!symlink(a, l);
+    P(f, TMP, "lt_file"); put(f, 10, 3);
+    P(lf, TMP, "lt_link_file"); (void)!symlink(f, lf);
+    P(dead, TMP, "nowhere");
+    P(ld, TMP, "lt_link_dead"); (void)!symlink(dead, ld);
+    char canon[FM_PATH_MAX];
+    char *cr = realpath(a, NULL);
+    CHECK(fm_link_dir_target(l, o, sizeof o) == 0 && cr && !strcmp(o, cr),
+          "O link to folder: 0 and canonical '%s' (got '%s')", cr ? cr : "?", o);
+    if (cr) free(cr);
+    int rc = fm_link_dir_target(lf, canon, sizeof canon);
+    CHECK(rc == -ENOTDIR, "O link to a file -> -ENOTDIR (got %d)", rc);
+    rc = fm_link_dir_target(ld, canon, sizeof canon);
+    CHECK(rc < 0, "O dangling link -> negative (got %d)", rc);
+    rc = fm_link_dir_target(l, canon, 3);
+    CHECK(rc == -ENAMETOOLONG, "O target that does not fit -> -ENAMETOOLONG (got %d)", rc);
+
+    /* fm_dir_read fills mode and link_dir */
+    char dir[FM_PATH_MAX];
+    P(dir, TMP, "expdir"); mk(dir);
+    char p1[FM_PATH_MAX];
+    P(p1, dir, "sub"); mk(p1);
+    P(p1, dir, "plain.txt"); put(p1, 20, 4);
+    P(p1, dir, "suid.bin"); put(p1, 20, 5); chmod(p1, 04755);
+    P(p1, dir, "lsub"); (void)!symlink("sub", p1);
+    P(p1, dir, "lplain"); (void)!symlink("plain.txt", p1);
+    P(p1, dir, "ldead"); (void)!symlink("missing", p1);
+    FmDir d;
+    CHECK(fm_dir_read(dir, FM_SORT_NAME, &d) == 0, "O dir_read ok");
+    int i;
+    i = fm_dir_find(&d, "lsub");
+    CHECK(i >= 0 && d.e[i].type == FM_T_LINK && d.e[i].link_dir, "O link to folder: link_dir true");
+    fm_mode_string(i >= 0 ? d.e[i].mode : 0, m);
+    CHECK(i >= 0 && m[0] == 'l', "O link mode from lstat is 'l' (got '%s')", m);
+    i = fm_dir_find(&d, "lplain");
+    CHECK(i >= 0 && d.e[i].type == FM_T_LINK && !d.e[i].link_dir, "O link to a file: link_dir false");
+    i = fm_dir_find(&d, "ldead");
+    CHECK(i >= 0 && d.e[i].type == FM_T_LINK && !d.e[i].link_dir, "O dangling link: link_dir false");
+    i = fm_dir_find(&d, "sub");
+    CHECK(i >= 0 && d.e[i].type == FM_T_DIR && !d.e[i].link_dir, "O real folder: link_dir false");
+    CHECK(i >= 0 && (d.e[i].mode & S_IFMT) == S_IFDIR, "O real folder mode is a directory");
+    i = fm_dir_find(&d, "suid.bin");
+    fm_mode_string(i >= 0 ? d.e[i].mode : 0, m);
+    CHECK(i >= 0 && !strcmp(m, "-rwsr-xr-x"), "O dir_read setuid file mode -> '%s'", m);
+    i = fm_dir_find(&d, "plain.txt");
+    CHECK(i >= 0 && (d.e[i].mode & S_IFMT) == S_IFREG && !d.e[i].link_dir, "O plain file mode is a regular file");
+    fm_dir_free(&d);
+
+    /* pseudo filesystems: whole components, normalised first */
+    struct { const char *p; bool want; } pse[] = {
+        {"/proc", true}, {"/proc/1", true}, {"/sys/class", true}, {"/dev", true},
+        {"/dev/input/event0", true}, {"/proc/../etc", false}, {"/devices", false},
+        {"/devx", false}, {"/home/root/data", false}, {"/", false},
+    };
+    for (size_t k = 0; k < sizeof pse / sizeof pse[0]; k++)
+        CHECK(fm_path_pseudo(pse[k].p) == pse[k].want, "O pseudo '%s' want %d", pse[k].p, (int)pse[k].want);
+
+    /* protected: the root, its direct children, pseudo, and anything unparsable */
+    struct { const char *p; bool want; } prot[] = {
+        {"/", true}, {"/etc", true}, {"/media", true}, {"/etc/passwd", false},
+        {"/proc/1", true}, {"/media/usb0", false}, {"/home/root/data", false},
+        {"", true}, {"garbage", true}, {"/a/../..", true}, {"//etc//", true},
+        {"/devices", true},            /* a direct child of / */
+    };
+    for (size_t k = 0; k < sizeof prot / sizeof prot[0]; k++)
+        CHECK(fm_path_protected(prot[k].p) == prot[k].want, "O protected '%s' want %d", prot[k].p, (int)prot[k].want);
+    unsetenv("TZ"); tzset();
+}
+
 /* ── main ────────────────────────────────────────────────────────────────── */
 
 int main(void) {
@@ -623,7 +749,7 @@ int main(void) {
 
     group_a(); group_b(); group_c(); group_d(); group_e(); group_f();
     group_g(); group_h(); group_i(); group_j(); group_k(); group_l();
-    group_m(); group_n();
+    group_m(); group_n(); group_o();
 
     rmtree(TMP);
     printf("%d checks, %d failures\n", checks, fails);

@@ -39,6 +39,11 @@ bool fm_path_parent(const char *path, char *out, size_t n);
 /* True when `path` is `root` or lies below it, compared by whole components
  * after normalising both ("/a/bc" is not within "/a/b"). */
 bool fm_path_within(const char *root, const char *path);
+/* True for /proc, /sys and /dev, or anything below one (whole components). */
+bool fm_path_pseudo(const char *path);
+/* True for "/", any direct child of "/", anything pseudo, and any path that
+ * will not normalise (fail closed). */
+bool fm_path_protected(const char *path);
 /* A name a user may give a new file or folder: 1..255 bytes, no '/', no control
  * character, not "." or "..". */
 bool fm_name_ok(const char *name);
@@ -66,6 +71,8 @@ typedef struct FmEntry {
     FmType     type;    /* from lstat: a link is FM_T_LINK whatever it points at */
     long long  size;
     long long  mtime;
+    unsigned   mode;      /* st_mode from the same lstat */
+    bool       link_dir;  /* FM_T_LINK whose target (stat) is a directory */
 } FmEntry;
 
 typedef enum { FM_SORT_NAME, FM_SORT_SIZE, FM_SORT_DATE, FM_SORT_COUNT } FmSort;
@@ -82,8 +89,18 @@ int  fm_dir_find(const FmDir *d, const char *name);   /* index or -1 */
 void fm_dir_free(FmDir *d);
 /* The detail text of an entry: size for a file, "<DIR>" for a folder. */
 void fm_entry_detail(const FmEntry *e, char *out, size_t n);
+/* "<mode> <size> <YYYY-MM-DD HH:MM>", e.g. "-rw-r--r-- 12.3K 2026-10-18 14:08";
+ * the time is localtime of mtime.  Always NUL-terminated, truncated at n. */
+void fm_entry_detail_long(const FmEntry *e, char *out, size_t n);
+/* ls-style mode text: type character, then rwxrwxrwx with s/S, s/S, t/T for
+ * setuid, setgid and sticky.  out holds 10 characters and a NUL. */
+void fm_mode_string(unsigned mode, char out[11]);
 /* Free and total bytes of the filesystem holding `path`. */
 bool fm_space(const char *path, long long *free_bytes, long long *total_bytes);
+/* realpath(path): 0 and the canonical target in out when it is a directory;
+ * otherwise -errno (-ENOTDIR when it is not a directory, -ENAMETOOLONG when
+ * it does not fit in n). */
+int fm_link_dir_target(const char *path, char *out, size_t n);
 
 /* ── The USB helper's output (pure) ──────────────────────────────────────── */
 

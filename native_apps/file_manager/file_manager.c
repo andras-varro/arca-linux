@@ -13,9 +13,12 @@
  * is no thread, so the UI, the pad and the touch panel stay live while a stick
  * is written.
  *
+ * EXPERT mode (button, F4, or the bar by pad) is the deeper manager: a SYSTEM root over "/", absolute
+ * paths, folder links you can enter, permissions in the rows; system folders stay protected.
+ *
  * Input: touch (tap a row, tap the cursor row again to open it, drag to
  * scroll, tap a header to switch pane or open the root list), keyboard (Tab,
- * arrows, Enter, Backspace, F2/F3/F5-F10, Insert, Delete, PgUp/PgDn/Home/End,
+ * arrows, Enter, Backspace, F2-F10, Insert, Delete, PgUp/PgDn/Home/End,
  * keypad + and -), pad (D-pad, A mark, X open, B the action bar, Select up,
  * Start exit).  gamepad.c turns a keyboard into nine abstract buttons and has
  * no function keys, so the function keys are read from the keyboard nodes
@@ -27,6 +30,7 @@
 #include "../common/common.h"
 #include "../common/gamepad.h"
 #include "../common/keyboard.h"
+#include "../common/config.h"
 #include "../common/list_view.h"
 #include "../common/pointer.h"
 #include "../common/top_bar.h"
@@ -48,6 +52,8 @@
 #define DATA_DIR        "/home/root/data"
 #define GAMES_DIR       "/home/root/data/games"     /* where scummvm-arca/README.md tells users to put game folders */
 #define AUDIO_DIR       "/opt/sound"                /* the effect clips and music beds (native_apps/build-and-deploy.sh) */
+#define SYSTEM_DIR      "/"                         /* the expert-mode root: the whole filesystem */
+#define KEY_EXPERT_CFG  "file_manager_expert"
 
 #define ROW_H      40
 #define HDR_H      26
@@ -79,6 +85,12 @@ typedef struct {
 static Root roots[MAX_ROOTS];
 static int  n_roots;
 static bool have_helper;
+
+/* Expert mode: the deeper, ordinary file manager (a SYSTEM root over "/",
+ * absolute paths, enterable folder links, permissions in the rows).  Off by
+ * default; kept in the shared config file so it survives a restart. */
+static bool   expert;
+static Config cfg;
 
 static Root *root_add(const char *label, const char *path, bool usb, bool dim, const char *note) {
     if (n_roots >= MAX_ROOTS) return NULL;
@@ -128,6 +140,7 @@ static int refresh_roots(void) {
     if (!is_dir_path(GAMES_DIR)) (void)mkdir(GAMES_DIR, 0755);
     if (is_dir_path(GAMES_DIR)) root_add("GAMES", GAMES_DIR, false, false, NULL);
     if (is_dir_path(AUDIO_DIR)) root_add("AUDIO", AUDIO_DIR, false, false, NULL);
+    if (expert) root_add("SYSTEM", SYSTEM_DIR, false, false, NULL);
 
     FmStLine lines[16];
     int n = run_storage("mount", NULL, lines, 16);
@@ -175,7 +188,7 @@ typedef struct {
     bool     has_up;
     FmSort   sort;
     char     free_txt[24];
-    char     detail[24];       /* the row being drawn */
+    char     detail[64];       /* the row being drawn */
     UiRect   hdr;
 } Pane;
 
@@ -191,6 +204,36 @@ static FmEntry *entry_at(Pane *p, int row) {
     if (p->mode != PM_DIR) return NULL;
     int i = row - (p->has_up ? 1 : 0);
     return (i >= 0 && i < p->dir.n) ? &p->dir.e[i] : NULL;
+}
+
+/* The expert row detail, cut to what the row can spare.  fm_entry_detail_long
+ * is "-rw-r--r-- 12.3K 2026-10-18 14:08" (33 characters, 6 px each at scale 1);
+ * a half-width pane leaves the name only about ten characters if the whole of
+ * that is drawn, so the date and time go first, then the year, and the
+ * permissions and size stay.  The budget is measured from the pane and the font
+ * rather than assumed, so the portrait layout (panes stacked, full width) keeps
+ * the date.  The full line is shown in the status line when a file is opened. */
+#define EXPERT_NAME_MIN 10      /* characters of name worth keeping beside the detail */
+
+static void expert_detail(const Pane *p, const FmEntry *e, char *out, size_t n) {
+    char full[64], mode[16] = "", size[16] = "", date[16] = "", tm[16] = "";
+    fm_entry_detail_long(e, full, sizeof full);
+    sscanf(full, "%15s %15s %15s %15s", mode, size, date, tm);
+    int isz = p->lv.row_h - 8;
+    if (isz < 8) isz = 8;
+    int budget = p->lv.rect.w - 2 * LV_BORDER - LV_BAR_W   /* the row, as list_view.c draws it */
+               - (8 + isz + 8) - 8                         /* icon column and the right margin */
+               - 10                                        /* gap between name and detail */
+               - text_measure_width("MMMMMMMMMM", p->lv.scale) * EXPERT_NAME_MIN / 10;
+    char c[4][64];
+    snprintf(c[0], sizeof c[0], "%s", full);
+    snprintf(c[1], sizeof c[1], "%s %s %s", mode, size, date);
+    snprintf(c[2], sizeof c[2], "%s %s %s", mode, size, strlen(date) >= 10 ? date + 5 : date);
+    snprintf(c[3], sizeof c[3], "%s %s", mode, size);
+    int pick = 3;
+    for (int i = 0; i < 4; i++)
+        if (text_measure_width(c[i], p->lv.scale) <= budget) { pick = i; break; }
+    snprintf(out, n, "%s", c[pick]);
 }
 
 static void pane_row(void *ctx, int i, LvRow *out) {
@@ -212,10 +255,13 @@ static void pane_row(void *ctx, int i, LvRow *out) {
     FmEntry *e = entry_at(p, i);
     if (!e) return;
     out->title = e->name;
-    fm_entry_detail(e, p->detail, sizeof p->detail);
+    if (expert) expert_detail(p, e, p->detail, sizeof p->detail);
+    else        fm_entry_detail(e, p->detail, sizeof p->detail);
     out->detail = p->detail;
-    out->glyph = e->type == FM_T_DIR ? LV_GLYPH_FOLDER : LV_GLYPH_FILE;
-    if (e->type == FM_T_LINK || e->type == FM_T_OTHER) out->flags |= LV_ROW_DIM;
+    /* In expert mode a link to a folder is a folder you can enter, not a dimmed dead end. */
+    bool enterable = expert && e->type == FM_T_LINK && e->link_dir;
+    out->glyph = (e->type == FM_T_DIR || enterable) ? LV_GLYPH_FOLDER : LV_GLYPH_FILE;
+    if ((e->type == FM_T_LINK && !enterable) || e->type == FM_T_OTHER) out->flags |= LV_ROW_DIM;
 }
 
 /* ── the status line ─────────────────────────────────────────────────────── */
@@ -271,6 +317,8 @@ static void pane_load(Pane *p, const char *select_name, int fallback_cursor) {
     }
     p->mode = PM_DIR;
     p->has_up = true;
+    if (p->dir.truncated)       /* the header keeps saying so; this is the moment it happens */
+        set_status(ST_WARN, "FIRST %d SHOWN - THE FOLDER HAS MORE", p->dir.n);
     long long fr = 0;
     if (fm_space(p->path, &fr, NULL)) {
         char sz[16];
@@ -293,12 +341,16 @@ static void pane_reload(Pane *p) {
     pane_load(p, keep[0] ? keep : NULL, p->lv.cursor);
 }
 
-static void pane_enter_root(Pane *p, int idx) {
+static void pane_set_root(Pane *p, int idx) {
     const Root *r = &roots[idx];
     snprintf(p->root, sizeof p->root, "%s", r->path);
     snprintf(p->root_label, sizeof p->root_label, "%s", r->label);
     p->root_usb = r->usb;
     snprintf(p->path, sizeof p->path, "%s", r->path);
+}
+
+static void pane_enter_root(Pane *p, int idx) {
+    pane_set_root(p, idx);
     pane_load(p, NULL, 0);
 }
 
@@ -326,6 +378,27 @@ static void pane_descend(Pane *p, const char *name) {
     pane_load(p, NULL, 0);        /* an unreadable folder falls back to its parent, with a message */
 }
 
+/* Expert mode: open a link to a folder.  The target is resolved to a canonical
+ * path first, so ".." from inside it goes to the target's real parent.  A target
+ * inside the pane's root is entered there; any other target (a stick's link out
+ * to /etc, say) switches the pane to the SYSTEM root, because the root is what
+ * confines the pane and a path outside it would be refused everywhere else. */
+static void pane_follow_link(Pane *p, const char *name) {
+    char lnk[FM_PATH_MAX], tgt[FM_PATH_MAX];
+    if (!fm_path_join(p->path, name, lnk, sizeof lnk)) { set_status(ST_WARN, "CANNOT OPEN THAT"); return; }
+    int rc = fm_link_dir_target(lnk, tgt, sizeof tgt);
+    if (rc < 0) { set_status(ST_WARN, "CANNOT FOLLOW LINK: %s", strerror(-rc)); return; }
+    if (!fm_path_within(p->root, tgt)) {
+        int sys = -1;
+        for (int i = 0; i < n_roots; i++)
+            if (!strcmp(roots[i].path, SYSTEM_DIR)) { sys = i; break; }
+        if (sys < 0) { set_status(ST_WARN, "CANNOT OPEN THAT"); return; }
+        pane_set_root(p, sys);
+    }
+    snprintf(p->path, sizeof p->path, "%s", tgt);
+    pane_load(p, NULL, 0);
+}
+
 static void pane_activate(Pane *p) {
     int idx = p->lv.cursor;
     if (idx < 0) return;
@@ -339,8 +412,15 @@ static void pane_activate(Pane *p) {
     FmEntry *e = entry_at(p, idx);
     if (!e) return;
     if (e->type == FM_T_DIR) { pane_descend(p, e->name); return; }
+    if (expert && e->type == FM_T_LINK && e->link_dir) { pane_follow_link(p, e->name); return; }
     char sz[16];
     fm_format_size(e->size, sz, sizeof sz);
+    if (expert && e->type == FM_T_FILE) {          /* the row had room for only part of this */
+        char line[64];
+        fm_entry_detail_long(e, line, sizeof line);
+        set_status(COLOR_WHITE, "%.60s  %s", e->name, line);
+        return;
+    }
     set_status(COLOR_WHITE, "%.80s  %s", e->name, e->type == FM_T_FILE ? sz : "(NOT A PLAIN FILE)");
 }
 
@@ -372,24 +452,28 @@ static void panes_revalidate(void) {
 
 typedef enum {
     B_REN, B_COPY, B_MOVE, B_MKDIR, B_DEL, B_MARK,
-    B_ALL, B_SORT, B_EJECT, B_SCAN, B_EXIT, B_COUNT
+    B_ALL, B_SORT, B_EJECT, B_SCAN, B_MODE, B_EXIT, B_COUNT
 } BarBtn;
 #define BAR_ROW1 6      /* buttons on the first bar row; the rest are on the second */
 
 typedef enum {
     A_NONE, A_REN, A_COPY, A_MOVE, A_MKDIR, A_DEL, A_MARK, A_ALL, A_SORT,
-    A_EJECT, A_SCAN, A_EXIT, A_SWITCH, A_UP, A_CLEAR
+    A_EJECT, A_SCAN, A_EXIT, A_SWITCH, A_UP, A_CLEAR, A_MODE
 } Act;
 
 static const char *const btn_label[B_COUNT] = {
     "RENAME", "COPY", "MOVE", "MKDIR", "DELETE", "MARK",
-    "ALL", "SORT", "EJECT", "RESCAN", "EXIT"
+    "ALL", "SORT", "EJECT", "RESCAN", "EXPERT", "EXIT"
 };
 static const Act btn_act[B_COUNT] = {
-    A_REN, A_COPY, A_MOVE, A_MKDIR, A_DEL, A_MARK, A_ALL, A_SORT, A_EJECT, A_SCAN, A_EXIT
+    A_REN, A_COPY, A_MOVE, A_MKDIR, A_DEL, A_MARK, A_ALL, A_SORT, A_EJECT, A_SCAN, A_MODE, A_EXIT
 };
 
 static Button  btn[B_COUNT];
+
+/* The mode button names the mode a tap switches TO.  Both labels are six
+ * characters, so the fit rule in layout() holds for either. */
+static const char *mode_label(void) { return expert ? "SIMPLE" : "EXPERT"; }
 static TopBar  bar;
 static int     status_y;
 static int     bar_focus = -1;      /* the action-bar button the pad or keyboard is on */
@@ -438,7 +522,7 @@ static void layout(Framebuffer *fb) {
         for (int i = 0; i < n; i++) {
             int b = first + i;
             uint32_t bg = b == B_DEL ? BTN_COLOR_DANGER : b == B_EXIT ? BTN_EXIT_COLOR : COLOR_BTN;
-            button_init_full(&btn[b], left + i * (bw + GAP), y, bw, BTN_H, btn_label[b],
+            button_init_full(&btn[b], left + i * (bw + GAP), y, bw, BTN_H, b == B_MODE ? mode_label() : btn_label[b],
                              bg, COLOR_WHITE, BTN_COLOR_HIGHLIGHT, scale);
         }
     }
@@ -684,7 +768,10 @@ static void draw_pane(Framebuffer *fb, Pane *p, bool on) {
     if (p->mode == PM_DIR) {
         const char *rel = fm_path_within(p->root, p->path) ? p->path + strlen(p->root) : "";
         snprintf(rt, sizeof rt, "%s  %s", fm_sort_label(p->sort), p->free_txt);
-        snprintf(lt, sizeof lt, "%s%s", p->root_label, rel);
+        if (p->dir.truncated)         /* the listing stops at the reader's cap: say so, in place of the free space */
+            snprintf(rt, sizeof rt, "FIRST %d SHOWN  %s", p->dir.n, fm_sort_label(p->sort));
+        if (expert) snprintf(lt, sizeof lt, "%s", p->path);       /* absolute; tail_fit keeps the end */
+        else        snprintf(lt, sizeof lt, "%s%s", p->root_label, rel);
     } else {
         snprintf(rt, sizeof rt, "FOLDERS");
         snprintf(lt, sizeof lt, "OPEN A FOLDER");
@@ -713,7 +800,7 @@ static void draw_all(Framebuffer *fb, const InputState *in) {
         fb_draw_text(fb, SCREEN_SAFE_LEFT + 4, status_y, cut, status_color, 2);
     } else {
         const char *hint = in && in->keyboard_connected
-            ? "TAB PANE  F2 REN  F3 SORT  F5 COPY  F6 MOVE  F7 MKDIR  F8 DEL  INS MARK  F9 RESCAN  F10 EXIT"
+            ? "TAB PANE  F2 REN  F3 SORT  F4 MODE  F5 COPY  F6 MOVE  F7 MKDIR  F8 DEL  INS MARK  F9 RESCAN  F10 EXIT"
             : in && in->gamepad_connected
             ? "PAD: DPAD MOVE / PANE   A MARK   X OPEN   SELECT UP   B BUTTON BAR   START EXIT"
             : "TAP A ROW, TAP AGAIN TO OPEN   TAP A HEADER FOR THE FOLDER LIST   DRAG TO SCROLL";
@@ -759,6 +846,30 @@ static int selection(Pane *p, const char **names, int max) {
     return n;
 }
 
+/* Expert mode reaches the real system, so a few things are not offered: nothing
+ * is renamed, moved or deleted if it is "/", a folder directly under "/" or
+ * anything in /proc, /sys, /dev; and nothing is copied or moved into or out of
+ * those pseudo folders (their files are not data, and a "copy" of /dev/zero never
+ * ends).  Copying out of /etc and the rest to a stick stays allowed.  Simple mode
+ * cannot get there, so it is not asked.  True, with a status shown, when refused. */
+static bool system_refuses(FmOp op, const char *src_dir, const char *dst_dir,
+                           const char *const *names, int n) {
+    if (!expert) return false;
+    if (fm_path_pseudo(src_dir) || (dst_dir && fm_path_pseudo(dst_dir))) {
+        set_status(ST_WARN, "SYSTEM FOLDER");
+        return true;
+    }
+    if (op == FM_OP_COPY) return false;       /* the source is only read */
+    for (int i = 0; i < n; i++) {
+        char full[FM_PATH_MAX];
+        if (!fm_path_join(src_dir, names[i], full, sizeof full) || fm_path_protected(full)) {
+            set_status(ST_WARN, "PROTECTED");
+            return true;
+        }
+    }
+    return false;
+}
+
 static void start_transfer(FmOp op) {
     Pane *s = AP(), *d = OP();
     if (s->mode != PM_DIR) { set_status(ST_WARN, "OPEN A FOLDER FIRST"); return; }
@@ -767,20 +878,31 @@ static void start_transfer(FmOp op) {
     if (!names) { set_status(ST_WARN, "OUT OF MEMORY"); return; }
     int n = selection(s, names, s->dir.n);
     if (n == 0) { free(names); set_status(ST_WARN, "NOTHING SELECTED"); return; }
+    if (system_refuses(op, s->path, op == FM_OP_DELETE ? NULL : d->path, names, n)) { free(names); return; }
     char err[160];
     int rc = fm_job_init(&job, op, s->path, op == FM_OP_DELETE ? NULL : d->path, names, n, err, sizeof err);
     char first[96];
-    lv_fit(first, sizeof first, names[0], 380, 2);
+    if (expert && n == 1) {          /* the whole path: a bare name does not say which folder it is about to leave */
+        char full[FM_PATH_MAX];
+        if (!fm_path_join(s->path, names[0], full, sizeof full)) snprintf(full, sizeof full, "%s", names[0]);
+        tail_fit(first, sizeof first, full, 380, 2);
+    } else {
+        lv_fit(first, sizeof first, names[0], 380, 2);
+    }
+    char where[96] = "";
+    if (expert) tail_fit(where, sizeof where, s->path, 380, 2);
     free(names);
     if (rc < 0) { dlg_info(op == FM_OP_DELETE ? "CANNOT DELETE" : "CANNOT DO THAT", err); return; }
     if (op != FM_OP_DELETE) { job_active = true; show_progress(); update_progress(); return; }
 
-    char msg[128];
+    char msg[256];
     if (n == 1) snprintf(msg, sizeof msg, "%s\nCANNOT BE UNDONE", first);
+    else if (expert) snprintf(msg, sizeof msg, "%d ITEMS IN\n%s\nCANNOT BE UNDONE", n, where);
     else        snprintf(msg, sizeof msg, "%d ITEMS\nCANNOT BE UNDONE", n);
     modal_dialog_init(&dlg, "DELETE?", msg, 2);
     modal_dialog_set_button(&dlg, 0, "DELETE", BTN_COLOR_DANGER, COLOR_WHITE);
     modal_dialog_set_button(&dlg, 1, "CANCEL", BTN_COLOR_SECONDARY, COLOR_WHITE);
+    if (expert && n > 1) dlg.dialog_height = 240;      /* three message lines, as open_error's two-button case */
     dlg_show(D_DELETE, 1);
 }
 
@@ -796,6 +918,7 @@ static void do_rename(void) {
     Pane *p = AP();
     FmEntry *e = entry_at(p, p->lv.cursor);
     if (!e) { set_status(ST_WARN, "SELECT AN ITEM TO RENAME"); return; }
+    { const char *nm[1] = { e->name }; if (system_refuses(FM_OP_MOVE, p->path, NULL, nm, 1)) return; }
     char old[FM_NAME_MAX], buf[FM_NAME_MAX];
     snprintf(old, sizeof old, "%s", e->name);
     snprintf(buf, sizeof buf, "%s", e->name);
@@ -810,6 +933,7 @@ static void do_rename(void) {
 static void do_mkdir(void) {
     Pane *p = AP();
     if (p->mode != PM_DIR) { set_status(ST_WARN, "OPEN A FOLDER FIRST"); return; }
+    if (expert && fm_path_pseudo(p->path)) { set_status(ST_WARN, "SYSTEM FOLDER"); return; }
     char buf[FM_NAME_MAX] = "";
     if (!ask_name("NEW FOLDER", buf)) return;
     int rc = fm_mkdir(p->path, buf);
@@ -880,6 +1004,53 @@ static void do_eject(void) {
     }
 }
 
+/* Same set-then-reload-then-save idiom as control_panel/led_page.c: the file is
+ * re-read and only this key written, so another program's unsaved key in our
+ * in-memory copy is never persisted by a tap here.  The write is read back,
+ * because config_set drops a key past the file's key ceiling in silence. */
+static bool expert_persist(void) {
+    config_set_bool(&cfg, KEY_EXPERT_CFG, expert);
+    Config disk;
+    config_init(&disk);
+    config_load(&disk);                 /* a missing file just starts empty */
+    config_set_bool(&disk, KEY_EXPERT_CFG, expert);
+    int rc = config_save(&disk);
+    hw_reload_config();
+    return rc == 0 && config_get_bool(&disk, KEY_EXPERT_CFG, !expert) == expert;
+}
+
+/* Switch modes.  The SYSTEM root comes and goes; a pane that was inside it (or
+ * in anything the simple mode could not reach) falls back to the folder list
+ * through panes_revalidate, which is the same path a vanished stick takes. */
+static void toggle_expert(void) {
+    expert = !expert;
+    if (expert) {
+        int at = n_roots;                    /* before the sticks, after the fixed roots */
+        for (int i = 0; i < n_roots; i++) if (roots[i].usb) { at = i; break; }
+        if (n_roots < MAX_ROOTS) {
+            memmove(&roots[at + 1], &roots[at], (size_t)(n_roots - at) * sizeof roots[0]);
+            n_roots++;
+            Root *r = &roots[at];
+            memset(r, 0, sizeof *r);
+            snprintf(r->label, sizeof r->label, "SYSTEM");
+            snprintf(r->path, sizeof r->path, "%s", SYSTEM_DIR);
+            long long fr;
+            if (fm_space(SYSTEM_DIR, &fr, NULL)) {
+                char sz[16];
+                fm_format_size(fr, sz, sizeof sz);
+                snprintf(r->detail, sizeof r->detail, "%s FREE", sz);
+            }
+        }
+    } else {
+        roots_remove(SYSTEM_DIR);
+    }
+    panes_revalidate();
+    button_set_text(&btn[B_MODE], mode_label());
+    bool saved = expert_persist();
+    if (saved) set_status(ST_OK, expert ? "EXPERT MODE" : "SIMPLE MODE");
+    else       set_status(ST_WARN, "%s - NOT SAVED", expert ? "EXPERT MODE" : "SIMPLE MODE");
+}
+
 static void do_action(Act a) {
     switch (a) {
     case A_REN:    do_rename(); break;
@@ -893,6 +1064,7 @@ static void do_action(Act a) {
     case A_SORT:   if (AP()->mode == PM_DIR) pane_sort_next(AP()); break;
     case A_EJECT:  do_eject(); break;
     case A_SCAN:   do_rescan(); break;
+    case A_MODE:   toggle_expert(); break;
     case A_EXIT:   running = false; break;
     case A_SWITCH: set_active(1 - act); break;
     case A_UP:     pane_up(AP()); break;
@@ -930,6 +1102,10 @@ int main(int argc, char *argv[]) {
 
     hw_init();
     hw_set_backlight(100);
+
+    config_init(&cfg);
+    config_load(&cfg);                      /* a missing file just leaves the defaults */
+    expert = config_get_bool(&cfg, KEY_EXPERT_CFG, false);
 
     fb_set_bpp(fb_device, 32);
     Framebuffer fb;
@@ -1060,6 +1236,7 @@ int main(int argc, char *argv[]) {
             if (rk_take(KEY_TAB))      action = A_SWITCH;
             if (rk_take(KEY_F2))       action = A_REN;
             if (rk_take(KEY_F3))       action = A_SORT;
+            if (rk_take(KEY_F4))       action = A_MODE;
             if (rk_take(KEY_F5))       action = A_COPY;
             if (rk_take(KEY_F6))       action = A_MOVE;
             if (rk_take(KEY_F7))       action = A_MKDIR;

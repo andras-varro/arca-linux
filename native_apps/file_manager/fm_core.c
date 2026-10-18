@@ -78,6 +78,18 @@ bool fm_path_within(const char *root, const char *path) {
     return p[rl] == '\0' || p[rl] == '/';
 }
 
+bool fm_path_pseudo(const char *path) {
+    return fm_path_within("/proc", path) || fm_path_within("/sys", path) ||
+           fm_path_within("/dev", path);
+}
+
+bool fm_path_protected(const char *path) {
+    char p[FM_PATH_MAX];
+    if (!fm_path_normalise(path, p, sizeof p)) return true;    /* fail closed */
+    if (!strcmp(p, "/") || fm_path_pseudo(p)) return true;
+    return !strchr(p + 1, '/');        /* "/x": a direct child of the root */
+}
+
 const char *fm_base(const char *path) {
     const char *s = strrchr(path, '/');
     return s ? s + 1 : path;
@@ -188,6 +200,12 @@ int fm_dir_read(const char *path, FmSort sort, FmDir *out) {
                 : S_ISLNK(st.st_mode) ? FM_T_LINK : FM_T_OTHER;
         e->size = (long long)st.st_size;
         e->mtime = (long long)st.st_mtime;
+        e->mode = (unsigned)st.st_mode;
+        e->link_dir = false;
+        if (e->type == FM_T_LINK) {
+            struct stat ts;
+            e->link_dir = stat(full, &ts) == 0 && S_ISDIR(ts.st_mode);
+        }
         out->n++;
     }
     closedir(d);
@@ -216,12 +234,52 @@ void fm_entry_detail(const FmEntry *e, char *out, size_t n) {
     }
 }
 
+void fm_mode_string(unsigned mode, char out[11]) {
+    static const char rwx[] = "rwxrwxrwx";
+    unsigned t = mode & S_IFMT;
+    out[0] = t == S_IFDIR ? 'd' : t == S_IFLNK ? 'l' : t == S_IFREG ? '-'
+           : t == S_IFCHR ? 'c' : t == S_IFBLK ? 'b' : t == S_IFIFO ? 'p'
+           : t == S_IFSOCK ? 's' : '?';
+    for (int i = 0; i < 9; i++)
+        out[1 + i] = (mode & (0400u >> i)) ? rwx[i] : '-';
+    if (mode & S_ISUID) out[3] = out[3] == 'x' ? 's' : 'S';
+    if (mode & S_ISGID) out[6] = out[6] == 'x' ? 's' : 'S';
+    if (mode & S_ISVTX) out[9] = out[9] == 'x' ? 't' : 'T';
+    out[10] = '\0';
+}
+
+void fm_entry_detail_long(const FmEntry *e, char *out, size_t n) {
+    if (!out || n == 0) return;
+    char mode[11], size[16], when[24] = "----/--/-- --:--";
+    fm_mode_string(e->mode, mode);
+    fm_entry_detail(e, size, sizeof size);
+    time_t t = (time_t)e->mtime;
+    struct tm tm;
+    tzset();                           /* a long-running process caches the zone */
+    if (localtime_r(&t, &tm)) strftime(when, sizeof when, "%Y-%m-%d %H:%M", &tm);
+    snprintf(out, n, "%s %s %s", mode, size, when);
+}
+
 bool fm_space(const char *path, long long *free_bytes, long long *total_bytes) {
     struct statvfs v;
     if (statvfs(path, &v) < 0) return false;
     if (free_bytes)  *free_bytes  = (long long)v.f_bavail * (long long)v.f_frsize;
     if (total_bytes) *total_bytes = (long long)v.f_blocks * (long long)v.f_frsize;
     return true;
+}
+
+int fm_link_dir_target(const char *path, char *out, size_t n) {
+    if (!path || !out || n == 0) return -EINVAL;
+    char *r = realpath(path, NULL);
+    if (!r) return -errno;
+    struct stat st;
+    int rc;
+    if (stat(r, &st) < 0) rc = -errno;
+    else if (!S_ISDIR(st.st_mode)) rc = -ENOTDIR;
+    else if (strlen(r) + 1 > n) rc = -ENAMETOOLONG;
+    else { strcpy(out, r); rc = 0; }
+    free(r);
+    return rc;
 }
 
 /* ── The USB helper's output ─────────────────────────────────────────────── */
