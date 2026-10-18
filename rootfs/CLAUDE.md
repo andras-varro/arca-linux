@@ -54,7 +54,7 @@ Everything that builds the **root filesystem we boot instead of the vendor's Yoc
 ## Per-unit state (an image carries none)
 
 **`make-card-image.sh` builds one generic image and refuses SSH key material in the rootfs tar, on p3 or from the bundle.** It also refuses a tar that fails `check-rootfs.sh`, before writing any image (measured: a tar older than the ed25519-only commit gives 48/1, "no ssh_host_rsa_key in the image", and is refused; the rebuilt tar gives 49/0). A unit's own
-state travels only through the backup items (`lib/CLAUDE.md`, provision.sh step 0; `SYSTEM_ANALYSIS.md#53-app-launcher-and-manifests`).
+state travels only through the backup items (`lib/CLAUDE.md`, provision.sh step 0; `DEVELOPING.md#plug-in-file-formats`).
 The unit names itself on first boot (`S04firstboot-hostname`: `arca-<4 hex>` from the kernel's random pool, applied with
 `/usr/sbin/set-hostname`), and sshd generates its host key then; highscores, host keys (`/home/root/data/ssh`) and cron live under `/home/root/data` on p3, which
 the image creates empty. ⚠️ **`config.c:65` saves by tmp + `rename()`, which replaces a

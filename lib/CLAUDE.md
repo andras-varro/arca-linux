@@ -16,7 +16,7 @@ source `arca-bundle.sh` on the *write* side while the image installer (`rootfs/c
 | `arca-bundle.sh` | the release-bundle layout |
 | `arca-release.sh` | fetch a published release — **the one library here that opens a socket** |
 | `arca-ssh.sh` | the one answer to "can I reach this device" |
-| `arca-state.sh` | the per-unit state lists: the SSH-key deny the card-image builder applies and `arca_state_unsafe_paths`; `rootfs/` sources it, `tests/arca_state_test.sh` covers it |
+| `arca-state.sh` | the SSH-key deny list the card-image builder applies; `rootfs/` sources it, `tests/arca_state_test.sh` covers it |
 | `product.sh` | `PRODUCT_NAME` / `PRODUCT_STEM` for banners, release titles and download names, read from `rootfs/board/arca/os-release`; no fallback, it refuses instead |
 | `arca-kernel-src.sh` | `arca_check_kernel_tarball`: the sha256 check `kernel/build-image.sh` and `usb_host/build-kernel-modules.sh` run before `tar xf`; the pin is read from `rootfs/package-hashes/linux-headers.hash` and nowhere else, and a missing pin refuses |
 
@@ -226,7 +226,7 @@ policy. ⚠️ **Boot service and install live only in `provision.sh` and `rootf
 
 **Step 0 runs the repo's `device-files/arca-backup` and every `*/backup.d/*.item` from a scratch dir on the unit** (`ARCA_BACKUP_ITEMS`),
 exports every item, secrets included, and copies `ludbox-backup-<host>-<stamp>.tar.gz` to `backups/` (mode 600, refuses to overwrite);
-any failure aborts with nothing written. The item format and the engine are in `SYSTEM_ANALYSIS.md#53-app-launcher-and-manifests`;
+any failure aborts with nothing written. The item format is in `DEVELOPING.md#plug-in-file-formats`;
 users export and import from Control Panel → Backup.
 
 ## Regressions

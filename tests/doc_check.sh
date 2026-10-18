@@ -935,11 +935,11 @@ ceilings() {
     # `CEILINGS_FILE` exists only so --self-test can drive this group over a fixture table.
     if [ -n "${CEILINGS_FILE:-}" ]; then cat "$CEILINGS_FILE"; return; fi
     cat <<'EOF'
-1859	SYSTEM_ANALYSIS.md
+1849	SYSTEM_ANALYSIS.md
 1362	IMPROVEMENT_PLAN.md
 224	HARDWARE.md
 162	README.md
-206	DEVELOPING.md
+208	DEVELOPING.md
 342	CLAUDE.md
 780	native_apps/CLAUDE.md
 232	lib/CLAUDE.md

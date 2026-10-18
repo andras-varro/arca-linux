@@ -19,7 +19,7 @@
 #   error <text>                  (and a nonzero exit; nothing is written after it)
 #
 # What "state" is: the item files /opt/arca/backup.d/<id>.item, one per item, installed by the
-# component that owns the files (format: SYSTEM_ANALYSIS.md#53-app-launcher-and-manifests). This
+# component that owns the files (format: DEVELOPING.md#plug-in-file-formats). This
 # script knows no path of its own. ARCA_ROOT (default empty, meaning /) moves the whole tree
 # for the host test and nothing else.
 #

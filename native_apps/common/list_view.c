@@ -350,6 +350,8 @@ static void draw_glyph(Framebuffer *fb, LvGlyph g, int x, int y, int s) {
         fb_fill_rect(fb, x + half - s / 8, y + half, s / 4, s - half, c);  /* stem */
         break;
     }
+    case LV_GLYPH_BLANK:
+        break;
     default:
         fb_fill_rect(fb, x, y, s, s, RGB(25, 25, 35));
         fb_draw_rect(fb, x, y, s, s, LV_COLOR_ROW_BD);

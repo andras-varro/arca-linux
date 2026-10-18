@@ -311,18 +311,12 @@ directories in simple mode; expert mode adds `/` with protected paths refused. E
 
 Open, in order:
 
-1. **Backup follow-ups from the operator's tap-through on .115 (2026-10-18).** Export, archive list, selective import, REBOOT NOW,
-   pad/keyboard/mouse and Files' EJECT all confirmed; the operator re-tests after the next card flash. Open, in order:
-   - **Stick state does not follow plug/unplug:** "NO USB STICK" / "STICK: usb0" changes only on the next export. Poll
-     `arca-storage` (the way `native_apps/file_manager/` notices a stick) while the page is shown.
-   - **A "READING…" frame before the page's first `arca-backup items`:** opening it looks like a freeze for 1–2 s.
-   - **One selection marker:** keep `list_view`'s orange bar + background; drop the `[X]`/`[ ]` title prefix and the black box.
-   - **Reboot dialog text:** "Unsaved play is lost" means nothing in the Control Panel; say only that the unit restarts.
-   - **Real icons for Backup and System** instead of the letter tiles (`control_panel/gen_cp_icons.py`).
-   - **Move the item format (and the `.app` format beside it) from `SYSTEM_ANALYSIS.md` 5.3 to `DEVELOPING.md`** (operator: that is
-     where a developer looks); fix inbound links.
-   - **Delete `arca_state_unsafe_paths`** from `lib/arca-state.sh` and its test cases: no caller left (operator go-ahead 2026-10-18).
-   - **Run `provision.sh` on .115** (operator: free to reboot) to exercise the new step 0 against a real unit, unverified so far.
+1. **Panel check of the Backup follow-ups, deployed to .115 2026-10-18, unverified at the panel.** The page now scans `/dev` for
+   `sd*` once a second (no fork) and runs `arca-storage mount` only when a new node appears; mdev's timing on plug/unplug is
+   unmeasured. Check: opening Backup shows READING… before the list; unplugging turns STICK: usb0 into NO USB STICK within ~2 s
+   with the marks kept; plugging in shows READING USB… then STICK: usb0; a marked row shows only the bar and the yellow name, and
+   the pad cursor stays distinguishable from it; the reboot dialog has no "unsaved play" line; the Backup and System tiles show
+   their icons (tray with arrow, chip).
 2. **Panel check, still open (the operator's /tmp/big went with a reboot): "FIRST N SHOWN"** appears only past `FM_MAX_ENTRIES` (`fm_core.h`) entries. To make such a
    folder: `mkdir /tmp/big && cd /tmp/big && i=0; while [ $i -lt 4100 ]; do : > f$i; i=$((i+1)); done`, then open it in expert mode.
 

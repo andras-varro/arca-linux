@@ -405,7 +405,7 @@ static int system_page_focusables(UiRect *out, int max) {
 
 const CpPage cp_system_page = {
     .name       = "System",
-    .icon       = NULL,
+    .icon       = "cp_system",
     .load       = system_page_load,
     .layout     = system_page_layout,
     .enter      = system_page_enter,

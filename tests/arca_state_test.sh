@@ -8,8 +8,6 @@
 #
 # WHAT IT COVERS:
 #
-#   A  Paths that would escape the extraction root (absolute, '..') are flagged by
-#      arca_state_unsafe_paths; ordinary ones are not.
 #   D  arca_state_ssh_keys_deny: a card image may carry no SSH key material.
 #
 # The count at the end includes a floor: a file that silently ran zero cases
@@ -48,18 +46,6 @@ expect_rc() {
 
 : > "$TMP/empty"
 
-echo ""
-echo "A  paths that escape the root"
-printf '%s\n' /etc/passwd ../etc/x etc/../../x home/root/.. > "$TMP/unsafe.lst"
-printf '%s\n' etc/hostname ./etc/timezone 'var/lib/bluetooth/..x' > "$TMP/safe.lst"
-arca_state_unsafe_paths < "$TMP/unsafe.lst" > "$TMP/a1.out"; rc=$?
-expect_out "$TMP/unsafe.lst" "$TMP/a1.out" "A1 arca_state_unsafe_paths flags all four"
-expect_rc 1 "$rc" "A2 and exits 1"
-arca_state_unsafe_paths < "$TMP/safe.lst" > "$TMP/a3.out"; rc=$?
-expect_out "$TMP/empty" "$TMP/a3.out" "A3 ordinary paths, including a name starting '..', pass"
-expect_rc 0 "$rc" "A4 and exit 0"
-
-echo ""
 echo "D  arca_state_ssh_keys_deny: a card image carries no SSH key material"
 printf '%s\n' ./ ./etc/ssh/sshd_config ./home/root/.ssh/ ./home/root/.ssh/authorized_keys ./usr/bin/ssh > "$TMP/g1.lst"
 arca_state_ssh_keys_deny < "$TMP/g1.lst" > "$TMP/g1.out"; rc=$?
@@ -88,8 +74,8 @@ expect_rc 0 "$rc" "D7 and exits 0"
 echo ""
 TOTAL=$((PASS + FAIL))
 echo "  $PASS passed, $FAIL failed"
-# groups A, D: 4 + 9 = 13 (group D has 3b/3c)
-MIN_CASES=13
+# group D: 9 cases (D3b/D3c included)
+MIN_CASES=9
 if [ "$TOTAL" -lt "$MIN_CASES" ]; then
     echo -e "  ${RED}HARNESS ERROR${NC}: only $TOTAL cases ran, expected at least $MIN_CASES."
     exit 2

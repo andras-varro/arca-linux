@@ -368,10 +368,9 @@ touched no log. All three:
 
 **App launcher + manifests.** The boot init script reads `/opt/arca/default-app` and respawns that
 binary whenever it exits (so exiting a game returns to the launcher). `app_launcher` scans
-`/opt/arca/apps/*.app` manifests (INI: `name=`, `exec=`, `icon=` PPM P6, `args=` one of
-`fb,touch`/`fb`/`touch`/`none`) and renders them as a touch grid. Each component's deploy script writes
+`/opt/arca/apps/*.app` manifests and renders them as a touch grid; each component's deploy script writes
 its own manifests + PPM icons — this is how projects plug into the launcher without a central registry.
-`SYSTEM_ANALYSIS.md#53-app-launcher-and-manifests`.
+Format, and the backup item files that plug into `arca-backup` the same way: `DEVELOPING.md#plug-in-file-formats`.
 
 **native_apps shared C library (`native_apps/common/`)** — every game and tool links these:
 `framebuffer.c` (double-buffered 800×480, bpp-aware primitives), `gamepad.c` (**the** unified input

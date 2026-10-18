@@ -15,6 +15,16 @@ bool bk_name_ok(const char *s) {
     return true;
 }
 
+bool bk_is_disk_name(const char *name) {
+    if (!name || name[0] != 's' || name[1] != 'd') return false;
+    const char *p = name + 2;
+    int letters = 0;
+    while (*p >= 'a' && *p <= 'z') { p++; letters++; }
+    if (letters < 1 || letters > 2) return false;
+    while (*p >= '0' && *p <= '9') p++;
+    return *p == '\0';
+}
+
 /* line starts with kw followed by one space; *rest is what follows. */
 static bool keyword(const char *line, const char *kw, const char **rest) {
     size_t n = strlen(kw);

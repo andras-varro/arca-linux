@@ -13,10 +13,14 @@
  *   DONE      "IMPORTED n ITEMS"; REBOOT NOW only if the engine said so
  *
  * The stick is found the way file_manager does: `arca-storage mount`, parsed by
- * fm_parse_storage_line().  Backups live in <mount>/ludbox-backup.  Every
+ * fm_parse_storage_line().  file_manager asks once per visit (and on RESCAN);
+ * this page also watches /dev once a second on HOME (disk_sig) and mounts again
+ * only when a disk node appears; a vanished one just clears the stick.  Backups
+ * live in <mount>/ludbox-backup.  Every
  * program runs through cp_exec() (no shell, argv built from ids that passed
  * bk_name_ok()).  A slow run is queued: the status line ("EXPORTING...") is
- * painted first, the run happens on the next input() call.  Keyboard and pad
+ * painted first, the run happens on the next input() call (the first load of
+ * the items too).  Keyboard and pad
  * reach every visible row and button through focusables(); a row tap toggles
  * its mark (ARCHIVES: opens it).  Ids the importing unit does not know are left
  * out of the list and counted in a note.  The line parsing is backup_parse.c
@@ -30,6 +34,7 @@
 #include "../common/list_view.h"
 #include "../file_manager/fm_core.h"
 
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,7 +48,7 @@
 #define OUT_BYTES     16384
 
 typedef enum { V_HOME, V_ARCHIVES, V_IMPORT, V_DONE } View;
-typedef enum { OP_NONE, OP_EXPORT, OP_ARCHIVES, OP_CONTENTS, OP_IMPORT } Op;
+typedef enum { OP_NONE, OP_LOAD, OP_STICK, OP_EXPORT, OP_ARCHIVES, OP_CONTENTS, OP_IMPORT } Op;
 
 /* ── State ──────────────────────────────────────────────────────────────── */
 
@@ -65,12 +70,13 @@ static int    done_n;
 static bool   stick_ok;
 static char   stick_mp[128];
 static char   stick_note[64];         /* shown when there is no stick */
+static unsigned stick_sig;            /* disk_sig() when the stick was last looked for */
+static uint32_t next_poll_ms;         /* HOME: when to look at /dev again */
 
 static char   out_buf[OUT_BYTES];
 
 static ListView lv;
 static bool     lv_ready;
-static char     row_buf[8][BK_NAME_MAX + 8];
 static char     detail_buf[8][24];
 static int      row_i;
 
@@ -113,9 +119,10 @@ static void src_row(void *ctx, int i, LvRow *out) {
     int n;
     const BkItem *it = cur_items(&n);
     if (i < 0 || i >= n) return;
-    snprintf(row_buf[slot], sizeof row_buf[slot], "%s %s",
-             lv_is_marked(&lv, i) ? "[X]" : "[ ]", it[i].name);
-    out->title = row_buf[slot];
+    /* Marked = list_view's bar and yellow text; the cursor is its own blue row
+     * with an edge, so the name carries no prefix.  BLANK: no placeholder box. */
+    out->title = it[i].name;
+    out->glyph = LV_GLYPH_BLANK;
     snprintf(detail_buf[slot], sizeof detail_buf[slot], "%s%s%s",
              it[i].secret ? "SECRET " : "", it[i].unit ? "UNIT " : "",
              it[i].reboot ? "REBOOT" : "");
@@ -175,8 +182,26 @@ static void load_items(void) {
     else cp_status(why, false);
 }
 
+/* A number for the disk nodes in /dev (bk_is_disk_name): 0 = none, and it
+ * changes when one appears, goes or is replaced by another.  One readdir, no
+ * fork — cheap enough for once a second. */
+static unsigned disk_sig(void) {
+    DIR *d = opendir("/dev");
+    if (!d) return 0;
+    unsigned sig = 0;
+    for (struct dirent *e; (e = readdir(d)) != NULL; ) {
+        if (!bk_is_disk_name(e->d_name)) continue;
+        unsigned h = 5381;
+        for (const char *p = e->d_name; *p; p++) h = h * 33 + (unsigned char)*p;
+        sig += h | 1;          /* a sum: the directory order does not matter */
+    }
+    closedir(d);
+    return sig;
+}
+
 /* Mounts (if needed) and finds the first stick: stick_ok / stick_mp / stick_note. */
 static void find_stick(void) {
+    stick_sig = disk_sig();
     stick_ok = false;
     stick_mp[0] = '\0';
     snprintf(stick_note, sizeof stick_note, "NO USB STICK");
@@ -304,11 +329,14 @@ static void backup_layout(void) {
 }
 
 static void backup_enter(void) {
-    pending = OP_NONE;
-    prev_touch = false;
-    load_items();
-    find_stick();
+    /* The slow part (items, mount) runs on the next input(), after a frame that
+     * says READING... has been painted. */
+    have_engine = access(ENGINE, X_OK) == 0;
+    n_home = 0;
     go_view(V_HOME);
+    pending = OP_LOAD;
+    prev_touch = false;
+    cp_status("READING...", true);
 }
 
 static void backup_leave(void) {
@@ -331,6 +359,10 @@ static void backup_draw(Framebuffer *fb) {
     switch (view) {
     case V_HOME:
         draw_section_header(fb, hdr_y, "BACK UP THIS UNIT");
+        if (pending == OP_LOAD) {
+            info_line(fb, 0, "READING...", COLOR_LABEL);
+            break;
+        }
         if (!have_engine) info_line(fb, 0, "NO BACKUP SUPPORT ON THIS SYSTEM", COLOR_YELLOW);
         else if (n_home == 0) info_line(fb, 0, "NOTHING TO BACK UP", COLOR_YELLOW);
         else {
@@ -375,7 +407,8 @@ static void backup_draw(Framebuffer *fb) {
     }
     if (view != V_DONE) {
         lv_sync(&lv);
-        lv_draw(fb, &lv, view == V_ARCHIVES ? "NO BACKUPS ON THE STICK"
+        lv_draw(fb, &lv, pending == OP_LOAD ? "READING..."
+                       : view == V_ARCHIVES ? "NO BACKUPS ON THE STICK"
                        : have_engine ? "NOTHING TO LIST" : "NO BACKUP SUPPORT");
         if (lv.count > lv_visible_rows(&lv)) {
             button_draw(fb, &btn_up);
@@ -511,6 +544,16 @@ static void run_pending(void) {
     Op op = pending;
     pending = OP_NONE;
     switch (op) {
+    case OP_LOAD:
+        load_items();
+        find_stick();
+        go_view(V_HOME);
+        next_poll_ms = 0;
+        break;
+    case OP_STICK:
+        find_stick();
+        cp_status(stick_ok ? "USB STICK READY" : stick_note, stick_ok);
+        break;
     case OP_EXPORT:   do_export();   break;
     case OP_ARCHIVES: do_archives(); break;
     case OP_CONTENTS: do_contents(); break;
@@ -560,6 +603,24 @@ static CpPageResult backup_input(Config *cfg, int tx, int ty, bool touching, uin
         return CP_PAGE_REDRAW;
     }
     CpPageResult act = CP_PAGE_IDLE;
+    /* HOME shows the stick: look at /dev once a second.  A new disk node is
+     * mounted on the next call (status first); a vanished one clears the stick
+     * at once.  The list, cursor and marks are not touched. */
+    if (view == V_HOME && (int32_t)(now - next_poll_ms) >= 0) {
+        next_poll_ms = now + 1000;
+        unsigned sig = disk_sig();
+        if (sig != stick_sig) {
+            if (sig == 0) {
+                stick_sig = 0;
+                stick_ok = false;
+                snprintf(stick_note, sizeof stick_note, "NO USB STICK");
+                act = CP_PAGE_REDRAW;
+            } else {
+                queue(OP_STICK, "READING USB...");
+                return CP_PAGE_REDRAW;
+            }
+        }
+    }
     int vis = lv_visible_rows(&lv);
 
     if (view != V_DONE) {
@@ -607,7 +668,7 @@ static CpPageResult backup_input(Config *cfg, int tx, int ty, bool touching, uin
         break;
     case V_DONE:
         if (a && imp_reboot_wanted) {
-            cp_confirm("REBOOT NOW", "THE UNIT RESTARTS\nUNSAVED PLAY IS LOST", "REBOOT", confirmed_reboot);
+            cp_confirm("REBOOT NOW", "THE UNIT RESTARTS", "REBOOT", confirmed_reboot);
             return CP_PAGE_IDLE;
         }
         if (a || b) { go_view(V_HOME); act = CP_PAGE_REDRAW; }
@@ -638,7 +699,7 @@ static int backup_focusables(UiRect *out, int max) {
 
 const CpPage cp_backup_page = {
     .name       = "Backup",
-    .icon       = NULL,
+    .icon       = "cp_backup",
     .load       = backup_load,
     .layout     = backup_layout,
     .enter      = backup_enter,

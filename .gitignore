@@ -279,7 +279,7 @@ Generated_Code/
 # because we have git ;-)
 _UpgradeReport_Files/
 Backup*/
-# Not a backup: the backup items (SYSTEM_ANALYSIS.md#53-app-launcher-and-manifests)
+# Not a backup: the backup items (DEVELOPING.md#plug-in-file-formats)
 !backup.d/
 UpgradeLog*.XML
 UpgradeLog*.htm

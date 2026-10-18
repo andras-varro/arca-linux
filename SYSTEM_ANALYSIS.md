@@ -2006,17 +2006,8 @@ neither read nor write the crontab. The mounts of [§4.2](#42-partitions) are no
 `/etc/init.d/arca-app` reads `/opt/arca/default-app` and **respawns that binary
 whenever it exits** — which is how quitting a game returns you to the launcher.
 
-`app_launcher` scans `/opt/arca/apps/*.app` manifests and renders them as a touch grid.
-Manifest format is INI: `name=`, `exec=`, `icon=` (PPM P6), `args=` (one of `fb,touch` / `fb` /
-`touch` / `none`). **Each component's deploy script writes its own manifests and icons** — that is
-how projects plug into the launcher with no central registry.
-
-**Backup items follow the same pattern.** `/opt/arca/backup.d/<id>.item` (`<id>` is `[a-z0-9_-]+`) says what part of the state
-one component owns: INI like the manifest, `name=` (shown in the UI), `paths=` (space separated, relative to `/`, no whitespace
-inside a path, globs allowed, a directory carries everything under it), and `unit=` / `secret=` / `reboot=` each `yes|no`
-(measured on or tied to this unit / holds a password or key / takes effect only after a reboot). The component's deploy script
-and `--bundle` copy its `backup.d/*.item`; `device-files/backup.d/` goes through `provision-rules.conf`. `device-files/arca-backup`
-reads these files and nothing else, so a new app is backed up by shipping one.
+`app_launcher` scans `/opt/arca/apps/*.app` manifests and renders them as a touch grid; the manifest and
+backup-item formats are in [DEVELOPING.md](DEVELOPING.md#plug-in-file-formats).
 
 **Seeing what is running: use `ps`, never `ps w`.** This busybox (v1.31.1) treats `ps w` as "processes
 with a controlling TTY" — on RW09 **3 lines against plain `ps`'s 51**, the two gettys and the header. An

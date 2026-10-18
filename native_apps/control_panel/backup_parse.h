@@ -31,6 +31,11 @@ typedef struct {
  * only, no leading '-' or '.' (so never an option, "." or ".."). */
 bool bk_name_ok(const char *s);
 
+/* Is this a /dev entry that is a USB/SCSI disk or one of its partitions:
+ * "sd" + 1-2 letters + optional digits ("sda", "sdb2")?  Not "sd", "sda1x",
+ * "sdcard", "mmcblk0". */
+bool bk_is_disk_name(const char *name);
+
 bool bk_parse_item(const char *line, BkItem *out);
 bool bk_parse_archive(const char *line, char *out, size_t n);
 bool bk_parse_info(const char *line, char *host, size_t hn, char *version, size_t vn,

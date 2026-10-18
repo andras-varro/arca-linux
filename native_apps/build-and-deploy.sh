@@ -460,7 +460,7 @@ if [[ -n "$BUNDLE_DIR" ]]; then
             || err "staging failed: $f"
     done
 
-    # The backup items (format: SYSTEM_ANALYSIS.md#53-app-launcher-and-manifests): data files in
+    # The backup items (format: DEVELOPING.md#plug-in-file-formats): data files in
     # this tree, copied as they are by both paths.
     for f in backup.d/*.item; do
         [ -f "$f" ] || continue

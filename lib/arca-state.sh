@@ -1,7 +1,6 @@
 #!/bin/bash
 #
-# lib/arca-state.sh — the one gate a card image has against key material, and a path-safety
-# filter for tar listings.
+# lib/arca-state.sh — the one gate a card image has against key material.
 #
 # SOURCED, not executed:   . "$SCRIPT_DIR/lib/arca-state.sh"
 #
@@ -11,19 +10,6 @@
 # <component>/backup.d/*.item, read on the unit by device-files/arca-backup.
 #
 # Paths are relative to /, never absolute, and contain no whitespace.
-
-# arca_state_unsafe_paths
-#   stdin: a tar listing (tar -tf). Prints every entry that is absolute or has a
-#   '..' component. Exit 1 if it printed any, 0 if none.
-arca_state_unsafe_paths() {
-    local e found=1
-    while IFS= read -r e; do
-        case "/$e/" in
-            //*|*/../*) printf '%s\n' "$e"; found=0 ;;
-        esac
-    done
-    [ "$found" -ne 0 ]
-}
 
 # arca_state_ssh_keys_deny
 #   stdin: a tar listing (tar -tf), or `find . ! -type d` output. Prints every entry
