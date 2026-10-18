@@ -311,16 +311,24 @@ directories in simple mode; expert mode adds `/` with protected paths refused. E
 
 Open, in order:
 
-1. **Backup: the operator's tap-through on .115.** Control Panel → Backup, the engine `device-files/arca-backup` and the item files
-   (format: `SYSTEM_ANALYSIS.md#53-app-launcher-and-manifests`) are in the tree. On .115 the engine was hand-installed (not yet by
-   `provision.sh`) and measured under BusyBox: export, contents and import work, and the hostile archives are refused. Unmeasured:
-   the page on the panel with a stick, pad and keyboard. Unverified: `provision.sh`'s new step 0 against a real unit.
+1. **Backup follow-ups from the operator's tap-through on .115 (2026-10-18).** Export, archive list, selective import, REBOOT NOW,
+   pad/keyboard/mouse and Files' EJECT all confirmed; the operator re-tests after the next card flash. Open, in order:
+   - **Stick state does not follow plug/unplug:** "NO USB STICK" / "STICK: usb0" changes only on the next export. Poll
+     `arca-storage` (the way `native_apps/file_manager/` notices a stick) while the page is shown.
+   - **A "READING…" frame before the page's first `arca-backup items`:** opening it looks like a freeze for 1–2 s.
+   - **One selection marker:** keep `list_view`'s orange bar + background; drop the `[X]`/`[ ]` title prefix and the black box.
+   - **Reboot dialog text:** "Unsaved play is lost" means nothing in the Control Panel; say only that the unit restarts.
+   - **Real icons for Backup and System** instead of the letter tiles (`control_panel/gen_cp_icons.py`).
+   - **Move the item format (and the `.app` format beside it) from `SYSTEM_ANALYSIS.md` 5.3 to `DEVELOPING.md`** (operator: that is
+     where a developer looks); fix inbound links.
+   - **Delete `arca_state_unsafe_paths`** from `lib/arca-state.sh` and its test cases: no caller left (operator go-ahead 2026-10-18).
+   - **Run `provision.sh` on .115** (operator: free to reboot) to exercise the new step 0 against a real unit, unverified so far.
 2. **fsck before mount: `dosfstools`.** Operator 2026-10-18: yes, and deploy it to running units, not only in a new image.
    `BR2_PACKAGE_DOSFSTOOLS` and `_FSCK_FAT` in `rootfs/configs/arca_defconfig` for future cards; for running units, build it in the
    Buildroot tree (ABI: `rootfs/CLAUDE.md`) and ship it with the `usb` group. `arca-storage` then runs `fsck.fat -a` before mounting,
    which answers the kernel's "Volume was not properly unmounted". Unmeasured: the added mount time on a big stick, and what `-a`
    changes on a dirty one.
-3. **Panel check, when the unit is free: "FIRST N SHOWN"** appears only past `FM_MAX_ENTRIES` (`fm_core.h`) entries. To make such a
+3. **Panel check, still open (the operator's /tmp/big went with a reboot): "FIRST N SHOWN"** appears only past `FM_MAX_ENTRIES` (`fm_core.h`) entries. To make such a
    folder: `mkdir /tmp/big && cd /tmp/big && i=0; while [ $i -lt 4100 ]; do : > f$i; i=$((i+1)); done`, then open it in expert mode.
 
 **Done when** a stick copied with ScummVM game files lands them where ScummVM finds them, the stick ejects cleanly, and a settings
