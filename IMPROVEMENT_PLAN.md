@@ -323,12 +323,7 @@ Open, in order:
      where a developer looks); fix inbound links.
    - **Delete `arca_state_unsafe_paths`** from `lib/arca-state.sh` and its test cases: no caller left (operator go-ahead 2026-10-18).
    - **Run `provision.sh` on .115** (operator: free to reboot) to exercise the new step 0 against a real unit, unverified so far.
-2. **fsck before mount: `dosfstools`.** Operator 2026-10-18: yes, and deploy it to running units, not only in a new image.
-   `BR2_PACKAGE_DOSFSTOOLS` and `_FSCK_FAT` in `rootfs/configs/arca_defconfig` for future cards; for running units, build it in the
-   Buildroot tree (ABI: `rootfs/CLAUDE.md`) and ship it with the `usb` group. `arca-storage` then runs `fsck.fat -a` before mounting,
-   which answers the kernel's "Volume was not properly unmounted". Unmeasured: the added mount time on a big stick, and what `-a`
-   changes on a dirty one.
-3. **Panel check, still open (the operator's /tmp/big went with a reboot): "FIRST N SHOWN"** appears only past `FM_MAX_ENTRIES` (`fm_core.h`) entries. To make such a
+2. **Panel check, still open (the operator's /tmp/big went with a reboot): "FIRST N SHOWN"** appears only past `FM_MAX_ENTRIES` (`fm_core.h`) entries. To make such a
    folder: `mkdir /tmp/big && cd /tmp/big && i=0; while [ $i -lt 4100 ]; do : > f$i; i=$((i+1)); done`, then open it in expert mode.
 
 **Done when** a stick copied with ScummVM game files lands them where ScummVM finds them, the stick ejects cleanly, and a settings

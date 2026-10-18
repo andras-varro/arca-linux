@@ -2,7 +2,7 @@
 # build-and-deploy.sh — USB host mode, Xbox controller and USB audio support for Arca
 #
 # Usage:
-#   ./build-and-deploy.sh                          # build the eight artifacts only
+#   ./build-and-deploy.sh                          # build the artifacts only
 #   ./build-and-deploy.sh <ip>                     # build + deploy
 #   ./build-and-deploy.sh --bundle <dir>           # build + stage into an offline bundle
 #
@@ -21,8 +21,12 @@
 #      usb-storage.ko, to /lib/modules/4.14.52/storage)
 #      -> THE CONTROLLER AS /dev/input/event*. Build artifacts, so they travel in
 #      the bundle (../lib/arca-bundle.sh) to /lib/modules/4.14.52/extra on p6.
+#   3. fsck.fat, from the Buildroot tree (~/br-rw/target/sbin/fsck.fat), stripped
+#      into fsck-staging/ and installed to /sbin/fsck.fat. arca-storage runs it
+#      before mounting a stick. Optional: when the source is absent this script
+#      warns and goes on without it.
 #
-# So this script restates neither. It BUILDS the eight artifacts, runs the ARM
+# So this script restates neither. It BUILDS the artifacts, runs the ARM
 # gate over them, and then drives the same implementations every other path
 # drives.
 
@@ -58,7 +62,7 @@ usage() {
     echo "       $0 --bundle <dir>"
     echo ""
     echo "  <ip>             Device IPv4 address; omit to build without deploying"
-    echo "  --bundle <dir>   Build, then stage the eight artifacts under <dir>/root/"
+    echo "  --bundle <dir>   Build, then stage the artifacts under <dir>/root/"
     echo "                   with a declared-mode manifest. No device needed."
     echo ""
     echo "  The four device scripts and the three rc5.d links are NOT installed from"
@@ -128,6 +132,21 @@ for _mod in "${STORAGE_MODULES[@]}" load-order.txt; do
     USB_ARTIFACTS+=("0644|$STORAGE_DIR/$_mod|/lib/modules/$KERNEL_VERSION/storage/$_mod")
 done
 unset _mod
+
+# fsck.fat is built by Buildroot (rootfs/), not by this component. The copy shipped is
+# STRIPPED, staged under fsck-staging/ so the Buildroot tree is never touched. The ARM gate
+# reads the UNSTRIPPED source instead (see step 3). Absent source is a warning, not a failure.
+FSCK_SRC="$HOME/br-rw/target/sbin/fsck.fat"
+FSCK_STRIP="$HOME/br-rw/host/bin/arm-buildroot-linux-gnueabi-strip"
+FSCK_STAGED="$SCRIPT_DIR/fsck-staging/fsck.fat"
+if [[ -f "$FSCK_SRC" && -x "$FSCK_STRIP" ]]; then
+    mkdir -p "$SCRIPT_DIR/fsck-staging"
+    cp -f "$FSCK_SRC" "$FSCK_STAGED"
+    "$FSCK_STRIP" "$FSCK_STAGED"
+    USB_ARTIFACTS+=("0755|$FSCK_STAGED|/sbin/fsck.fat")
+else
+    warn "fsck.fat not found at $FSCK_SRC (or no strip tool at $FSCK_STRIP) — skipping it; arca-storage mounts without the pre-mount check"
+fi
 
 echo ""
 echo "════════════════════════════════════════"
@@ -241,9 +260,10 @@ echo ""
 #
 # ⚠️ Exit 2 ("could not judge") is a REFUSAL here, unlike in
 # commission-offline.sh. Every usb_host artifact is unstripped by construction —
-# `$CC -static` with no strip, and the module build does not strip either — so a 2
-# means the build changed, not that this component ships stripped binaries the way
-# scummvm and vnc_client do. Keeping it fatal is what makes "usb_host contributes
+# `$CC -static` with no strip, and the module build does not strip either — and
+# fsck.fat is gated at its unstripped Buildroot source, not at the stripped staging
+# copy, so a 2 means the build changed, not that this component ships stripped binaries
+# the way scummvm and vnc_client do. Keeping it fatal is what makes "usb_host contributes
 # zero TAKEN ON TRUST entries to a bundle" a checked property.
 #
 # ⚠️ The status is read directly, NEVER through xargs: xargs collapses any exit of
@@ -251,7 +271,11 @@ echo ""
 # not judge".
 ts "[3/7] ARM-safety gate (no sdiv/udiv)"
 ARM_TARGETS=()
-for a in "${USB_ARTIFACTS[@]}"; do ARM_TARGETS+=("${a#*|}"); ARM_TARGETS[-1]="${ARM_TARGETS[-1]%%|*}"; done
+for a in "${USB_ARTIFACTS[@]}"; do
+    [[ "$a" == *"|$FSCK_STAGED|"* ]] && continue   # the stripped copy; gated unstripped below
+    ARM_TARGETS+=("${a#*|}"); ARM_TARGETS[-1]="${ARM_TARGETS[-1]%%|*}"
+done
+[[ -f "$FSCK_SRC" ]] && ARM_TARGETS+=("$FSCK_SRC")
 if [[ -x "$REPO_ROOT/native_apps/check-arm-safe.sh" || -f "$REPO_ROOT/native_apps/check-arm-safe.sh" ]]; then
     arm_rc=0
     bash "$REPO_ROOT/native_apps/check-arm-safe.sh" "${ARM_TARGETS[@]}" || arm_rc=$?
