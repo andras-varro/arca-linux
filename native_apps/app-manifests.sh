@@ -46,6 +46,7 @@ platformer|Office Runner|/opt/games/platformer|/opt/arca/icons/platformer.ppm|fb
 theremin|Tap-a-Theremin|/opt/games/theremin|/opt/arca/icons/theremin.ppm|fb,touch
 terminal|Terminal|/opt/games/terminal|/opt/arca/icons/terminal.ppm|fb,touch
 file_manager|Files|/opt/games/file_manager|/opt/arca/icons/file_manager.ppm|fb,touch
+jellyfin|Jellyfin|/opt/games/jellyfin|/opt/arca/icons/jellyfin.ppm|fb,touch
 control_panel|Control Panel|/opt/games/control_panel|/opt/arca/icons/control_panel.ppm|
 '
 

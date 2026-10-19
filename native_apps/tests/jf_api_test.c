@@ -280,11 +280,22 @@ static void test_supersede_and_priority(void)
     CHECK(n == 1 && r[0].tag == 3);
     CHECK(strstr(heads(s), "GET /a") == NULL && strstr(heads(s), "GET /c") != NULL);
 
-    /* an in-flight LIST is ended by a newer one */
+    jf_api_free(&a); srv_stop(s);
+
+    /* an in-flight LIST is ended by a newer one.  The server never answers
+     * the first connection, so tag 10 cannot finish before it is superseded
+     * however loaded the host is; a reply that did would be a legal result */
+    Act sl[] = {{A_SILENT, 0}, {A_ITEMS, 0}};
+    s = srv_start(sl, 2);
+    setup(&a, s);
     fresh_list();
     jf_api_enqueue_list(&a, 10, "/d", &list);
     JfResult tmp;
-    jf_api_poll(&a, &tmp);                                      /* starts tag 10 */
+    for (int i = 0; i < 200 && !strstr(heads(s), "GET /d"); i++) {
+        CHECK(!jf_api_poll(&a, &tmp));                          /* starts tag 10 */
+        usleep(5000);
+    }
+    CHECK(strstr(heads(s), "GET /d") != NULL);
     jf_api_enqueue_list(&a, 11, "/e", &list);
     n = pump(&a, r, 8, 3000);
     CHECK(n == 1 && r[0].tag == 11 && list.n == 2);

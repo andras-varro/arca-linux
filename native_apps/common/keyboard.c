@@ -132,8 +132,9 @@ static void kb_focus_move(const char **keys, KeyboardLayout layout, int rows, in
 
 enum { KA_DEL, KA_CLEAR, KA_SHIFT, KA_SPACE, KA_CANCEL, KA_OK };
 
-int keyboard_enter(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
-                   const char *title, char *buf, int max_len, KeyboardLayout layout) {
+static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
+                  const char *title, char *buf, int max_len, KeyboardLayout layout,
+                  bool mask) {
 
     /* ── Select key layout ───────────────────────────────────────────── */
     const char **keys      = alpha_keys;
@@ -306,6 +307,7 @@ int keyboard_enter(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
             strncpy(display, work, max_len);
             display[cursor] = '\0';           /* safety — cursor tracks length */
             int dlen = (int)strlen(display);
+            if (mask) for (int mi = 0; mi < dlen; mi++) display[mi] = '*';
             if (dlen < max_len) {
                 display[dlen]     = '_';
                 display[dlen + 1] = '\0';
@@ -479,4 +481,14 @@ int keyboard_enter(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
          * must keep the mix bus advancing, and a tap must be seen promptly. */
         usleep(FRAME_DELAY_ACTIVE_US);
     }
+}
+
+int keyboard_enter(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
+                   const char *title, char *buf, int max_len, KeyboardLayout layout) {
+    return kb_run(fb, touch, gm, title, buf, max_len, layout, false);
+}
+
+int keyboard_enter_masked(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
+                          const char *title, char *buf, int max_len, KeyboardLayout layout) {
+    return kb_run(fb, touch, gm, title, buf, max_len, layout, true);
 }

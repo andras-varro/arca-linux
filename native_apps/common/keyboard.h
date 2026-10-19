@@ -39,4 +39,9 @@ typedef enum {
 int keyboard_enter(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
                    const char *title, char *buf, int max_len, KeyboardLayout layout);
 
+/* Same as keyboard_enter(), but the field shows one '*' per character (a
+ * password).  The returned text in buf is the real one. */
+int keyboard_enter_masked(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
+                          const char *title, char *buf, int max_len, KeyboardLayout layout);
+
 #endif /* KEYBOARD_H */

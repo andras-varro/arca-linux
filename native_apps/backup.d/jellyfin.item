@@ -1,0 +1,5 @@
+name=Jellyfin login (server, user, token)
+paths=opt/jellyfin/jellyfin.conf
+unit=no
+secret=yes
+reboot=no
