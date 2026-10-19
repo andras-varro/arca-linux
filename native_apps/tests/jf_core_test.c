@@ -153,7 +153,9 @@ static void test_signin(void)
     send_signin("host", "", "pw");
     CHECK(cm.n == 0 && app.banner[0], "empty user refused");
     send_signin("http://10.0.0.1/", "bob", "secret");
-    CHECK(cm.n == 2 && cm.c[0].type == JF_CMD_SET_SERVER && cm.c[0].port == 8096 && strcmp(cm.c[0].host, "10.0.0.1") == 0, "SET_SERVER parsed");
+    CHECK(cm.c[0].type == JF_CMD_SET_SERVER && cm.c[0].port == 8096 && strcmp(cm.c[0].host, "10.0.0.1") == 0, "SET_SERVER parsed");
+    CHECK(cm.n == 3 && cm.c[1].type == JF_CMD_SET_AUTH && cm.c[2].type == JF_CMD_REQUEST,
+          "SIGNIN sets the identity before the AUTH request: an empty DeviceId is refused by the server");
     const JfCmd *r = find(JF_CMD_REQUEST);
     CHECK(r && r->kind == JF_KIND_AUTH && strcmp(r->user, "bob") == 0 && strcmp(r->password, "secret") == 0, "AUTH request carries credentials");
     CHECK(app.busy && strcmp(app.login.server, "10.0.0.1:8096") == 0, "busy, server kept canonical");
@@ -174,6 +176,17 @@ static void test_signin(void)
     res.tag = tag; res.err = JF_ERR_UNREACHABLE; res.status = 0;
     send_result(&res);
     CHECK(cm.n == 0 && app.screen == JF_SCR_SIGNIN && strcmp(app.banner, "SERVER UNREACHABLE") == 0, "AUTH never retried by the core");
+
+    send_signin("10.0.0.1", "bob", "secret");
+    tag = find(JF_CMD_REQUEST)->tag;
+    res.tag = tag; res.err = JF_ERR_BADREPLY; res.status = 415;
+    send_result(&res);
+    CHECK(strcmp(app.banner, "UNEXPECTED REPLY (HTTP 415)") == 0, "an unexpected status is named in the banner: %s", app.banner);
+    send_signin("10.0.0.1", "bob", "secret");
+    tag = find(JF_CMD_REQUEST)->tag;
+    res.tag = tag; res.err = JF_ERR_BADREPLY; res.status = 200;
+    send_result(&res);
+    CHECK(strcmp(app.banner, "UNEXPECTED REPLY") == 0, "a 200 that did not parse names no status: %s", app.banner);
 
     send_signin("10.0.0.1", "bob", "secret");
     tag = find(JF_CMD_REQUEST)->tag;

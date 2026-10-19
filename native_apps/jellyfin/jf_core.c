@@ -267,15 +267,20 @@ static void session_expired(JfApp *app, JfCmds *out)
     set_banner(app, "SESSION EXPIRED, SIGN IN AGAIN");
 }
 
-static const char *err_text(JfErr e)
+/* The status is named for a reply nobody planned for, so a panel report says which one. */
+static const char *err_text(char *buf, size_t cap, JfErr e, int status)
 {
+    const char *t;
     switch (e) {
     case JF_ERR_UNREACHABLE: return "SERVER UNREACHABLE";
     case JF_ERR_FORBIDDEN:   return "ACCESS DENIED";
     case JF_ERR_NOTFOUND:    return "NOT FOUND";
-    case JF_ERR_SERVER:      return "SERVER ERROR";
-    default:                 return "UNEXPECTED REPLY";
+    case JF_ERR_SERVER:      t = "SERVER ERROR"; break;
+    default:                 t = "UNEXPECTED REPLY"; break;
     }
+    if (status <= 0 || status == 200) return t;
+    snprintf(buf, cap, "%s (HTTP %d)", t, status);
+    return buf;
 }
 
 /* ── results ───────────────────────────────────────────────────────────── */
@@ -285,7 +290,7 @@ static void on_auth(JfApp *app, const JfResult *r, JfCmds *out)
     if (!app->auth_pending || r->tag != app->auth_tag) return;
     app->auth_pending = false;
     if (r->err == JF_ERR_UNAUTH) { set_banner(app, "WRONG USER OR PASSWORD"); return; }
-    if (r->err != JF_ERR_NONE || !r->token[0] || !r->user_id[0]) { set_banner(app, err_text(r->err)); return; }
+    if (r->err != JF_ERR_NONE || !r->token[0] || !r->user_id[0]) { char t[48]; set_banner(app, err_text(t, sizeof t, r->err, r->status)); return; }
     copy(app->login.token, sizeof(app->login.token), r->token);
     copy(app->login.user_id, sizeof(app->login.user_id), r->user_id);
     emit(out, JF_CMD_SET_AUTH);
@@ -309,7 +314,8 @@ static void on_list(JfApp *app, const JfResult *r, JfCmds *out)
     if (e != JF_ERR_NONE) {
         bool again = e == JF_ERR_UNREACHABLE || e == JF_ERR_SERVER;
         app->play_wait = false;
-        set_overlay(app, err_text(e), again ? (JF_BTN_RETRY | JF_BTN_CLOSE) : JF_BTN_CLOSE);
+        char t[48];
+        set_overlay(app, err_text(t, sizeof t, e, r->status), again ? (JF_BTN_RETRY | JF_BTN_CLOSE) : JF_BTN_CLOSE);
         return;
     }
     /* A page that consumed nothing while the server claims more would be asked for forever. */
@@ -390,6 +396,7 @@ static void on_signin(JfApp *app, const JfEvent *ev, JfCmds *out)
     JfCmd *s = emit(out, JF_CMD_SET_SERVER);
     copy(s->host, sizeof(s->host), host);
     s->port = port;
+    emit(out, JF_CMD_SET_AUTH);   /* the device identity: the server refuses an empty DeviceId */
     JfCmd *c = emit(out, JF_CMD_REQUEST);
     c->kind = JF_KIND_AUTH;
     c->tag = ++app->auth_tag;

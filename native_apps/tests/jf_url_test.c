@@ -229,6 +229,8 @@ static void test_header(void)
     snprintf(want, sizeof(want), "%s, Token=\"tok123\"\r\n", base);
     EXPECT("header token", n, b, want);
 
+    CHECK(jf_auth_header(b, sizeof(b), "RW", "", NULL) == -1, "empty device_id (the server answers 500)");
+    CHECK(jf_auth_header(b, sizeof(b), "", "d1", NULL) == -1, "empty device");
     CHECK(jf_auth_header(b, sizeof(b), "R\"W", "d1", NULL) == -1, "quote in device");
     CHECK(jf_auth_header(b, sizeof(b), "RW", "d\\1", NULL) == -1, "backslash in device_id");
     CHECK(jf_auth_header(b, sizeof(b), "R\rW", "d1", NULL) == -1, "CR in device");

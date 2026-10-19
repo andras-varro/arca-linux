@@ -52,7 +52,8 @@ bool jf_session_id(char out[JF_ID_LEN + 1]);
 
 /**
  * "Authorization: MediaBrowser Client=..., Device=..., DeviceId=..., Version=\"1\"[, Token=...]\r\n".
- * `token` NULL or "" leaves the Token out.  -1 when `device`/`device_id`/`token` hold a quote, CR or LF.
+ * `token` NULL or "" leaves the Token out.  -1 when `device` or `device_id` is empty, or any of the three
+ * holds a quote, backslash, CR or LF.
  */
 int jf_auth_header(char *out, size_t cap, const char *device, const char *device_id, const char *token);
 

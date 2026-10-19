@@ -163,7 +163,8 @@ static bool header_safe(const char *s)
 
 int jf_auth_header(char *out, size_t cap, const char *device, const char *device_id, const char *token)
 {
-    if (!device || !device_id || !header_safe(device) || !header_safe(device_id)) return -1;
+    /* an empty DeviceId is answered 500 by AuthenticateByName */
+    if (!device || !device_id || !*device || !*device_id || !header_safe(device) || !header_safe(device_id)) return -1;
     if (token && *token) {
         if (!header_safe(token)) return -1;
         return fin(snprintf(out, cap,

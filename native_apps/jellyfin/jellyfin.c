@@ -16,6 +16,7 @@
 #include "hardware.h"
 #include "pointer.h"
 #include "audio.h"
+#include "logger.h"
 #include "jf_ui.h"
 
 #define EVQ_MAX 8
@@ -25,6 +26,7 @@ static void signal_handler(int sig) { (void)sig; running = 0; }
 
 static JfApp app;          /* ~0.8 MB: static */
 static JfApi api;
+static Logger logger;      /* jf_api logs each request: kind, status, error, ms */
 static JfUi  ui;
 static Audio audio;
 static bool  audio_ok;
@@ -183,6 +185,8 @@ int main(int argc, char *argv[])
         fb_close(&fb);
         return 1;
     }
+    logger_init(&logger, "jellyfin", LOG_LEVEL_INFO, false);
+    api.log = &logger;
     jf_ui_init(&ui, &fb, &touch, &gp, &app);
 
     {
@@ -259,6 +263,7 @@ int main(int argc, char *argv[])
         audio_close(&audio);
     }
     jf_api_free(&api);
+    logger_close(&logger);
     jf_ui_free(&ui);
     jf_login_wipe(&app.login);
     hw_leds_off();
