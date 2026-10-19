@@ -301,43 +301,36 @@ follow its shape. Navigation stays as it is: the pages' `*_page_focusables` rect
 from, or a draw callback owned by the widget. **Done when** buttons, toggles, sliders, launcher tiles, dialog buttons and the bar draw
 focus through one mechanism, and the Control Panel's generic ring is gone.
 
-### F151. User data on a USB stick: a file manager plus export/import of settings and scores — open, operator priority 2026-10-15, designed 2026-10-16
-
-A user with no PC tools has no backup (the old backup needed SSH) and no way to put ScummVM games or audio on a
-grown p3. The operator ruling of 2026-10-15 lifted the 2026-09-06 USB ruling for USB storage.
-
-Design facts the open items need: `native_apps/file_manager/` roots are the stick, `/home/root/data` and the ScummVM games and audio
-directories in simple mode; expert mode adds `/` with protected paths refused. Eject (sync + unmount) is required before pulling a vfat stick.
-
-Open, in order:
-
-1. **Files app does not follow plug/unplug:** a pulled stick still shows its old listing; a new one appears only after RESCAN.
-   The Backup page's 1 Hz `/dev` scan (`disk_sig`, `bk_is_disk_name` in `control_panel/backup_*`) is the model; move it into one
-   shared helper both use rather than copying it.
-2. **Files app startup shows a black screen until the first frame** (nice to have): paint a LOADING… frame first, as Backup does.
-3. **The Backup engine must travel with the page:** `deploy-all.sh` on a reflashed unit brought the page and not `arca-backup` or
-   `device-files/backup.d/` (operator, 2026-10-18), because only `provision.sh` installs them. Give them a `backup` group in
-   `provision-rules.conf` and have `native_apps/build-and-deploy.sh` install it, the way `usb_host` installs the `usb` group.
-
-**Done when** 1–3 pass at the panel.
-
 ### F152. A Jellyfin music client playing to a Bluetooth speaker — open, operator wish 2026-10-16, nice to have, not designed
 
 Browse and search a local Jellyfin server and stream a track to the A2DP sink BlueALSA already serves
-(BlueALSA: `SYSTEM_ANALYSIS.md#36-usb`). Builds on F151's `list_view` + `thumb_cache` (search results with album art). **[inferred, not
+(BlueALSA: `SYSTEM_ANALYSIS.md#36-usb`). Builds on the file manager's `list_view` + `thumb_cache` (search results with album art). **[inferred, not
 measured]** The network is not the limit: an SSH copy saturated the CPU at ~3.1 MB/s, while a 320 kbit/s stream is ~40 KB/s (~1-2% of
 that cost) and 48 kHz stereo PCM ~192 KB/s (~6%). The unknowns are decode and SBC encode on one 600 MHz core: no MP3/AAC/FLAC decoder
 exists in `native_apps/common` (`audio_wav.c` only), there is no HTTP client or JSON parser and no libcurl in the rootfs. Having the
 server transcode to one codec (or to PCM) keeps the device to one decoder. **Done when** the first question is answered: CPU of
 BlueALSA plus a decoder for a server-transcoded stream, measured on `.188` with a speaker connected.
 
-### F153. Remote input for on-device verification: `uinput` — open, operator 2026-10-18 ("important for you to handle the unit remotely")
+### F153. Remote input for on-device verification: `arca_tap` — open, operator 2026-10-18 ("important for you to handle the unit remotely")
 
-Automated checks stop at an app's first screen because nothing can tap: a write to an evdev node goes to the driver, not to readers
-(`CLAUDE.md`, non-obvious constraints). The vendor kernel lacked `/dev/uinput`; ours is built from source, so `CONFIG_INPUT_UINPUT=m`
-is probably one more module through `kernel/build-bt-modules.sh`'s pattern **[inferred, config not checked]**. Then a small
-`uinput` tool creates a virtual touchscreen and taps given panel coordinates, and `input_scan.c` must accept that device.
-**Done when** a script taps from the launcher into Control Panel → Backup on .115 and a framebuffer capture shows the page.
+`native_apps/arca_tap/` plus `common/remote_tap.c` drive the panel through `/dev/uinput` (loaded on any unit with the bluetooth
+component). Measured on .115 2026-10-18: taps from the launcher into Files, and from the launcher through Control Panel page 2 into
+Backup, each confirmed by framebuffer capture. Apps read only `/dev/input/touchscreen0`, so the daemon re-points that link at its
+virtual device and restarts the app; the real panel is not read while it runs. Off unless the `remote_tap` config key is set
+(Control Panel → Input → REMOTE TAP; for tests it can be appended to `/opt/games/arca_config.conf` over SSH).
+
+Open, in order:
+
+1. **`start`/`stop` from `/opt/games` are broken.** The first build's `start` was killed by its own app restart (exit 143, daemon
+   up). The fix in the tree re-execs `start`/`stop` from `/var/run/arca-tapd`; deployed, `start` then printed "cannot stage the
+   daemon in /var/run" (`copy_self` failed, file present) and `stop` hung >120 s (killed by hand). Not diagnosed; `arca-app` matches
+   on `/proc/<pid>/exe`, so the name is not it. Suspects: ETXTBSY on the copy, a blocking `system()` restart.
+2. **Untested:** `swipe` against a drag consumer (Files' list; the icon grids have no swipe, so the launcher test proved nothing),
+   `hold`, and the REMOTE TAP toggle on the Input page, including OFF → device removed and app restarted.
+3. **Docs:** `CLAUDE.md`'s "You cannot script a touch interaction" and the matching `native_apps/CLAUDE.md` text become a pointer
+   to `arca_tap`, with its limit (only apps that read `touchscreen0` follow it).
+
+**Done when** 1–3 hold and a script runs a Files plug/pull check end to end without a human.
 
 ### F106. Support BeagleBone Black boards — open, operator idea 2026-10-01, future
 
@@ -438,7 +431,7 @@ and that is a result rather than a gap — three mechanisms read out of the MUSB
 and **refuted on hardware**, and the answer that ships is the one-tap RESCAN, verified on a panel. Before
 anyone proposes a fourth theory, read the refuted table in `usb_host/README.md`, which names the one
 never-attempted candidate and the question any candidate must answer first. **The operator ruling of 2026-10-15 lifts this
-for USB storage** (the file manager and export/import under F151); the enumeration-at-probe closure above stands.
+for USB storage** (the file manager and the Backup page); the enumeration-at-probe closure above stands.
 
 **Bundles hold built artifacts only — settled**, because the one consumer that installs device scripts runs
 from a clone and has `device-files/` beside it either way.

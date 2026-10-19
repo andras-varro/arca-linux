@@ -229,7 +229,7 @@ else
 fi
 
 # ── Groups ────────────────────────────────────────────────────────────────
-PLAN_NOMDNS=$(arca_provision_plan "$RULES" "base usb bluetooth")
+PLAN_NOMDNS=$(arca_provision_plan "$RULES" "base usb bluetooth backup")
 absent "$(printf 'link-opt\t-\t/etc/rc5.d/S30avahi-daemon\t../init.d/avahi-daemon')" \
     "$PLAN_NOMDNS" "B14 --no-mdns drops the avahi link"
 expect "$(printf 'link\t-\t/etc/rc5.d/S28time-sync\t../init.d/time-sync')" \
@@ -709,6 +709,37 @@ for fn in arca_provision_plan_sshd arca_provision_ssh_auth_group arca_provision_
 done
 if [ -e "$REPO_DIR/lib/arca-sshd.sh" ]; then bad "G2 lib/arca-sshd.sh is deleted"; else ok "G2 lib/arca-sshd.sh is deleted"; fi
 if grep -qE '^[a-z-]+[[:space:]]+sshd' "$RULES"; then bad "G3 no record in provision-rules.conf names an sshd group"; else ok "G3 no record in provision-rules.conf names an sshd group"; fi
+
+
+# ══════════════════════════════════════════════════════════════════
+echo "H. the backup group: default-on, optional, installed by native_apps"
+# ══════════════════════════════════════════════════════════════════
+case " $(arca_provision_default_groups) " in
+    *" backup "*) ok "H1 backup is a default group (provision.sh and the card bundle install it)" ;;
+    *) bad "H1 backup is a default group (provision.sh and the card bundle install it)" ;;
+esac
+case " $(arca_provision_optional_groups) " in
+    *" backup "*) ok "H2 backup is optional, so native_apps can compile it and --no-backup works" ;;
+    *) bad "H2 backup is optional, so native_apps can compile it and --no-backup works" ;;
+esac
+BKPLAN="$FW/backupplan"
+if arca_provision_plan_component "$RULES" backup > "$BKPLAN" 2>/dev/null; then
+    ok "H3 the backup component plan compiles"
+else
+    bad "H3 the backup component plan compiles"
+fi
+expect "$(printf 'install\t0755\t/usr/sbin/arca-backup\tdevice-files/arca-backup')" \
+    "$(cat "$BKPLAN")" "H4 the backup group installs the engine at 0755"
+NITEM_DISK=$(find "$REPO_DIR"/device-files/backup.d -name "*.item" | wc -l)
+NITEM_PLAN=$(awk -F'\t' '$1 == "install" && $3 ~ /^\/opt\/arca\/backup\.d\/.+\.item$/ && $2 == "0644" {n++} END {print n+0}' "$BKPLAN")
+assert_eq "$NITEM_DISK" "$NITEM_PLAN" \
+    "H5 the backup group installs every device-files/backup.d item at 0644 ($NITEM_DISK on disk)"
+assert_eq "0" "$(awk -F'\t' '$1 == "link" || $1 == "link-opt" {n++} END {print n+0}' "$BKPLAN")" \
+    "H6 the backup group has no boot links"
+assert_eq "0" "$(arca_provision_plan "$RULES" base | grep -c -e 'arca-backup' -e '/opt/arca/backup.d/' || true)" \
+    "H7 a base-only plan carries no backup record (the rows left base)"
+expect "$(printf 'install\t0755\t/usr/sbin/arca-backup\tdevice-files/arca-backup')" \
+    "$PLAN_ALL" "H8 the default plan includes the engine"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

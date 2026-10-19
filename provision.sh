@@ -26,7 +26,8 @@
 #   1. Installs the provision plan: device-files/arca-app as
 #      /etc/init.d/arca-app, the audio-enable + time-sync boot scripts, avahi
 #      (mDNS), the USB host-mode scripts and their boot links (--no-usb skips), the
-#      Bluetooth boot script and dbus policy (--no-bluetooth skips)
+#      Bluetooth boot script and dbus policy (--no-bluetooth skips), the backup engine and
+#      its item files (--no-backup skips; native_apps/build-and-deploy.sh installs them too)
 #   2. Applies kernel/sysctl security settings (ASLR, no ip_forward, etc.)
 #   3. Reboots the device
 #

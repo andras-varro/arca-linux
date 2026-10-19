@@ -132,7 +132,7 @@ offline.
   the callers left whole record types out of the breakdown.
 - ⚠️ **`usb` is a provision group, and a component script compiles it through
   `arca_provision_plan_component`, not through its own `scp`/`ln -sf`.** `arca_provision_plan_component
-  FILE GROUP` compiles one optional group's records for `usb_host/build-and-deploy.sh` (`usb`) and `bluetooth/build-and-deploy.sh` (`bluetooth`) — a separate
+  FILE GROUP` compiles one optional group's records for `usb_host/build-and-deploy.sh` (`usb`) `bluetooth/build-and-deploy.sh` (`bluetooth`) and `native_apps/build-and-deploy.sh` (`backup`) — a separate
   entry point rather than a flag on `arca_provision_plan`, and it refuses `base`, so an install
   path cannot reach a base-less plan by mistyping a group list.
 

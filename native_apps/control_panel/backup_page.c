@@ -14,7 +14,7 @@
  *
  * The stick is found the way file_manager does: `arca-storage mount`, parsed by
  * fm_parse_storage_line().  file_manager asks once per visit (and on RESCAN);
- * this page also watches /dev once a second on HOME (disk_sig) and mounts again
+ * this page also watches /dev once a second on HOME (usb_disk_sig) and mounts again
  * only when a disk node appears; a vanished one just clears the stick.  Backups
  * live in <mount>/ludbox-backup.  Every
  * program runs through cp_exec() (no shell, argv built from ids that passed
@@ -32,9 +32,9 @@
 #include "backup_parse.h"
 #include "../common/common.h"
 #include "../common/list_view.h"
+#include "../common/usb_watch.h"
 #include "../file_manager/fm_core.h"
 
-#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -70,7 +70,7 @@ static int    done_n;
 static bool   stick_ok;
 static char   stick_mp[128];
 static char   stick_note[64];         /* shown when there is no stick */
-static unsigned stick_sig;            /* disk_sig() when the stick was last looked for */
+static unsigned stick_sig;            /* usb_disk_sig() when the stick was last looked for */
 static uint32_t next_poll_ms;         /* HOME: when to look at /dev again */
 
 static char   out_buf[OUT_BYTES];
@@ -182,26 +182,9 @@ static void load_items(void) {
     else cp_status(why, false);
 }
 
-/* A number for the disk nodes in /dev (bk_is_disk_name): 0 = none, and it
- * changes when one appears, goes or is replaced by another.  One readdir, no
- * fork — cheap enough for once a second. */
-static unsigned disk_sig(void) {
-    DIR *d = opendir("/dev");
-    if (!d) return 0;
-    unsigned sig = 0;
-    for (struct dirent *e; (e = readdir(d)) != NULL; ) {
-        if (!bk_is_disk_name(e->d_name)) continue;
-        unsigned h = 5381;
-        for (const char *p = e->d_name; *p; p++) h = h * 33 + (unsigned char)*p;
-        sig += h | 1;          /* a sum: the directory order does not matter */
-    }
-    closedir(d);
-    return sig;
-}
-
 /* Mounts (if needed) and finds the first stick: stick_ok / stick_mp / stick_note. */
 static void find_stick(void) {
-    stick_sig = disk_sig();
+    stick_sig = usb_disk_sig();
     stick_ok = false;
     stick_mp[0] = '\0';
     snprintf(stick_note, sizeof stick_note, "NO USB STICK");
@@ -608,7 +591,7 @@ static CpPageResult backup_input(Config *cfg, int tx, int ty, bool touching, uin
      * at once.  The list, cursor and marks are not touched. */
     if (view == V_HOME && (int32_t)(now - next_poll_ms) >= 0) {
         next_poll_ms = now + 1000;
-        unsigned sig = disk_sig();
+        unsigned sig = usb_disk_sig();
         if (sig != stick_sig) {
             if (sig == 0) {
                 stick_sig = 0;

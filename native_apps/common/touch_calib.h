@@ -122,6 +122,16 @@ void touch_calib_curve_from_fit(const TouchAxisFit *f, int hw_min, int hw_max,
  * off the panel. */
 int touch_calib_predict_panel(int raw, int raw_at_0, int raw_at_max, int dim);
 
+/* The inverse of the production axis map: the raw value that
+ * touch_map_axis_panel(raw, v0, k_lo, k_hi, v1, dim) sends to `panel`, searched
+ * within [raw_lo, raw_hi] (the range the digitiser can emit, normally 0..4095,
+ * intersected with the calibrated endpoints). Bisection over the map itself, so
+ * it cannot disagree with it. `*exact` (may be NULL) is false when `panel` is
+ * unreachable in that range (the saturated band); the nearest raw is returned.
+ * Used by arca-tap to inject a touch that apps read back as the same pixel. */
+int touch_calib_raw_for_panel(int panel, int v0, int k_lo, int k_hi, int v1,
+                              int dim, int raw_lo, int raw_hi, bool *exact);
+
 /* Panel coordinate predicted by the shipped three-segment curve. */
 int touch_calib_predict_curve(int raw, const TouchAxisCurve *c);
 

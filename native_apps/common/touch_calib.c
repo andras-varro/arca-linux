@@ -44,6 +44,27 @@ int touch_calib_predict_panel(int raw, int raw_at_0, int raw_at_max, int dim) {
     return touch_map_axis_panel(raw, raw_at_0, k_lo, k_hi, raw_at_max, dim);
 }
 
+int touch_calib_raw_for_panel(int panel, int v0, int k_lo, int k_hi, int v1,
+                              int dim, int raw_lo, int raw_hi, bool *exact) {
+    /* Bisection over the production axis map, not a second copy of its
+     * arithmetic: whatever the integer truncation does there, the answer is
+     * the first raw that the map sends to `panel`. The map is monotone on each
+     * axis (the knot check in the map falls back to a line otherwise). */
+    if (raw_hi < raw_lo) { int t = raw_lo; raw_lo = raw_hi; raw_hi = t; }
+    bool inc = touch_map_axis_panel(raw_hi, v0, k_lo, k_hi, v1, dim) >=
+               touch_map_axis_panel(raw_lo, v0, k_lo, k_hi, v1, dim);
+    int lo = raw_lo, hi = raw_hi;
+    while (lo < hi) {
+        int mid = lo + ((hi - lo) >> 1);
+        int m = touch_map_axis_panel(mid, v0, k_lo, k_hi, v1, dim);
+        if (inc ? (m >= panel) : (m <= panel)) hi = mid;
+        else lo = mid + 1;
+    }
+    if (exact)
+        *exact = touch_map_axis_panel(lo, v0, k_lo, k_hi, v1, dim) == panel;
+    return lo;
+}
+
 int touch_calib_predict_curve(int raw, const TouchAxisCurve *c) {
     return touch_map_axis_panel(raw, c->v0, c->k_lo, c->k_hi, c->v1, c->dim);
 }

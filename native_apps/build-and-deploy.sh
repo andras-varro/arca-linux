@@ -58,6 +58,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 . "$REPO_ROOT/lib/arca-bundle.sh"
 # shellcheck source=../lib/product.sh
 . "$REPO_ROOT/lib/product.sh"
+# shellcheck source=../lib/arca-identify.sh
+. "$REPO_ROOT/lib/arca-identify.sh"
+# shellcheck source=../lib/arca-provision.sh
+. "$REPO_ROOT/lib/arca-provision.sh"
 
 # ── argument shapes ─────────────────────────────────────────────────────────
 # Two, and they do not mix: `--bundle <dir>` needs no device, and every deploy
@@ -292,7 +296,7 @@ $CC "${WARN[@]}" -O2 -I. \
 # The standalone unified_calibrate was folded into it and deleted — it was a
 # second, independent copy of the same 9-tap fit, carrying the same defect.
 step "27/32" "control_panel"
-$CC "${WARN[@]}" -O2 -I. control_panel/control_panel.c control_panel/cp_page_name.c control_panel/usb_bus.c control_panel/touch_wizard.c control_panel/led_page.c control_panel/monitor_page.c control_panel/cpu_load.c control_panel/soc_temp.c control_panel/mon_graph.c sysmon/mon_ring.c control_panel/info_page.c control_panel/network_page.c control_panel/usb_page.c control_panel/input_page.c control_panel/audio_page.c control_panel/display_page.c control_panel/bluetooth_page.c control_panel/system_page.c control_panel/log_page.c control_panel/log_filter.c control_panel/ssh_page.c control_panel/cp_exec.c control_panel/backup_page.c control_panel/backup_parse.c file_manager/fm_core.c build/list_view.o control_panel/sys_settings.c control_panel/bt_ctl.c common/status_line.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" $CALIB_OBJ build/ui_layout.o build/ui_flow.o build/ui_focus.o build/ppm.o build/icon_grid.o build/top_bar.o build/pointer.o build/product.o -o build/control_panel -lm "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. control_panel/control_panel.c control_panel/cp_page_name.c control_panel/usb_bus.c control_panel/touch_wizard.c control_panel/led_page.c control_panel/monitor_page.c control_panel/cpu_load.c control_panel/soc_temp.c control_panel/mon_graph.c sysmon/mon_ring.c control_panel/info_page.c control_panel/network_page.c control_panel/usb_page.c control_panel/input_page.c control_panel/audio_page.c control_panel/display_page.c control_panel/bluetooth_page.c control_panel/system_page.c control_panel/log_page.c control_panel/log_filter.c control_panel/ssh_page.c control_panel/cp_exec.c control_panel/backup_page.c control_panel/backup_parse.c common/usb_watch.c file_manager/fm_core.c build/list_view.o control_panel/sys_settings.c control_panel/bt_ctl.c common/status_line.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" $CALIB_OBJ build/ui_layout.o build/ui_flow.o build/ui_focus.o build/ppm.o build/icon_grid.o build/top_bar.o build/pointer.o build/product.o -o build/control_panel -lm "${AUDIO_LIBS[@]}"
 
 # Touch diagnostic. It was previously absent from this script, which is why a
 # deployed copy of the old trace tool was stale (pre-bezel); that tool now lives in
@@ -302,6 +306,9 @@ $CC "${WARN[@]}" -O2 -I. control_panel/control_panel.c control_panel/cp_page_nam
 # needs /dev/uinput and this kernel has none — ../CLAUDE.md carries the rule.
 step "28/32" "touch_raw"
 $CC "${WARN[@]}" -O2 -I. tests/touch_raw.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" $CALIB_OBJ -o build/touch_raw -lm "${AUDIO_LIBS[@]}"
+# arca_tap: scripted touch (tap/hold/swipe) through a uinput device; gated by the
+# Input page's REMOTE TAP setting. Links like touch_raw: it inverts the calibration.
+$CC "${WARN[@]}" -O2 -I. arca_tap/arca_tap.c common/remote_tap.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" $CALIB_OBJ -o build/arca_tap -lm "${AUDIO_LIBS[@]}"
 
 # The mix bus, driven by hand.  Groups I/J/K of tests/audio_gen_test.c cover the
 # arithmetic; whether two sounds are AUDIBLE as two, and whether the ~60 ms
@@ -325,7 +332,7 @@ $CC "${WARN[@]}" -O2 -I. "${VTERM_CFLAGS[@]}" terminal/terminal.c terminal/term_
 # fm_core.c is its screen-free half (host test tests/file_manager_test.c); the top
 # bar, the pointer and the list widget are the shared objects built above.
 step "32/32" "file_manager"
-$CC "${WARN[@]}" -O2 -I. file_manager/file_manager.c file_manager/fm_core.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" build/list_view.o build/top_bar.o build/icon_grid.o build/ppm.o build/pointer.o build/ui_flow.o build/ui_focus.o control_panel/cpu_load.c common/status_line.c -o build/file_manager -lm "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. file_manager/file_manager.c file_manager/fm_core.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" build/list_view.o build/top_bar.o build/icon_grid.o build/ppm.o build/pointer.o build/ui_flow.o build/ui_focus.o control_panel/cpu_load.c common/status_line.c common/usb_watch.c -o build/file_manager -lm "${AUDIO_LIBS[@]}"
 
 # Collect icon files from source dirs → build/icons/.  control_panel/icons/ holds
 # the control panel's home-grid icons (gen_cp_icons.py); control_panel reads them
@@ -369,7 +376,7 @@ echo "  Wrote $(find build/soundsets -maxdepth 1 -type f -name '*.sound' 2>/dev/
 # --bundle would recreate it again.
 GAMES_BINARIES=(snake tetris pong brick_breaker samegame frogger platformer
                 theremin audio_mix_test control_panel arcamond
-                touch_raw terminal file_manager)
+                touch_raw terminal file_manager arca_tap)
 
 echo ""
 echo "Build sizes:"
@@ -755,6 +762,31 @@ ssh "$DEVICE" "mkdir -p /opt/arca/backup.d"
 scp backup.d/*.item "$DEVICE:/opt/arca/backup.d/"
 ssh "$DEVICE" "chmod 644 /opt/arca/backup.d/*.item"
 ok "Backup items installed ($(find backup.d -name '*.item' | wc -l) file(s))"
+echo ""
+
+# The backup group of the provision plan: the engine /usr/sbin/arca-backup and the
+# device-files/backup.d item files the Control Panel's Backup page reads. They are
+# records in device-files/provision-rules.conf, so a unit that was only ever given
+# component deploys still gets the page working. The steps are the usb group's
+# (usb_host/build-and-deploy.sh); the decisions are not here.
+info "Installing the backup group (provision-rules.conf)..."
+PROV_RULES="$REPO_ROOT/device-files/provision-rules.conf"
+[[ -f "$PROV_RULES" ]] || err "missing $PROV_RULES"
+if ! PCHECK="$(arca_provision_validate "$PROV_RULES" "$REPO_ROOT")"; then
+    echo "$PCHECK"; err "provision-rules.conf does not validate"
+fi
+BACKUP_PLAN=$(mktemp)
+arca_provision_plan_component "$PROV_RULES" backup > "$BACKUP_PLAN" \
+    || { rm -f "$BACKUP_PLAN"; err "could not compile the backup provision plan"; }
+info "$(arca_provision_plan_summary "$BACKUP_PLAN")"
+arca_provision_push_installs "$BACKUP_PLAN" "$REPO_ROOT" "$DEVICE" \
+    || { rm -f "$BACKUP_PLAN"; err "could not copy the backup provision sources to the device"; }
+ssh "$DEVICE" "cat > /tmp/arca-backup-plan" < "$BACKUP_PLAN"
+arca_provision_online_script | ssh "$DEVICE" "cat > /tmp/arca-backup-provision.sh"
+ssh "$DEVICE" "sh /tmp/arca-backup-provision.sh /tmp/arca-backup-plan; rc=\$?; rm -f /tmp/arca-backup-provision.sh /tmp/arca-backup-plan; exit \$rc" \
+    || { rm -f "$BACKUP_PLAN"; err "the backup provision step failed on the device"; }
+rm -f "$BACKUP_PLAN"
+ok "backup group installed (arca-backup and its item files)"
 echo ""
 
 # Deploy the per-game sound sets

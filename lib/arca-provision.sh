@@ -48,9 +48,9 @@
 # p3/p2 is the offline executor's job.
 
 ARCA_PROVISION_TYPES="install link link-opt unlink"
-ARCA_PROVISION_GROUPS_ALL="base mdns usb bluetooth"
-ARCA_PROVISION_GROUPS_DEFAULT="base mdns usb bluetooth"
-ARCA_PROVISION_GROUPS_OPTIONAL="mdns usb bluetooth"
+ARCA_PROVISION_GROUPS_ALL="base mdns usb bluetooth backup"
+ARCA_PROVISION_GROUPS_DEFAULT="base mdns usb bluetooth backup"
+ARCA_PROVISION_GROUPS_OPTIONAL="mdns usb bluetooth backup"
 
 arca_provision_default_groups()  { echo "$ARCA_PROVISION_GROUPS_DEFAULT"; }
 arca_provision_optional_groups() { echo "$ARCA_PROVISION_GROUPS_OPTIONAL"; }

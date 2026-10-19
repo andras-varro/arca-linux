@@ -33,8 +33,8 @@ the explicit not-applicable and an *empty* field is an error.
   that nothing downstream would catch, so validation rejects it.
 - **`unlink` is how a file an older image carried is retired** — a unit imaged earlier keeps whatever
   that image installed, and nothing else sweeps `/etc/init.d`.
-- **`usb` and `bluetooth` are optional groups**, compiled by `usb_host/build-and-deploy.sh` and
-  `bluetooth/build-and-deploy.sh` through `arca_provision_plan_component`. The four USB device scripts and
+- **`usb`, `bluetooth` and `backup` are optional groups**, compiled by `usb_host/build-and-deploy.sh`,
+  `bluetooth/build-and-deploy.sh` and `native_apps/build-and-deploy.sh` (`backup`) through `arca_provision_plan_component`. The four USB device scripts and
   the three `rc5.d` links are ordinary `usb`-group records, and nothing in the group touches p1.
 
 Modes are **declared** in this file, never read off disk — `/mnt/c` reports every file 0777 and
@@ -59,8 +59,8 @@ See `SYSTEM_ANALYSIS.md#53-app-launcher-and-manifests`.
 Changing a file in this directory does **not** go out with a component deploy. Only
 `./provision.sh <ip>` (which ends in a reboot) or, for a new card image,
 `rootfs/commission-offline.sh` (run by `rootfs/make-card-image.sh --bundle`) installs it.
-The exceptions are the four **`usb`-group** scripts and the **`bluetooth`-group** files, which
-`cd usb_host` / `cd bluetooth` `&& ./build-and-deploy.sh <ip>` also installs, and which need no reboot.
+The exceptions are the four **`usb`-group** scripts and the **`bluetooth`-group** files and the **`backup`-group** files, which
+`cd usb_host` / `cd bluetooth` / `cd native_apps` `&& ./build-and-deploy.sh <ip>` also installs, and which need no reboot.
 
 ## Regressions
 

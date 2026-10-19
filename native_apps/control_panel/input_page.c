@@ -25,6 +25,7 @@
 #include "cp_ui.h"
 #include "../common/common.h"
 #include "../common/input_scan.h"
+#include "../common/remote_tap.h"
 #include "../common/ui_flow.h"
 
 #include <fcntl.h>
@@ -132,6 +133,8 @@ static InputPageState input_state;
 static Button input_btn_ktest, input_btn_mtest, input_btn_gtest;
 static Button input_btn_kback, input_btn_mback, input_btn_gback;
 static Button input_btn_multitouch;
+static Button input_btn_rtap;
+static bool   rtap_on;      /* the saved setting, mirrored for the button colour */
 static Button input_btn_calibrate, input_btn_touch_diag, input_btn_reset_geom;
 
 /* ── Key table ──────────────────────────────────────────────────────────── */
@@ -494,12 +497,14 @@ static const char *const test_labels[3] = { "KBD TEST", "MOUSE TEST", "PAD TEST"
 
 /* The touch tools' row: four slots, so each button keeps its place as the rest
  * join.  A NULL slot is not placed, drawn or counted. */
-enum { TOUCH_SLOT_CALIB, TOUCH_SLOT_DIAG, TOUCH_SLOT_MULTI, TOUCH_SLOT_RESET, TOUCH_SLOTS };
+enum { TOUCH_SLOT_CALIB, TOUCH_SLOT_DIAG, TOUCH_SLOT_MULTI, TOUCH_SLOT_RESET,
+       TOUCH_SLOT_RTAP, TOUCH_SLOTS };
 static Button *const touch_btns[TOUCH_SLOTS] = {
     [TOUCH_SLOT_CALIB] = &input_btn_calibrate,
     [TOUCH_SLOT_DIAG]  = &input_btn_touch_diag,
     [TOUCH_SLOT_MULTI] = &input_btn_multitouch,
     [TOUCH_SLOT_RESET] = &input_btn_reset_geom,
+    [TOUCH_SLOT_RTAP]  = &input_btn_rtap,
 };
 /* At most 14 characters: a landscape quarter (184 px) holds that at scale 2;
  * portrait wraps them into rows instead of shrinking the font. */
@@ -508,6 +513,7 @@ static const char *const touch_labels[TOUCH_SLOTS] = {
     [TOUCH_SLOT_DIAG]  = "DIAGNOSTIC",
     [TOUCH_SLOT_MULTI] = "MULTI-TOUCH",
     [TOUCH_SLOT_RESET] = "RESET GEOMETRY",
+    [TOUCH_SLOT_RTAP]  = "REMOTE TAP",
 };
 /* RESET is the escape hatch from a bad calibration, so it reads as danger;
  * the diagnostic, the one tool with every layer of interpretation removed,
@@ -517,6 +523,7 @@ static const uint32_t touch_colors[TOUCH_SLOTS] = {
     [TOUCH_SLOT_DIAG]  = RGB(100, 60, 120),
     [TOUCH_SLOT_MULTI] = BTN_COLOR_PRIMARY,
     [TOUCH_SLOT_RESET] = BTN_COLOR_DANGER,
+    [TOUCH_SLOT_RTAP]  = RGB(90, 90, 90),   /* grey = off; green while on, see input_sync_disabled() */
 };
 
 static int sec_touch_y;       /* the touch tools' section header */
@@ -789,6 +796,9 @@ static void input_sync_disabled(void) {
     input_btn_ktest.disabled = s->kbd_idx < 0;
     input_btn_mtest.disabled = s->mou_idx < 0;
     input_btn_gtest.disabled = s->pad_idx < 0;
+    /* REMOTE TAP shows its state by colour: green on, grey off. */
+    button_set_colors(&input_btn_rtap, rtap_on ? RGB(0, 150, 60) : RGB(90, 90, 90),
+                      COLOR_WHITE, RGB(0, 200, 80));
 }
 
 static void input_page_draw(Framebuffer *fb) {
@@ -1100,7 +1110,7 @@ static void draw_pad_test(Framebuffer *fb, InputPageState *s) {
 /* ── Input ──────────────────────────────────────────────────────────────── */
 
 static void input_page_load(const Config *cfg) {
-    (void)cfg;
+    rtap_on = remote_tap_enabled(cfg);
     InputPageState *s = &input_state;
     s->scr = INPUT_SCR_MAIN;
     s->fd_cnt = 0;
@@ -1160,6 +1170,17 @@ static CpPageResult input_page_input(Config *cfg, int tx, int ty,
     if (button_update(&input_btn_multitouch, tx, ty, touching, now)) {
         state->scr = INPUT_SCR_MULTITOUCH;
         act = CP_PAGE_FULLSCREEN;
+    }
+    if (button_update(&input_btn_rtap, tx, ty, touching, now)) {
+        /* Saved at once.  arca-tap polls the file, so OFF removes the virtual
+         * device within a second and no reboot is involved. */
+        rtap_on = !rtap_on;
+        remote_tap_set(cfg, rtap_on);
+        if (config_save(cfg) != 0)
+            cp_status("REMOTE TAP NOT SAVED", false);
+        else
+            cp_status(rtap_on ? "REMOTE TAP ON" : "REMOTE TAP OFF", true);
+        act = CP_PAGE_REDRAW;
     }
     if (button_update(&input_btn_ktest, tx, ty, touching, now)) {
         memset(&state->kbd, 0, sizeof(state->kbd));
@@ -1603,6 +1624,7 @@ static int input_page_focusables(UiRect *out, int max) {
 /* RESET DEFAULTS has already cleared slot_p1..slot_p4 from cfg; the manager's
  * live pins follow, or the page would keep showing pins the file lost. */
 static void input_page_reset_defaults(Config *cfg) {
+    rtap_on = remote_tap_enabled(cfg);   /* config_clear removed the key: off */
     for (int sl = 0; sl < INPUT_SLOTS; sl++)
         gamepad_slot_unpin(cp_gamepad(), sl, cfg);
 }

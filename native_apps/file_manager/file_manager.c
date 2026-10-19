@@ -35,6 +35,7 @@
 #include "../common/pointer.h"
 #include "../common/top_bar.h"
 #include "../common/ui_flow.h"
+#include "../common/usb_watch.h"
 #include "fm_core.h"
 
 #include <errno.h>
@@ -85,6 +86,7 @@ typedef struct {
 static Root roots[MAX_ROOTS];
 static int  n_roots;
 static bool have_helper;
+static unsigned usb_sig;       /* usb_disk_sig() when the roots were last built */
 
 /* Expert mode: the deeper, ordinary file manager (a SYSTEM root over "/",
  * absolute paths, enterable folder links, permissions in the rows).  Off by
@@ -135,6 +137,7 @@ static int run_storage(const char *verb, const char *arg, FmStLine *out, int max
 
 /* Rebuild the root list; mounts any stick that is plugged in and not yet mounted. */
 static int refresh_roots(void) {
+    usb_sig = usb_disk_sig();          /* before the mount: a node arriving during it is seen next */
     n_roots = 0;
     if (is_dir_path(DATA_DIR)) root_add("DATA", DATA_DIR, false, false, NULL);
     if (!is_dir_path(GAMES_DIR)) (void)mkdir(GAMES_DIR, 0755);
@@ -443,8 +446,10 @@ static void pane_sort_next(Pane *p) {
                p->sort == FM_SORT_SIZE ? " (LARGEST FIRST)" : p->sort == FM_SORT_DATE ? " (NEWEST FIRST)" : "");
 }
 
-/* After the root list changed: a pane inside a root that is gone goes back to the list. */
-static void panes_revalidate(void) {
+/* After the root list changed: a pane inside a root that is gone goes back to the
+ * list.  True when that was a USB stick (the status line already says so). */
+static bool panes_revalidate(void) {
+    bool dropped = false;
     for (int k = 0; k < 2; k++) {
         Pane *p = &P[k];
         if (p->mode == PM_ROOTS) { lv_reset(&p->lv); continue; }
@@ -452,12 +457,13 @@ static void panes_revalidate(void) {
         for (int i = 0; i < n_roots; i++)
             if (!roots[i].dim && !strcmp(roots[i].path, p->root)) { found = true; break; }
         if (!found) {
-            if (p->root_usb) set_status(ST_WARN, "THE STICK IS GONE");
+            if (p->root_usb) { set_status(ST_WARN, "THE STICK IS GONE"); dropped = true; }
             pane_open_roots(p);
         } else {
             pane_reload(p);
         }
     }
+    return dropped;
 }
 
 /* ── layout and widgets ──────────────────────────────────────────────────── */
@@ -984,12 +990,26 @@ static void roots_remove(const char *path) {
         }
 }
 
-static void do_rescan(void) {
-    busy_banner("LOOKING FOR USB STICKS...");
+static void rescan(const char *banner) {
+    busy_banner(banner);
     int sticks = refresh_roots();
-    panes_revalidate();
+    bool dropped = panes_revalidate();
     if (!have_helper) set_status(ST_WARN, "NO USB SUPPORT ON THIS SYSTEM");
-    else set_status(ST_OK, "%d USB STICK%s READY", sticks, sticks == 1 ? "" : "S");
+    else if (!dropped) set_status(ST_OK, "%d USB STICK%s READY", sticks, sticks == 1 ? "" : "S");
+}
+
+static void do_rescan(void) { rescan("LOOKING FOR USB STICKS..."); }
+
+/* Once a second, when nothing else holds the screen (not during a copy or a
+ * dialog): a disk node that appeared or went in /dev re-runs the mount step
+ * and rebuilds the roots.  A pane inside a stick that went drops to the list. */
+static bool usb_follow(uint32_t now) {
+    static uint32_t next_ms;
+    if ((int32_t)(now - next_ms) < 0) return false;
+    next_ms = now + 1000;
+    if (usb_disk_sig() == usb_sig) return false;
+    rescan("READING USB...");
+    return true;
 }
 
 static void do_eject(void) {
@@ -1125,6 +1145,10 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "file_manager: cannot open framebuffer %s\n", fb_device);
         return 1;
     }
+    /* First frame before anything blocks (touch/config/mount); the screen is black until a frame is shown. */
+    fb_clear(&fb, COLOR_BG);
+    text_draw_centered(&fb, fb.width / 2, fb.height / 2, "LOADING...", COLOR_WHITE, 3);
+    fb_swap(&fb);
     TouchInput touch;
     if (touch_init(&touch, touch_device) < 0) {
         fprintf(stderr, "file_manager: cannot open touch %s\n", touch_device);
@@ -1176,6 +1200,9 @@ int main(int argc, char *argv[]) {
         btn[B_EJECT].disabled = eject_off;
         if (eject_off != prev_eject_off) { prev_eject_off = eject_off; needs_redraw = true; }
         if (bar_focus >= 0 && btn[bar_focus].disabled) bar_focus = bar_next(bar_focus, 1);
+
+        /* A plug or pull in /dev: not while a copy runs or a dialog is open. */
+        if (!job_active && !dlg.active && usb_follow(now)) needs_redraw = true;
 
         if (needs_redraw) {
             draw_all(&fb, &in);

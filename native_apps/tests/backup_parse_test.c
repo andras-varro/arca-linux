@@ -34,10 +34,6 @@ int main(void) {
     CHECK(!bk_parse_item("items a unit=no secret=no reboot=no x", &it));
     CHECK(!bk_parse_item("item ../x unit=no secret=no reboot=no x", &it));
     CHECK(!bk_parse_item("", &it) && !bk_parse_item(NULL, &it));
-    CHECK(bk_is_disk_name("sda") && bk_is_disk_name("sda1") && bk_is_disk_name("sdb12"));
-    CHECK(bk_is_disk_name("sdaa"));
-    CHECK(!bk_is_disk_name("sd") && !bk_is_disk_name("sd1") && !bk_is_disk_name("sda1x"));
-    CHECK(!bk_is_disk_name("sdcard") && !bk_is_disk_name("mmcblk0") && !bk_is_disk_name("") && !bk_is_disk_name(NULL));
     /* B */
     char a[64], h[32], v[32], d[32];
     CHECK(bk_parse_archive("archive ludbox-backup-arca-1a2b-2026-10-18.tar.gz\n", a, sizeof a));
