@@ -52,12 +52,14 @@ static JfItemType type_of(const char *s, const JsonTok *t, int n, int o)
 {
     int i = json_obj_get(s, t, n, o, "Type");
     if (i < 0 || t[i].type != JSON_STRING) return JF_ITEM_NONE;
-    char ty[16];
+    char ty[16];   /* "MusicGenre" is the longest type kept (10) */
     int r = json_str(s, &t[i], ty, sizeof ty);
     if (r < 0 || r >= (int)sizeof ty) return JF_ITEM_NONE;
     if (!strcmp(ty, "MusicArtist")) return JF_ITEM_ARTIST;
     if (!strcmp(ty, "MusicAlbum")) return JF_ITEM_ALBUM;
     if (!strcmp(ty, "Audio")) return JF_ITEM_TRACK;
+    if (!strcmp(ty, "Playlist")) return JF_ITEM_PLAYLIST;
+    if (!strcmp(ty, "MusicGenre")) return JF_ITEM_GENRE;
     return JF_ITEM_NONE;
 }
 
@@ -76,7 +78,7 @@ static void read_item(const char *s, const JsonTok *t, int n, int o, JfItem *it)
     i = json_obj_get(s, t, n, o, "NormalizationGain");
     if (i >= 0 && json_num(s, &t[i], &d)) it->norm_gain_mdb = gain_mdb(d);
 
-    if (it->type == JF_ITEM_ARTIST) return;
+    if (it->type == JF_ITEM_ARTIST || it->type == JF_ITEM_GENRE || it->type == JF_ITEM_PLAYLIST) return;
     sfield(s, t, n, o, "Album", it->album, sizeof it->album);
     if (sfield(s, t, n, o, "AlbumArtist", it->artist, sizeof it->artist)) return;
     i = json_obj_get(s, t, n, o, "Artists");

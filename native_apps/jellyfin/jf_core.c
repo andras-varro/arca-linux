@@ -70,15 +70,29 @@ static bool have_token(const JfApp *app) { return app->login.token[0] != '\0'; }
 
 /* ── list requests ─────────────────────────────────────────────────────── */
 
+static const char *const CAT_NAME[JF_CAT_COUNT] = { "ALBUMS", "ARTISTS", "PLAYLISTS", "GENRES", "SONGS" };
+
 static int build_path(const JfApp *app, int lid, int start, char *out, size_t cap)
 {
     const char *uid = app->login.user_id;
     const char *id = app->ctx[lid].id;
+    int sub = app->ctx[lid].sub;
     int lim = PAGE[lid];
     switch (lid) {
-    case JF_LIST_ARTISTS: return jf_path_artists(out, cap, uid, start, lim);
-    case JF_LIST_ALBUMS:  return jf_path_albums(out, cap, uid, id, start, lim);
-    case JF_LIST_TRACKS:  return jf_path_tracks(out, cap, uid, id, start, lim);
+    case JF_LIST_ARTISTS:
+        switch (app->cat) {
+        case JF_CAT_ALBUMS:    return jf_path_albums_all(out, cap, uid, start, lim);
+        case JF_CAT_PLAYLISTS: return jf_path_playlists(out, cap, uid, start, lim);
+        case JF_CAT_GENRES:    return jf_path_genres(out, cap, uid, start, lim);
+        case JF_CAT_SONGS:     return jf_path_songs(out, cap, uid, start, JF_PAGE_TRACKS);
+        default:               return jf_path_artists(out, cap, uid, start, lim);
+        }
+    case JF_LIST_ALBUMS:
+        return sub == JF_SUB_GENRE ? jf_path_genre_albums(out, cap, uid, id, start, lim)
+                                   : jf_path_albums(out, cap, uid, id, start, lim);
+    case JF_LIST_TRACKS:
+        return sub == JF_SUB_PLAYLIST ? jf_path_playlist_items(out, cap, uid, id, start, lim)
+                                      : jf_path_tracks(out, cap, uid, id, start, lim);
     default:              return jf_path_search(out, cap, uid, id, start, lim);
     }
 }
@@ -104,9 +118,10 @@ static bool request_page(JfApp *app, int lid, int start, JfCmds *out)
 }
 
 /* Point a list at a new subject: empty it, bump its generation, ask for page one. */
-static void retarget(JfApp *app, int lid, const char *id, const char *title, JfCmds *out)
+static void retarget(JfApp *app, int lid, const char *id, const char *title, int sub, JfCmds *out)
 {
     JfList *l = &app->lists[lid];
+    app->ctx[lid].sub = sub;
     copy(app->ctx[lid].id, sizeof(app->ctx[lid].id), id);
     copy(app->ctx[lid].title, sizeof(app->ctx[lid].title), title);
     jf_list_clear(l);
@@ -127,17 +142,18 @@ static void nav_push(JfApp *app)
     JfNavEntry *e = &app->nav[app->nav_n++];
     int lid = cur_list(app);
     e->screen = app->screen;
+    e->sub = lid >= 0 ? app->ctx[lid].sub : 0;
     copy(e->id, sizeof(e->id), lid >= 0 ? app->ctx[lid].id : "");
     copy(e->title, sizeof(e->title), lid >= 0 ? app->ctx[lid].title : "");
 }
 
 /* Show a list screen on a new subject, with the current screen below it. */
-static void enter(JfApp *app, JfScreen scr, const char *id, const char *title, JfCmds *out)
+static void enter(JfApp *app, JfScreen scr, const char *id, const char *title, int sub, JfCmds *out)
 {
     int lid = list_of_screen(scr);
     nav_push(app);
     app->screen = scr;
-    retarget(app, lid, id, title, out);
+    retarget(app, lid, id, title, sub, out);
 }
 
 static void pop(JfApp *app, JfCmds *out)
@@ -148,8 +164,8 @@ static void pop(JfApp *app, JfCmds *out)
     int lid = list_of_screen(e.screen);
     /* The list is shared by every visit to its screen: if another visit
      * re-aimed it, aim it back rather than show the wrong rows. */
-    if (lid >= 0 && strcmp(app->ctx[lid].id, e.id) != 0)
-        retarget(app, lid, e.id, e.title, out);
+    if (lid >= 0 && (strcmp(app->ctx[lid].id, e.id) != 0 || app->ctx[lid].sub != e.sub))
+        retarget(app, lid, e.id, e.title, e.sub, out);
 }
 
 static void go_signin(JfApp *app)
@@ -165,7 +181,7 @@ static void refresh(JfApp *app)
     app->list = lid >= 0 ? &app->lists[lid] : NULL;
     switch (app->screen) {
     case JF_SCR_SIGNIN:     copy(app->crumb, sizeof(app->crumb), "SIGN IN"); break;
-    case JF_SCR_ARTISTS:    copy(app->crumb, sizeof(app->crumb), "ARTISTS"); break;
+    case JF_SCR_ARTISTS:    copy(app->crumb, sizeof(app->crumb), CAT_NAME[app->cat]); break;
     case JF_SCR_ALBUMS:
     case JF_SCR_TRACKS:     copy(app->crumb, sizeof(app->crumb), app->ctx[lid].title); break;
     case JF_SCR_SEARCH:     snprintf(app->crumb, sizeof(app->crumb), "SEARCH: %s", app->ctx[lid].id); break;
@@ -297,7 +313,8 @@ static void on_auth(JfApp *app, const JfResult *r, JfCmds *out)
     emit(out, JF_CMD_SAVE_LOGIN);
     app->nav_n = 0;
     app->screen = JF_SCR_ARTISTS;
-    retarget(app, JF_LIST_ARTISTS, "", "ARTISTS", out);
+    app->cat = JF_CAT_ARTISTS;
+    retarget(app, JF_LIST_ARTISTS, "", CAT_NAME[app->cat], JF_SUB_PLAIN, out);
 }
 
 static void on_list(JfApp *app, const JfResult *r, JfCmds *out)
@@ -370,7 +387,8 @@ static void on_start(JfApp *app, const JfLogin *lg, JfCmds *out)
         c->port = port;
         emit(out, JF_CMD_SET_AUTH);
         app->screen = JF_SCR_ARTISTS;
-        retarget(app, JF_LIST_ARTISTS, "", "ARTISTS", out);
+        app->cat = JF_CAT_ARTISTS;
+        retarget(app, JF_LIST_ARTISTS, "", CAT_NAME[app->cat], JF_SUB_PLAIN, out);
     } else {
         go_signin(app);
     }
@@ -411,8 +429,10 @@ static void on_activate(JfApp *app, int i, JfCmds *out)
     if (lid < 0 || i < 0 || i >= app->lists[lid].n) return;
     const JfItem *it = &app->lists[lid].items[i];
     switch (it->type) {
-    case JF_ITEM_ARTIST: enter(app, JF_SCR_ALBUMS, it->id, it->name, out); break;
-    case JF_ITEM_ALBUM:  enter(app, JF_SCR_TRACKS, it->id, it->name, out); break;
+    case JF_ITEM_ARTIST:   enter(app, JF_SCR_ALBUMS, it->id, it->name, JF_SUB_PLAIN, out); break;
+    case JF_ITEM_GENRE:    enter(app, JF_SCR_ALBUMS, it->id, it->name, JF_SUB_GENRE, out); break;
+    case JF_ITEM_ALBUM:    enter(app, JF_SCR_TRACKS, it->id, it->name, JF_SUB_PLAIN, out); break;
+    case JF_ITEM_PLAYLIST: enter(app, JF_SCR_TRACKS, it->id, it->name, JF_SUB_PLAYLIST, out); break;
     case JF_ITEM_TRACK:  play_from(app, lid, i, out); break;
     default: break;
     }
@@ -465,8 +485,8 @@ static void on_search(JfApp *app, const char *term, JfCmds *out)
     if (cur_list(app) < 0) return;
     char t[96];
     copy(t, sizeof(t), term);
-    if (app->screen == JF_SCR_SEARCH) retarget(app, JF_LIST_SEARCH, t, "", out);
-    else enter(app, JF_SCR_SEARCH, t, "", out);
+    if (app->screen == JF_SCR_SEARCH) retarget(app, JF_LIST_SEARCH, t, "", JF_SUB_PLAIN, out);
+    else enter(app, JF_SCR_SEARCH, t, "", JF_SUB_PLAIN, out);
 }
 
 static void on_back(JfApp *app, JfCmds *out)
@@ -477,6 +497,14 @@ static void on_back(JfApp *app, JfCmds *out)
         return;
     }
     pop(app, out);
+}
+
+/* Root level only: step the category and reload the root list (the nav stack is empty, so it does not grow). */
+static void on_category(JfApp *app, int dir, JfCmds *out)
+{
+    if (app->screen != JF_SCR_ARTISTS || app->nav_n != 0 || !have_token(app) || dir == 0) return;
+    app->cat = (JfCat)((app->cat + (dir > 0 ? 1 : JF_CAT_COUNT - 1)) % JF_CAT_COUNT);
+    retarget(app, JF_LIST_ARTISTS, "", CAT_NAME[app->cat], JF_SUB_PLAIN, out);
 }
 
 static void on_need_more(JfApp *app, JfCmds *out)
@@ -504,6 +532,7 @@ void jf_app_init(JfApp *app)
     jf_list_init(&app->lists[JF_LIST_ALBUMS], app->store_albums, JF_CAP_ALBUMS);
     jf_list_init(&app->lists[JF_LIST_TRACKS], app->store_tracks, JF_CAP_TRACKS);
     jf_list_init(&app->lists[JF_LIST_SEARCH], app->store_search, JF_CAP_SEARCH);
+    app->cat = JF_CAT_ARTISTS;
     app->session_fn = jf_session_id;
     app->volume_step = JF_VOLUME_DEFAULT;
     app->login.volume_step = JF_VOLUME_DEFAULT;
@@ -556,6 +585,7 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
     case JF_EV_VOL_DOWN: on_volume(app, -1, out); break;
     case JF_EV_SEARCH:   on_search(app, ev->term, out); break;
     case JF_EV_NEED_MORE: on_need_more(app, out); break;
+    case JF_EV_CATEGORY: on_category(app, ev->i, out); break;
     case JF_EV_OPEN_NOWPLAYING:
         if (cur_list(app) >= 0 && app->queue_n > 0) { nav_push(app); app->screen = JF_SCR_NOWPLAYING; }
         break;

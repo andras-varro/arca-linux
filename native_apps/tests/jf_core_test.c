@@ -523,10 +523,95 @@ static void test_quit(void)
     CHECK(sizeof(JfApp) < 2000000, "JfApp stays small enough to be static (%zu)", sizeof(JfApp));
 }
 
+/* The root category: ALBUMS <-> ARTISTS <-> PLAYLISTS <-> GENRES <-> SONGS, default ARTISTS. */
+static void test_categories(void)
+{
+    char want[JF_PATH_MAX];
+    signed_in(); artists_loaded(3, 3);
+    CHECK(app.cat == JF_CAT_ARTISTS && strcmp(app.crumb, "ARTISTS") == 0, "default category ARTISTS");
+
+    /* the full cycle forward from ARTISTS, wrapping, with the request each step makes */
+    send(JF_EV_CATEGORY, 1);
+    jf_path_playlists(want, sizeof(want), UID, 0, JF_PAGE_ARTISTS);
+    CHECK(app.cat == JF_CAT_PLAYLISTS && find(JF_CMD_REQUEST) && strcmp(find(JF_CMD_REQUEST)->path, want) == 0,
+          "ARTISTS > PLAYLISTS requests the playlists");
+    CHECK(strcmp(app.crumb, "PLAYLISTS") == 0 && app.nav_n == 0 && app.screen == JF_SCR_ARTISTS, "root replaced, no stack growth");
+    send(JF_EV_CATEGORY, 1);
+    jf_path_genres(want, sizeof(want), UID, 0, JF_PAGE_ARTISTS);
+    CHECK(app.cat == JF_CAT_GENRES && strcmp(find(JF_CMD_REQUEST)->path, want) == 0, "> GENRES");
+    send(JF_EV_CATEGORY, 1);
+    jf_path_songs(want, sizeof(want), UID, 0, JF_PAGE_TRACKS);
+    CHECK(app.cat == JF_CAT_SONGS && strcmp(find(JF_CMD_REQUEST)->path, want) == 0, "> SONGS pages by the track page size");
+    send(JF_EV_CATEGORY, 1);
+    jf_path_albums_all(want, sizeof(want), UID, 0, JF_PAGE_ARTISTS);
+    CHECK(app.cat == JF_CAT_ALBUMS && strcmp(find(JF_CMD_REQUEST)->path, want) == 0, "SONGS wraps to ALBUMS");
+    send(JF_EV_CATEGORY, 1);
+    jf_path_artists(want, sizeof(want), UID, 0, JF_PAGE_ARTISTS);
+    CHECK(app.cat == JF_CAT_ARTISTS && strcmp(find(JF_CMD_REQUEST)->path, want) == 0, "ALBUMS > ARTISTS");
+    send(JF_EV_CATEGORY, -1);
+    send(JF_EV_CATEGORY, -1);
+    CHECK(app.cat == JF_CAT_SONGS, "backwards from ALBUMS wraps to SONGS (cat %d)", app.cat);
+
+    /* the old request is superseded: its late reply changes nothing, and the new list is the one pending */
+    JfCmd songs = *find(JF_CMD_REQUEST);
+    send(JF_EV_CATEGORY, -1);                       /* SONGS -> GENRES while songs is in flight */
+    JfCmd genres = *find(JF_CMD_REQUEST);
+    reply_raw(&songs, JF_ERR_NONE);                /* jf_api would have cancelled it; a late one must still change nothing */
+    CHECK(app.lists[JF_LIST_ARTISTS].n == 0 && app.lists[JF_LIST_ARTISTS].pending, "a stale category reply is dropped");
+    reply_list(&genres, JF_ITEM_GENRE, 2, 1120);
+    CHECK(app.lists[JF_LIST_ARTISTS].n == 2 && app.lists[JF_LIST_ARTISTS].total == 1120 && !app.busy, "genres shown");
+
+    /* genre -> its albums -> tracks, BACK walks home without reloading the root */
+    send(JF_EV_ACTIVATE, 1);
+    jf_path_genre_albums(want, sizeof(want), UID, app.lists[JF_LIST_ARTISTS].items[1].id, 0, JF_PAGE_ALBUMS);
+    CHECK(app.screen == JF_SCR_ALBUMS && strcmp(find(JF_CMD_REQUEST)->path, want) == 0, "genre opens its albums");
+    CHECK(strcmp(app.crumb, app.lists[JF_LIST_ARTISTS].items[1].name) == 0, "crumb = genre name");
+    JfCmd alb = *find(JF_CMD_REQUEST);
+    send(JF_EV_CATEGORY, 1);
+    CHECK(app.cat == JF_CAT_GENRES && app.screen == JF_SCR_ALBUMS && cm.n == 0, "no category switch below the root");
+    reply_list(&alb, JF_ITEM_ALBUM, 2, 2);
+    send(JF_EV_ACTIVATE, 0);
+    jf_path_tracks(want, sizeof(want), UID, app.lists[JF_LIST_ALBUMS].items[0].id, 0, JF_PAGE_TRACKS);
+    CHECK(app.screen == JF_SCR_TRACKS && strcmp(find(JF_CMD_REQUEST)->path, want) == 0, "a genre's album opens as a plain album");
+    send(JF_EV_BACK, 0); send(JF_EV_BACK, 0);
+    CHECK(app.screen == JF_SCR_ARTISTS && app.cat == JF_CAT_GENRES && app.lists[JF_LIST_ARTISTS].n == 2 && !has(JF_CMD_REQUEST),
+          "BACK x2 returns to the genre list, not reloaded");
+    send(JF_EV_BACK, 0);
+    CHECK(has(JF_CMD_EXIT), "BACK at the root leaves");
+
+    /* playlist -> its tracks (playlist path), PLAY ALL, BACK */
+    signed_in(); artists_loaded(3, 3);
+    send(JF_EV_CATEGORY, 1);
+    JfCmd pl = *find(JF_CMD_REQUEST); reply_list(&pl, JF_ITEM_PLAYLIST, 1, 1);
+    send(JF_EV_ACTIVATE, 0);
+    jf_path_playlist_items(want, sizeof(want), UID, app.lists[JF_LIST_ARTISTS].items[0].id, 0, JF_PAGE_TRACKS);
+    CHECK(app.screen == JF_SCR_TRACKS && strcmp(find(JF_CMD_REQUEST)->path, want) == 0, "playlist opens its items");
+    JfCmd pt = *find(JF_CMD_REQUEST); reply_list(&pt, JF_ITEM_TRACK, 3, 3);
+    send(JF_EV_PLAY_ALL, 0);
+    CHECK(has(JF_CMD_PLAY_STREAM) && app.queue_n == 3, "PLAY ALL on a playlist queues its tracks");
+    send(JF_EV_BACK, 0);
+    CHECK(app.screen == JF_SCR_ARTISTS && app.cat == JF_CAT_PLAYLISTS && app.lists[JF_LIST_ARTISTS].n == 1 && !has(JF_CMD_REQUEST),
+          "BACK from a playlist returns to PLAYLISTS");
+
+    /* a song row plays; its page extends through NEED_MORE */
+    send(JF_EV_CATEGORY, 1); send(JF_EV_CATEGORY, 1);
+    JfCmd sg = *find(JF_CMD_REQUEST); reply_list(&sg, JF_ITEM_TRACK, 25, 39280);
+    send(JF_EV_NEED_MORE, 0);
+    jf_path_songs(want, sizeof(want), UID, 25, JF_PAGE_TRACKS);
+    CHECK(strcmp(find(JF_CMD_REQUEST)->path, want) == 0, "SONGS pages with StartIndex 25");
+    send(JF_EV_ACTIVATE, 2);
+    CHECK(has(JF_CMD_PLAY_STREAM) && app.queue_n == 25 - 2, "a song row queues from the row on");
+
+    /* the search screen is not the root: no switching there */
+    send_text(JF_EV_SEARCH, "blue");
+    send(JF_EV_CATEGORY, 1);
+    CHECK(app.screen == JF_SCR_SEARCH && cm.n == 0, "no category switch on SEARCH");
+}
+
 int main(void)
 {
     test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue();
-    test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit();
+    test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit(); test_categories();
     printf("jf_core_test: %d checks, %d failures\n", checks, fails);
     return fails ? 1 : 0;
 }

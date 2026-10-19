@@ -31,7 +31,8 @@
 #include "jf_api.h"
 
 /* Page sizes (items per request) and storage caps per list.  The artists cap
- * covers the 1505 album artists of the test server; past a cap the list is `full`
+ * covers the 1505 album artists and the 1120 genres of the test server (the root list
+ * also holds albums, playlists and songs: of 39280 songs it keeps the first 1600); past a cap the list is `full`
  * and paging stops (search is the way to reach the rest). */
 #define JF_PAGE_ARTISTS   50
 #define JF_PAGE_ALBUMS    30
@@ -52,6 +53,13 @@ typedef enum { JF_SCR_SIGNIN = 0, JF_SCR_ARTISTS, JF_SCR_ALBUMS, JF_SCR_TRACKS,
                JF_SCR_SEARCH, JF_SCR_NOWPLAYING, JF_SCR_QUEUE } JfScreen;
 
 typedef enum { JF_LIST_ARTISTS = 0, JF_LIST_ALBUMS, JF_LIST_TRACKS, JF_LIST_SEARCH, JF_LIST_COUNT } JfListId;
+
+/* The root browse category (JF_SCR_ARTISTS shows it), in the order JF_EV_CATEGORY cycles. */
+typedef enum { JF_CAT_ALBUMS = 0, JF_CAT_ARTISTS, JF_CAT_PLAYLISTS, JF_CAT_GENRES, JF_CAT_SONGS, JF_CAT_COUNT } JfCat;
+
+/* What an ALBUMS or TRACKS list is the child of: ALBUMS of an artist (plain) or of a genre,
+ * TRACKS of an album (plain) or of a playlist. */
+typedef enum { JF_SUB_PLAIN = 0, JF_SUB_GENRE, JF_SUB_PLAYLIST } JfSub;
 
 typedef enum { JF_PLAY_IDLE = 0, JF_PLAY_FETCHING, JF_PLAY_PLAYING, JF_PLAY_END } JfPlayState;
 
@@ -77,6 +85,7 @@ typedef enum {
     JF_EV_RETRY,         /* overlay button */
     JF_EV_CLOSE_ERROR,   /* overlay button */
     JF_EV_NEED_MORE,     /* the list cursor is near the end of the loaded rows */
+    JF_EV_CATEGORY,      /* .i: +1 next, -1 previous root category; only at the root (ARTISTS screen, nav empty) */
     JF_EV_QUIT,          /* the X / EXIT button */
     /* results and audio facts */
     JF_EV_RESULT,        /* .res: a copy of the JfResult from jf_api_poll */
@@ -138,12 +147,13 @@ typedef struct {
 
 typedef bool (*JfSessionFn)(char out[33]);
 
-typedef struct { JfScreen screen; char id[96]; char title[96]; } JfNavEntry;
-typedef struct { char id[96]; char title[96]; } JfListCtx;
+typedef struct { JfScreen screen; char id[96]; char title[96]; int sub; } JfNavEntry;
+typedef struct { char id[96]; char title[96]; int sub; } JfListCtx;
 
 typedef struct {
     /* ── what the UI reads ─────────────────────────────────────────────── */
     JfScreen screen;
+    JfCat cat;               /* the root category; the list on the ARTISTS screen holds it (JF_LIST_ARTISTS slot) */
     JfList *list;            /* the list to draw on ARTISTS/ALBUMS/TRACKS/SEARCH; NULL otherwise.
                               * Rows are list->items[0..n); n < total means more pages exist. */
     char crumb[160];         /* title text for the top bar */

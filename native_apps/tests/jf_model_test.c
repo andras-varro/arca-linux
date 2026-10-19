@@ -278,7 +278,7 @@ static void test_skips_and_cap(void)
 
     /* skipped but counted: unknown Type, non-hex Id, short Id, no Id, no Type, non-object */
     jf_list_init(&l, it, 4);
-    CHECK(parse("{\"Items\":[{\"Id\":\"" ID1 "\",\"Type\":\"Playlist\",\"Name\":\"p\"},"
+    CHECK(parse("{\"Items\":[{\"Id\":\"" ID1 "\",\"Type\":\"Folder\",\"Name\":\"p\"},"
                 "{\"Id\":\"zz000000000000000000000000000001\",\"Type\":\"Audio\"},"
                 "{\"Id\":\"0000000000000000000000000000001\",\"Type\":\"Audio\"},"
                 "{\"Id\":\"" ID1 "0\",\"Type\":\"Audio\"},"
@@ -288,12 +288,26 @@ static void test_skips_and_cap(void)
     CHECK(!strcmp(it[0].name, "keep") && it[0].type == JF_ITEM_ALBUM, "the valid one is kept");
     /* skipped items never mark the list full */
     jf_list_init(&l, it, 1);
-    parse("{\"Items\":[{\"Id\":\"" ID1 "\",\"Type\":\"Audio\"},{\"Id\":\"" ID2 "\",\"Type\":\"Playlist\"}]}", &l);
+    parse("{\"Items\":[{\"Id\":\"" ID1 "\",\"Type\":\"Audio\"},{\"Id\":\"" ID2 "\",\"Type\":\"Folder\"}]}", &l);
     CHECK(l.n == 1 && !l.full && l.loaded == 2, "a skipped type is not a dropped item");
     /* uppercase hex is accepted */
     jf_list_init(&l, it, 1);
     parse("{\"Items\":[{\"Id\":\"ABCDEF00000000000000000000000001\",\"Type\":\"Audio\"}]}", &l);
     CHECK(l.n == 1, "uppercase hex id");
+}
+
+/* Playlists and genres are kept: name and id only, and the id is checked like any other. */
+static void test_root_types(void)
+{
+    JfItem it[4];
+    JfList l;
+    jf_list_init(&l, it, 4);
+    CHECK(parse("{\"Items\":[{\"Name\":\"Mix\",\"Id\":\"" ID1 "\",\"Type\":\"Playlist\",\"Album\":\"x\",\"AlbumArtist\":\"y\"},"
+                "{\"Name\":\"Jazz\",\"Id\":\"" ID2 "\",\"Type\":\"MusicGenre\"},"
+                "{\"Name\":\"Bad\",\"Id\":\"nothex\",\"Type\":\"MusicGenre\"}],\"TotalRecordCount\":1120}", &l) == JF_PARSE_OK, "root types page");
+    CHECK(l.n == 2 && l.loaded == 3 && l.total == 1120, "n=%d loaded=%d total=%d", l.n, l.loaded, l.total);
+    CHECK(it[0].type == JF_ITEM_PLAYLIST && !strcmp(it[0].name, "Mix") && !it[0].album[0] && !it[0].artist[0], "playlist");
+    CHECK(it[1].type == JF_ITEM_GENRE && !strcmp(it[1].name, "Jazz"), "genre");
 }
 
 static const char AUTH[] =
@@ -355,6 +369,7 @@ int main(void)
     test_prefixes();
     test_failures();
     test_skips_and_cap();
+    test_root_types();
     test_auth();
     printf("jf_model_test: %d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;

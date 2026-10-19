@@ -23,7 +23,8 @@
 /** Token budget for one page (~20 B per JsonTok = ~100 KB); a page of 50 tracks with MediaSources noise fits. */
 #define JF_TOKENS_PAGE  5000
 
-typedef enum { JF_ITEM_NONE = 0, JF_ITEM_ARTIST, JF_ITEM_ALBUM, JF_ITEM_TRACK } JfItemType;
+typedef enum { JF_ITEM_NONE = 0, JF_ITEM_ARTIST, JF_ITEM_ALBUM, JF_ITEM_TRACK,
+               JF_ITEM_PLAYLIST, JF_ITEM_GENRE } JfItemType;
 
 typedef struct {
     char id[33];

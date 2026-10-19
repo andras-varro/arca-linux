@@ -117,6 +117,51 @@ int jf_path_search(char *out, size_t cap, const char *uid, const char *term, int
                         "&SearchTerm=%s&StartIndex=%d&Limit=%d", uid, enc, start, limit), cap);
 }
 
+int jf_path_albums_all(char *out, size_t cap, const char *uid, int start, int limit)
+{
+    if (!jf_id_valid(uid)) return -1;
+    return fin(snprintf(out, cap,
+                        "/Items?userId=%s&IncludeItemTypes=MusicAlbum&Recursive=true"
+                        "&SortBy=SortName&StartIndex=%d&Limit=%d", uid, start, limit), cap);
+}
+
+int jf_path_playlists(char *out, size_t cap, const char *uid, int start, int limit)
+{
+    if (!jf_id_valid(uid)) return -1;
+    return fin(snprintf(out, cap,
+                        "/Items?userId=%s&IncludeItemTypes=Playlist&Recursive=true"
+                        "&StartIndex=%d&Limit=%d", uid, start, limit), cap);
+}
+
+int jf_path_genres(char *out, size_t cap, const char *uid, int start, int limit)
+{
+    if (!jf_id_valid(uid)) return -1;
+    return fin(snprintf(out, cap, "/MusicGenres?userId=%s&StartIndex=%d&Limit=%d", uid, start, limit), cap);
+}
+
+int jf_path_songs(char *out, size_t cap, const char *uid, int start, int limit)
+{
+    if (!jf_id_valid(uid)) return -1;
+    return fin(snprintf(out, cap,
+                        "/Items?userId=%s&IncludeItemTypes=Audio&Recursive=true"
+                        "&SortBy=SortName&StartIndex=%d&Limit=%d", uid, start, limit), cap);
+}
+
+int jf_path_playlist_items(char *out, size_t cap, const char *uid, const char *playlist_id, int start, int limit)
+{
+    if (!jf_id_valid(uid) || !jf_id_valid(playlist_id)) return -1;
+    return fin(snprintf(out, cap, "/Playlists/%s/Items?userId=%s&StartIndex=%d&Limit=%d",
+                        playlist_id, uid, start, limit), cap);
+}
+
+int jf_path_genre_albums(char *out, size_t cap, const char *uid, const char *genre_id, int start, int limit)
+{
+    if (!jf_id_valid(uid) || !jf_id_valid(genre_id)) return -1;
+    return fin(snprintf(out, cap,
+                        "/Items?userId=%s&GenreIds=%s&IncludeItemTypes=MusicAlbum&Recursive=true"
+                        "&SortBy=SortName&StartIndex=%d&Limit=%d", uid, genre_id, start, limit), cap);
+}
+
 int jf_path_stream(char *out, size_t cap, const char *id, const char *session_id)
 {
     if (!jf_id_valid(id) || !jf_id_valid(session_id)) return -1;

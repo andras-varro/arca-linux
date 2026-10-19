@@ -25,6 +25,8 @@
 #define JF_UI_ROW5   5     /* now playing: NEXT, VOL-, VOL+, QUEUE, BACK */
 #define JF_UI_FIELDS 3     /* sign-in: SERVER, USER, PASSWORD */
 #define JF_UI_BTN_H  44
+#define JF_UI_CAT_H  40     /* root category strip: arrows and name */
+#define JF_UI_CAT_W  72     /* one arrow */
 
 /* The screen the layout is taken against (SCREEN_* macros in the app). */
 typedef struct {
@@ -37,6 +39,9 @@ typedef struct {
     UiRect banner;                  /* notice / busy line under the bar */
     UiRect list;                    /* browse list (above the row) */
     UiRect list_full;               /* the queue list: no button row under it */
+    UiRect list_root;               /* the browse list on the root screen: under the category strip */
+    UiRect cat_prev, cat_next;      /* root category arrows, pressable */
+    UiRect cat_label;               /* root category name and count, drawn only */
     UiRect row3[JF_UI_ROW3];        /* pressable */
     UiRect row5[JF_UI_ROW5];        /* pressable */
     UiRect field[JF_UI_FIELDS];     /* sign-in rows, pressable */
@@ -64,6 +69,8 @@ typedef struct {
     bool dlg_up;
     unsigned dlg_buttons;
     JfScreen last_screen;
+    JfCat last_cat;
+    Button cat_btn[2];
     bool lv_ready;
     char fields[JF_UI_FIELDS][64];       /* server, user, password (wiped after the POST) */
     int  focus;                          /* index in the zone (sign-in: 0..4) */

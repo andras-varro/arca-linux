@@ -38,6 +38,11 @@ void jf_ui_layout(JfLayout *L, const JfExtents *e)
     int rowy = e->safe_b - JF_UI_BTN_H - 4;
     L->list = rect_of(sl, top, sw, rowy - 4 - top);
     L->list_full = rect_of(sl, top, sw, e->safe_b - 4 - top);
+    int ctop = top + JF_UI_CAT_H + 4;
+    L->list_root = rect_of(sl, ctop, sw, rowy - 4 - ctop);
+    L->cat_prev = rect_of(sl, top, JF_UI_CAT_W, JF_UI_CAT_H);
+    L->cat_next = rect_of(sl + sw - JF_UI_CAT_W, top, JF_UI_CAT_W, JF_UI_CAT_H);
+    L->cat_label = rect_of(sl + JF_UI_CAT_W + GAP, top, sw - 2 * (JF_UI_CAT_W + GAP), JF_UI_CAT_H);
 
     int w3 = (sw - 2 * GAP) / 3;
     for (int i = 0; i < JF_UI_ROW3; i++)
@@ -140,8 +145,11 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
     for (int i = 0; i < JF_UI_FIELDS; i++) style(&ui->field[i], ui->L.field[i], "", 2);
     style(&ui->signin, ui->L.signin, "SIGN IN", 3);
     style(&ui->signexit, ui->L.signexit, "EXIT", 3);
+    style(&ui->cat_btn[0], ui->L.cat_prev, "<", 3);
+    style(&ui->cat_btn[1], ui->L.cat_next, ">", 3);
 
     ui->last_screen = (JfScreen)-1;
+    ui->last_cat = app->cat;
     ui->show_ring = true;
     ui->dirty = true;
 }
@@ -195,13 +203,12 @@ static void drain_after_keyboard(JfUi *ui, Pointer *ptr)
 
 static void edit_field(JfUi *ui, Pointer *ptr, int i)
 {
-    static const char *title[JF_UI_FIELDS] = { "SERVER IP OR IP:PORT", "USER", "PASSWORD" };
+    static const char *title[JF_UI_FIELDS] = { "SERVER HOST OR HOST:PORT", "USER", "PASSWORD" };
     char tmp[64];
     snprintf(tmp, sizeof tmp, "%s", ui->fields[i]);
     int rc = i == 2
         ? keyboard_enter_masked(ui->fb, ui->touch, ui->gm, title[i], tmp, 63, KB_LAYOUT_FULL)
-        : keyboard_enter(ui->fb, ui->touch, ui->gm, title[i], tmp, 63,
-                         i == 0 ? KB_LAYOUT_NUMERIC : KB_LAYOUT_FULL);
+        : keyboard_enter(ui->fb, ui->touch, ui->gm, title[i], tmp, 63, KB_LAYOUT_FULL);
     if (rc == KB_RESULT_OK) snprintf(ui->fields[i], sizeof ui->fields[i], "%s", tmp);
     jf_wipe(tmp, sizeof tmp);
     drain_after_keyboard(ui, ptr);
@@ -210,7 +217,7 @@ static void edit_field(JfUi *ui, Pointer *ptr, int i)
 static void do_search(JfUi *ui, Pointer *ptr, JfEvent *out, int *n, int max)
 {
     char term[96] = "";
-    int rc = keyboard_enter(ui->fb, ui->touch, ui->gm, "SEARCH", term, 40, KB_LAYOUT_ALPHANUM);
+    int rc = keyboard_enter(ui->fb, ui->touch, ui->gm, "SEARCH", term, 40, KB_LAYOUT_FULL);
     drain_after_keyboard(ui, ptr);
     if (rc != KB_RESULT_OK) return;
     int k = emit(out, n, max, JF_EV_SEARCH);
@@ -234,7 +241,8 @@ static void begin_screen(JfUi *ui)
         if (!ui->fields[1][0]) snprintf(ui->fields[1], sizeof ui->fields[1], "%s", app->login.user);
     }
     if (app->screen == JF_SCR_QUEUE || is_list_screen(app->screen)) {
-        ui->lv.rect = app->screen == JF_SCR_QUEUE ? ui->L.list_full : ui->L.list;
+        ui->lv.rect = app->screen == JF_SCR_QUEUE ? ui->L.list_full
+                    : app->screen == JF_SCR_ARTISTS ? ui->L.list_root : ui->L.list;
         lv_reset(&ui->lv);
         if (app->screen == JF_SCR_QUEUE && app->queue_n > 0) lv_move_to(&ui->lv, app->queue_cur);
     }
@@ -391,6 +399,17 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     int count = src_count(ui);
     if (go_back) emit(out, &n, max, JF_EV_BACK);
 
+    if (sc == JF_SCR_ARTISTS) {
+        /* Left / Right are free in the list zone (the list takes only Up / Down); the row and the bar
+         * zones keep them for moving along their buttons. */
+        int step = 0;
+        if (ui->zone == JF_ZONE_LIST) step = bp(in, BTN_ID_RIGHT) - bp(in, BTN_ID_LEFT);
+        if (button_check_tap(&ui->cat_btn[0], ts, now)) step = -1;
+        if (button_check_tap(&ui->cat_btn[1], ts, now)) step = 1;
+        if (step) { int k = emit(out, &n, max, JF_EV_CATEGORY); if (k >= 0) out[k].i = step; }
+        if (app->cat != ui->last_cat) { ui->last_cat = app->cat; lv_reset(&ui->lv); ui->dirty = true; }
+    }
+
     const InputState *lin = NULL;
     if (ui->zone == JF_ZONE_LIST) {
         lin = in;
@@ -446,6 +465,13 @@ static void draw_banner(JfUi *ui)
     const JfApp *app = ui->app;
     UiRect b = ui->L.banner;
     if (app->banner[0]) fb_draw_text(ui->fb, b.x + 4, b.y + 2, app->banner, RING, 2);
+    else if (app->list && app->screen != JF_SCR_ARTISTS && app->list->total > 0) {
+        /* the server's count, so a ranked first page is not read as the whole answer */
+        char c[32];
+        const char *what = app->screen == JF_SCR_SEARCH ? "RESULTS" : app->screen == JF_SCR_ALBUMS ? "ALBUMS" : "TRACKS";
+        snprintf(c, sizeof c, "%d %s", app->list->total, what);
+        fb_draw_text(ui->fb, b.x + 4, b.y + 2, c, DIM, 2);
+    }
     if (app->busy) fb_draw_text(ui->fb, b.x + b.w - 8 - text_measure_width("LOADING", 2), b.y + 2, "LOADING", DIM, 2);
 }
 
@@ -480,6 +506,20 @@ static void draw_row3(JfUi *ui)
         button_draw(ui->fb, &ui->row3[i]);
         if (ui->show_ring && ui->zone == JF_ZONE_ROW && ui->focus == i) ring(ui, ui->L.row3[i]);
     }
+}
+
+/* The root strip: [<]  CATEGORY  count  [>]. */
+static void draw_category(JfUi *ui)
+{
+    const JfApp *app = ui->app;
+    char t[176];
+    if (app->list && app->list->total > 0) snprintf(t, sizeof t, "%s  %d", app->crumb, app->list->total);
+    else snprintf(t, sizeof t, "%s", app->crumb);
+    UiRect r = ui->L.cat_label;
+    int w = text_measure_width(t, 3);
+    fb_draw_text(ui->fb, r.x + (r.w - w) / 2, r.y + (r.h - 21) / 2, t, COLOR_WHITE, 3);
+    button_draw(ui->fb, &ui->cat_btn[0]);
+    button_draw(ui->fb, &ui->cat_btn[1]);
 }
 
 static void draw_nowplaying(JfUi *ui)
@@ -534,7 +574,7 @@ void jf_ui_draw(JfUi *ui)
 
     const char *title = "JELLYFIN";
     switch (app->screen) {
-    case JF_SCR_ARTISTS: case JF_SCR_ALBUMS: case JF_SCR_TRACKS: case JF_SCR_SEARCH:
+    case JF_SCR_ALBUMS: case JF_SCR_TRACKS: case JF_SCR_SEARCH:
         if (app->crumb[0]) title = app->crumb;
         break;
     case JF_SCR_NOWPLAYING: title = "NOW PLAYING"; break;
@@ -553,6 +593,13 @@ void jf_ui_draw(JfUi *ui)
         break;
     case JF_SCR_NOWPLAYING:
         draw_nowplaying(ui);
+        break;
+    case JF_SCR_ARTISTS:
+        draw_category(ui);
+        ui->lv.active = ui->zone == JF_ZONE_LIST;
+        lv_sync(&ui->lv);
+        lv_draw(fb, &ui->lv, app->busy ? "" : "NOTHING HERE");
+        draw_row3(ui);
         break;
     case JF_SCR_QUEUE:
         ui->lv.active = ui->zone == JF_ZONE_LIST;

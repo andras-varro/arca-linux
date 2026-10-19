@@ -28,12 +28,13 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     JfExtents e = { 0, 0, 800, 480, inset_l, inset_t, 800 - inset_r, 480 - inset_b };
     JfLayout L;
     jf_ui_layout(&L, &e);
-    UiRect press[16];
+    UiRect press[18];
     int n = 0;
     for (int i = 0; i < JF_UI_ROW3; i++) press[n++] = L.row3[i];
     for (int i = 0; i < JF_UI_ROW5; i++) press[n++] = L.row5[i];
     for (int i = 0; i < JF_UI_FIELDS; i++) press[n++] = L.field[i];
     press[n++] = L.signin; press[n++] = L.signexit;
+    press[n++] = L.cat_prev; press[n++] = L.cat_next;
     for (int i = 0; i < n; i++)
         CHECK(inside(press[i], e.safe_l, e.safe_t, e.safe_r, e.safe_b),
               "A: inset %d/%d/%d/%d: button %d (%d,%d %dx%d) outside SAFE", inset_t, inset_b, inset_l, inset_r,
@@ -44,6 +45,12 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     CHECK(inside(L.list_full, e.safe_l, e.safe_t, e.safe_r, e.safe_b), "B: queue list outside SAFE (inset %d)", inset_t);
     CHECK(L.list.y > L.bar_bottom, "B: list starts under the bar rule");
     CHECK(L.list.h >= 2 * 40, "B: list shows at least two rows (inset %d): h %d", inset_t, L.list.h);
+    CHECK(inside(L.list_root, e.safe_l, e.safe_t, e.safe_r, e.safe_b), "E: root list outside SAFE (inset %d)", inset_t);
+    CHECK(L.list_root.h >= 2 * 40, "E: root list shows at least two rows (inset %d): h %d", inset_t, L.list_root.h);
+    CHECK(disjoint(L.cat_prev, L.list_root) && disjoint(L.cat_next, L.list_root) && disjoint(L.cat_label, L.list_root), "E: category strip overlaps the root list");
+    CHECK(disjoint(L.cat_prev, L.cat_label) && disjoint(L.cat_next, L.cat_label) && disjoint(L.cat_prev, L.cat_next), "E: category strip parts overlap");
+    CHECK(disjoint(L.cat_prev, L.banner) && disjoint(L.cat_label, L.banner), "E: category strip overlaps the banner");
+    for (int i = 0; i < JF_UI_ROW3; i++) CHECK(disjoint(L.row3[i], L.list_root), "E: row3[%d] overlaps the root list", i);
     for (int i = 0; i < JF_UI_ROW3; i++) {
         CHECK(disjoint(L.row3[i], L.list), "C: row3[%d] overlaps the list", i);
         for (int j = i + 1; j < JF_UI_ROW3; j++) CHECK(disjoint(L.row3[i], L.row3[j]), "C: row3 %d/%d overlap", i, j);

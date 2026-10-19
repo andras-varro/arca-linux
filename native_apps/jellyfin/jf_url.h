@@ -41,6 +41,15 @@ int jf_path_artists(char *out, size_t cap, const char *uid, int start, int limit
 int jf_path_albums(char *out, size_t cap, const char *uid, const char *artist_id, int start, int limit);
 int jf_path_tracks(char *out, size_t cap, const char *uid, const char *album_id, int start, int limit);
 int jf_path_search(char *out, size_t cap, const char *uid, const char *term, int start, int limit);
+/** The root browse lists: every album, playlists, genres, every song. */
+int jf_path_albums_all(char *out, size_t cap, const char *uid, int start, int limit);
+int jf_path_playlists(char *out, size_t cap, const char *uid, int start, int limit);
+int jf_path_genres(char *out, size_t cap, const char *uid, int start, int limit);
+int jf_path_songs(char *out, size_t cap, const char *uid, int start, int limit);
+/** A playlist's tracks, in playlist order. */
+int jf_path_playlist_items(char *out, size_t cap, const char *uid, const char *playlist_id, int start, int limit);
+/** The albums of one genre. */
+int jf_path_genre_albums(char *out, size_t cap, const char *uid, const char *genre_id, int start, int limit);
 /** `session_id` is 32 hex from jf_session_id(); a fresh one per request, or the server reuses an old transcode job. */
 int jf_path_stream(char *out, size_t cap, const char *id, const char *session_id);
 

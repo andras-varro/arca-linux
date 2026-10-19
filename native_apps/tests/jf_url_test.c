@@ -83,6 +83,33 @@ static void test_builders(void)
            "&SearchTerm=AC%2FDC%20%26%20co&StartIndex=5&Limit=10");
     CAP_EDGE("search", jf_path_search(b_, cap, UID, "AC/DC & co", 5, 10));
 
+    n = jf_path_albums_all(b, sizeof(b), UID, 30, 30);
+    EXPECT("albums_all", n, b, "/Items?userId=" UID
+           "&IncludeItemTypes=MusicAlbum&Recursive=true&SortBy=SortName&StartIndex=30&Limit=30");
+    CAP_EDGE("albums_all", jf_path_albums_all(b_, cap, UID, 30, 30));
+
+    n = jf_path_playlists(b, sizeof(b), UID, 0, 50);
+    EXPECT("playlists", n, b, "/Items?userId=" UID "&IncludeItemTypes=Playlist&Recursive=true&StartIndex=0&Limit=50");
+    CAP_EDGE("playlists", jf_path_playlists(b_, cap, UID, 0, 50));
+
+    n = jf_path_genres(b, sizeof(b), UID, 50, 50);
+    EXPECT("genres", n, b, "/MusicGenres?userId=" UID "&StartIndex=50&Limit=50");
+    CAP_EDGE("genres", jf_path_genres(b_, cap, UID, 50, 50));
+
+    n = jf_path_songs(b, sizeof(b), UID, 25, 25);
+    EXPECT("songs", n, b, "/Items?userId=" UID
+           "&IncludeItemTypes=Audio&Recursive=true&SortBy=SortName&StartIndex=25&Limit=25");
+    CAP_EDGE("songs", jf_path_songs(b_, cap, UID, 25, 25));
+
+    n = jf_path_playlist_items(b, sizeof(b), UID, ALB, 0, 25);
+    EXPECT("playlist_items", n, b, "/Playlists/" ALB "/Items?userId=" UID "&StartIndex=0&Limit=25");
+    CAP_EDGE("playlist_items", jf_path_playlist_items(b_, cap, UID, ALB, 0, 25));
+
+    n = jf_path_genre_albums(b, sizeof(b), UID, ART, 0, 30);
+    EXPECT("genre_albums", n, b, "/Items?userId=" UID "&GenreIds=" ART
+           "&IncludeItemTypes=MusicAlbum&Recursive=true&SortBy=SortName&StartIndex=0&Limit=30");
+    CAP_EDGE("genre_albums", jf_path_genre_albums(b_, cap, UID, ART, 0, 30));
+
     n = jf_path_stream(b, sizeof(b), ALB, SES);
     EXPECT("stream", n, b, "/Audio/" ALB "/stream?static=false&container=wav&audioCodec=pcm_s16le"
            "&audioSampleRate=44100&audioChannels=1&playSessionId=" SES);
@@ -114,6 +141,12 @@ static void test_ids(void)
     CHECK(jf_path_tracks(b, sizeof(b), UID, "", 0, 1) == -1, "tracks: bad album");
     CHECK(jf_path_search(b, sizeof(b), short_id, "x", 0, 1) == -1, "search: bad uid");
     CHECK(jf_path_search(b, sizeof(b), UID, NULL, 0, 1) == -1, "search: NULL term");
+    CHECK(jf_path_playlist_items(b, sizeof(b), UID, "", 0, 1) == -1, "playlist_items: bad id");
+    CHECK(jf_path_genre_albums(b, sizeof(b), UID, long_id, 0, 1) == -1, "genre_albums: bad id");
+    CHECK(jf_path_genres(b, sizeof(b), short_id, 0, 1) == -1, "genres: bad uid");
+    CHECK(jf_path_songs(b, sizeof(b), short_id, 0, 1) == -1, "songs: bad uid");
+    CHECK(jf_path_albums_all(b, sizeof(b), short_id, 0, 1) == -1, "albums_all: bad uid");
+    CHECK(jf_path_playlists(b, sizeof(b), short_id, 0, 1) == -1, "playlists: bad uid");
     CHECK(jf_path_stream(b, sizeof(b), inject, SES) == -1, "stream: bad id");
     CHECK(jf_path_stream(b, sizeof(b), ALB, "short") == -1, "stream: bad session");
 }
