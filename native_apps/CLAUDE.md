@@ -581,14 +581,19 @@ towards wherever you tap in the playfield, which needs no regions, cannot latch,
 playfield one target. Where that does not map (platformer needs simultaneous run + jump), say so on the
 start menu with `start_menu_set_warning()` rather than shipping controls that do not work.
 
-**What you can and cannot test from a script.** `CONFIG_INPUT_UINPUT` is unset in this kernel, so an
-injector reports success and delivers nothing — a `tests/touch_inject.c` did exactly that and is
-deleted; root `../CLAUDE.md` has the mechanism. But that is a limit on *the device*, not on the
-code: `gamepad.c`'s own state machine is fully testable on the host, and `tests/gamepad_latch_test.c` does
-it. `gamepad_poll()` takes the touch coordinate as a plain argument and its evdev sources are `read(2)` on
+**Scripting touch.** `arca_tap` (`arca_tap/arca_tap.c`, header has the usage) drives the panel through a
+uinput virtual touchscreen: `arca_tap start` creates it, re-points `/dev/input/touchscreen0` at it and
+restarts the app; `tap X Y`, `hold X Y MS` and `swipe X1 Y1 X2 Y2 [MS]` take **logical** pixels (a
+screenshot's); `stop` restores the link and restarts the app. Test-only: gated by the `remote_tap` key
+(Control Panel > Input > REMOTE TAP, or a `remote_tap=1` line in `/opt/games/arca_config.conf`),
+started on demand, never left running, no boot service. It needs the uinput device (`uinput.ko` ships
+with the `bluetooth` component). Only apps that read `/dev/input/touchscreen0` follow it, the real
+panel is not read while it runs, and it refuses portrait. A plain evdev write reports success, delivers nothing.
+
+**Host tests.** `gamepad.c`'s state machine is testable on the host (`tests/gamepad_latch_test.c`):
+`gamepad_poll()` takes the touch coordinate as a plain argument and its evdev sources are `read(2)` on
 an fd — so a temp file of `struct input_event` assigned to `gm.gamepad_fd` drives the real
-`poll_gamepad()`, returning each event and then 0 at EOF exactly as a quiet non-blocking evdev fd does.
-Run that after touching input logic; what still needs the panel is only whether a game *feels* right.
+`poll_gamepad()`, returning each event and then 0 at EOF as a quiet non-blocking evdev fd does. Run it after touching input logic.
 
 **Ask a touch button with `button_check_tap()`, every frame.** `button_check_press()` derives the press
 edge from `btn->was_pressed` and clears that latch on exactly one kind of call — one where

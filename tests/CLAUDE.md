@@ -31,7 +31,7 @@ dominates it, are in the script's own header, measured.
 passes. Phase 2 carried no such branch until a host C regression needed a facility only root has here:
 `gamepad_announce_test.c` synthesises an evdev node through **this host's** `/dev/uinput`, so on a normal
 run it skips, and exit 0 alone would have reported it as having tested its subject. (That says nothing
-about the device, which has no `/dev/uinput` and where writing to an event node still delivers nothing.)
+about the device, where writing to an event node delivers nothing; see `arca_tap`.)
 The detection reads the RUN output only, never the build log above it, so a compiler warning quoting a
 source comment cannot mark a test skipped; a phase-2 exit of 2 is a harness error on the same footing as
 a suite's. ⚠️ **A phase-2 test signals a skip by printing `skip` as the FIRST token on a line**, and the

@@ -94,8 +94,8 @@ shows what it will run, `--self-test` runs its own negative controls, and exit *
 than that a test failed. One suite needs root and reports itself SKIPPED without it, which the summary names — a skip
 is never counted as a pass. Authoring rules: `tests/CLAUDE.md`.
 
-The device half: `native_apps/smoke-first-screen.sh <ip> [binary ...]` (`--list`, `--out DIR`) stops the app loop, launches each
-native app, and gives its first frame one verdict (pass / did-not-start / started-died / black-screen / could-not-tell).
+The device half: `native_apps/smoke-first-screen.sh <ip> [binary ...]` (`--list`, `--out DIR`) stops the app loop, launches each native app, and gives its first frame one verdict (pass / did-not-start / started-died / black-screen / could-not-tell).
+`native_apps/files-hotplug-check.sh <ip> [--out DIR]` is the unattended Files check: it opens Files through `arca_tap`, pulls and re-plugs the stick by sysfs, and passes only if the right pane changed on the pull and gained its USB row on the plug (exit 0 / 1 / 2).
 
 ```bash
 ./tests/run-all.sh                  # everything

@@ -27,8 +27,8 @@ Device facts live there; this file holds only what we intend to *do* about them.
 
 ## Needs a human at the panel
 
-**Nothing is outstanding.** There is no `/dev/uinput`, so nothing past an app's first screen is
-script-verifiable (`CLAUDE.md` → *Non-obvious constraints*), and panel time is the project's scarce
+**Nothing is outstanding.** Past an app's first screen a check is scripted with `arca_tap` (`CLAUDE.md` → *Non-obvious
+constraints*); what still needs a human is what an eye or a finger judges, and panel time is the project's scarce
 resource: price the check before requesting it, group requests into **one checklist**, split an item when
 only part of it is gated, and record the answer with the confidence it was given — "I think it works" is a
 hedge, and a verdict is a weaker answer than a description, so say which one the next item needs.
@@ -311,22 +311,6 @@ exists in `native_apps/common` (`audio_wav.c` only), there is no HTTP client or 
 server transcode to one codec (or to PCM) keeps the device to one decoder. **Done when** the first question is answered: CPU of
 BlueALSA plus a decoder for a server-transcoded stream, measured on `.188` with a speaker connected.
 
-### F153. Remote input for on-device verification: `arca_tap` — open, operator 2026-10-18 ("important for you to handle the unit remotely")
-
-`native_apps/arca_tap/` plus `common/remote_tap.c` drive the panel through `/dev/uinput` (loaded on any unit with the bluetooth
-component). Measured on .115 2026-10-18: taps from the launcher into Files, and from the launcher through Control Panel page 2 into
-Backup, each confirmed by framebuffer capture. Apps read only `/dev/input/touchscreen0`, so the daemon re-points that link at its
-virtual device and restarts the app; the real panel is not read while it runs. Off unless the `remote_tap` config key is set
-(Control Panel → Input → REMOTE TAP; for tests it can be appended to `/opt/games/arca_config.conf` over SSH). Test-only, started on
-demand, never left running (operator, 2026-10-18): no boot service, no polish beyond what a test script needs.
-
-Open, in order:
-
-1. **Docs:** `CLAUDE.md`'s "You cannot script a touch interaction" and the matching `native_apps/CLAUDE.md` text become a pointer
-   to `arca_tap`, with its limit (only apps that read `touchscreen0` follow it).
-
-**Done when** 1 holds and a script runs a Files plug/pull check end to end without a human.
-
 ### F106. Support BeagleBone Black boards — open, operator idea 2026-10-01, future
 
 The operator inherited many BeagleBone Black boards (photos: `beaglebone/image/beaglebone-black-board-{1,2}.jpg`). **Measured from the
@@ -385,9 +369,8 @@ expensive to reach. **Operator ruling: a test-only command-line switch is accept
 passes no arguments, so such a flag is reachable over SSH and deliberately not from the panel, which is
 what a test entry point wants. `brick_breaker` already has both halves (`--test` and a pause toggle), so
 its level-5 problem is open on the level number, not on the mechanism. A pause-dialog toggle (the shape
-Office Runner's TRAINING toggle in `platformer.c` uses) is not script-reachable — there is no
-`/dev/uinput` — so a mode with no CLI entry has no first-screen SSH check either; it makes a deep state
-cheaper for a human, not automatable.
+Office Runner's TRAINING toggle in `platformer.c` uses) is reachable by `arca_tap` taps, so a mode
+with no CLI entry is still script-checkable; a CLI switch only makes the deep state cheaper to reach.
 
 ### C15. The bare plan-ID scan collides with function-key names — open, measured 2026-09-03
 
