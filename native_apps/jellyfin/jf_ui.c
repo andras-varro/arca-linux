@@ -195,12 +195,13 @@ static void drain_after_keyboard(JfUi *ui, Pointer *ptr)
 
 static void edit_field(JfUi *ui, Pointer *ptr, int i)
 {
-    static const char *title[JF_UI_FIELDS] = { "SERVER HOST OR HOST:PORT", "USER", "PASSWORD" };
+    static const char *title[JF_UI_FIELDS] = { "SERVER IP OR IP:PORT", "USER", "PASSWORD" };
     char tmp[64];
     snprintf(tmp, sizeof tmp, "%s", ui->fields[i]);
     int rc = i == 2
         ? keyboard_enter_masked(ui->fb, ui->touch, ui->gm, title[i], tmp, 63, KB_LAYOUT_FULL)
-        : keyboard_enter(ui->fb, ui->touch, ui->gm, title[i], tmp, 63, KB_LAYOUT_FULL);
+        : keyboard_enter(ui->fb, ui->touch, ui->gm, title[i], tmp, 63,
+                         i == 0 ? KB_LAYOUT_NUMERIC : KB_LAYOUT_FULL);
     if (rc == KB_RESULT_OK) snprintf(ui->fields[i], sizeof ui->fields[i], "%s", tmp);
     jf_wipe(tmp, sizeof tmp);
     drain_after_keyboard(ui, ptr);
