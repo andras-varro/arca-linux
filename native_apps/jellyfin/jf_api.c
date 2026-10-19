@@ -212,6 +212,9 @@ static void begin_current(JfApi *a)
         wipe(hdr, sizeof(hdr));
         return;
     }
+    /* without a JSON content type the sign-in POST is answered 415 */
+    if (c->kind == JF_KIND_AUTH)
+        hl += snprintf(hdr + hl, sizeof(hdr) - (size_t)hl, "Content-Type: application/json\r\n");
     if (c->kind == JF_KIND_AUTH)
         http_begin(&a->req, a->host, a->port, "POST", c->path, hdr, c->body, c->body_len,
                    HTTP_BUFFER, a->body, JF_API_BODY_BYTES);

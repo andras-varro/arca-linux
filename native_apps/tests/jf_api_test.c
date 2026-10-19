@@ -207,6 +207,8 @@ static void test_list_and_header(void)
     const char *post = strstr(h, "POST /Users/AuthenticateByName");
     CHECK(post != NULL);
     CHECK(post && strstr(post, "TOK-ABC") == NULL);
+    /* the real server answers 415 to a sign-in without it */
+    CHECK(post && strstr(post, "\r\nContent-Type: application/json\r\n") != NULL);
     jf_api_free(&a);
     srv_stop(s);
 }
