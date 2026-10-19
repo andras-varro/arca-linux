@@ -328,10 +328,15 @@ random tracks: median -5, max +17.9, a quarter positive), so applying it evens t
 speaker needs its own level decision (proposed, not ruled: apply the gain, boosts capped at +12 dB, onboard loudness via the
 bus volume). Whole-system CPU on the panel's monitor during playback: ~15%. A 48 kHz stereo stream is refused. **Built:**
 `common/http.c` (polled non-blocking HTTP/1.0, buffer or stream mode, token only in a header) and `common/json.c`; the API
-wants the `Authorization: MediaBrowser Token=` header (`api_key=` got 401 on `/Users/Me`). **Missing:** `list_view` and
+wants the `Authorization: MediaBrowser Token=` header (`api_key=` got 401 on `/Users/Me`). `stream_play` on `http.c`, `.115`,
+BT, 2026-10-19: 40 s of a studio track, 0 underruns, whole-system CPU 8-10%, the operator heard good quality at the right
+volume. **Missing:** `list_view` and
 `keyboard_enter()` exist, a thumbnail cache does not; album art needs a PNG decoder (`format=Bmp` answers JPEG, `format=Png`
-is honoured). **Order:** (1) server, user and token set in the Control Panel, the unit keeping a token and never the
-password, no credential in the repo or an image, and the gain applied to the stream; (2) the app: Artists → Albums → Tracks in `list_view`, search through `keyboard_enter()`, now playing, a queue,
+is honoured). **Order:** (1) the app's own sign-in screen (server, user, password exchanged for a token; operator ruling
+2026-10-19: in the app, not the Control Panel), the unit keeping a token and never the password, no credential in the repo
+or an image, plus an `arca-backup` item for that login shaped like the VNC one and **unchecked by default** (plain text);
+(2) the app: Artists → Albums → Tracks in `list_view`, search through `keyboard_enter()`, now playing with a volume
+control (operator, same day) applied with the track gain in one place, a queue,
 pad and keyboard as well as touch, and `stream_play` deleted. **Done when** the app plays a searched track at the panel.
 
 ### F154. Stereo music through the mono mix bus — open, operator request 2026-10-19, feasibility not assessed
