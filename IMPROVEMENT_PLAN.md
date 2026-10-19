@@ -322,16 +322,12 @@ demand, never left running (operator, 2026-10-18): no boot service, no polish be
 
 Open, in order:
 
-1. **`start`/`stop` from `/opt/games` are broken.** The first build's `start` was killed by its own app restart (exit 143, daemon
-   up). The fix in the tree re-execs `start`/`stop` from `/var/run/arca-tapd`; deployed, `start` then printed "cannot stage the
-   daemon in /var/run" (`copy_self` failed, file present) and `stop` hung >120 s (killed by hand). Not diagnosed; `arca-app` matches
-   on `/proc/<pid>/exe`, so the name is not it. Suspects: ETXTBSY on the copy, a blocking `system()` restart.
-2. **Untested:** `swipe` against a drag consumer (Files' list; the icon grids have no swipe, so the launcher test proved nothing),
+1. **Untested:** `swipe` against a drag consumer (Files' list; the icon grids have no swipe, so the launcher test proved nothing),
    `hold`, and REMOTE TAP turned OFF while the daemon runs (device removed, app restarted); the toggle itself works at the panel.
-3. **Docs:** `CLAUDE.md`'s "You cannot script a touch interaction" and the matching `native_apps/CLAUDE.md` text become a pointer
+2. **Docs:** `CLAUDE.md`'s "You cannot script a touch interaction" and the matching `native_apps/CLAUDE.md` text become a pointer
    to `arca_tap`, with its limit (only apps that read `touchscreen0` follow it).
 
-**Done when** 1–3 hold and a script runs a Files plug/pull check end to end without a human.
+**Done when** 1–2 hold and a script runs a Files plug/pull check end to end without a human.
 
 ### F106. Support BeagleBone Black boards — open, operator idea 2026-10-01, future
 

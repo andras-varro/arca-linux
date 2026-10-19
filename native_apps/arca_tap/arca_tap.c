@@ -326,8 +326,33 @@ static int daemon_main(void) {
 
 /* ---- the front end ---------------------------------------------------------- */
 
+/* Does any process hold /dev/input/<node> open? arca-app restart returns before
+ * the app has run touch_init, and a tap sent before that reaches nobody. */
+static bool node_in_use(const char *node) {
+    char want[64], path[300], t[64];
+    snprintf(want, sizeof(want), "/dev/input/%s", node);
+    DIR *pd = opendir("/proc");
+    struct dirent *p;
+    bool found = false;
+    while (pd && !found && (p = readdir(pd)) != NULL) {
+        if (p->d_name[0] < '0' || p->d_name[0] > '9') continue;
+        snprintf(path, sizeof(path), "/proc/%s/fd", p->d_name);
+        DIR *fd = opendir(path);
+        struct dirent *f;
+        while (fd && !found && (f = readdir(fd)) != NULL) {
+            snprintf(path, sizeof(path), "/proc/%s/fd/%s", p->d_name, f->d_name);
+            ssize_t n = readlink(path, t, sizeof(t) - 1);
+            if (n > 0) { t[n] = '\0'; found = strcmp(t, want) == 0; }
+        }
+        if (fd) closedir(fd);
+    }
+    if (pd) closedir(pd);
+    return found;
+}
+
 static int copy_self(void) {
     int in = open("/proc/self/exe", O_RDONLY);
+    unlink(DAEMON_COPY);      /* a daemon still exiting runs it: O_TRUNC would be ETXTBSY */
     int out = open(DAEMON_COPY, O_WRONLY | O_CREAT | O_TRUNC, 0755);
     char b[4096];
     ssize_t n;
@@ -358,7 +383,15 @@ static int cmd_start(void) {
     }
     for (int i = 0; i < 100; i++) {          /* up to 10 s */
         if (access(READY_PATH, F_OK) == 0) {
+            char node[32] = "";
+            FILE *rf = fopen(READY_PATH, "r");
+            if (rf) { if (fscanf(rf, "%31s", node) != 1) node[0] = '\0'; fclose(rf); }
             restart_app();
+            for (int j = 0; j < 150 && node[0] && !node_in_use(node); j++) usleep(100000);
+            if (node[0] && !node_in_use(node)) {
+                fprintf(stderr, "arca_tap: running, but no app opened /dev/input/%s within 15 s\n", node);
+                return 1;
+            }
             printf("arca_tap: running; app restarted on the virtual touchscreen\n");
             return 0;
         }
@@ -372,8 +405,11 @@ static int cmd_stop(void) {
     int pid = read_pid();
     if (pid) {
         kill(pid, SIGTERM);       /* the daemon restores the link and restarts the app */
-        for (int i = 0; i < 50 && read_pid(); i++) usleep(100000);
-        printf("arca_tap: stopped\n");
+        /* Wait for the process, not its PID file: that goes before the app
+         * restart, which takes several seconds. */
+        for (int i = 0; i < 200 && kill(pid, 0) == 0; i++) usleep(100000);
+        if (kill(pid, 0) == 0) return fail("daemon still running after 20 s; see " LOG_PATH);
+        printf("arca_tap: stopped; app restarted on the real panel\n");
         return 0;
     }
     if (access(ORIG_PATH, F_OK) == 0) {     /* a crashed daemon left the link behind */
@@ -410,13 +446,14 @@ static int cmd_send(int argc, char **argv) {
 
 /* arca-app stop kills everything running out of /opt/games, and start and stop
  * both end in an app restart, so they re-exec from the copy outside it first:
- * run from /opt/games, the restart would kill this process too. */
+ * run from /opt/games, the restart would kill this process too.
+ * Compared by inode, not by path: /var/run is a symlink to volatile/run, so
+ * /proc/self/exe never spells DAEMON_COPY, and a string compare made the copy
+ * re-stage itself (ETXTBSY) on start and exec itself forever on stop. */
 static bool running_from_copy(void) {
-    char self[128];
-    ssize_t n = readlink("/proc/self/exe", self, sizeof(self) - 1);
-    if (n <= 0) return false;
-    self[n] = '\0';
-    return strcmp(self, DAEMON_COPY) == 0;
+    struct stat self, copy;
+    if (stat("/proc/self/exe", &self) != 0 || stat(DAEMON_COPY, &copy) != 0) return false;
+    return self.st_dev == copy.st_dev && self.st_ino == copy.st_ino;
 }
 
 int main(int argc, char **argv) {
