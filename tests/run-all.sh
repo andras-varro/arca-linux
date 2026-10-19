@@ -154,6 +154,7 @@ CTEST_ROWS=(
     "input_slots_test|-I common|common/input_slots.c"
     "json_test|-I common -fsanitize=undefined|common/json.c"
     "jf_api_test|-I common -I jellyfin -fsanitize=undefined|jellyfin/jf_api.c jellyfin/jf_model.c jellyfin/jf_url.c common/http.c common/json.c common/logger.c"
+    "jf_core_test|-I common -I jellyfin -fsanitize=undefined|jellyfin/jf_core.c jellyfin/jf_model.c jellyfin/jf_url.c jellyfin/jf_login.c common/config.c common/json.c"
     "jf_login_test|-I common -I jellyfin|jellyfin/jf_login.c jellyfin/jf_url.c common/config.c"
     "jf_model_test|-I common -I jellyfin -fsanitize=undefined|jellyfin/jf_model.c common/json.c"
     "jf_url_test|-I common -I jellyfin|jellyfin/jf_url.c"
