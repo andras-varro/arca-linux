@@ -542,7 +542,7 @@ done:
 static void run_host(Framebuffer *fb, TouchInput *touch) {
     char name[HOST_MAX + 1];
     snprintf(name, sizeof(name), "%s", host);
-    if (keyboard_enter(fb, touch, cp_gamepad(), "HOST NAME", name, HOST_MAX, KB_LAYOUT_ALPHANUM) != KB_RESULT_OK) return;
+    if (keyboard_enter(fb, touch, cp_gamepad(), "HOST NAME", name, HOST_MAX, KB_LAYOUT_FULL) != KB_RESULT_OK) return;
     for (char *c = name; *c; c++) *c = (char)tolower((unsigned char)*c);
     if (strcmp(name, host) == 0) { cp_status("HOST NAME UNCHANGED", false); return; }
     if (!sys_hostname_valid(name)) {
