@@ -1,0 +1,286 @@
+/*
+ * tests/jf_url_test.c — the Jellyfin wire strings: every endpoint builder's exact
+ * output and its cap boundary, id validation, percent-encoding, the server
+ * address parser, the playSessionId source and the two secret-carrying builders
+ * (Authorization header, login body).
+ *
+ * Exact-string checks matter more than "contains": a builder that drops a
+ * parameter or reorders them still looks plausible, and the server answers 200
+ * with the wrong list.  Each builder is also run at cap == len+1 (must fit) and
+ * cap == len (must be refused), the boundary an off-by-one in fin() would move.
+ *
+ * Build and run (host gcc, from native_apps/):
+ *   gcc -Wall -Wextra -I common -I jellyfin tests/jf_url_test.c jellyfin/jf_url.c \
+ *       -o build/jf_url_test && ./build/jf_url_test
+ */
+
+#include <stdio.h>
+#include <string.h>
+
+#include "jf_url.h"
+
+static int fails, checks;
+#define CHECK(c, ...) do { checks++; if (!(c)) { fails++; printf("FAIL line %d: ", __LINE__); \
+    printf(__VA_ARGS__); printf("\n"); } } while (0)
+
+#define UID  "0123456789abcdef0123456789abcdef"
+#define ART  "fedcba9876543210fedcba9876543210"
+#define ALB  "00112233445566778899AABBCCDDEEFF"
+#define SES  "aaaaaaaabbbbbbbbccccccccdddddddd"
+
+static void expect_str(int line, const char *what, int n, const char *buf, const char *want)
+{
+    int len = (int)strlen(want);
+    CHECK(n == len, "line %d %s: returned %d, want %d", line, what, n, len);
+    CHECK(strcmp(buf, want) == 0, "line %d %s: got \"%s\"\n  want \"%s\"", line, what, buf, want);
+}
+#define EXPECT(what, n, buf, want) expect_str(__LINE__, what, n, buf, want)
+
+/* `call` is written against `b_` and `cap`; it runs at a roomy cap, then len+1, then len. */
+#define CAP_EDGE(what, call) do { \
+    char b_[512]; size_t cap = sizeof(b_); \
+    int len_ = (call); \
+    CHECK(len_ > 0, "%s: baseline failed", what); \
+    cap = (size_t)len_ + 1; CHECK((call) == len_, "%s: cap=len+1 refused", what); \
+    cap = (size_t)len_;     CHECK((call) == -1, "%s: cap=len accepted", what); \
+    } while (0)
+
+/* Bytes 00 11 22 .. ff, so the expected id is known without re-deriving the hex code. */
+static int fake_ok(unsigned char *buf, size_t n)
+{
+    for (size_t i = 0; i < n; i++) buf[i] = (unsigned char)(i * 0x11);
+    return (int)n;
+}
+static int fake_fail(unsigned char *buf, size_t n) { (void)buf; (void)n; return -1; }
+static int fake_short(unsigned char *buf, size_t n) { (void)buf; return (int)n - 1; }
+
+static void test_builders(void)
+{
+    char b[512];
+    int n;
+
+    n = jf_path_auth(b, sizeof(b));
+    EXPECT("auth", n, b, "/Users/AuthenticateByName");
+    CAP_EDGE("auth", jf_path_auth(b_, cap));
+
+    n = jf_path_artists(b, sizeof(b), UID, 0, 50);
+    EXPECT("artists", n, b, "/Artists/AlbumArtists?userId=" UID "&StartIndex=0&Limit=50");
+    CAP_EDGE("artists", jf_path_artists(b_, cap, UID, 0, 50));
+
+    n = jf_path_albums(b, sizeof(b), UID, ART, 100, 25);
+    EXPECT("albums", n, b, "/Items?userId=" UID "&ArtistIds=" ART
+           "&IncludeItemTypes=MusicAlbum&Recursive=true&SortBy=SortName&StartIndex=100&Limit=25");
+    CAP_EDGE("albums", jf_path_albums(b_, cap, UID, ART, 100, 25));
+
+    n = jf_path_tracks(b, sizeof(b), UID, ALB, 0, 200);
+    EXPECT("tracks", n, b, "/Items?userId=" UID "&ParentId=" ALB
+           "&IncludeItemTypes=Audio&SortBy=ParentIndexNumber,IndexNumber&StartIndex=0&Limit=200");
+    CAP_EDGE("tracks", jf_path_tracks(b_, cap, UID, ALB, 0, 200));
+
+    n = jf_path_search(b, sizeof(b), UID, "AC/DC & co", 5, 10);
+    EXPECT("search", n, b, "/Items?userId=" UID
+           "&IncludeItemTypes=Audio,MusicAlbum,MusicArtist&Recursive=true"
+           "&SearchTerm=AC%2FDC%20%26%20co&StartIndex=5&Limit=10");
+    CAP_EDGE("search", jf_path_search(b_, cap, UID, "AC/DC & co", 5, 10));
+
+    n = jf_path_stream(b, sizeof(b), ALB, SES);
+    EXPECT("stream", n, b, "/Audio/" ALB "/stream?static=false&container=wav&audioCodec=pcm_s16le"
+           "&audioSampleRate=44100&audioChannels=1&playSessionId=" SES);
+    CAP_EDGE("stream", jf_path_stream(b_, cap, ALB, SES));
+}
+
+static void test_ids(void)
+{
+    char b[512];
+    const char *short_id = "0123456789abcdef0123456789abcde";
+    const char *long_id  = "0123456789abcdef0123456789abcdef0";
+    const char *bad_chr  = "0123456789abcdef0123456789abcdeg";
+    const char *inject   = "0123456789abcdef0123456789abc/..";
+
+    CHECK(jf_id_valid(UID), "valid id refused");
+    CHECK(jf_id_valid(ALB), "uppercase hex id refused");
+    CHECK(!jf_id_valid(NULL), "NULL id accepted");
+    CHECK(!jf_id_valid(""), "empty id accepted");
+    CHECK(!jf_id_valid(short_id), "31 digits accepted");
+    CHECK(!jf_id_valid(long_id), "33 digits accepted");
+    CHECK(!jf_id_valid(bad_chr), "non-hex char accepted");
+    CHECK(!jf_id_valid(inject), "path characters accepted");
+
+    CHECK(jf_path_artists(b, sizeof(b), short_id, 0, 1) == -1, "artists: bad uid");
+    CHECK(jf_path_artists(b, sizeof(b), NULL, 0, 1) == -1, "artists: NULL uid");
+    CHECK(jf_path_albums(b, sizeof(b), bad_chr, ART, 0, 1) == -1, "albums: bad uid");
+    CHECK(jf_path_albums(b, sizeof(b), UID, inject, 0, 1) == -1, "albums: bad artist");
+    CHECK(jf_path_tracks(b, sizeof(b), long_id, ALB, 0, 1) == -1, "tracks: bad uid");
+    CHECK(jf_path_tracks(b, sizeof(b), UID, "", 0, 1) == -1, "tracks: bad album");
+    CHECK(jf_path_search(b, sizeof(b), short_id, "x", 0, 1) == -1, "search: bad uid");
+    CHECK(jf_path_search(b, sizeof(b), UID, NULL, 0, 1) == -1, "search: NULL term");
+    CHECK(jf_path_stream(b, sizeof(b), inject, SES) == -1, "stream: bad id");
+    CHECK(jf_path_stream(b, sizeof(b), ALB, "short") == -1, "stream: bad session");
+}
+
+static void test_session(void)
+{
+    char a[JF_ID_LEN + 1], c[JF_ID_LEN + 1];
+
+    CHECK(jf_session_id(a) && jf_session_id(c), "urandom session id failed");
+    CHECK(strcmp(a, c) != 0, "two urandom session ids equal: %s", a);
+    CHECK(strlen(a) == JF_ID_LEN, "session id length %d", (int)strlen(a));
+    int lower = 1;
+    for (const char *p = a; *p; p++)
+        if (!((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f'))) lower = 0;
+    CHECK(lower, "session id not lowercase hex: %s", a);
+    CHECK(jf_id_valid(a), "session id fails jf_id_valid");
+
+    jf_url_set_random(fake_ok);
+    CHECK(jf_session_id(a), "fake random refused");
+    CHECK(strcmp(a, "00112233445566778899aabbccddeeff") == 0, "fake random gave %s", a);
+    CHECK(jf_session_id(c) && strcmp(a, c) == 0, "fake random not deterministic");
+
+    jf_url_set_random(fake_fail);
+    strcpy(a, "junk");
+    CHECK(!jf_session_id(a), "failing random reported success");
+    CHECK(a[0] == '\0', "failing random left a non-empty id");
+    jf_url_set_random(fake_short);
+    CHECK(!jf_session_id(a), "short read reported success");
+
+    jf_url_set_random(NULL);
+    CHECK(jf_session_id(a) && jf_session_id(c) && strcmp(a, c) != 0, "NULL did not restore urandom");
+}
+
+static void test_encode(void)
+{
+    char b[64];
+    int n;
+
+    n = jf_url_encode(b, sizeof(b), "a b");        EXPECT("space", n, b, "a%20b");
+    n = jf_url_encode(b, sizeof(b), "a&b");        EXPECT("amp", n, b, "a%26b");
+    n = jf_url_encode(b, sizeof(b), "a#b");        EXPECT("hash", n, b, "a%23b");
+    n = jf_url_encode(b, sizeof(b), "100%");       EXPECT("percent", n, b, "100%25");
+    n = jf_url_encode(b, sizeof(b), "\xC3\xA9");   EXPECT("e-acute", n, b, "%C3%A9");
+    n = jf_url_encode(b, sizeof(b), "AZaz09-_.~"); EXPECT("unreserved", n, b, "AZaz09-_.~");
+    n = jf_url_encode(b, sizeof(b), "");           EXPECT("empty", n, b, "");
+    n = jf_url_encode(b, sizeof(b), "/?=+");       EXPECT("reserved", n, b, "%2F%3F%3D%2B");
+
+    CHECK(jf_url_encode(b, 7, "ab c") == 6, "encode: exact fit (len 6, cap 7) refused");
+    CHECK(jf_url_encode(b, 6, "ab c") == -1, "encode: cap == len accepted");
+    CHECK(b[0] == '\0', "encode: overflow left text");
+    CHECK(jf_url_encode(b, 3, "\xC3\xA9") == -1, "encode: 3-char escape into cap 3 accepted");
+    CHECK(jf_url_encode(b, 0, "a") == -1, "encode: cap 0 accepted");
+    CHECK(jf_url_encode(b, sizeof(b), NULL) == -1, "encode: NULL input accepted");
+}
+
+static void test_server(void)
+{
+    char h[JF_HOST_MAX];
+    int p;
+
+#define SRV_OK(in, host, port) do { p = -1; \
+    CHECK(jf_parse_server(in, h, sizeof(h), &p) == JF_SERVER_OK, "\"%s\" refused", in); \
+    CHECK(strcmp(h, host) == 0, "\"%s\": host \"%s\"", in, h); \
+    CHECK(p == port, "\"%s\": port %d", in, p); } while (0)
+/* The port must stay untouched on failure: the caller keeps its previous setting. */
+#define SRV_NO(in, res) do { p = -1; \
+    CHECK(jf_parse_server(in, h, sizeof(h), &p) == (res), "\"%s\": wrong verdict", in); \
+    CHECK(p == -1, "\"%s\": port written on failure", in); } while (0)
+
+    SRV_OK("1.2.3.4", "1.2.3.4", 8096);
+    SRV_OK("host:8096", "host", 8096);
+    SRV_OK("http://h/", "h", 8096);
+    SRV_OK("http://my-host_1.lan:80//", "my-host_1.lan", 80);
+    SRV_OK("h:1", "h", 1);
+    SRV_OK("h:65535", "h", 65535);
+
+    SRV_NO("https://x", JF_SERVER_HTTPS);
+    SRV_NO("", JF_SERVER_EMPTY);
+    SRV_NO("http://", JF_SERVER_EMPTY);
+    SRV_NO("a\rb", JF_SERVER_BAD);
+    SRV_NO("a\nb", JF_SERVER_BAD);
+    SRV_NO("a b", JF_SERVER_BAD);
+    SRV_NO("a\tb", JF_SERVER_BAD);
+    SRV_NO("h:0", JF_SERVER_BAD);
+    SRV_NO("h:65536", JF_SERVER_BAD);
+    SRV_NO("h:", JF_SERVER_BAD);
+    SRV_NO("h:80x", JF_SERVER_BAD);
+    SRV_NO("h:123456", JF_SERVER_BAD);
+    SRV_NO(":80", JF_SERVER_BAD);
+    SRV_NO("h:80:90", JF_SERVER_BAD);
+
+    char small[4];
+    CHECK(jf_parse_server("abc", small, sizeof(small), &p) == JF_SERVER_OK, "host fitting cap refused");
+    CHECK(jf_parse_server("abcd", small, sizeof(small), &p) == JF_SERVER_BAD, "host longer than cap accepted");
+    CHECK(jf_parse_server("abcd:80", small, sizeof(small), &p) == JF_SERVER_BAD, "host+port longer than cap accepted");
+}
+
+static void test_header(void)
+{
+    char b[256], want[256];
+    int n;
+    const char *base = "Authorization: MediaBrowser Client=\"Arca\", Device=\"RW\", DeviceId=\"d1\", Version=\"1\"";
+
+    n = jf_auth_header(b, sizeof(b), "RW", "d1", NULL);
+    CHECK(n > 0 && strstr(b, "Token=") == NULL, "NULL token left a Token: %s", b);
+    snprintf(want, sizeof(want), "%s\r\n", base);
+    EXPECT("header no token", n, b, want);
+
+    n = jf_auth_header(b, sizeof(b), "RW", "d1", "");
+    CHECK(n > 0 && strstr(b, "Token=") == NULL, "empty token left a Token: %s", b);
+
+    n = jf_auth_header(b, sizeof(b), "RW", "d1", "tok123");
+    snprintf(want, sizeof(want), "%s, Token=\"tok123\"\r\n", base);
+    EXPECT("header token", n, b, want);
+
+    CHECK(jf_auth_header(b, sizeof(b), "R\"W", "d1", NULL) == -1, "quote in device");
+    CHECK(jf_auth_header(b, sizeof(b), "RW", "d\\1", NULL) == -1, "backslash in device_id");
+    CHECK(jf_auth_header(b, sizeof(b), "R\rW", "d1", NULL) == -1, "CR in device");
+    CHECK(jf_auth_header(b, sizeof(b), "RW", "d\n1", NULL) == -1, "LF in device_id");
+    CHECK(jf_auth_header(b, sizeof(b), "RW", "d1", "t\"k") == -1, "quote in token");
+    CHECK(jf_auth_header(b, sizeof(b), "RW", "d1", "t\\k") == -1, "backslash in token");
+    CHECK(jf_auth_header(b, sizeof(b), "RW", "d1", "t\rk") == -1, "CR in token");
+    CHECK(jf_auth_header(b, sizeof(b), "RW", "d1", "t\nk") == -1, "LF in token");
+    CHECK(jf_auth_header(b, sizeof(b), NULL, "d1", NULL) == -1, "NULL device");
+
+    CHECK(jf_auth_header(b, (size_t)n + 1, "RW", "d1", "tok123") == n, "header cap=len+1 refused");
+    CHECK(jf_auth_header(b, (size_t)n, "RW", "d1", "tok123") == -1, "header cap=len accepted");
+}
+
+static void test_body(void)
+{
+    char b[128];
+    int n;
+
+    n = jf_auth_body(b, sizeof(b), "bob", "pw");
+    EXPECT("plain body", n, b, "{\"Username\":\"bob\",\"Pw\":\"pw\"}");
+
+    n = jf_auth_body(b, sizeof(b), "bob", "a\"b\\c");
+    EXPECT("quote+backslash", n, b, "{\"Username\":\"bob\",\"Pw\":\"a\\\"b\\\\c\"}");
+
+    n = jf_auth_body(b, sizeof(b), "u\"v", "x\ny\t\x01z");
+    EXPECT("controls", n, b, "{\"Username\":\"u\\\"v\",\"Pw\":\"x\\u000ay\\u0009\\u0001z\"}");
+
+    n = jf_auth_body(b, sizeof(b), "", "");
+    EXPECT("empty fields", n, b, "{\"Username\":\"\",\"Pw\":\"\"}");
+
+    n = jf_auth_body(b, sizeof(b), "bob", "pw");
+    CHECK(jf_auth_body(b, (size_t)n + 1, "bob", "pw") == n, "body cap=len+1 refused");
+    /* every shorter cap must fail and leave an empty string: the caller wipes it */
+    for (size_t cap = 1; cap <= (size_t)n; cap++) {
+        memset(b, 'X', sizeof(b));
+        CHECK(jf_auth_body(b, cap, "bob", "pw") == -1, "body cap=%d accepted", (int)cap);
+        CHECK(b[0] == '\0', "body cap=%d: out[0] not NUL", (int)cap);
+    }
+    CHECK(jf_auth_body(b, 0, "bob", "pw") == -1, "body cap 0 accepted");
+    CHECK(jf_auth_body(b, sizeof(b), NULL, "pw") == -1, "NULL user accepted");
+}
+
+int main(void)
+{
+    test_builders();
+    test_ids();
+    test_session();
+    test_encode();
+    test_server();
+    test_header();
+    test_body();
+    printf("jf_url_test: %d checks, %d failed\n", checks, fails);
+    return fails ? 1 : 0;
+}

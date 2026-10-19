@@ -234,6 +234,8 @@ typedef struct {
      */
     AudioSampleVoice music;   /**< the bed: long, usually looping                 */
     AudioSampleVoice sfx;     /**< one-shot recorded effect, over the bed         */
+    bool     music_gain_set;        /**< audio_music_set_gain() has been called           */
+    int      music_gain_total_mdb;  /**< its total after the cap, applied to every music start */
     /* ── the canned sounds' CONTENT: four clips, four voices ────────────────
      * ⚠️ Loaded lazily, on the first trigger of each name — not at init, because
      * a game that never fails should not pay for fx_fail, and because a device
@@ -673,6 +675,18 @@ bool audio_music_start(Audio *audio, const char *path, bool loop);
 bool audio_music_start_fd(Audio *audio, int fd);
 long audio_music_stream_buffered(const Audio *audio);
 long audio_music_stream_underruns(const Audio *audio);
+
+/**
+ * Set the music voice's gain: `norm_mdb` (a track's normalisation gain) plus
+ * `user_mdb` (the volume setting), both milli-dB, summed and capped by
+ * `audio_gain_total_mdb()`.  A live voice slews to it in ~20 ms; with no music
+ * voice sounding it is remembered and applied to the NEXT start (file, stream
+ * or resume).  The effect is relative to the `audio_set_volume()` level.
+ */
+void audio_music_set_gain(Audio *audio, int norm_mdb, int user_mdb);
+
+/** The total set by `audio_music_set_gain()` after the cap (0 until it is called). */
+int  audio_music_get_gain_mdb(const Audio *audio);
 
 /**
  * Stop the bed at the end of its release, not now.

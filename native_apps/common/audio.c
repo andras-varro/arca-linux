@@ -1324,9 +1324,16 @@ static bool sample_arm(Audio *audio, AudioSampleVoice *sv, const char *what,
         fill  = audio_wav_stream_fill;
         ctx   = &sv->stream;
     }
+    /* The music voice starts at its remembered gain so a carried or resumed track
+     * does not ramp up from unity.  The bus refuses peak 0, so a mute starts at 1
+     * (inaudible) and is then set to 0. */
+    int arm_peak = audio_voice_peak(audio->vol);
+    bool gained  = (sv == &audio->music) && audio->music_gain_set;
+    if (gained) arm_peak = audio_gain_peak(arm_peak, audio->music_gain_total_mdb);
+    if (arm_peak < 1) arm_peak = 1;
     int  slot  = audio_mix_add_sample(&audio->mix, fill, ctx,
                                       sv->buf, sv->buf_frames, total,
-                                      audio_voice_peak(audio->vol));
+                                      arm_peak);
     if (slot < 0) {
         /* ⚠️ The full bus REFUSES and never steals (audio_gen.h) — one mechanism
          * for both voice kinds, which is what keeps a UI blip from cutting the bed.
@@ -1340,6 +1347,8 @@ static bool sample_arm(Audio *audio, AudioSampleVoice *sv, const char *what,
 
     sv->slot = slot;
     sv->gen  = audio_mix_voice_gen(&audio->mix, slot);
+    if (gained && audio_gain_peak(audio_voice_peak(audio->vol), audio->music_gain_total_mdb) == 0)
+        audio_mix_set_voice_peak(&audio->mix, slot, sv->gen, 0);
     sv->held = false;
     if (sv->streaming) {
         /* No file: say what the stream IS (the bus format it must match; the
@@ -1532,4 +1541,22 @@ bool audio_music_enabled(const Audio *audio)
 bool audio_effects_enabled(const Audio *audio)
 {
     return audio && audio->effects_on;
+}
+
+void audio_music_set_gain(Audio *audio, int norm_mdb, int user_mdb)
+{
+    if (!audio) return;
+    audio->music_gain_total_mdb = audio_gain_total_mdb(norm_mdb, user_mdb);
+    audio->music_gain_set       = true;
+    const AudioSampleVoice *sv = &audio->music;
+    if (!audio->available || sv->slot < 0) return;
+    /* A stale (slot, gen) is refused by the mixer, so a finished track is a no-op. */
+    audio_mix_set_voice_peak(&audio->mix, sv->slot, sv->gen,
+                             audio_gain_peak(audio_voice_peak(audio->vol),
+                                             audio->music_gain_total_mdb));
+}
+
+int audio_music_get_gain_mdb(const Audio *audio)
+{
+    return (audio && audio->music_gain_set) ? audio->music_gain_total_mdb : 0;
 }

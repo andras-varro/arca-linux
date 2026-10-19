@@ -360,6 +360,8 @@ typedef struct {
     double   phase;       /**< radians, wrapped to [0, 2π)                     */
     double   phase_step;  /**< 2π · freq / rate                                */
     int      peak;        /**< this voice's amplitude — the per-voice gain      */
+    int      peak_goal;   /**< where `peak` is slewing to (== peak when settled) */
+    int      peak_step;   /**< largest change of `peak` per rendered sample      */
     long     delay;       /**< frames of silence still owed before it sounds    */
     long     frames;      /**< total length                                    */
     long     pos;         /**< frames sounded so far (0..frames)               */
@@ -520,6 +522,38 @@ int  audio_mix_add_sample(AudioMixer *m, AudioVoiceFill fill, void *ctx,
  * Returns true if it found that voice and armed the release.
  */
 bool audio_mix_release_voice(AudioMixer *m, int slot, uint32_t gen);
+
+/* ── Live gain ──────────────────────────────────────────────────────────────
+ * A voice's `peak` may now exceed unity (a boost), so a track's normalisation
+ * gain and a user volume can be summed into ONE number and applied where the
+ * sample is already multiplied.  `audio_gain_total_mdb()` is the only place the
+ * boost cap lives.  Milli-dB throughout (1000 = 1 dB). */
+#define AUDIO_GAIN_MAX_MDB    12000     /**< total boost cap (+12 dB)                 */
+#define AUDIO_GAIN_MIN_MDB    (-60000)  /**< at or below this the voice is muted      */
+#define AUDIO_GAIN_PEAK_MAX   (4 * 32768) /**< largest `peak`: 4x unity (+12 dB)      */
+
+/** norm + user, clamped to [AUDIO_GAIN_MIN_MDB, AUDIO_GAIN_MAX_MDB].  Overflow-safe. */
+int  audio_gain_total_mdb(int norm_mdb, int user_mdb);
+
+/** base_peak * 10^(total_mdb / 20000), rounded, at most AUDIO_GAIN_PEAK_MAX; 0 when
+ *  total_mdb <= AUDIO_GAIN_MIN_MDB or base_peak <= 0 (mute). */
+int  audio_gain_peak(int base_peak, int total_mdb);
+
+/** One sample times a voice's peak: floor(s * peak / 32768), exactly, for every
+ *  peak up to AUDIO_GAIN_PEAK_MAX, and bit-identical to the former `(s * peak) >> 15`
+ *  for peak <= 32767.  ⚠️ Split into whole units and a 15-bit remainder so no product
+ *  exceeds 2^30: `sizeof(long) == 4` here, and `s * 131072` would wrap. */
+static inline long audio_voice_scale(int16_t s, int peak)
+{
+    return (long)s * (long)(peak >> 15) + (((long)s * (long)(peak & 32767)) >> 15);
+}
+
+/** Set where voice (slot, gen) is heading.  Identity as audio_mix_release_voice().
+ *  Before the voice has sounded a frame the change is immediate; afterwards `peak`
+ *  slews there at about 20 ms per full swing.  `peak` 0 is legal here (mute), is
+ *  clamped to AUDIO_GAIN_PEAK_MAX, and negative is refused.  False for a stale or
+ *  free handle. */
+bool audio_mix_set_voice_peak(AudioMixer *m, int slot, uint32_t gen, int peak);
 
 /** Which limiter the bus is actually using, AUDIO_MIX_HARD or AUDIO_MIX_SOFT.
  *  ⚠️ **An A/B tool must read its toggle back from here rather than print its

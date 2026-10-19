@@ -332,6 +332,15 @@ long audio_mix_render(AudioMixer *m, int16_t *mono, long frames)
                 continue;
             }
 
+            /* The gain ramp: `peak` walks to `peak_goal` by at most `peak_step` per
+             * sample, so a live gain change is a ~20 ms slope and not a click.  One
+             * compare per voice per sample while settled; no divide. */
+            if (vo->peak != vo->peak_goal) {
+                int d = vo->peak_goal - vo->peak;
+                if (d > 0) vo->peak += (d > vo->peak_step) ? vo->peak_step : d;
+                else       vo->peak -= (-d > vo->peak_step) ? vo->peak_step : -d;
+            }
+
             double env = audio_tone_env(vo->pos, vo->frames, vo->attack, vo->release);
 
             if (vo->kind == AUDIO_VOICE_SAMPLE) {
@@ -361,7 +370,7 @@ long audio_mix_render(AudioMixer *m, int16_t *mono, long frames)
                  * `__aeabi_idiv` call per sample per voice; the shift is exact
                  * and the 1/32768-vs-1/32767 difference is a third of an LSB at
                  * full scale.  Same reasoning as `audio_attenuate()`. */
-                acc += (int32_t)((((long)s * (long)vo->peak) >> 15) * env);
+                acc += (int32_t)((double)audio_voice_scale(s, vo->peak) * env);
 
                 if (++vo->pos >= vo->frames) vo->active = false;
                 continue;
@@ -439,6 +448,8 @@ int audio_mix_add(AudioMixer *m, int freq_hz, int duration_ms,
     vo->phase      = 0.0;
     vo->phase_step = 2.0 * M_PI * (double)freq_hz / (double)m->rate;
     vo->peak       = peak;
+    vo->peak_goal  = peak;
+    vo->peak_step  = 1;
     vo->delay      = delay;
     vo->frames     = frames;
     vo->pos        = 0;
@@ -469,6 +480,8 @@ int audio_mix_add_sample(AudioMixer *m, AudioVoiceFill fill, void *ctx,
     vo->buf_pos = 0;
     vo->drained = false;
     vo->peak    = peak;
+    vo->peak_goal = peak;
+    vo->peak_step = 1;
     vo->delay   = 0;
     vo->frames  = total_frames;
     vo->pos     = 0;
@@ -580,4 +593,45 @@ long audio_pump_frames(long lead, long in_flight, long space, long cap)
     if (want > space)         want = space;
     if (cap > 0 && want > cap) want = cap;
     return want;
+}
+
+int audio_gain_total_mdb(int norm_mdb, int user_mdb)
+{
+    /* long long: two caller-supplied ints must not wrap before the clamp. */
+    long long t = (long long)norm_mdb + (long long)user_mdb;
+    if (t > AUDIO_GAIN_MAX_MDB) return AUDIO_GAIN_MAX_MDB;
+    if (t < AUDIO_GAIN_MIN_MDB) return AUDIO_GAIN_MIN_MDB;
+    return (int)t;
+}
+
+int audio_gain_peak(int base_peak, int total_mdb)
+{
+    if (base_peak <= 0 || total_mdb <= AUDIO_GAIN_MIN_MDB) return 0;
+    if (total_mdb > AUDIO_GAIN_MAX_MDB) total_mdb = AUDIO_GAIN_MAX_MDB;
+    /* One pow(), on a user action only, never per sample. */
+    double p = (double)base_peak * pow(10.0, (double)total_mdb / 20000.0);
+    if (p > (double)AUDIO_GAIN_PEAK_MAX) return AUDIO_GAIN_PEAK_MAX;
+    return (int)(p + 0.5);
+}
+
+bool audio_mix_set_voice_peak(AudioMixer *m, int slot, uint32_t gen, int peak)
+{
+    if (!m || slot < 0 || slot >= AUDIO_MAX_VOICES || gen == 0 || peak < 0) return false;
+    AudioVoice *vo = &m->v[slot];
+    if (!vo->active || vo->gen != gen) return false;   /* freed, or reused */
+
+    if (peak > AUDIO_GAIN_PEAK_MAX) peak = AUDIO_GAIN_PEAK_MAX;
+    vo->peak_goal = peak;
+    if (vo->pos == 0) {                /* nothing sounded yet: no click to avoid */
+        vo->peak = peak;
+        return true;
+    }
+    /* About 20 ms for the whole swing; the one divide here is per call, not per sample. */
+    long ramp = (long)m->rate * 20 / 1000;
+    if (ramp < 1) ramp = 1;
+    long d = (long)peak - (long)vo->peak;
+    if (d < 0) d = -d;
+    long step = (d + ramp - 1) / ramp;
+    vo->peak_step = (step < 1) ? 1 : (int)step;
+    return true;
 }
