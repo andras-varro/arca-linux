@@ -608,10 +608,232 @@ static void test_categories(void)
     CHECK(app.screen == JF_SCR_SEARCH && cm.n == 0, "no category switch on SEARCH");
 }
 
+
+/* ── the action bar, queue insertion, instant mix, save ─────────────────── */
+
+static void start_playing(int row)
+{
+    send(JF_EV_ACTIVATE, row);
+    unsigned tag = find(JF_CMD_PLAY_STREAM)->tag;
+    reply_stream(tag, JF_ERR_NONE, 40);
+    send(JF_EV_STREAM_STARTED, 0);
+}
+static void save_result(unsigned tag, JfErr e, int status)
+{
+    JfResult r; memset(&r, 0, sizeof(r));
+    r.kind = JF_KIND_SAVE; r.tag = tag; r.err = e; r.status = status; r.fd = -1;
+    send_result(&r);
+}
+/* a playing queue of `n` entries that are not the list's rows */
+static void fake_queue(int n)
+{
+    for (int k = 0; k < n; k++) {
+        memset(&app.queue[k], 0, sizeof(app.queue[k]));
+        app.queue[k].type = JF_ITEM_TRACK;
+        snprintf(app.queue[k].id, sizeof(app.queue[k].id), "%032x", 0x7000 + k);
+        snprintf(app.queue[k].name, sizeof(app.queue[k].name), "q%d", k);
+    }
+    app.queue_n = n; app.queue_cur = 0; app.play_state = JF_PLAY_PLAYING;
+}
+
+static void test_action_bar(void)
+{
+    in_tracks(5, 5);
+    send(JF_EV_SELECT, 1);
+    CHECK(app.action_bar && app.action_row == 1 && cm.n == 0 && app.play_state == JF_PLAY_IDLE, "SELECT on a track raises the bar, plays nothing");
+    send(JF_EV_SELECT, 1);
+    CHECK(!app.action_bar && cm.n == 0, "the same row again drops the bar");
+    send(JF_EV_SELECT, 1); send(JF_EV_SELECT, 3);
+    CHECK(app.action_bar && app.action_row == 3, "another track row moves the bar");
+    send(JF_EV_BACK, 0);
+    CHECK(!app.action_bar && app.screen == JF_SCR_TRACKS && cm.n == 0, "BACK only drops the bar (screen %d)", app.screen);
+    send(JF_EV_SELECT, 2); send(JF_EV_NEED_MORE, 0); send(JF_EV_VOL_UP, 0);
+    CHECK(app.action_bar && app.action_row == 2, "more rows arriving and volume keep the bar");
+    send(JF_EV_DISMISS, 0);
+    CHECK(!app.action_bar, "DISMISS drops it");
+    send(JF_EV_SELECT, 2); send(JF_EV_ACTIVATE, 2);
+    CHECK(!app.action_bar && app.queue_n == 3 && has(JF_CMD_PLAY_STREAM), "PLAY (ACTIVATE) plays from the row and drops the bar");
+    send(JF_EV_SELECT, 2); send(JF_EV_OPEN_NOWPLAYING, 0);
+    CHECK(app.screen == JF_SCR_NOWPLAYING && !app.action_bar, "a screen change drops the bar");
+    send(JF_EV_BACK, 0);
+    send(JF_EV_SELECT, 2); send_text(JF_EV_SEARCH, "blue");
+    CHECK(app.screen == JF_SCR_SEARCH && !app.action_bar, "a search drops the bar");
+    send(JF_EV_BACK, 0);
+    CHECK(!app.action_bar, "still down after BACK");
+
+    in_tracks(3, 3);
+    send(JF_EV_SELECT, 1); send(JF_EV_PLAY_NEXT, 1);
+    CHECK(!app.action_bar, "an action drops the bar");
+
+    signed_in(); artists_loaded(3, 3);
+    send(JF_EV_SELECT, 0);
+    CHECK(app.screen == JF_SCR_ALBUMS && !app.action_bar && has(JF_CMD_REQUEST), "SELECT on a non-track row opens it");
+}
+
+static void test_queue_insert(void)
+{
+    in_tracks(6, 6);
+    JfList *tl = &app.lists[JF_LIST_TRACKS];
+    send(JF_EV_PLAY_NEXT, 3);
+    CHECK(app.queue_n == 1 && app.queue_cur == 0 && strcmp(app.queue[0].id, tl->items[3].id) == 0 &&
+          has(JF_CMD_PLAY_STREAM) && !has(JF_CMD_STOP) && app.play_state == JF_PLAY_FETCHING &&
+          strncmp(app.queue_name, "Queue: ", 7) == 0,
+          "PLAY NEXT with an empty queue plays that one track (n %d)", app.queue_n);
+
+    start_playing(0);                               /* queue = rows 0..5 */
+    char old1[33]; snprintf(old1, sizeof old1, "%s", app.queue[1].id);
+    send(JF_EV_PLAY_NEXT, 4);
+    CHECK(app.queue_n == 7 && app.queue_cur == 0 && strcmp(app.queue[1].id, tl->items[4].id) == 0 &&
+          strcmp(app.queue[2].id, old1) == 0 && cm.n == 0 && strcmp(app.banner, "QUEUED NEXT") == 0,
+          "PLAY NEXT lands after the playing entry, shifts the rest, plays nothing (n %d banner %s)", app.queue_n, app.banner);
+    app.queue_cur = 3;
+    send(JF_EV_PLAY_NEXT, 5);
+    CHECK(app.queue_n == 8 && app.queue_cur == 3 && strcmp(app.queue[4].id, tl->items[5].id) == 0, "PLAY NEXT in the middle");
+    app.queue_cur = app.queue_n - 1;
+    send(JF_EV_PLAY_NEXT, 2);
+    CHECK(app.queue_n == 9 && strcmp(app.queue[8].id, tl->items[2].id) == 0 && app.queue_cur == 7, "PLAY NEXT at the end appends");
+
+    fake_queue(4);
+    char l3[33]; snprintf(l3, sizeof l3, "%s", app.queue[3].id);
+    send(JF_EV_ADD_QUEUE, 1);
+    CHECK(app.queue_n == 5 && strcmp(app.queue[4].id, tl->items[1].id) == 0 && strcmp(app.queue[3].id, l3) == 0 &&
+          cm.n == 0 && strcmp(app.banner, "ADDED TO QUEUE") == 0, "ADD appends");
+    fake_queue(JF_QUEUE_MAX);
+    char snap[33]; snprintf(snap, sizeof snap, "%s", app.queue[1].id);
+    send(JF_EV_ADD_QUEUE, 1);
+    CHECK(app.queue_n == JF_QUEUE_MAX && strcmp(app.banner, "QUEUE FULL") == 0 && cm.n == 0, "ADD on a full queue: notice, unchanged");
+    send(JF_EV_PLAY_NEXT, 1);
+    CHECK(app.queue_n == JF_QUEUE_MAX && strcmp(app.banner, "QUEUE FULL") == 0 && strcmp(app.queue[1].id, snap) == 0 && cm.n == 0,
+          "PLAY NEXT on a full queue: notice, unchanged");
+
+    app.queue_n = 0; app.play_state = JF_PLAY_IDLE;
+    send(JF_EV_ADD_QUEUE, 2);
+    CHECK(app.queue_n == 1 && has(JF_CMD_PLAY_STREAM) && strcmp(app.queue[0].id, tl->items[2].id) == 0, "ADD with nothing playing starts it");
+    app.play_state = JF_PLAY_END; app.queue_n = 3;
+    send(JF_EV_ADD_QUEUE, 4);
+    CHECK(app.queue_n == 1 && has(JF_CMD_PLAY_STREAM) && !has(JF_CMD_STOP) && strcmp(app.queue[0].id, tl->items[4].id) == 0,
+          "ADD after the queue ended starts a fresh queue (n %d)", app.queue_n);
+    app.play_state = JF_PLAY_END; app.queue_n = 3;
+    send(JF_EV_PLAY_NEXT, 5);
+    CHECK(app.queue_n == 1 && has(JF_CMD_PLAY_STREAM) && strcmp(app.queue[0].id, tl->items[5].id) == 0, "PLAY NEXT after the queue ended starts a fresh queue");
+
+    signed_in(); artists_loaded(3, 3);
+    send(JF_EV_ADD_QUEUE, 0); send(JF_EV_PLAY_NEXT, 0);
+    CHECK(app.queue_n == 0 && cm.n == 0, "a non-track row cannot be queued");
+}
+
+static void test_mix(void)
+{
+    in_tracks(4, 4);
+    JfList *tl = &app.lists[JF_LIST_TRACKS];
+    send(JF_EV_MIX, 1);
+    CHECK(strcmp(app.banner, "MIX: COMING") == 0 && cm.n == 0 && app.queue_n == 0, "MIX is a placeholder notice, no commands");
+
+    start_playing(0);
+    send(JF_EV_SELECT, 2);
+    send(JF_EV_INSTANT_MIX, 2);
+    const JfCmd *c = find(JF_CMD_REQUEST);
+    CHECK(c && cm.n == 1 && c->kind == JF_KIND_LIST && c->list == &app.lists[JF_LIST_MIX] && !app.action_bar,
+          "INSTANT MIX requests a LIST into the mix store and drops the bar");
+    CHECK(c && strstr(c->path, "/InstantMix") && strstr(c->path, tl->items[2].id) && strstr(c->path, UID),
+          "path names the endpoint, the seed and the user: %s", c ? c->path : "-");
+    CHECK(app.busy && app.queue_n == 4 && app.play_state == JF_PLAY_PLAYING, "busy while fetching; the queue and audio are untouched");
+    JfCmd req = *c;
+    reply_list(&req, JF_ITEM_TRACK, 5, 5);
+    CHECK(app.queue_n == 5 && app.queue_cur == 0 && strcmp(app.queue[0].id, app.lists[JF_LIST_MIX].items[0].id) == 0,
+          "the mix replaces the queue (n %d)", app.queue_n);
+    CHECK(cm.n == 2 && cm.c[0].type == JF_CMD_STOP && cm.c[1].type == JF_CMD_PLAY_STREAM && strstr(cm.c[1].path, app.queue[0].id),
+          "stop the playing audio, stream the mix's first item");
+    char want[96]; snprintf(want, sizeof want, "Mix: %.80s", tl->items[2].name);
+    CHECK(strcmp(app.queue_name, want) == 0, "queue_name = '%s' (got '%s')", want, app.queue_name);
+
+    /* seed -1 = the playing track */
+    reply_stream(cm.c[1].tag, JF_ERR_NONE, 42); send(JF_EV_STREAM_STARTED, 0);
+    send(JF_EV_INSTANT_MIX, -1);
+    c = find(JF_CMD_REQUEST);
+    CHECK(c && strstr(c->path, app.queue[0].id), "INSTANT MIX from NOW PLAYING seeds with the playing track");
+
+    /* stale: a second request supersedes the first */
+    JfCmd first = *c;
+    send(JF_EV_INSTANT_MIX, -1);
+    int qn = app.queue_n;
+    reply_list(&first, JF_ITEM_TRACK, 3, 3);
+    CHECK(app.queue_n == qn && cm.n == 0, "a superseded mix reply is ignored");
+
+    /* empty answer: queue stays */
+    in_tracks(4, 4); start_playing(0);
+    send(JF_EV_INSTANT_MIX, 1);
+    req = *find(JF_CMD_REQUEST);
+    reply_list(&req, JF_ITEM_TRACK, 0, 0);
+    CHECK(strcmp(app.banner, "NO MIX FOUND") == 0 && app.queue_n == 4 && cm.n == 0 && !app.busy, "empty mix: notice, queue kept");
+
+    /* errors */
+    send(JF_EV_INSTANT_MIX, 1);
+    req = *find(JF_CMD_REQUEST);
+    reply_raw(&req, JF_ERR_SERVER);
+    CHECK(app.overlay && (app.overlay_buttons & JF_BTN_RETRY) && app.queue_n == 4, "mix server error: overlay with RETRY");
+    send(JF_EV_RETRY, 0);
+    CHECK(has(JF_CMD_REQUEST) && find(JF_CMD_REQUEST)->list == &app.lists[JF_LIST_MIX] && strstr(find(JF_CMD_REQUEST)->path, "/InstantMix"),
+          "RETRY re-asks the mix");
+    req = *find(JF_CMD_REQUEST);
+    reply_raw(&req, JF_ERR_NOTFOUND);
+    CHECK(app.overlay && app.overlay_buttons == JF_BTN_CLOSE && strcmp(app.overlay_text, "NOT FOUND") == 0, "mix 404: CLOSE only");
+    send(JF_EV_CLOSE_ERROR, 0);
+    send(JF_EV_INSTANT_MIX, 1);
+    req = *find(JF_CMD_REQUEST);
+    reply_raw(&req, JF_ERR_UNAUTH);
+    CHECK(app.screen == JF_SCR_SIGNIN, "mix 401 -> session expired");
+
+    /* idle: no STOP before the first stream */
+    in_tracks(4, 4);
+    send(JF_EV_INSTANT_MIX, 0);
+    req = *find(JF_CMD_REQUEST);
+    reply_list(&req, JF_ITEM_TRACK, 3, 3);
+    CHECK(cm.n == 1 && cm.c[0].type == JF_CMD_PLAY_STREAM && app.queue_n == 3, "idle: the mix starts without a STOP");
+}
+
+static void test_save(void)
+{
+    in_tracks(5, 5);
+    send_text(JF_EV_SAVE_PLAYLIST, "x");
+    CHECK(cm.n == 0, "no save on an empty queue");
+    start_playing(0);
+    send_text(JF_EV_SAVE_PLAYLIST, "");
+    CHECK(cm.n == 0, "no save without a name");
+    send_text(JF_EV_SAVE_PLAYLIST, "My List");
+    const JfCmd *c = find(JF_CMD_REQUEST);
+    CHECK(c && cm.n == 1 && c->kind == JF_KIND_SAVE && strcmp(c->name, "My List") == 0 && c->n == 5 && c->tag != 0,
+          "SAVE command: kind, name, n = queue size");
+    CHECK(c && app.busy && app.retry.kind != JF_KIND_SAVE, "busy while the POST is out; never stored for RETRY");
+    unsigned tag = c->tag;
+    send_text(JF_EV_SAVE_PLAYLIST, "Other");
+    CHECK(cm.n == 0, "a second save is ignored while one is pending");
+    save_result(tag + 7, JF_ERR_NONE, 200);
+    CHECK(app.busy && !app.overlay, "a result with another tag is ignored");
+    save_result(tag, JF_ERR_NONE, 200);
+    CHECK(!app.busy && strcmp(app.banner, "SAVED: My List") == 0, "success: banner (%s)", app.banner);
+
+    fake_queue(150);
+    send_text(JF_EV_SAVE_PLAYLIST, "Big");
+    c = find(JF_CMD_REQUEST);
+    CHECK(c && c->n == JF_SAVE_IDS_MAX, "n capped at %d (got %d)", JF_SAVE_IDS_MAX, c ? c->n : -1);
+    tag = c ? c->tag : 0;
+    save_result(tag, JF_ERR_SERVER, 500);
+    CHECK(app.overlay && app.overlay_buttons == JF_BTN_CLOSE && !app.busy, "failure: overlay, CLOSE only");
+    send(JF_EV_RETRY, 0);
+    CHECK(cm.n == 0 && app.overlay, "RETRY does nothing for a save");
+    send(JF_EV_CLOSE_ERROR, 0);
+    send_text(JF_EV_SAVE_PLAYLIST, "Again");
+    c = find(JF_CMD_REQUEST);
+    CHECK(c && c->kind == JF_KIND_SAVE && c->tag != tag, "a new save after a failure is allowed, with a new tag");
+    save_result(c ? c->tag : 0, JF_ERR_UNAUTH, 401);
+    CHECK(app.screen == JF_SCR_SIGNIN && !app.busy, "save 401 -> session expired");
+}
 int main(void)
 {
     test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue();
     test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit(); test_categories();
+    test_action_bar(); test_queue_insert(); test_mix(); test_save();
     printf("jf_core_test: %d checks, %d failures\n", checks, fails);
     return fails ? 1 : 0;
 }

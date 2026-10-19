@@ -2,20 +2,23 @@
  * jf_api.h — the Jellyfin client's request queue: one HTTP request in flight at
  * a time over a four-slot ring, polled once per frame, never blocking.
  *
- * Three kinds.  AUTH is a POST (sign-in).  LIST is a GET whose body is parsed
+ * Four kinds.  AUTH is a POST (sign-in).  SAVE is a POST of a JSON body (create a playlist) whose
+ * reply body is ignored: the status is the result.  LIST is a GET whose body is parsed
  * with jf_parse_items() into a caller-given JfList.  STREAM is a GET in
  * HTTP_STREAM mode: on a 200 the result carries the socket, positioned at the
  * first body byte (http_take_fd), for audio_music_start_fd().
  *
- * Order: AUTH > STREAM > LIST, oldest first within a kind.  An in-flight request
+ * Order: AUTH > SAVE > STREAM > LIST, oldest first within a kind (a save is one short user action, so it
+ * does not wait behind a stream).  An in-flight request
  * is never preempted, with one exception: SUPERSESSION.  A new LIST drops every
  * queued LIST and ends the in-flight one, a new STREAM does the same to STREAMs;
- * a dropped request delivers no result.  Every request carries a caller `tag`
+ * a dropped request delivers no result; a SAVE is never superseded, a second one just queues.  Every request carries a caller `tag`
  * that comes back in its result, so a result for a view the user has left can be
  * told from the current one.
  *
  * A GET that fails UNREACHABLE or SERVER is retried once after `retry_ms`; AUTH
- * is never retried (a second sign-in with a wrong password is not harmless).
+ * and SAVE are never retried (a second sign-in with a wrong password is not harmless, a second save could
+ * make a duplicate playlist).
  *
  * ⚠️ **Secrets.**  The Authorization header is built per request into a stack
  * buffer and wiped (volatile loop) right after http_begin(); the AUTH body (it
@@ -44,10 +47,11 @@
 #define JF_API_BODY_BYTES (96 * 1024)
 #define JF_API_PATH_MAX   384
 #define JF_API_BODY_OUT   320       /**< largest AUTH request body */
+#define JF_API_POST_BYTES 4608      /**< largest request body: a SAVE of JF_SAVE_IDS_MAX ids (~3.6 KB) */
 #define JF_API_TOKEN_MAX  64
 #define JF_API_NAME_MAX   64
 
-typedef enum { JF_KIND_NONE = 0, JF_KIND_AUTH, JF_KIND_LIST, JF_KIND_STREAM } JfKind;
+typedef enum { JF_KIND_NONE = 0, JF_KIND_AUTH, JF_KIND_LIST, JF_KIND_STREAM, JF_KIND_SAVE } JfKind;
 
 typedef enum {
     JF_ERR_NONE = 0,
@@ -77,7 +81,7 @@ typedef struct {
     unsigned seq;                       /**< enqueue order, oldest first          */
     JfList  *list;
     char     path[JF_API_PATH_MAX];
-    char     body[JF_API_BODY_OUT];     /**< AUTH only; wiped when the request ends */
+    char     body[JF_API_POST_BYTES];   /**< AUTH and SAVE only; wiped when the request ends */
     size_t   body_len;
 } JfSlot;
 
@@ -119,6 +123,8 @@ void jf_api_set_auth(JfApi *a, const char *device, const char *device_id, const 
 int  jf_api_enqueue_auth(JfApi *a, unsigned tag, const char *user, const char *password);
 int  jf_api_enqueue_list(JfApi *a, unsigned tag, const char *path, JfList *list);
 int  jf_api_enqueue_stream(JfApi *a, unsigned tag, const char *path);
+/** POST /Playlists: the first `n` (1..JF_SAVE_IDS_MAX) ids as a new playlist `name`.  The reply body is ignored. */
+int  jf_api_enqueue_save(JfApi *a, unsigned tag, const char *name, const char *user_id, const char *const *ids, int n);
 
 /** Drop every queued and in-flight request of `kind`; no result is delivered. */
 void jf_api_cancel_kind(JfApi *a, JfKind kind);

@@ -72,18 +72,21 @@ static void serve(int ls, int hpipe, const Act *script, int nscript)
             if ((end = strstr(buf, "\r\n\r\n")) != NULL) break;
         }
         if (!end) { close(c); continue; }
-        /* drain a request body so the close does not reset the reply */
+        /* drain a request body so the close does not reset the reply, and report it after the head */
+        char body[8192];
+        size_t have = len - (size_t)(end + 4 - buf);
         const char *cl = strstr(buf, "Content-Length: ");
-        if (cl) {
-            size_t want = (size_t)atoi(cl + 16), have = len - (size_t)(end + 4 - buf);
-            while (have < want) {
-                char tmp[512];
-                ssize_t n = read(c, tmp, sizeof(tmp));
-                if (n <= 0) break;
-                have += (size_t)n;
-            }
+        size_t want = cl ? (size_t)atoi(cl + 16) : 0;
+        if (want > sizeof(body) - 1) want = sizeof(body) - 1;
+        if (have > want) have = want;
+        memcpy(body, end + 4, have);
+        while (have < want) {
+            ssize_t n = read(c, body + have, want - have);
+            if (n <= 0) break;
+            have += (size_t)n;
         }
         (void)!write(hpipe, buf, (size_t)(end + 4 - buf));
+        if (have) (void)!write(hpipe, body, have);
         Act a = script[conn < nscript ? conn : nscript - 1];
         conn++;
         switch (a.kind) {
@@ -380,6 +383,118 @@ static void test_stream(void)
     jf_api_free(&a); srv_stop(s);
 }
 
+static void test_save(void)
+{
+    JfApi a;
+    JfResult r[8];
+    const char *ids2[] = { ID2, ID1 };
+
+    /* a 200 whose reply body is not JSON is still a success: the body of a SAVE is ignored */
+    Act ok[] = {{A_STATUS, 200}};
+    Srv *s = srv_start(ok, 1);
+    setup(&a, s);
+    jf_api_set_auth(&a, "dev", "did", "TOK-SAVE");
+    CHECK(jf_api_enqueue_save(&a, 21, "My \"mix\" \134 \303\251", ID1, ids2, 2) == 0);
+    CHECK(jf_api_busy(&a));
+    CHECK(pump(&a, r, 4, 3000) == 1);
+    CHECK(r[0].kind == JF_KIND_SAVE && r[0].tag == 21 && r[0].err == JF_ERR_NONE && r[0].status == 200);
+    CHECK(r[0].parse == JF_PARSE_OK && r[0].list == NULL && r[0].fd == -1);
+    const char *h = heads(s);
+    CHECK(strstr(h, "POST /Playlists HTTP/1.0") != NULL);
+    CHECK(strstr(h, "\r\nContent-Type: application/json\r\n") != NULL);
+    CHECK(strstr(h, "Token=\"TOK-SAVE\"") != NULL);             /* unlike the sign-in, the token goes */
+    CHECK(strstr(h, "\r\n\r\n{\"Name\":\"My \134\"mix\134\" \134\134 \303\251\",\"Ids\":[\"" ID2 "\",\"" ID1
+                    "\"],\"UserId\":\"" ID1 "\",\"MediaType\":\"Audio\"}") != NULL);
+    jf_api_free(&a);
+    srv_stop(s);
+
+    /* the largest save: 100 ids, in order, the whole body arrives */
+    char idbuf[JF_SAVE_IDS_MAX][JF_ID_LEN + 1];
+    const char *ids[JF_SAVE_IDS_MAX];
+    for (int i = 0; i < JF_SAVE_IDS_MAX; i++) {
+        snprintf(idbuf[i], sizeof(idbuf[i]), "%032x", i + 1);
+        ids[i] = idbuf[i];
+    }
+    s = srv_start(ok, 1);
+    setup(&a, s);
+    CHECK(jf_api_enqueue_save(&a, 1, "Big", ID1, ids, JF_SAVE_IDS_MAX) == 0);
+    CHECK(pump(&a, r, 4, 3000) == 1 && r[0].err == JF_ERR_NONE);
+    h = heads(s);
+    const char *p1 = strstr(h, idbuf[0]), *p100 = strstr(h, idbuf[99]);
+    CHECK(p1 && p100 && p1 < p100);
+    CHECK(strstr(h, "\"],\"UserId\":\"" ID1 "\",\"MediaType\":\"Audio\"}") != NULL);
+    CHECK(jf_api_enqueue_save(&a, 2, "Big", ID1, ids, JF_SAVE_IDS_MAX + 1) == -1);
+    CHECK(jf_api_enqueue_save(&a, 2, "Big", ID1, ids, 0) == -1);
+    CHECK(jf_api_enqueue_save(&a, 2, "Big", "short", ids, 1) == -1);
+    CHECK(!jf_api_busy(&a));                                    /* a refused enqueue queues nothing */
+    jf_api_free(&a);
+    srv_stop(s);
+
+    /* never retried: a 500 and a silent server each cost exactly one POST (a LIST costs two) */
+    Act s500[] = {{A_STATUS, 500}};
+    s = srv_start(s500, 1);
+    setup(&a, s);
+    jf_api_enqueue_save(&a, 3, "x", ID1, ids2, 1);
+    CHECK(pump(&a, r, 4, 3000) == 1 && r[0].kind == JF_KIND_SAVE && r[0].err == JF_ERR_SERVER && r[0].status == 500);
+    CHECK(count_str(heads(s), "POST /Playlists") == 1);
+    jf_api_free(&a); srv_stop(s);
+
+    Act sil[] = {{A_SILENT, 0}};
+    s = srv_start(sil, 1);
+    setup(&a, s);
+    a.idle_ms = 250;
+    jf_api_enqueue_save(&a, 4, "x", ID1, ids2, 1);
+    CHECK(pump(&a, r, 4, 4000) == 1 && r[0].kind == JF_KIND_SAVE && r[0].err == JF_ERR_UNREACHABLE && r[0].tag == 4);
+    CHECK(count_str(heads(s), "POST /Playlists") == 1);
+    jf_api_free(&a); srv_stop(s);
+
+    /* no supersession: two saves both go out, oldest first; a 401 is reported as such */
+    Act two[] = {{A_STATUS, 200}, {A_STATUS, 401}};
+    s = srv_start(two, 2);
+    setup(&a, s);
+    CHECK(jf_api_enqueue_save(&a, 5, "first", ID1, ids2, 1) == 0);
+    CHECK(jf_api_enqueue_save(&a, 6, "second", ID1, ids2, 1) == 0);
+    CHECK(pump(&a, r, 4, 3000) == 2);
+    CHECK(r[0].tag == 5 && r[0].err == JF_ERR_NONE && r[1].tag == 6 && r[1].err == JF_ERR_UNAUTH);
+    h = heads(s);
+    CHECK(strstr(h, "first") != NULL && strstr(h, "second") != NULL && strstr(h, "first") < strstr(h, "second"));
+    jf_api_free(&a); srv_stop(s);
+
+    /* AUTH > SAVE > STREAM > LIST whatever the order they were queued in */
+    Act pr[] = {{A_AUTH, 0}, {A_STATUS, 200}, {A_STREAM, 0}, {A_ITEMS, 0}};
+    s = srv_start(pr, 4);
+    setup(&a, s);
+    fresh_list();
+    CHECK(jf_api_enqueue_list(&a, 1, "/list", &list) == 0);
+    CHECK(jf_api_enqueue_stream(&a, 2, "/stream") == 0);
+    CHECK(jf_api_enqueue_save(&a, 3, "x", ID1, ids2, 1) == 0);
+    CHECK(jf_api_enqueue_auth(&a, 4, "u", PASSWORD) == 0);
+    CHECK(pump(&a, r, 8, 3000) == 4);
+    CHECK(r[0].kind == JF_KIND_AUTH && r[1].kind == JF_KIND_SAVE && r[2].kind == JF_KIND_STREAM && r[3].kind == JF_KIND_LIST);
+    if (r[2].fd >= 0) close(r[2].fd);
+    jf_api_free(&a); srv_stop(s);
+
+    /* cancel drops queued saves and nothing else; the ring still bounds them */
+    s = srv_start(ok, 1);
+    setup(&a, s);
+    fresh_list();
+    for (int i = 0; i < JF_API_SLOTS; i++) CHECK(jf_api_enqueue_save(&a, (unsigned)i, "x", ID1, ids2, 1) == 0);
+    CHECK(jf_api_enqueue_save(&a, 99, "x", ID1, ids2, 1) == -1);
+    jf_api_cancel_kind(&a, JF_KIND_LIST);
+    CHECK(jf_api_busy(&a));
+    jf_api_cancel_kind(&a, JF_KIND_SAVE);
+    CHECK(!jf_api_busy(&a));
+    CHECK(pump(&a, r, 4, 300) == 0);
+    CHECK(heads(s)[0] == 0);                                    /* nothing reached the wire */
+    /* ... and the one in flight */
+    CHECK(jf_api_enqueue_save(&a, 7, "x", ID1, ids2, 1) == 0);
+    CHECK(!jf_api_poll(&a, &r[0]));                             /* begins it */
+    CHECK(jf_api_busy(&a));
+    jf_api_cancel_kind(&a, JF_KIND_SAVE);
+    CHECK(!jf_api_busy(&a));
+    jf_api_free(&a); srv_stop(s);
+}
+
 static void test_classify(void)
 {
     CHECK(jf_api_classify(200, "") == JF_ERR_NONE);
@@ -413,6 +528,7 @@ int main(void)
     test_errors();
     test_supersede_and_priority();
     test_stream();
+    test_save();
     printf("jf_api_test: %d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;
 }

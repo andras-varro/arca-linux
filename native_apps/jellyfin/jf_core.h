@@ -42,6 +42,7 @@
 #define JF_CAP_ALBUMS    300
 #define JF_CAP_TRACKS    300
 #define JF_CAP_SEARCH    200
+#define JF_CAP_MIX       200      /* an instant mix: JF_MIX_LIMIT items fit */
 #define JF_QUEUE_MAX     200
 #define JF_NAV_MAX        16
 #define JF_CMDS_MAX        4
@@ -52,7 +53,9 @@
 typedef enum { JF_SCR_SIGNIN = 0, JF_SCR_ARTISTS, JF_SCR_ALBUMS, JF_SCR_TRACKS,
                JF_SCR_SEARCH, JF_SCR_NOWPLAYING, JF_SCR_QUEUE } JfScreen;
 
-typedef enum { JF_LIST_ARTISTS = 0, JF_LIST_ALBUMS, JF_LIST_TRACKS, JF_LIST_SEARCH, JF_LIST_COUNT } JfListId;
+typedef enum { JF_LIST_ARTISTS = 0, JF_LIST_ALBUMS, JF_LIST_TRACKS, JF_LIST_SEARCH,
+               JF_LIST_MIX,       /* no screen of its own: the reply of an INSTANT MIX request */
+               JF_LIST_COUNT } JfListId;
 
 /* The root browse category (JF_SCR_ARTISTS shows it), in the order JF_EV_CATEGORY cycles. */
 typedef enum { JF_CAT_ALBUMS = 0, JF_CAT_ARTISTS, JF_CAT_PLAYLISTS, JF_CAT_GENRES, JF_CAT_SONGS, JF_CAT_COUNT } JfCat;
@@ -72,7 +75,15 @@ typedef enum {
     /* user intents */
     JF_EV_START,         /* .login: the loaded login; once, first */
     JF_EV_SIGNIN,        /* .server .user .password */
-    JF_EV_ACTIVATE,      /* .i: row index in app->list->items */
+    JF_EV_ACTIVATE,      /* .i: row index in app->list->items; a track row PLAYS from there on (the action bar's PLAY) */
+    JF_EV_SELECT,        /* .i: a tap / ENTER on a list row.  A track row raises the ACTION BAR on it (the same row
+                          * again drops it, another track row moves it); any other row opens as ACTIVATE does */
+    JF_EV_PLAY_NEXT,     /* .i: list row (>= 0, a track); inserts after the queue position, or plays it when nothing plays */
+    JF_EV_ADD_QUEUE,     /* .i: list row; appends, or plays it when nothing plays */
+    JF_EV_MIX,           /* .i: list row, or -1 = the playing track.  Placeholder: the core only shows "MIX: COMING" */
+    JF_EV_INSTANT_MIX,   /* .i: list row, or -1 = the playing track; the mix replaces the queue and plays */
+    JF_EV_SAVE_PLAYLIST, /* .term: the playlist name (the UI never sends an empty one); saves the queue's first JF_SAVE_IDS_MAX */
+    JF_EV_DISMISS,       /* drop the action bar */
     JF_EV_BACK,
     JF_EV_PLAY_ALL,
     JF_EV_NEXT,
@@ -111,7 +122,9 @@ typedef enum {
     JF_CMD_SET_SERVER,   /* jf_api_set_server(.host, .port) */
     JF_CMD_SET_AUTH,     /* jf_api_set_auth(device, app->login.device_id, app->login.token) */
     JF_CMD_REQUEST,      /* .kind AUTH: jf_api_enqueue_auth(.tag, .user, .password);
-                          * .kind LIST: jf_api_enqueue_list(.tag, .path, .list) */
+                          * .kind LIST: jf_api_enqueue_list(.tag, .path, .list)  (also the INSTANT MIX request)
+                          * .kind SAVE: jf_api_enqueue_save(.tag, .name, app->login.user_id, ids, .n) with ids = the
+                          *   ids of app->queue[0..n); POST, never retried (no app->retry) */
     JF_CMD_CANCEL,       /* jf_api_cancel_kind(.kind) */
     JF_CMD_PLAY_STREAM,  /* jf_api_enqueue_stream(.tag, .path); .norm_mdb/.user_mdb repeat the gain */
     JF_CMD_START_AUDIO,  /* audio_music_start_fd(.fd), then audio_music_set_gain(.norm_mdb, .user_mdb);
@@ -137,6 +150,8 @@ typedef struct {
     int fd;
     int norm_mdb;
     int user_mdb;
+    char name[96];       /* SAVE: the playlist name */
+    int n;               /* SAVE: how many queue ids */
 } JfCmd;
 
 typedef struct {
@@ -161,6 +176,10 @@ typedef struct {
     char overlay_text[48];
     unsigned overlay_buttons;/* JF_BTN_* mask */
     char banner[48];         /* one-line notice ("" = none); stays until the next user intent */
+    bool action_bar;         /* the ACTION BAR is up on list row `action_row` (a track): the UI draws it in the button row
+                              * and owns focus there.  Dropped by any other user intent, a screen change or a re-aim */
+    int action_row;
+    char queue_name[96];     /* the name SAVE AS PLAYLIST offers: set by whatever built the queue ("Queue: <first>", "Mix: <seed>") */
     unsigned banner_seq;     /* bumps on every new banner, so the UI can time it */
     bool busy;               /* any request in flight or being waited for: show a spinner */
     JfPlayState play_state;  /* IDLE; FETCHING (stream requested); PLAYING; END = "END OF QUEUE" */
@@ -177,8 +196,9 @@ typedef struct {
     JfNavEntry nav[JF_NAV_MAX];
     int nav_n;
     JfCmd retry;
-    unsigned auth_tag, stream_tag;
-    bool auth_pending;
+    unsigned auth_tag, stream_tag, save_tag;
+    bool auth_pending, save_pending;
+    char save_name[96];
     bool play_wait;
     int play_wait_from;
     int fail_streak;
@@ -187,6 +207,7 @@ typedef struct {
     JfItem store_albums[JF_CAP_ALBUMS];
     JfItem store_tracks[JF_CAP_TRACKS];
     JfItem store_search[JF_CAP_SEARCH];
+    JfItem store_mix[JF_CAP_MIX];
 } JfApp;
 
 /** Zero the app, wire the list storage, session_fn = jf_session_id, volume = default. */

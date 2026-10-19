@@ -6,6 +6,8 @@
  *   B  the lists lie inside SCREEN_VISIBLE_* (and, being tapped, inside SAFE_* too);
  *   C  the button rows do not overlap the list, and buttons within a row do not overlap;
  *   D  the drawn-only now-playing rects lie inside SCREEN_VISIBLE_*.
+ *   F  the action bar, SAVE AS PLAYLIST and the now-playing MIX pair (all pressable, so also under A) do not
+ *      overlap the list or each other, and the list ends above the bar.
  */
 #include <stdio.h>
 #include "jf_ui.h"
@@ -28,21 +30,22 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     JfExtents e = { 0, 0, 800, 480, inset_l, inset_t, 800 - inset_r, 480 - inset_b };
     JfLayout L;
     jf_ui_layout(&L, &e);
-    UiRect press[18];
+    UiRect press[32];
     int n = 0;
     for (int i = 0; i < JF_UI_ROW3; i++) press[n++] = L.row3[i];
     for (int i = 0; i < JF_UI_ROW5; i++) press[n++] = L.row5[i];
     for (int i = 0; i < JF_UI_FIELDS; i++) press[n++] = L.field[i];
     press[n++] = L.signin; press[n++] = L.signexit;
+    for (int i = 0; i < JF_UI_ABAR; i++) press[n++] = L.abar[i];
+    for (int i = 0; i < JF_UI_NPMIX; i++) press[n++] = L.np_mix[i];
+    press[n++] = L.save;
     press[n++] = L.cat_prev; press[n++] = L.cat_next;
     for (int i = 0; i < n; i++)
         CHECK(inside(press[i], e.safe_l, e.safe_t, e.safe_r, e.safe_b),
               "A: inset %d/%d/%d/%d: button %d (%d,%d %dx%d) outside SAFE", inset_t, inset_b, inset_l, inset_r,
               i, press[i].x, press[i].y, press[i].w, press[i].h);
     CHECK(inside(L.list, e.vis_l, e.vis_t, e.vis_r, e.vis_b), "B: list outside VISIBLE (inset %d)", inset_t);
-    CHECK(inside(L.list_full, e.vis_l, e.vis_t, e.vis_r, e.vis_b), "B: queue list outside VISIBLE (inset %d)", inset_t);
     CHECK(inside(L.list, e.safe_l, e.safe_t, e.safe_r, e.safe_b), "B: list outside SAFE (inset %d)", inset_t);
-    CHECK(inside(L.list_full, e.safe_l, e.safe_t, e.safe_r, e.safe_b), "B: queue list outside SAFE (inset %d)", inset_t);
     CHECK(L.list.y > L.bar_bottom, "B: list starts under the bar rule");
     CHECK(L.list.h >= 2 * 40, "B: list shows at least two rows (inset %d): h %d", inset_t, L.list.h);
     CHECK(inside(L.list_root, e.safe_l, e.safe_t, e.safe_r, e.safe_b), "E: root list outside SAFE (inset %d)", inset_t);
@@ -57,6 +60,18 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     }
     for (int i = 0; i < JF_UI_ROW5; i++)
         for (int j = i + 1; j < JF_UI_ROW5; j++) CHECK(disjoint(L.row5[i], L.row5[j]), "C: row5 %d/%d overlap", i, j);
+    /* F  the action bar and the queue's SAVE take the button row, under the list; the bar's buttons are disjoint */
+    for (int i = 0; i < JF_UI_ABAR; i++) {
+        CHECK(disjoint(L.abar[i], L.list) && disjoint(L.abar[i], L.list_root), "F: abar[%d] overlaps a list (inset %d)", i, inset_t);
+        CHECK(L.abar[i].y == L.row3[0].y, "F: abar[%d] is not in the button row", i);
+        for (int j = i + 1; j < JF_UI_ABAR; j++) CHECK(disjoint(L.abar[i], L.abar[j]), "F: abar %d/%d overlap", i, j);
+    }
+    CHECK(disjoint(L.save, L.list), "F: SAVE overlaps the queue list (inset %d)", inset_t);
+    CHECK(L.list.y + L.list.h <= L.abar[0].y, "F: the list does not end above the action bar (inset %d)", inset_t);
+    CHECK(disjoint(L.np_mix[0], L.np_mix[1]), "F: now-playing MIX buttons overlap");
+    for (int i = 0; i < JF_UI_NPMIX; i++)
+        for (int j = 0; j < JF_UI_ROW5; j++) CHECK(disjoint(L.np_mix[i], L.row5[j]), "F: np_mix[%d] overlaps row5[%d] (inset %d)", i, j, inset_t);
+    CHECK(L.progress.y + L.progress.h + 30 <= L.np_mix[0].y, "F: progress and its label leave the MIX row clear (inset %d)", inset_t);
     CHECK(inside(L.progress, e.vis_l, e.vis_t, e.vis_r, e.vis_b), "D: progress outside VISIBLE");
     CHECK(inside(L.info, e.vis_l, e.vis_t, e.vis_r, e.vis_b), "D: info outside VISIBLE");
     CHECK(L.progress.y + L.progress.h + 30 <= L.row5[0].y, "D: progress and its label leave the button row clear");

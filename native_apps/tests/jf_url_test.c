@@ -307,6 +307,64 @@ static void test_body(void)
     CHECK(jf_auth_body(b, sizeof(b), NULL, "pw") == -1, "NULL user accepted");
 }
 
+static void test_mix_and_save(void)
+{
+    char b[8192];
+    int n = jf_path_instant_mix(b, sizeof(b), UID, ALB, 50);
+    EXPECT("instant mix", n, b, "/Items/" ALB "/InstantMix?userId=" UID "&Limit=50&EnableImages=false&EnableUserData=false");
+    CHECK(jf_path_instant_mix(b, sizeof(b), "short", ALB, 50) == -1, "bad uid accepted");
+    CHECK(jf_path_instant_mix(b, sizeof(b), UID, "../x", 50) == -1, "bad track id accepted");
+    CHECK(jf_path_instant_mix(b, sizeof(b), UID, NULL, 50) == -1, "NULL track id accepted");
+    CAP_EDGE("instant mix", jf_path_instant_mix(b_, cap, UID, ALB, 50));
+
+    n = jf_path_playlist_create(b, sizeof(b));
+    EXPECT("playlist create", n, b, "/Playlists");
+    CHECK(jf_path_playlist_create(b, 11) == 10, "create cap=len+1 refused");
+    CHECK(jf_path_playlist_create(b, 10) == -1, "create cap=len accepted");
+
+    const char *ids[JF_SAVE_IDS_MAX + 1];
+    for (int i = 0; i <= JF_SAVE_IDS_MAX; i++) ids[i] = (i & 1) ? ART : ALB;
+
+    n = jf_save_body(b, sizeof(b), "Mix", UID, ids, 2);
+    EXPECT("save body", n, b, "{\"Name\":\"Mix\",\"Ids\":[\"" ALB "\",\"" ART "\"],\"UserId\":\"" UID
+                              "\",\"MediaType\":\"Audio\"}");
+    n = jf_save_body(b, sizeof(b), "a\"b\134c \303\251", UID, ids, 1);
+    EXPECT("name escaping", n, b, "{\"Name\":\"a\134\"b\134\134c \303\251\",\"Ids\":[\"" ALB "\"],\"UserId\":\""
+                                  UID "\",\"MediaType\":\"Audio\"}");
+    n = jf_save_body(b, sizeof(b), "x\ny", UID, ids, 1);
+    CHECK(n > 0 && strstr(b, "x\134u000ay") != NULL && strchr(b, '\n') == NULL, "newline in name not escaped");
+    n = jf_save_body(b, sizeof(b), "", UID, ids, 1);
+    CHECK(n > 0 && strstr(b, "\"Name\":\"\",") != NULL, "empty name refused");
+
+    n = jf_save_body(b, sizeof(b), "Max", UID, ids, JF_SAVE_IDS_MAX);
+    CHECK(n > 0 && n < 4608, "100-id body: %d bytes", n);
+    CHECK(strstr(b, "\"Ids\":[\"" ALB "\",\"" ART "\",\"" ALB "\"") != NULL, "ids out of order");
+    CHECK(b[n - 1] == '}' && strstr(b, "\"],\"UserId\"") != NULL, "100-id body not closed");
+    CHECK(jf_save_body(b, sizeof(b), "Max", UID, ids, JF_SAVE_IDS_MAX + 1) == -1, "101 ids accepted");
+    CHECK(jf_save_body(b, sizeof(b), "Max", UID, ids, 0) == -1, "0 ids accepted");
+    CHECK(jf_save_body(b, sizeof(b), "Max", UID, ids, -1) == -1, "-1 ids accepted");
+    CHECK(jf_save_body(b, sizeof(b), "Max", UID, NULL, 1) == -1, "NULL ids accepted");
+    CHECK(jf_save_body(b, sizeof(b), NULL, UID, ids, 1) == -1, "NULL name accepted");
+    CHECK(jf_save_body(b, sizeof(b), "Max", "short", ids, 1) == -1, "bad uid accepted");
+    CHECK(jf_save_body(b, sizeof(b), "Max", NULL, ids, 1) == -1, "NULL uid accepted");
+    const char *bad[] = { ALB, "not-an-id", ART };
+    CHECK(jf_save_body(b, sizeof(b), "Max", UID, bad, 3) == -1, "bad id in the middle accepted");
+    CHECK(b[0] == '\0', "refused body not empty");
+    const char *nul[] = { ALB, NULL };
+    CHECK(jf_save_body(b, sizeof(b), "Max", UID, nul, 2) == -1, "NULL id accepted");
+
+    /* every shorter cap fails and leaves an empty string (the name is the user's, but the caller wipes anyway) */
+    n = jf_save_body(b, sizeof(b), "Mix", UID, ids, 3);
+    CHECK(jf_save_body(b, (size_t)n + 1, "Mix", UID, ids, 3) == n, "save cap=len+1 refused");
+    for (size_t cap = 1; cap <= (size_t)n; cap++) {
+        char c[8192];
+        memset(c, 'X', sizeof(c));
+        CHECK(jf_save_body(c, cap, "Mix", UID, ids, 3) == -1, "save cap=%d accepted", (int)cap);
+        CHECK(c[0] == '\0', "save cap=%d: out[0] not NUL", (int)cap);
+    }
+    CHECK(jf_save_body(b, 0, "Mix", UID, ids, 1) == -1, "save cap 0 accepted");
+}
+
 int main(void)
 {
     test_builders();
@@ -316,6 +374,7 @@ int main(void)
     test_server();
     test_header();
     test_body();
+    test_mix_and_save();
     printf("jf_url_test: %d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;
 }

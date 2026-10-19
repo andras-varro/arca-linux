@@ -24,6 +24,8 @@
 #define JF_UI_ROW3   3     /* browse screens: SEARCH, NOW PLAYING, PLAY ALL */
 #define JF_UI_ROW5   5     /* now playing: NEXT, VOL-, VOL+, QUEUE, BACK */
 #define JF_UI_FIELDS 3     /* sign-in: SERVER, USER, PASSWORD */
+#define JF_UI_ABAR   5     /* action bar: PLAY, PLAY NEXT, ADD QUEUE, MIX, INSTANT MIX */
+#define JF_UI_NPMIX  2     /* now playing: MIX, INSTANT MIX (focus 5 and 6, after the row5 buttons) */
 #define JF_UI_BTN_H  44
 #define JF_UI_CAT_H  40     /* root category strip: arrows and name */
 #define JF_UI_CAT_W  72     /* one arrow */
@@ -37,8 +39,10 @@ typedef struct {
 typedef struct {
     int    bar_bottom;              /* top_bar_bottom(): the rule is drawn on this row */
     UiRect banner;                  /* notice / busy line under the bar */
-    UiRect list;                    /* browse list (above the row) */
-    UiRect list_full;               /* the queue list: no button row under it */
+    UiRect list;                    /* browse list and queue list (above the button row) */
+    UiRect abar[JF_UI_ABAR];        /* the action bar: in the button row's place while it is up; pressable */
+    UiRect save;                    /* the queue screen's SAVE AS PLAYLIST, in the button row; pressable */
+    UiRect np_mix[JF_UI_NPMIX];     /* now playing: a row above row5; pressable */
     UiRect list_root;               /* the browse list on the root screen: under the category strip */
     UiRect cat_prev, cat_next;      /* root category arrows, pressable */
     UiRect cat_label;               /* root category name and count, drawn only */
@@ -53,7 +57,8 @@ typedef struct {
 void jf_ui_layout(JfLayout *L, const JfExtents *e);
 void jf_ui_extents_live(JfExtents *e);
 
-typedef enum { JF_ZONE_LIST = 0, JF_ZONE_ROW, JF_ZONE_BAR } JfZone;
+/* ABAR: the action bar owns focus while the core says it is up (Left / Right move, ENTER acts, Up / Down dismiss it). */
+typedef enum { JF_ZONE_LIST = 0, JF_ZONE_ROW, JF_ZONE_BAR, JF_ZONE_ABAR } JfZone;
 
 typedef struct {
     Framebuffer *fb;
@@ -63,7 +68,8 @@ typedef struct {
     JfLayout L;
     TopBar bar;
     ListView lv;
-    Button row3[JF_UI_ROW3], row5[JF_UI_ROW5];
+    Button row3[JF_UI_ROW3], row5[JF_UI_ROW5], abar[JF_UI_ABAR], np_mix[JF_UI_NPMIX], save;
+    bool abar_up;                        /* the core's action_bar as of the last frame: a rising edge moves focus onto it */
     Button field[JF_UI_FIELDS], signin, signexit;
     ModalDialog dlg;
     bool dlg_up;

@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static const int PAGE[JF_LIST_COUNT] = { JF_PAGE_ARTISTS, JF_PAGE_ALBUMS, JF_PAGE_TRACKS, JF_PAGE_SEARCH };
+static const int PAGE[JF_LIST_COUNT] = { JF_PAGE_ARTISTS, JF_PAGE_ALBUMS, JF_PAGE_TRACKS, JF_PAGE_SEARCH, JF_MIX_LIMIT };
 
 /* ── small helpers ─────────────────────────────────────────────────────── */
 
@@ -93,6 +93,7 @@ static int build_path(const JfApp *app, int lid, int start, char *out, size_t ca
     case JF_LIST_TRACKS:
         return sub == JF_SUB_PLAYLIST ? jf_path_playlist_items(out, cap, uid, id, start, lim)
                                       : jf_path_tracks(out, cap, uid, id, start, lim);
+    case JF_LIST_MIX:     return jf_path_instant_mix(out, cap, uid, id, JF_MIX_LIMIT);
     default:              return jf_path_search(out, cap, uid, id, start, lim);
     }
 }
@@ -128,6 +129,7 @@ static void retarget(JfApp *app, int lid, const char *id, const char *title, int
     l->pending = false;
     l->generation++;
     app->play_wait = false;
+    app->action_bar = false;      /* the rows under it are gone */
     request_page(app, lid, 0, out);
 }
 
@@ -173,12 +175,14 @@ static void go_signin(JfApp *app)
     app->screen = JF_SCR_SIGNIN;
     app->nav_n = 0;
     app->play_wait = false;
+    app->action_bar = false;
 }
 
 static void refresh(JfApp *app)
 {
     int lid = cur_list(app);
     app->list = lid >= 0 ? &app->lists[lid] : NULL;
+    if (app->action_bar && (!app->list || app->action_row < 0 || app->action_row >= app->list->n)) app->action_bar = false;
     switch (app->screen) {
     case JF_SCR_SIGNIN:     copy(app->crumb, sizeof(app->crumb), "SIGN IN"); break;
     case JF_SCR_ARTISTS:    copy(app->crumb, sizeof(app->crumb), CAT_NAME[app->cat]); break;
@@ -188,7 +192,7 @@ static void refresh(JfApp *app)
     case JF_SCR_NOWPLAYING: copy(app->crumb, sizeof(app->crumb), "NOW PLAYING"); break;
     case JF_SCR_QUEUE:      copy(app->crumb, sizeof(app->crumb), "QUEUE"); break;
     }
-    bool any = app->auth_pending || app->play_wait || app->play_state == JF_PLAY_FETCHING;
+    bool any = app->auth_pending || app->save_pending || app->play_wait || app->play_state == JF_PLAY_FETCHING;
     for (int k = 0; k < JF_LIST_COUNT; k++) any = any || app->lists[k].pending;
     app->busy = any;
 }
@@ -247,6 +251,7 @@ static void start_queue(JfApp *app, int lid, int from, JfCmds *out)
         if (l->items[k].type == JF_ITEM_TRACK) app->queue[app->queue_n++] = l->items[k];
     if (app->queue_n == 0) return;
     app->fail_streak = 0;
+    snprintf(app->queue_name, sizeof(app->queue_name), "Queue: %.80s", app->queue[0].name);
     play_track(app, 0, app->play_state == JF_PLAY_PLAYING || app->play_state == JF_PLAY_FETCHING, out);
 }
 
@@ -263,10 +268,136 @@ static void play_from(JfApp *app, int lid, int from, JfCmds *out)
     start_queue(app, lid, from, out);
 }
 
+/* ── the action bar: PLAY NEXT, ADD TO QUEUE, MIX, INSTANT MIX ─────────── */
+
+/* The track an action means: list row `i` of the screen's list (tracks only), or -1 = the
+ * playing track.  Copied, so the caller may rewrite the queue it came from. */
+static bool seed_item(const JfApp *app, int i, JfItem *out)
+{
+    if (i < 0) {
+        const JfItem *now = jf_now(app);
+        if (!now) return false;
+        *out = *now;
+        return true;
+    }
+    int lid = cur_list(app);
+    if (lid < 0 || i >= app->lists[lid].n || app->lists[lid].items[i].type != JF_ITEM_TRACK) return false;
+    *out = app->lists[lid].items[i];
+    return true;
+}
+
+static bool nothing_plays(const JfApp *app)
+{
+    return app->play_state != JF_PLAY_PLAYING && app->play_state != JF_PLAY_FETCHING;
+}
+
+/* Start `n` items of `src` as a fresh queue (the current audio is stopped first if live). */
+static void start_items(JfApp *app, const JfItem *src, int n, const char *name, JfCmds *out)
+{
+    int have = 0;
+    for (int k = 0; k < n; k++) if (src[k].type == JF_ITEM_TRACK) have++;
+    if (have == 0) return;               /* an empty answer leaves the queue as it is */
+    bool live = !nothing_plays(app);
+    app->queue_n = 0;
+    for (int k = 0; k < n && app->queue_n < JF_QUEUE_MAX; k++)
+        if (src[k].type == JF_ITEM_TRACK) app->queue[app->queue_n++] = src[k];
+    copy(app->queue_name, sizeof(app->queue_name), name);
+    app->fail_streak = 0;
+    play_track(app, 0, live, out);
+}
+
+static void on_play_next(JfApp *app, int i, JfCmds *out)
+{
+    JfItem it;
+    if (!seed_item(app, i, &it) || i < 0 || !have_token(app)) return;
+    if (nothing_plays(app) || app->queue_n == 0) {
+        char nm[96];
+        snprintf(nm, sizeof nm, "Queue: %.80s", it.name);
+        start_items(app, &it, 1, nm, out);
+        return;
+    }
+    if (app->queue_n >= JF_QUEUE_MAX) { set_banner(app, "QUEUE FULL"); return; }
+    int at = app->queue_cur + 1;           /* queue_cur stays: the playing track is not disturbed */
+    memmove(&app->queue[at + 1], &app->queue[at], sizeof(app->queue[0]) * (size_t)(app->queue_n - at));
+    app->queue[at] = it;
+    app->queue_n++;
+    set_banner(app, "QUEUED NEXT");
+}
+
+static void on_add_queue(JfApp *app, int i, JfCmds *out)
+{
+    JfItem it;
+    if (!seed_item(app, i, &it) || i < 0 || !have_token(app)) return;
+    if (nothing_plays(app) || app->queue_n == 0) {
+        char nm[96];
+        snprintf(nm, sizeof nm, "Queue: %.80s", it.name);
+        start_items(app, &it, 1, nm, out);
+        return;
+    }
+    if (app->queue_n >= JF_QUEUE_MAX) { set_banner(app, "QUEUE FULL"); return; }
+    app->queue[app->queue_n++] = it;
+    set_banner(app, "ADDED TO QUEUE");
+}
+
+/* MIX is not built yet: this is the one place a later job grows (a tick screen over the seed's neighbours). */
+static void mix_request(JfApp *app, const JfItem *seed, JfCmds *out)
+{
+    (void)seed; (void)out;
+    set_banner(app, "MIX: COMING");
+}
+
+static void on_mix(JfApp *app, int i, JfCmds *out)
+{
+    JfItem it;
+    if (seed_item(app, i, &it)) mix_request(app, &it, out);
+}
+
+/* Ask the server for a mix of `seed`.  The reply (on_mix_reply) replaces the queue. */
+static void on_instant_mix(JfApp *app, int i, JfCmds *out)
+{
+    JfItem it;
+    if (!seed_item(app, i, &it) || !have_token(app)) return;
+    JfList *l = &app->lists[JF_LIST_MIX];
+    app->ctx[JF_LIST_MIX].sub = 0;
+    copy(app->ctx[JF_LIST_MIX].id, sizeof(app->ctx[JF_LIST_MIX].id), it.id);
+    copy(app->ctx[JF_LIST_MIX].title, sizeof(app->ctx[JF_LIST_MIX].title), it.name);
+    jf_list_clear(l);
+    l->pending = false;
+    l->generation++;
+    app->play_wait = false;
+    request_page(app, JF_LIST_MIX, 0, out);
+}
+
+static void on_mix_reply(JfApp *app, JfCmds *out)
+{
+    const JfList *l = &app->lists[JF_LIST_MIX];
+    char nm[96];
+    snprintf(nm, sizeof nm, "Mix: %.80s", app->ctx[JF_LIST_MIX].title);
+    int tracks = 0;
+    for (int k = 0; k < l->n; k++) if (l->items[k].type == JF_ITEM_TRACK) tracks++;
+    if (tracks == 0) { set_banner(app, "NO MIX FOUND"); return; }
+    start_items(app, l->items, l->n, nm, out);
+}
+
+/* SAVE AS PLAYLIST: the POST carries the first JF_SAVE_IDS_MAX queue ids (the loop reads them from
+ * app->queue).  It is never put in app->retry: the overlay offers CLOSE only, so nothing re-POSTs. */
+static void on_save(JfApp *app, const char *name, JfCmds *out)
+{
+    if (!name[0] || app->queue_n == 0 || app->save_pending || !have_token(app)) return;
+    JfCmd *c = emit(out, JF_CMD_REQUEST);
+    c->kind = JF_KIND_SAVE;
+    c->tag = ++app->save_tag;
+    copy(c->name, sizeof(c->name), name);
+    c->n = app->queue_n < JF_SAVE_IDS_MAX ? app->queue_n : JF_SAVE_IDS_MAX;
+    copy(app->save_name, sizeof(app->save_name), name);
+    app->save_pending = true;
+}
+
 /* ── session loss and error text ───────────────────────────────────────── */
 
 static void session_expired(JfApp *app, JfCmds *out)
 {
+    app->save_pending = false;
     jf_wipe(app->login.token, sizeof(app->login.token));
     app->login.user_id[0] = '\0';
     emit(out, JF_CMD_CLEAR_LOGIN);
@@ -337,6 +468,7 @@ static void on_list(JfApp *app, const JfResult *r, JfCmds *out)
     }
     /* A page that consumed nothing while the server claims more would be asked for forever. */
     if (l->loaded <= app->req_loaded[lid]) l->total = l->loaded;
+    if (lid == JF_LIST_MIX) { on_mix_reply(app, out); return; }
     if (app->play_wait && lid == JF_LIST_TRACKS) {
         if (l->loaded < l->total && !l->full) request_page(app, lid, l->loaded, out);
         else { app->play_wait = false; start_queue(app, lid, app->play_wait_from, out); }
@@ -362,12 +494,29 @@ static void on_stream(JfApp *app, const JfResult *r, JfCmds *out)
     c->user_mdb = jf_volume_mdb(app->volume_step);
 }
 
+/* The POST's answer: its tag must be the one in flight.  A failure is CLOSE only (no RETRY: it would POST again). */
+static void on_save_result(JfApp *app, const JfResult *r, JfCmds *out)
+{
+    if (!app->save_pending || r->tag != app->save_tag) return;
+    app->save_pending = false;
+    if (r->err == JF_ERR_UNAUTH) { session_expired(app, out); return; }
+    if (r->err != JF_ERR_NONE) {
+        char t[48];
+        set_overlay(app, err_text(t, sizeof t, r->err, r->status), JF_BTN_CLOSE);
+        return;
+    }
+    char b[48];
+    snprintf(b, sizeof b, "SAVED: %.40s", app->save_name);
+    set_banner(app, b);
+}
+
 static void on_result(JfApp *app, const JfResult *r, JfCmds *out)
 {
     switch (r->kind) {
     case JF_KIND_AUTH:   on_auth(app, r, out); break;
     case JF_KIND_LIST:   on_list(app, r, out); break;
     case JF_KIND_STREAM: on_stream(app, r, out); break;
+    case JF_KIND_SAVE:   on_save_result(app, r, out); break;
     default: break;
     }
 }
@@ -436,6 +585,17 @@ static void on_activate(JfApp *app, int i, JfCmds *out)
     case JF_ITEM_TRACK:  play_from(app, lid, i, out); break;
     default: break;
     }
+}
+
+/* A tap / ENTER on a list row.  A track row raises the action bar on it (or drops it when it is the
+ * same row), anything else opens as ACTIVATE does and the bar goes away. */
+static void on_select(JfApp *app, int i, JfCmds *out)
+{
+    int lid = cur_list(app);
+    if (lid < 0 || i < 0 || i >= app->lists[lid].n) return;
+    if (app->lists[lid].items[i].type != JF_ITEM_TRACK) { app->action_bar = false; on_activate(app, i, out); return; }
+    if (app->action_bar && app->action_row == i) app->action_bar = false;
+    else { app->action_bar = true; app->action_row = i; }
 }
 
 static void on_play_all(JfApp *app, JfCmds *out)
@@ -532,6 +692,7 @@ void jf_app_init(JfApp *app)
     jf_list_init(&app->lists[JF_LIST_ALBUMS], app->store_albums, JF_CAP_ALBUMS);
     jf_list_init(&app->lists[JF_LIST_TRACKS], app->store_tracks, JF_CAP_TRACKS);
     jf_list_init(&app->lists[JF_LIST_SEARCH], app->store_search, JF_CAP_SEARCH);
+    jf_list_init(&app->lists[JF_LIST_MIX], app->store_mix, JF_CAP_MIX);
     app->cat = JF_CAT_ARTISTS;
     app->session_fn = jf_session_id;
     app->volume_step = JF_VOLUME_DEFAULT;
@@ -575,10 +736,23 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
 
     if (ev->type != JF_EV_NEED_MORE) app->banner[0] = '\0';
 
+    /* The action bar lives for one gesture: any user intent other than the ones that keep it (more
+     * rows arriving, volume, picking a row) drops it, and a BACK that found it up only drops it. */
+    bool bar_was = app->action_bar;
+    if (ev->type != JF_EV_NEED_MORE && ev->type != JF_EV_SELECT && ev->type != JF_EV_VOL_UP && ev->type != JF_EV_VOL_DOWN)
+        app->action_bar = false;
+
     switch (ev->type) {
     case JF_EV_SIGNIN:   on_signin(app, ev, out); break;
     case JF_EV_ACTIVATE: on_activate(app, ev->i, out); break;
-    case JF_EV_BACK:     on_back(app, out); break;
+    case JF_EV_SELECT:   on_select(app, ev->i, out); break;
+    case JF_EV_PLAY_NEXT: on_play_next(app, ev->i, out); break;
+    case JF_EV_ADD_QUEUE: on_add_queue(app, ev->i, out); break;
+    case JF_EV_MIX:      on_mix(app, ev->i, out); break;
+    case JF_EV_INSTANT_MIX: on_instant_mix(app, ev->i, out); break;
+    case JF_EV_SAVE_PLAYLIST: on_save(app, ev->term, out); break;
+    case JF_EV_DISMISS:  break;
+    case JF_EV_BACK:     if (!bar_was) on_back(app, out); break;
     case JF_EV_PLAY_ALL: on_play_all(app, out); break;
     case JF_EV_NEXT:     on_next(app, out); break;
     case JF_EV_VOL_UP:   on_volume(app, +1, out); break;

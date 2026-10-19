@@ -33,7 +33,8 @@ static void copy_str(char *dst, size_t cap, const char *s)
 
 static const char *kind_name(JfKind k)
 {
-    return k == JF_KIND_AUTH ? "auth" : k == JF_KIND_LIST ? "list" : k == JF_KIND_STREAM ? "stream" : "none";
+    return k == JF_KIND_AUTH ? "auth" : k == JF_KIND_LIST ? "list" : k == JF_KIND_STREAM ? "stream"
+         : k == JF_KIND_SAVE ? "save" : "none";
 }
 
 /* ── pure: the error table ─────────────────────────────────────────────── */
@@ -128,7 +129,7 @@ static int enqueue(JfApi *a, JfKind kind, unsigned tag, const char *path, JfList
                    const char *body, size_t body_len)
 {
     size_t pl = path ? strlen(path) : 0;
-    if (pl == 0 || pl >= JF_API_PATH_MAX || body_len > JF_API_BODY_OUT) return -1;
+    if (pl == 0 || pl >= JF_API_PATH_MAX || body_len > JF_API_POST_BYTES) return -1;
     if (kind == JF_KIND_LIST || kind == JF_KIND_STREAM) jf_api_cancel_kind(a, kind);   /* supersede */
     for (int i = 0; i < JF_API_SLOTS; i++) {
         JfSlot *s = &a->ring[i];
@@ -167,6 +168,16 @@ int jf_api_enqueue_stream(JfApi *a, unsigned tag, const char *path)
     return enqueue(a, JF_KIND_STREAM, tag, path, NULL, NULL, 0);
 }
 
+int jf_api_enqueue_save(JfApi *a, unsigned tag, const char *name, const char *user_id, const char *const *ids, int n)
+{
+    char path[64], body[JF_API_POST_BYTES];
+    int pl = jf_path_playlist_create(path, sizeof(path));
+    int bl = jf_save_body(body, sizeof(body), name, user_id, ids, n);
+    int rc = -1;
+    if (pl > 0 && bl > 0) rc = enqueue(a, JF_KIND_SAVE, tag, path, NULL, body, (size_t)bl);
+    return rc;
+}
+
 bool jf_api_busy(const JfApi *a)
 {
     if (a->cur.kind != JF_KIND_NONE) return true;
@@ -177,7 +188,7 @@ bool jf_api_busy(const JfApi *a)
 
 static int prio(JfKind k)
 {
-    return k == JF_KIND_AUTH ? 3 : k == JF_KIND_STREAM ? 2 : k == JF_KIND_LIST ? 1 : 0;
+    return k == JF_KIND_AUTH ? 4 : k == JF_KIND_SAVE ? 3 : k == JF_KIND_STREAM ? 2 : k == JF_KIND_LIST ? 1 : 0;
 }
 
 /* Highest priority, oldest first; -1 when the ring is empty. */
@@ -201,7 +212,7 @@ static void begin_current(JfApi *a)
     char hdr[1024];
     JfSlot *c = &a->cur;
     const char *tok = (c->kind == JF_KIND_AUTH) ? NULL : a->token;
-    int total = c->kind == JF_KIND_AUTH ? a->auth_total_ms
+    int total = (c->kind == JF_KIND_AUTH || c->kind == JF_KIND_SAVE) ? a->auth_total_ms
               : c->kind == JF_KIND_STREAM ? a->stream_total_ms : a->list_total_ms;
     int hl = jf_auth_header(hdr, sizeof(hdr), a->device, a->device_id, tok);
     a->began_ms = now_ms();
@@ -212,10 +223,10 @@ static void begin_current(JfApi *a)
         wipe(hdr, sizeof(hdr));
         return;
     }
-    /* without a JSON content type the sign-in POST is answered 415 */
-    if (c->kind == JF_KIND_AUTH)
+    /* without a JSON content type the sign-in POST is answered 415; the playlist POST needs it too */
+    if (c->kind == JF_KIND_AUTH || c->kind == JF_KIND_SAVE)
         hl += snprintf(hdr + hl, sizeof(hdr) - (size_t)hl, "Content-Type: application/json\r\n");
-    if (c->kind == JF_KIND_AUTH)
+    if (c->kind == JF_KIND_AUTH || c->kind == JF_KIND_SAVE)
         http_begin(&a->req, a->host, a->port, "POST", c->path, hdr, c->body, c->body_len,
                    HTTP_BUFFER, a->body, JF_API_BODY_BYTES);
     else if (c->kind == JF_KIND_LIST)
@@ -287,7 +298,8 @@ bool jf_api_poll(JfApi *a, JfResult *out)
     copy_str(herr, sizeof(herr), hp == HTTP_ERROR ? http_error(&a->req) : "");
     JfErr e = jf_api_classify(status, herr);
 
-    if ((e == JF_ERR_UNREACHABLE || e == JF_ERR_SERVER) && a->cur.kind != JF_KIND_AUTH && !a->retried) {
+    bool post = a->cur.kind == JF_KIND_AUTH || a->cur.kind == JF_KIND_SAVE;     /* never retried */
+    if ((e == JF_ERR_UNREACHABLE || e == JF_ERR_SERVER) && !post && !a->retried) {
         if (hp == HTTP_DONE && a->cur.kind == JF_KIND_STREAM) {
             int f = http_take_fd(&a->req);
             if (f >= 0) close(f);

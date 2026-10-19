@@ -71,6 +71,18 @@ static void execute(const JfCmds *cmds, uint32_t now)
                     push(&e);
                 }
                 jf_wipe((void *)c->password, sizeof c->password);
+            } else if (c->kind == JF_KIND_SAVE) {
+                /* the ids are the queue's first c->n; the core does not change the queue until this step ends */
+                const char *ids[JF_SAVE_IDS_MAX];
+                int n = c->n < JF_SAVE_IDS_MAX ? c->n : JF_SAVE_IDS_MAX;
+                for (int k = 0; k < n; k++) ids[k] = app.queue[k].id;
+                if (jf_api_enqueue_save(&api, c->tag, c->name, app.login.user_id, ids, n) < 0) {
+                    JfEvent e;
+                    memset(&e, 0, sizeof e);
+                    e.type = JF_EV_RESULT;
+                    e.res.kind = JF_KIND_SAVE; e.res.tag = c->tag; e.res.err = JF_ERR_BADREPLY; e.res.fd = -1;
+                    push(&e);
+                }
             } else if (jf_api_enqueue_list(&api, c->tag, c->path, c->list) < 0) {
                 JfEvent e;
                 memset(&e, 0, sizeof e);

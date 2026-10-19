@@ -257,3 +257,37 @@ int jf_auth_body(char *out, size_t cap, const char *user, const char *password)
     if (n < 0) out[0] = '\0';
     return n;
 }
+
+int jf_path_instant_mix(char *out, size_t cap, const char *uid, const char *track_id, int limit)
+{
+    if (!jf_id_valid(uid) || !jf_id_valid(track_id)) return -1;
+    return fin(snprintf(out, cap, "/Items/%s/InstantMix?userId=%s&Limit=%d"
+                        "&EnableImages=false&EnableUserData=false", track_id, uid, limit), cap);
+}
+
+int jf_path_playlist_create(char *out, size_t cap)
+{
+    return fin(snprintf(out, cap, "/Playlists"), cap);
+}
+
+int jf_save_body(char *out, size_t cap, const char *name, const char *uid, const char *const *ids, int n)
+{
+    if (!out || cap == 0) return -1;
+    out[0] = '\0';
+    if (!name || !jf_id_valid(uid) || !ids || n < 1 || n > JF_SAVE_IDS_MAX) return -1;
+    for (int i = 0; i < n; i++) if (!jf_id_valid(ids[i])) return -1;
+    int r = json_lit(out, cap, 0, "{\"Name\":\"");
+    if (r >= 0) r = json_put(out, cap, (size_t)r, name);
+    if (r >= 0) r = json_lit(out, cap, (size_t)r, "\",\"Ids\":[");
+    for (int i = 0; r >= 0 && i < n; i++) {
+        if (i) r = json_lit(out, cap, (size_t)r, ",");
+        if (r >= 0) r = json_lit(out, cap, (size_t)r, "\"");
+        if (r >= 0) r = json_lit(out, cap, (size_t)r, ids[i]);
+        if (r >= 0) r = json_lit(out, cap, (size_t)r, "\"");
+    }
+    if (r >= 0) r = json_lit(out, cap, (size_t)r, "],\"UserId\":\"");
+    if (r >= 0) r = json_lit(out, cap, (size_t)r, uid);
+    if (r >= 0) r = json_lit(out, cap, (size_t)r, "\",\"MediaType\":\"Audio\"}");
+    if (r < 0) out[0] = '\0';
+    return r;
+}
