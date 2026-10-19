@@ -317,7 +317,8 @@ BlueALSA plus a decoder for a server-transcoded stream, measured on `.188` with 
 component). Measured on .115 2026-10-18: taps from the launcher into Files, and from the launcher through Control Panel page 2 into
 Backup, each confirmed by framebuffer capture. Apps read only `/dev/input/touchscreen0`, so the daemon re-points that link at its
 virtual device and restarts the app; the real panel is not read while it runs. Off unless the `remote_tap` config key is set
-(Control Panel → Input → REMOTE TAP; for tests it can be appended to `/opt/games/arca_config.conf` over SSH).
+(Control Panel → Input → REMOTE TAP; for tests it can be appended to `/opt/games/arca_config.conf` over SSH). Test-only, started on
+demand, never left running (operator, 2026-10-18): no boot service, no polish beyond what a test script needs.
 
 Open, in order:
 
@@ -326,7 +327,7 @@ Open, in order:
    daemon in /var/run" (`copy_self` failed, file present) and `stop` hung >120 s (killed by hand). Not diagnosed; `arca-app` matches
    on `/proc/<pid>/exe`, so the name is not it. Suspects: ETXTBSY on the copy, a blocking `system()` restart.
 2. **Untested:** `swipe` against a drag consumer (Files' list; the icon grids have no swipe, so the launcher test proved nothing),
-   `hold`, and the REMOTE TAP toggle on the Input page, including OFF → device removed and app restarted.
+   `hold`, and REMOTE TAP turned OFF while the daemon runs (device removed, app restarted); the toggle itself works at the panel.
 3. **Docs:** `CLAUDE.md`'s "You cannot script a touch interaction" and the matching `native_apps/CLAUDE.md` text become a pointer
    to `arca_tap`, with its limit (only apps that read `touchscreen0` follow it).
 
