@@ -48,6 +48,18 @@ static const char *full_lower_keys[] = {
     NULL
 };
 
+/* KB_LAYOUT_FULL: symbols page, same 10 × 4 grid.  Holds every printable ASCII
+ * punctuation mark the letter pages lack (: ; " ' < > / ? = + ( ) * & { [ } ] ~
+ * ` @ # $ % ^ , \ |) plus . and -, and keeps the digit row so a password needs
+ * no page flip for them. */
+static const char *full_sym_keys[] = {
+    "@#$%&*()=+",
+    "<>/?:;\"'\\|",
+    "[]{}~`^,.-",
+    "0123456789",
+    NULL
+};
+
 /* KB_LAYOUT_NUMERIC: 4 cols × 4 rows (space = empty slot, not rendered) */
 static const char *numeric_keys[] = {
     "123.",
@@ -130,7 +142,7 @@ static void kb_focus_move(const char **keys, KeyboardLayout layout, int rows, in
     if (best >= 0) { *fr = nr; *fc = best; }
 }
 
-enum { KA_DEL, KA_CLEAR, KA_SHIFT, KA_SPACE, KA_CANCEL, KA_OK };
+enum { KA_DEL, KA_CLEAR, KA_SHIFT, KA_SYM, KA_SPACE, KA_CANCEL, KA_OK };
 
 static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
                   const char *title, char *buf, int max_len, KeyboardLayout layout,
@@ -140,6 +152,7 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
     const char **keys      = alpha_keys;
     const char **alt_keys  = NULL;          /* for FULL shift toggle */
     bool         shifted   = true;          /* FULL starts upper */
+    bool         symbols   = false;         /* FULL: showing the symbols page */
     bool         is_alpha  = false;         /* ALPHA _ → space mapping */
 
     switch (layout) {
@@ -206,12 +219,13 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
     /* ── Action buttons ──────────────────────────────────────────────── */
     bool has_shift = (layout == KB_LAYOUT_FULL);
     bool has_space = (layout == KB_LAYOUT_FULL);   /* the others keep a space on a key */
-    int n_action = 4 + (has_shift ? 1 : 0) + (has_space ? 1 : 0);   /* DEL CLEAR [SHIFT] [SPACE] CANCEL OK */
+    bool has_sym   = (layout == KB_LAYOUT_FULL);
+    int n_action = 4 + (has_shift ? 1 : 0) + (has_sym ? 1 : 0) + (has_space ? 1 : 0);   /* DEL CLEAR [SHIFT] [#+=] [SPACE] CANCEL OK */
     int aw = safe_w / n_action;
 
     const char *del_label = (layout == KB_LAYOUT_NUMERIC) ? "<-" : "DEL";
 
-    Button btn_del, btn_clear, btn_shift, btn_space, btn_cancel, btn_ok;
+    Button btn_del, btn_clear, btn_shift, btn_sym, btn_space, btn_cancel, btn_ok;
     int col_idx = 0;
 
     button_init_full(&btn_del, safe_l + col_idx * aw, action_y, aw - 4, btn_h,
@@ -227,6 +241,13 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
     if (has_shift) {
         button_init_full(&btn_shift, safe_l + col_idx * aw, action_y, aw - 4, btn_h,
                          "SHIFT",
+                         RGB(30, 30, 80), COLOR_WHITE, RGB(100, 100, 220), 2);
+        col_idx++;
+    }
+
+    if (has_sym) {
+        button_init_full(&btn_sym, safe_l + col_idx * aw, action_y, aw - 4, btn_h,
+                         "#+=",
                          RGB(30, 30, 80), COLOR_WHITE, RGB(100, 100, 220), 2);
         col_idx++;
     }
@@ -248,12 +269,13 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
                      RGB(0, 70, 0), COLOR_WHITE, RGB(0, 180, 0), 2);
 
     /* The action row in order, so a focus column maps to one button and one id. */
-    Button *act_btn[6];
-    int     act_id[6];
+    Button *act_btn[7];
+    int     act_id[7];
     int     na = 0;
     act_btn[na] = &btn_del;    act_id[na++] = KA_DEL;
     act_btn[na] = &btn_clear;  act_id[na++] = KA_CLEAR;
     if (has_shift) { act_btn[na] = &btn_shift; act_id[na++] = KA_SHIFT; }
+    if (has_sym)   { act_btn[na] = &btn_sym;   act_id[na++] = KA_SYM; }
     if (has_space) { act_btn[na] = &btn_space; act_id[na++] = KA_SPACE; }
     act_btn[na] = &btn_cancel; act_id[na++] = KA_CANCEL;
     act_btn[na] = &btn_ok;     act_id[na++] = KA_OK;
@@ -285,7 +307,9 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
         /* Which glyph set the keys show — needed by input as well as drawing,
          * so it is computed whether or not this frame paints. */
         const char **cur_keys = keys;
-        if (has_shift && !shifted)
+        if (has_sym && symbols)
+            cur_keys = full_sym_keys;
+        else if (has_shift && !shifted)
             cur_keys = alt_keys;
 
         /* ── Draw ────────────────────────────────────────────────────── */
@@ -341,6 +365,10 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
             button_draw(fb, &btn_clear);
             if (has_shift)
                 button_draw(fb, &btn_shift);
+            if (has_sym) {
+                strncpy(btn_sym.text, symbols ? "ABC" : "#+=", sizeof(btn_sym.text) - 1);
+                button_draw(fb, &btn_sym);
+            }
             if (has_space)
                 button_draw(fb, &btn_space);
             button_draw(fb, &btn_cancel);
@@ -453,10 +481,15 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
             cursor = 0;
             memset(work, 0, max_len + 1);
         } else if (pick_a == KA_SHIFT) {
-            shifted = !shifted;
+            if (!symbols) {          /* no case on the symbols page */
+                shifted = !shifted;
+                dirty = true;
+                /* Swap key pointer for next frame redraw */
+                keys = shifted ? full_upper_keys : full_lower_keys;
+            }
+        } else if (pick_a == KA_SYM) {
+            symbols = !symbols;
             dirty = true;
-            /* Swap key pointer for next frame redraw */
-            keys = shifted ? full_upper_keys : full_lower_keys;
         } else if (pick_a == KA_SPACE) {
             if (cursor < max_len) {
                 work[cursor++] = ' ';
