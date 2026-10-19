@@ -311,11 +311,15 @@ directories in simple mode; expert mode adds `/` with protected paths refused. E
 
 Open, in order:
 
-1. **ScummVM games from a stick, at the panel:** copy a game folder (a freeware one from scummvm.org, e.g. Beneath a Steel Sky) with
-   Files into the ScummVM games directory, eject, then add and start it in ScummVM.
-2. **Cross-unit import:** export on one unit, import that archive on another (.188 when it is back, or after a reflash).
+1. **Backup on a freshly flashed unit (operator, .115, 2026-10-18): "No Backup support"** after reflash + `deploy-all.sh`. Expected:
+   the engine `/usr/sbin/arca-backup` and `device-files/backup.d/` reach a unit only through `provision.sh` (or a new card image),
+   never through `deploy-all.sh`. Run `./provision.sh 192.168.50.115`, then import one of the operator's pre-flash exports.
+2. **Files app does not follow plug/unplug:** a pulled stick still shows its old listing; a new one appears only after RESCAN.
+   The Backup page's 1 Hz `/dev` scan (`disk_sig`, `bk_is_disk_name` in `control_panel/backup_*`) is the model; move it into one
+   shared helper both use rather than copying it.
+3. **Files app startup shows a black screen until the first frame** (nice to have): paint a LOADING… frame first, as Backup does.
 
-**Done when** both pass.
+**Done when** 1–3 pass at the panel. ScummVM games from a stick: confirmed by the operator 2026-10-18 (BASS).
 
 ### F152. A Jellyfin music client playing to a Bluetooth speaker — open, operator wish 2026-10-16, nice to have, not designed
 
@@ -326,6 +330,14 @@ that cost) and 48 kHz stereo PCM ~192 KB/s (~6%). The unknowns are decode and SB
 exists in `native_apps/common` (`audio_wav.c` only), there is no HTTP client or JSON parser and no libcurl in the rootfs. Having the
 server transcode to one codec (or to PCM) keeps the device to one decoder. **Done when** the first question is answered: CPU of
 BlueALSA plus a decoder for a server-transcoded stream, measured on `.188` with a speaker connected.
+
+### F153. Remote input for on-device verification: `uinput` — open, operator 2026-10-18 ("important for you to handle the unit remotely")
+
+Automated checks stop at an app's first screen because nothing can tap: a write to an evdev node goes to the driver, not to readers
+(`CLAUDE.md`, non-obvious constraints). The vendor kernel lacked `/dev/uinput`; ours is built from source, so `CONFIG_INPUT_UINPUT=m`
+is probably one more module through `kernel/build-bt-modules.sh`'s pattern **[inferred, config not checked]**. Then a small
+`uinput` tool creates a virtual touchscreen and taps given panel coordinates, and `input_scan.c` must accept that device.
+**Done when** a script taps from the launcher into Control Panel → Backup on .115 and a framebuffer capture shows the page.
 
 ### F106. Support BeagleBone Black boards — open, operator idea 2026-10-01, future
 
