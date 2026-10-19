@@ -310,6 +310,10 @@ $CC "${WARN[@]}" -O2 -I. tests/touch_raw.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}
 # Input page's REMOTE TAP setting. Links like touch_raw: it inverts the calibration.
 $CC "${WARN[@]}" -O2 -I. arca_tap/arca_tap.c common/remote_tap.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" $CALIB_OBJ -o build/arca_tap -lm "${AUDIO_LIBS[@]}"
 
+# stream_play: temporary command-line check of the fd music source
+# (audio_music_start_fd).  Draws nothing, opens no touch; links like audio_mix_test.
+$CC "${WARN[@]}" -O2 -I. stream_play/stream_play.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/stream_play -lm "${AUDIO_LIBS[@]}"
+
 # The mix bus, driven by hand.  Groups I/J/K of tests/audio_gen_test.c cover the
 # arithmetic; whether two sounds are AUDIBLE as two, and whether the ~60 ms
 # minimum-tone rule survives a stream that is never reset, need an ear at the panel.
@@ -376,7 +380,7 @@ echo "  Wrote $(find build/soundsets -maxdepth 1 -type f -name '*.sound' 2>/dev/
 # --bundle would recreate it again.
 GAMES_BINARIES=(snake tetris pong brick_breaker samegame frogger platformer
                 theremin audio_mix_test control_panel arcamond
-                touch_raw terminal file_manager arca_tap)
+                touch_raw terminal file_manager arca_tap stream_play)
 
 echo ""
 echo "Build sizes:"

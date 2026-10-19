@@ -103,6 +103,12 @@ static void level_defaults(Audio *audio)
      * somebody else's tone". */
     audio->music.slot     = -1;
     audio->sfx.slot       = -1;
+    /* ⚠️ Same memset, same trap, worse victim: a zeroed stream `fd` is 0, i.e.
+     * STDIN, and audio_wav_stream_close() closes any fd >= 0 — from the start of
+     * every file bed, from audio_music_start_fd() and from audio_close().  -1
+     * means "owns no descriptor". */
+    audio->music.stream.fd = -1;
+    audio->sfx.stream.fd   = -1;
     /* The clip voices, same -1, but for a WEAKER reason than the two above and it
      * is worth stating rather than implying: a zeroed clip voice reads slot 0 —
      * which on a game with a bed IS the bed — but its `gen` is 0 and
@@ -134,6 +140,8 @@ static void clip_bank_discard(Audio *audio);
 static void sample_discard(AudioSampleVoice *sv)
 {
     audio_wav_close(&sv->wav);
+    audio_wav_stream_free(&sv->stream);
+    sv->streaming = false;
     free(sv->buf);
     sv->buf        = NULL;
     sv->buf_frames = 0;
@@ -198,9 +206,22 @@ static int stream_open(Audio *audio)
      * at its own read position, the way audio_music_resume() does.  Asked before
      * the reset, while the old mixer can still answer; on the first open the slot
      * is -1 and nothing is carried. */
-    bool carry_music = sample_live(audio, &audio->music) && audio->music.wav.f;
+    bool carry_stream = sample_live(audio, &audio->music) && audio->music.streaming;
+    bool carry_music  = sample_live(audio, &audio->music) && audio->music.wav.f;
 
     bus_reset(audio);
+    if (carry_stream) {
+        /* A socket cannot be reopened, so a stream is either carried or ended. */
+        if (audio->music.stream.expected_rate == audio->sample_rate) {
+            sample_arm(audio, &audio->music, "music", "carry", NULL);
+        } else {
+            fprintf(stderr, "audio: stream not carried — it is %d Hz, the new device "
+                            "granted %d; closing it\n",
+                    audio->music.stream.expected_rate, audio->sample_rate);
+            audio_wav_stream_close(&audio->music.stream);
+            audio->music.streaming = false;
+        }
+    }
     if (carry_music) {
         if (audio->music.wav.rate == audio->sample_rate)
             sample_arm(audio, &audio->music, "music", "carry", NULL);
@@ -1293,7 +1314,17 @@ static bool sample_arm(Audio *audio, AudioSampleVoice *sv, const char *what,
      * the two are the same expression; a RESUMED voice that declared the whole
      * file would outlive its data and the mixer would pad the tail with silence. */
     long total = sample_total_frames(sv->wav.frames - sv->wav.pos, sv->wav.loop);
-    int  slot  = audio_mix_add_sample(&audio->mix, audio_wav_fill, &sv->wav,
+    AudioVoiceFill fill = audio_wav_fill;
+    void *ctx = &sv->wav;
+    if (sv->streaming) {
+        /* A stream's length is not known when it is armed (the header is still on
+         * the wire), so declare a large FINITE total like a loop does; the voice
+         * ends when the fill returns short at EOF, not at this number. */
+        total = AUDIO_SAMPLE_MAX_TOTAL;
+        fill  = audio_wav_stream_fill;
+        ctx   = &sv->stream;
+    }
+    int  slot  = audio_mix_add_sample(&audio->mix, fill, ctx,
                                       sv->buf, sv->buf_frames, total,
                                       audio_voice_peak(audio->vol));
     if (slot < 0) {
@@ -1310,6 +1341,19 @@ static bool sample_arm(Audio *audio, AudioSampleVoice *sv, const char *what,
     sv->slot = slot;
     sv->gen  = audio_mix_voice_gen(&audio->mix, slot);
     sv->held = false;
+    if (sv->streaming) {
+        /* No file: say what the stream IS (the bus format it must match; the
+         * header may still be on the wire) rather than the file fields, which
+         * are all zero for it. */
+        fprintf(stderr, "audio: %s %s %s — stream, %d Hz mono 16-bit%s, %ld bytes "
+                        "buffered, slot %d gen %lu\n",
+                what, how, path ? path : "(the held stream)",
+                sv->stream.hdr_done ? sv->stream.hdr.rate : sv->stream.expected_rate,
+                sv->stream.hdr_done ? "" : " expected (header pending)",
+                audio_wav_stream_buffered(&sv->stream), slot,
+                (unsigned long)sv->gen);
+        return true;
+    }
     fprintf(stderr, "audio: %s %s %s — %ld frames in file, %ld consumed, "
                     "%ld declared, %d Hz %d ch, loop=%d, slot %d gen %lu\n",
             what, how, path ? path : "(the held file)", sv->wav.frames,
@@ -1335,6 +1379,8 @@ static bool sample_start(Audio *audio, AudioSampleVoice *sv, const char *path,
     }
 
     audio_wav_close(&sv->wav);          /* a restart must not leak the old fd */
+    audio_wav_stream_close(&sv->stream);
+    sv->streaming = false;
     if (!audio_wav_open(&sv->wav, path, loop)) {
         fprintf(stderr, "audio: %s cannot open %s\n", what, path);
         return false;
@@ -1364,6 +1410,11 @@ static bool sample_start(Audio *audio, AudioSampleVoice *sv, const char *path,
 bool audio_music_pause(Audio *audio)
 {
     if (!audio) return false;
+    if (audio->music.streaming) {
+        fprintf(stderr, "audio: music pause refused — a stream cannot be held "
+                        "(stop it; the peer keeps sending)\n");
+        return false;
+    }
     if (!audio_music_active(audio)) {
         fprintf(stderr, "audio: music pause — nothing is sounding\n");
         return false;
@@ -1403,6 +1454,45 @@ bool audio_music_start(Audio *audio, const char *path, bool loop)
      * "no bed" and stops asking — audio_music_enabled() is what it should print. */
     if (!audio->music_on) return false;
     return sample_start(audio, &audio->music, path, loop, "music");
+}
+
+bool audio_music_start_fd(Audio *audio, int fd)
+{
+    if (!audio || fd < 0) return false;
+    if (!audio->music_on || !audio->available) return false;
+    AudioSampleVoice *sv = &audio->music;
+
+    if (sample_live(audio, sv)) {
+        fprintf(stderr, "audio: music refused — the previous bed still owes %ld frames "
+                        "and its source is that voice's ctx\n",
+                audio_mix_voice_pending(&audio->mix, sv->slot, sv->gen));
+        return false;
+    }
+    audio_wav_close(&sv->wav);
+    audio_wav_stream_close(&sv->stream);
+    sv->streaming = false;
+
+    /* The refusal of a wrong format happens inside the stream (it names the rate
+     * it was offered); no resampler, as for a file. */
+    if (!audio_wav_stream_open(&sv->stream, fd, audio->sample_rate)) return false;
+    sv->streaming = true;
+    sv->held      = false;
+    if (!sample_arm(audio, sv, "music", "start", "(stream)")) {
+        sv->stream.fd = -1;             /* the caller keeps its fd on a refusal */
+        sv->streaming = false;
+        return false;
+    }
+    return true;
+}
+
+long audio_music_stream_buffered(const Audio *audio)
+{
+    return (audio && audio->music.streaming) ? audio_wav_stream_buffered(&audio->music.stream) : 0;
+}
+
+long audio_music_stream_underruns(const Audio *audio)
+{
+    return (audio && audio->music.streaming) ? audio->music.stream.underruns : 0;
 }
 
 void audio_music_stop(Audio *audio)

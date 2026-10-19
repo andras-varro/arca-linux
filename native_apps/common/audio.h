@@ -63,6 +63,8 @@
  */
 typedef struct {
     AudioWav wav;             /**< the open file; `wav.f` NULL when closed       */
+    AudioWavStream stream;    /**< an fd source instead (audio_music_start_fd); `streaming` says which is live */
+    bool     streaming;       /**< this voice pulls from `stream`, not `wav`      */
     int16_t *buf;             /**< read-ahead scratch, allocated on first start  */
     long     buf_frames;      /**< its size — how often the SD read is entered   */
     int      slot;            /**< mix-bus slot, -1 when this voice is idle      */
@@ -658,6 +660,19 @@ void audio_fx_set_path(Audio *audio, AudioFxId id, const char *path);
  * a 32-bit `long`.
  */
 bool audio_music_start(Audio *audio, const char *path, bool loop);
+
+/**
+ * Play a WAV arriving on `fd` (a socket, a pipe): the bus format only (mono,
+ * 16-bit, the granted rate), header sizes of 0xFFFFFFFF mean until EOF.  The fd is
+ * made O_NONBLOCK and the call never waits; `audio_pump()` pulls from it.  Rules
+ * (pre-roll ~1 s, silence on underrun, EOF ends the track) are in `audio_wav.h`.
+ * Takes ownership of `fd` only when it returns true (closed on the next start, or
+ * by `audio_close()`).  A bad header that has not arrived yet is logged later and
+ * ends the track.  Not pausable.  `audio_music_stream_buffered()` is the status.
+ */
+bool audio_music_start_fd(Audio *audio, int fd);
+long audio_music_stream_buffered(const Audio *audio);
+long audio_music_stream_underruns(const Audio *audio);
 
 /**
  * Stop the bed at the end of its release, not now.

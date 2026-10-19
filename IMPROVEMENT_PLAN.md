@@ -316,15 +316,17 @@ stereo. The RIFF size field reads `0xFFFFFFFF` and a `LIST` chunk precedes `data
 core on `.73`: 100 s of 48 kHz stereo (19.2 MB) arrived in 8.2 s for 4.9 CPU-s (`wget | head | wc`, an upper bound),
 and the mono stream is half the bytes.
 
-**What is missing (read from source):** `audio_music_start()` (`common/audio.h:660`) takes a path that
-`audio_wav_open()` `fopen`s (`common/audio_wav.c:33`), so nothing plays a stream fed from a socket; `native_apps/common`
-has no HTTP client and no JSON parser. `list_view` and `keyboard_enter()` exist; a thumbnail cache does not, nor a
-JPEG decoder for album art (whether the server sends BMP is unverified). **Order:** (1) a socket source for the music
-player with a few seconds of buffer and a stated underrun rule, driven by a throwaway command-line tool; (2) a minimal
-HTTP/1.1 client and JSON parser in `common/`, server, user and token set in the Control Panel, the unit keeping a token
-and never the password, no credential in the repo or an image; (3) the app: Artists → Albums → Tracks in `list_view`,
-search through `keyboard_enter()`, now playing, a queue, pad and keyboard as well as touch. **Done when** step 1 plays a
-server track on onboard, USB and Bluetooth, with CPU measured while a BT speaker is connected (on `.188`).
+**Built:** `audio_music_start_fd()` (`common/audio.h`) plays a WAV from a non-blocking fd through a ring buffer, with a
+1 s pre-roll, silence plus re-buffer on an underrun and a fade at each edge (rules in `common/audio_wav.c`), and the
+throwaway `stream_play <host> <port> <path> [seconds]` drives it. On `.73` it played a server track to the onboard
+speaker for 20 s with 0 underruns and about 5% CPU, and refused a 48 kHz stereo stream. **Missing:** `native_apps/common`
+has no HTTP client and no JSON parser; `list_view` and `keyboard_enter()` exist, a thumbnail cache does not. Album art
+needs a PNG decoder: asked for `format=Bmp` the server sends JPEG, while `format=Png` is honoured. **Order:** (1) the
+same track on USB and Bluetooth, CPU measured with a BT speaker connected (on `.188`); (2) a minimal HTTP/1.0 client
+(HTTP/1.0 makes the server send the body unchunked, measured) and JSON parser in `common/`, server, user and token set
+in the Control Panel, the unit keeping a token and never the password, no credential in the repo or an image; (3) the
+app: Artists → Albums → Tracks in `list_view`, search through `keyboard_enter()`, now playing, a queue, pad and keyboard
+as well as touch, and `stream_play` deleted. **Done when** step 1 is measured.
 
 ### F154. Stereo music through the mono mix bus — open, operator request 2026-10-19, feasibility not assessed
 
