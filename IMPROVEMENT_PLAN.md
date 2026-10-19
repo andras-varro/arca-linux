@@ -322,12 +322,10 @@ demand, never left running (operator, 2026-10-18): no boot service, no polish be
 
 Open, in order:
 
-1. **Untested:** `swipe` against a drag consumer (Files' list; the icon grids have no swipe, so the launcher test proved nothing),
-   `hold`, and REMOTE TAP turned OFF while the daemon runs (device removed, app restarted); the toggle itself works at the panel.
-2. **Docs:** `CLAUDE.md`'s "You cannot script a touch interaction" and the matching `native_apps/CLAUDE.md` text become a pointer
+1. **Docs:** `CLAUDE.md`'s "You cannot script a touch interaction" and the matching `native_apps/CLAUDE.md` text become a pointer
    to `arca_tap`, with its limit (only apps that read `touchscreen0` follow it).
 
-**Done when** 1–2 hold and a script runs a Files plug/pull check end to end without a human.
+**Done when** 1 holds and a script runs a Files plug/pull check end to end without a human.
 
 ### F106. Support BeagleBone Black boards — open, operator idea 2026-10-01, future
 
