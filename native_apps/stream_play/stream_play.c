@@ -7,101 +7,38 @@
  *
  * With `seconds`, plays that long and exits 0 (the device has no `timeout`).
  *
- * Sends a plain HTTP/1.0 GET (no chunked encoding: the body is the WAV until the
- * server closes), checks for status 200, consumes the headers, then hands the
- * non-blocking socket to the audio layer and pumps it at ~60 Hz.  Prints one
- * status line a second.  The query string (a token, if the server wants one)
- * comes from argv only — nothing is stored in the tree.  It draws nothing and
- * reads no touch.
+ * The request goes through common/http.c in HTTP_STREAM mode: a plain HTTP/1.0 GET
+ * (so no chunked encoding: the body is the WAV until the server closes), driven by
+ * polling.  http.c reads the reply head exactly, so the socket it hands over sits
+ * at the first body byte, and that non-blocking socket goes straight to the audio
+ * layer, which is pumped at ~60 Hz.  Prints one status line a second.
+ *
+ * A token can reach the server two ways.  The environment variable JF_TOKEN, if
+ * set and non-empty, is sent as an Authorization header, so it never appears in
+ * argv or in the process list.  Otherwise a token the server accepts in the query
+ * string comes from argv, as before.  Neither is printed or stored in the tree.
+ * It draws nothing and reads no touch.
  */
 
-#include <errno.h>
-#include <netdb.h>
 #include <signal.h>
-#include <sys/time.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "common/audio.h"
+#include "common/http.h"
 
 static volatile sig_atomic_t running = 1;
 static void on_signal(int sig) { (void)sig; running = 0; }
 
-/* ~5 s on connect (SNDTIMEO) and on the blocking header read (RCVTIMEO); a dead
- * server would otherwise hold this tool until the kernel gives up. */
-static void set_timeouts(int fd)
+/* Not memset: the compiler may drop a memset of a buffer it can see is not read again. */
+static void wipe(void *p, size_t n)
 {
-    struct timeval tv;
-    tv.tv_sec = 5; tv.tv_usec = 0;
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-}
-
-static int connect_to(const char *host, const char *port)
-{
-    struct addrinfo hints, *res, *ai;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_socktype = SOCK_STREAM;
-    int rc = getaddrinfo(host, port, &hints, &res);
-    if (rc != 0) {
-        fprintf(stderr, "stream_play: cannot resolve %s: %s\n", host, gai_strerror(rc));
-        return -1;
-    }
-    int fd = -1;
-    for (ai = res; ai; ai = ai->ai_next) {
-        fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-        if (fd < 0) continue;
-        set_timeouts(fd);
-        if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) break;
-        if (!running) { close(fd); fd = -1; break; }
-        close(fd);
-        fd = -1;
-    }
-    freeaddrinfo(res);
-    if (fd < 0) fprintf(stderr, "stream_play: cannot connect to %s:%s\n", host, port);
-    return fd;
-}
-
-/* Blocking, one byte at a time: the header is a few hundred bytes and reading
- * exactly to the blank line leaves every body byte for the audio layer. */
-static int skip_http_headers(int fd)
-{
-    char line[256];
-    size_t len = 0;
-    int first = 1, blank_run = 0;
-    for (;;) {
-        char c;
-        ssize_t n = read(fd, &c, 1);
-        if (n < 0 && errno == EINTR) { if (!running) return -1; continue; }
-        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            fprintf(stderr, "stream_play: timed out reading the headers\n");
-            return -1;
-        }
-        if (n <= 0) { fprintf(stderr, "stream_play: connection closed in the headers\n"); return -1; }
-        if (c == '\r') continue;
-        if (c != '\n') {
-            blank_run = 0;
-            if (len < sizeof(line) - 1) line[len++] = c;
-            continue;
-        }
-        line[len] = 0;
-        if (first) {
-            first = 0;
-            if (strncmp(line, "HTTP/", 5) != 0 || !strchr(line, ' ')
-                || strncmp(strchr(line, ' ') + 1, "200", 3) != 0) {
-                fprintf(stderr, "stream_play: server said: %s\n", line);
-                return -1;
-            }
-        }
-        if (len == 0 && ++blank_run >= 1) return 0;     /* the blank line */
-        len = 0;
-    }
+    volatile unsigned char *q = p;
+    while (n--) *q++ = 0;
 }
 
 int main(int argc, char *argv[])
@@ -111,8 +48,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "usage: %s <host> <port> <path-and-query> [seconds]\n", argv[0]);
         return 2;
     }
-    /* sigaction WITHOUT SA_RESTART: signal() restarts a blocked connect() or read(),
-     * so Ctrl-C would not interrupt them. */
+    /* sigaction WITHOUT SA_RESTART: signal() restarts a blocked system call, so
+     * Ctrl-C would not interrupt it. */
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = on_signal;
@@ -124,19 +61,54 @@ int main(int argc, char *argv[])
         fprintf(stderr, "stream_play: seconds must be a positive number\n");
         return 2;
     }
+    int port = atoi(argv[2]);
+    if (port < 1 || port > 65535) {
+        fprintf(stderr, "stream_play: port must be 1..65535\n");
+        return 2;
+    }
     signal(SIGPIPE, SIG_IGN);
 
-    int fd = connect_to(argv[1], argv[2]);
-    if (fd < 0) return 1;
+    char hdr[512];
+    const char *headers = NULL;
+    const char *token = getenv("JF_TOKEN");
+    if (token && *token) {
+        int hl = snprintf(hdr, sizeof(hdr),
+                          "Authorization: MediaBrowser Client=\"Arca\", Device=\"Arca\", "
+                          "DeviceId=\"arca-stream-play\", Version=\"1\", Token=\"%s\"\r\n",
+                          token);
+        if (hl <= 0 || hl >= (int)sizeof(hdr)) {
+            fprintf(stderr, "stream_play: JF_TOKEN is too long\n");
+            return 2;
+        }
+        headers = hdr;
+    }
 
-    char req[1024];
-    int rl = snprintf(req, sizeof(req), "GET %s HTTP/1.0\r\nHost: %s\r\n\r\n", argv[3], argv[1]);
-    if (rl <= 0 || rl >= (int)sizeof(req) || write(fd, req, (size_t)rl) != rl) {
-        fprintf(stderr, "stream_play: cannot send the request\n");
-        close(fd);
+    HttpReq req;
+    http_init(&req);
+    http_begin(&req, argv[1], port, "GET", argv[3], headers, NULL, 0, HTTP_STREAM, NULL, 0);
+    HttpPoll hp;
+    wipe(hdr, sizeof(hdr));                    /* the request keeps its own copy; the token is not needed here */
+    while ((hp = http_poll(&req)) == HTTP_PENDING) {
+        if (!running) {
+            http_end(&req);
+            fprintf(stderr, "stream_play: interrupted\n");
+            return 1;
+        }
+        usleep(10000);
+    }
+    if (hp == HTTP_ERROR) {
+        fprintf(stderr, "stream_play: %s\n", http_error(&req));
+        http_end(&req);
         return 1;
     }
-    if (skip_http_headers(fd) != 0) { close(fd); return 1; }
+    int status = http_status(&req);
+    int fd = http_take_fd(&req);
+    http_end(&req);
+    if (status != 200 || fd < 0) {
+        fprintf(stderr, "stream_play: server said: %d\n", status);
+        if (fd >= 0) close(fd);
+        return 1;
+    }
 
     Audio audio;
     if (audio_init(&audio) != 0) {

@@ -323,13 +323,15 @@ throwaway `stream_play <host> <port> <path> [seconds]` drives it. **Measured on 
 USB card (`plughw:1,0`) and onboard (`plughw:0,0`), each 0 underruns, `stream_play` ~3% CPU and `bluealsa` below
 `top`'s resolution; the operator heard all three with no clicks, onboard **very faint**, quieter than game music on the same speaker. The
 source is quiet: the first 30 s of that track as served measure peak -10.5 dBFS, RMS -37.3 dBFS mono (stereo -6.4 /
--36.9), about 20 dB under a game asset (`sounds/fx_burst.wav`, RMS -15.9), so step 1 below starts by applying the server's
-per-track normalisation gain, if it serves one (unverified). Whole-system CPU on the panel's monitor during playback: ~15%. A 48 kHz stereo stream is refused. **Missing:** `native_apps/common` has no HTTP
-client and no JSON parser; `list_view` and `keyboard_enter()` exist, a thumbnail cache does not. Album art needs a PNG
-decoder: asked for `format=Bmp` the server sends JPEG, while `format=Png` is honoured. **Order:** (1) a minimal
-HTTP/1.0 client (HTTP/1.0 makes the server send the body unchunked, measured) and JSON parser in `common/`, server, user
-and token set in the Control Panel, the unit keeping a token and never the password, no credential in the repo or an
-image; (2) the app: Artists → Albums → Tracks in `list_view`, search through `keyboard_enter()`, now playing, a queue,
+-36.9), about 20 dB under a game asset (`sounds/fx_burst.wav`, RMS -15.9). Every item carries `NormalizationGain` (dB; 200
+random tracks: median -5, max +17.9, a quarter positive), so applying it evens tracks out but turns most *down*: the faint
+speaker needs its own level decision (proposed, not ruled: apply the gain, boosts capped at +12 dB, onboard loudness via the
+bus volume). Whole-system CPU on the panel's monitor during playback: ~15%. A 48 kHz stereo stream is refused. **Built:**
+`common/http.c` (polled non-blocking HTTP/1.0, buffer or stream mode, token only in a header) and `common/json.c`; the API
+wants the `Authorization: MediaBrowser Token=` header (`api_key=` got 401 on `/Users/Me`). **Missing:** `list_view` and
+`keyboard_enter()` exist, a thumbnail cache does not; album art needs a PNG decoder (`format=Bmp` answers JPEG, `format=Png`
+is honoured). **Order:** (1) server, user and token set in the Control Panel, the unit keeping a token and never the
+password, no credential in the repo or an image, and the gain applied to the stream; (2) the app: Artists → Albums → Tracks in `list_view`, search through `keyboard_enter()`, now playing, a queue,
 pad and keyboard as well as touch, and `stream_play` deleted. **Done when** the app plays a searched track at the panel.
 
 ### F154. Stereo music through the mono mix bus — open, operator request 2026-10-19, feasibility not assessed
