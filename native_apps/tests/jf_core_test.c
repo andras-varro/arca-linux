@@ -726,8 +726,9 @@ static void test_mix(void)
 {
     in_tracks(4, 4);
     JfList *tl = &app.lists[JF_LIST_TRACKS];
-    send(JF_EV_MIX, 1);
-    CHECK(strcmp(app.banner, "MIX: COMING") == 0 && cm.n == 0 && app.queue_n == 0, "MIX is a placeholder notice, no commands");
+    send(JF_EV_MIX, 1);                  /* the real MIX is in test_mix_* below: it asks for the seed and queues nothing */
+    CHECK(cm.n == 1 && app.queue_n == 0 && strcmp(app.banner, "MIX: COMING") != 0, "MIX is no placeholder any more");
+    send(JF_EV_BACK, 0);
 
     start_playing(0);
     send(JF_EV_SELECT, 2);
@@ -792,6 +793,490 @@ static void test_mix(void)
     CHECK(cm.n == 1 && cm.c[0].type == JF_CMD_PLAY_STREAM && app.queue_n == 3, "idle: the mix starts without a STOP");
 }
 
+/* ── MIX on a track: seed fetch, tick screen, genre index, candidate pool ─── */
+
+#define ARTID "000000000000000000000000a47157ee"
+#define GID(n) (0x200000u + (n))      /* genre-index ids */
+#define PID(n) (0x100000u + (n))      /* pool track ids  */
+
+static JfItem mk_item(JfItemType t, unsigned n, const char *name, const char *genres)
+{
+    JfItem it;
+    memset(&it, 0, sizeof(it));
+    it.type = t;
+    snprintf(it.id, sizeof(it.id), "%032x", n);
+    snprintf(it.name, sizeof(it.name), "%s", name);
+    if (genres) snprintf(it.genres, sizeof(it.genres), "%s", genres);
+    return it;
+}
+static const char *hexid(unsigned n) { static char b[4][33]; static int k; k = (k + 1) & 3; snprintf(b[k], 33, "%032x", n); return b[k]; }
+
+/* the caller's JfCmd is a copy: jf_step overwrites `cm` */
+static void reply_items(const JfCmd *c, const JfItem *src, int n, int total)
+{
+    JfCmd copy = *c;
+    JfList *l = copy.list;
+    for (int k = 0; k < n && l->n < l->cap; k++) l->items[l->n++] = src[k];
+    l->loaded += n;
+    l->total = total;
+    reply_raw(&copy, JF_ERR_NONE);
+}
+
+struct gs { const char *name; unsigned idn; int count; };
+static void reply_genre_page(const JfCmd *c, int start, int total, const struct gs *sp, int nsp)
+{
+    char want[JF_PATH_MAX];
+    jf_path_genre_index(want, sizeof(want), UID, start, JF_MIX_GENRE_PAGE);
+    CHECK(c->kind == JF_KIND_LIST && c->list == &app.lists[JF_LIST_GENRES] && strcmp(c->path, want) == 0,
+          "genre index request for start %d: %s", start, c->path);
+    int size = total - start < JF_MIX_GENRE_PAGE ? total - start : JF_MIX_GENRE_PAGE;
+    static JfItem page[JF_MIX_GENRE_PAGE];
+    for (int k = 0; k < size; k++) {
+        char nm[32];
+        snprintf(nm, sizeof(nm), "Filler %d", start + k);
+        page[k] = k < nsp ? mk_item(JF_ITEM_GENRE, sp[k].idn, sp[k].name, NULL) : mk_item(JF_ITEM_GENRE, 0x300000u + (unsigned)(start + k), nm, NULL);
+        page[k].count = k < nsp ? sp[k].count : 7;
+    }
+    reply_items(c, page, size, total);
+}
+
+/* a track list with a known artist, MIX on row 1, the seed reply: ends on the tick screen (or a banner) */
+static void mix_open(const char *genres, int year, bool artist)
+{
+    in_tracks(4, 4);
+    snprintf(app.lists[JF_LIST_TRACKS].items[1].artist, sizeof(app.lists[JF_LIST_TRACKS].items[1].artist), "The Band");
+    send(JF_EV_MIX, 1);
+    JfCmd c = *find(JF_CMD_REQUEST);
+    JfItem s = app.lists[JF_LIST_TRACKS].items[1];
+    snprintf(s.genres, sizeof(s.genres), "%s", genres);
+    s.year = year;
+    if (artist) snprintf(s.artist_id, sizeof(s.artist_id), "%s", ARTID);
+    reply_items(&c, &s, 1, 1);
+}
+
+/* Rock+Pop ticked, START, the index in one page with the given counts: stops with the first pool request pending */
+static void mix_run(int rock, int pop)
+{
+    mix_open("Rock\nPop\n", 0, false);
+    send(JF_EV_MIX_START, 0);
+    JfCmd c = *find(JF_CMD_REQUEST);
+    struct gs sp[2] = { { "Rock", GID(1), rock }, { "Pop", GID(2), pop } };
+    reply_genre_page(&c, 0, 3, sp, 2);
+}
+
+static const JfCmd *pool_req(void)
+{
+    const JfCmd *c = find(JF_CMD_REQUEST);
+    return c && c->list == &app.lists[JF_LIST_POOL] ? c : NULL;
+}
+
+/* pool pages: `n` items per page; the first `match` carry Rock+Pop, the others Rock only; ids run on (or follow the start) */
+static struct { int total, n, match; bool by_start; unsigned ctr; int starts[16]; bool rnd[16]; int reqs; } pg;
+static void pg_reset(int total, int n, int match, bool by_start)
+{
+    memset(&pg, 0, sizeof(pg));
+    pg.total = total; pg.n = n; pg.match = match; pg.by_start = by_start;
+}
+static int pg_run(int max)
+{
+    while (pg.reqs < max) {
+        const JfCmd *p = pool_req();
+        if (!p) break;
+        JfCmd c = *p;
+        const char *s = strstr(c.path, "StartIndex=");
+        int start = s ? atoi(s + 11) : -1;
+        pg.starts[pg.reqs] = start;
+        pg.rnd[pg.reqs] = strstr(c.path, "SortBy=Random") != NULL;
+        pg.reqs++;
+        int n = pg.n;
+        if (pg.by_start && start + n > pg.total) n = pg.total - start;
+        static JfItem page[JF_MIX_PAGE];
+        for (int k = 0; k < n; k++)
+            page[k] = mk_item(JF_ITEM_TRACK, PID(pg.by_start ? (unsigned)(start + k + 1) : ++pg.ctr), "T", k < pg.match ? "Rock\nPop\n" : "Rock\n");
+        reply_items(&c, page, n, pg.total);
+    }
+    return pg.reqs;
+}
+static bool queue_unique(void)
+{
+    for (int a = 0; a < app.queue_n; a++)
+        for (int b = a + 1; b < app.queue_n; b++) if (strcmp(app.queue[a].id, app.queue[b].id) == 0) return false;
+    return true;
+}
+
+static void test_mix_seed_and_ticks(void)
+{
+    in_tracks(4, 4);
+    send(JF_EV_MIX, 99);
+    CHECK(cm.n == 0 && app.mix.phase == JF_MIX_OFF, "MIX on a row that is not there: nothing");
+    send(JF_EV_MIX, 1);
+    const JfCmd *c = find(JF_CMD_REQUEST);
+    char want[JF_PATH_MAX];
+    jf_path_item_by_id(want, sizeof(want), UID, app.lists[JF_LIST_TRACKS].items[1].id);
+    CHECK(c && cm.n == 1 && c->kind == JF_KIND_LIST && c->list == &app.lists[JF_LIST_SEED] && strcmp(c->path, want) == 0,
+          "seed request: Ids=<row id> into the seed list (%s)", c ? c->path : "-");
+    CHECK(app.mix.phase == JF_MIX_SEED && app.screen == JF_SCR_TRACKS && app.busy && !app.banner[0], "SEED phase, still on the tracks, busy");
+    JfCmd seedreq = *c;
+
+    send(JF_EV_VOL_UP, 0);
+    CHECK(app.mix.phase == JF_MIX_SEED && !has(JF_CMD_CANCEL), "volume does not abandon the seed fetch");
+    send(JF_EV_NEED_MORE, 0);
+    CHECK(app.mix.phase == JF_MIX_SEED && !has(JF_CMD_CANCEL), "NEED_MORE does not abandon the seed fetch");
+    int nav0 = app.nav_n;
+    send(JF_EV_BACK, 0);
+    CHECK(app.mix.phase == JF_MIX_OFF && has(JF_CMD_CANCEL) && app.screen == JF_SCR_TRACKS && app.nav_n == nav0 && !app.busy,
+          "BACK abandons the fetch and is spent: still on the tracks (screen %d nav %d)", app.screen, app.nav_n);
+    JfItem s = app.lists[JF_LIST_TRACKS].items[1];
+    snprintf(s.genres, sizeof(s.genres), "Rock\n");
+    reply_items(&seedreq, &s, 1, 1);
+    CHECK(app.screen == JF_SCR_TRACKS && app.mix.phase == JF_MIX_OFF && cm.n == 0, "a seed reply after the abandon is ignored");
+
+    send(JF_EV_MIX, 1);
+    send(JF_EV_ACTIVATE, 0);
+    CHECK(app.mix.phase == JF_MIX_OFF && has(JF_CMD_CANCEL), "another intent abandons the fetch too");
+
+    /* the tick screen: genres deduped by key, own spelling, artist and decade */
+    mix_open("Rock\nPop Music\nPop\n  \nHip-Hop\n", 1984, true);
+    const JfMix *m = &app.mix;
+    CHECK(app.screen == JF_SCR_MIX && m->phase == JF_MIX_TICKS && !app.busy, "tick screen (screen %d phase %d)", app.screen, m->phase);
+    CHECK(m->opt_n == 5, "5 rows: Rock, Pop Music, Hip-Hop, artist, decade (got %d)", m->opt_n);
+    if (m->opt_n == 5) {
+        CHECK(m->opt[0].kind == JF_MIXOPT_GENRE && strcmp(m->opt[0].label, "Rock") == 0, "row 0 '%s'", m->opt[0].label);
+        CHECK(m->opt[1].kind == JF_MIXOPT_GENRE && strcmp(m->opt[1].label, "Pop Music") == 0, "row 1 keeps the first spelling: '%s'", m->opt[1].label);
+        CHECK(m->opt[2].kind == JF_MIXOPT_GENRE && strcmp(m->opt[2].label, "Hip-Hop") == 0, "row 2 '%s'", m->opt[2].label);
+        CHECK(m->opt[3].kind == JF_MIXOPT_ARTIST && strcmp(m->opt[3].label, "SAME ARTIST") == 0, "row 3 '%s'", m->opt[3].label);
+        CHECK(m->opt[4].kind == JF_MIXOPT_DECADE && strcmp(m->opt[4].label, "SAME DECADE (1980S)") == 0, "row 4 '%s'", m->opt[4].label);
+        CHECK(m->opt[0].on && m->opt[1].on && m->opt[2].on && !m->opt[3].on && !m->opt[4].on, "genres on, artist and decade off");
+    }
+    CHECK(strcmp(m->artist_id, ARTID) == 0 && m->year == 1984, "artist id and year kept");
+
+    send(JF_EV_MIX_TOGGLE, 3);
+    CHECK(app.mix.opt[3].on && cm.n == 0, "toggle turns a row on");
+    send(JF_EV_MIX_TOGGLE, 3);
+    CHECK(!app.mix.opt[3].on, "and off again");
+    send(JF_EV_MIX_TOGGLE, 0);
+    CHECK(!app.mix.opt[0].on && app.mix.opt[1].on, "toggle changes only its row");
+    send(JF_EV_MIX_TOGGLE, -1); send(JF_EV_MIX_TOGGLE, 5); send(JF_EV_MIX_TOGGLE, 1000);
+    CHECK(!app.mix.opt[0].on && app.mix.opt[1].on && app.mix.opt[2].on && !app.mix.opt[3].on && !app.mix.opt[4].on, "out-of-range toggles change nothing");
+
+    send(JF_EV_MIX_TOGGLE, 1); send(JF_EV_MIX_TOGGLE, 2);
+    send(JF_EV_MIX_START, 0);
+    CHECK(strcmp(app.banner, "TICK AT LEAST ONE") == 0 && cm.n == 0 && app.mix.phase == JF_MIX_TICKS && app.screen == JF_SCR_MIX && !app.busy,
+          "START with nothing ticked: banner, no command (banner '%s', n %d)", app.banner, cm.n);
+
+    send(JF_EV_BACK, 0);
+    CHECK(app.screen == JF_SCR_TRACKS && app.mix.phase == JF_MIX_OFF, "BACK on the ticks leaves (screen %d)", app.screen);
+    send(JF_EV_MIX_TOGGLE, 0);
+    send(JF_EV_MIX_START, 0);
+    CHECK(cm.n == 0 && app.screen == JF_SCR_TRACKS, "toggle and START outside the MIX screen do nothing");
+
+    mix_open("Rock\n", 0, false);
+    CHECK(app.screen == JF_SCR_MIX && app.mix.opt_n == 1 && app.mix.opt[0].on, "no artist id and no year: the genre row only (n %d)", app.mix.opt_n);
+    mix_open("Rock\n", 999, true);
+    CHECK(app.mix.opt_n == 2 && app.mix.opt[1].kind == JF_MIXOPT_ARTIST, "a year below 1000 gives no decade row (n %d)", app.mix.opt_n);
+    mix_open("", 1999, false);
+    CHECK(app.mix.opt_n == 1 && app.mix.opt[0].kind == JF_MIXOPT_DECADE && strcmp(app.mix.opt[0].label, "SAME DECADE (1990S)") == 0,
+          "no genres: the decade row alone, 1999 -> 1990S ('%s')", app.mix.opt[0].label);
+    mix_open("", 0, false);
+    CHECK(app.screen == JF_SCR_TRACKS && strcmp(app.banner, "NOTHING TO MIX ON") == 0 && app.mix.phase == JF_MIX_OFF, "nothing known: banner (%s)", app.banner);
+    in_tracks(4, 4);
+    send(JF_EV_MIX, 1);
+    JfCmd none = *find(JF_CMD_REQUEST);
+    reply_items(&none, NULL, 0, 0);
+    CHECK(app.screen == JF_SCR_TRACKS && strcmp(app.banner, "TRACK NOT FOUND") == 0, "empty seed reply: banner (%s)", app.banner);
+}
+
+static void test_mix_flow(void)
+{
+    mix_open("Rock\nPop Music\nPop\n", 1984, true);
+    int nav_before = app.nav_n - 1;
+    send(JF_EV_MIX_TOGGLE, 2);       /* artist on */
+    send(JF_EV_MIX_TOGGLE, 3);       /* decade on */
+    send(JF_EV_MIX_START, 0);
+    const JfCmd *c = find(JF_CMD_REQUEST);
+    CHECK(c && cm.n == 1 && app.mix.phase == JF_MIX_INDEX && app.busy && app.screen == JF_SCR_MIX, "START asks for the genre index");
+    CHECK(app.mix.gk_n == 2 && strcmp(app.mix.gk[0].key, "rock") == 0 && strcmp(app.mix.gk[1].key, "pop") == 0, "ticked keys: %d, '%s', '%s'",
+          app.mix.gk_n, app.mix.gk[0].key, app.mix.gk[1].key);
+
+    /* the index over three pages: spellings fold into their key, a fifth variant adds count but no id */
+    JfCmd r = *c;
+    struct gs p1[] = { { "Pop", GID(1), 500 }, { "Rock", GID(2), 300 } };
+    reply_genre_page(&r, 0, 250, p1, 2);
+    c = find(JF_CMD_REQUEST);
+    CHECK(c && cm.n == 1 && app.mix.phase == JF_MIX_INDEX && app.mix.consumed == 100, "page 1 read; next page requested (consumed %d)", app.mix.consumed);
+    r = *c;
+    struct gs p2[] = { { "Pop Music", GID(3), 50 }, { "Rock Music", GID(4), 20 }, { "Hip Hop", GID(9), 99 } };
+    reply_genre_page(&r, 100, 250, p2, 3);
+    c = find(JF_CMD_REQUEST);
+    CHECK(c && app.mix.consumed == 200 && c->list == &app.lists[JF_LIST_GENRES], "page 2 read; third requested (consumed %d)", app.mix.consumed);
+    r = *c;
+    struct gs p3[] = { { "ROCK", GID(5), 10 }, { "rock_", GID(6), 5 }, { "Rock - Music", GID(7), 1 } };
+    reply_genre_page(&r, 200, 250, p3, 3);
+    CHECK(app.mix.gk[0].nids == JF_MIX_VARIANTS && app.mix.gk[1].nids == 2, "rock keeps %d ids, pop %d", app.mix.gk[0].nids, app.mix.gk[1].nids);
+    CHECK(app.mix.gk[0].count == 336 && app.mix.gk[1].count == 550, "counts summed over all variants: rock %ld pop %ld", app.mix.gk[0].count, app.mix.gk[1].count);
+
+    /* rock (336) is rarer than pop (550): its ids ask the server, pop's do not */
+    c = find(JF_CMD_REQUEST);
+    const char *rock_ids[] = { hexid(GID(2)), hexid(GID(4)), hexid(GID(5)), hexid(GID(6)) };
+    char want[JF_PATH_MAX];
+    jf_path_mix_pool(want, sizeof(want), UID, rock_ids, 4, ARTID, 1980, true, 0, JF_MIX_PAGE);
+    CHECK(c && cm.n == 1 && c->list == &app.lists[JF_LIST_POOL] && strcmp(c->path, want) == 0 && app.mix.phase == JF_MIX_POOL && app.mix.chosen == 0,
+          "pool request: the rarer key's four ids, artist, decade, Random\n  got  %s\n  want %s", c ? c->path : "-", want);
+    CHECK(c && !strstr(c->path, hexid(GID(1))) && !strstr(c->path, hexid(GID(3))) && !strstr(c->path, hexid(GID(7))),
+          "pop's ids and the fifth rock id are not in the path");
+
+    /* page 1 (40): seed, an album, a track lacking Pop, two kept in other spellings, a repeat, 34 plain keepers */
+    JfItem pg1[JF_MIX_PAGE];
+    pg1[0] = app.mix.seed;
+    pg1[1] = mk_item(JF_ITEM_ALBUM, PID(900), "Album", "Rock\nPop\n");
+    pg1[2] = mk_item(JF_ITEM_TRACK, PID(901), "OnlyRock", "Rock\n");
+    pg1[3] = mk_item(JF_ITEM_TRACK, PID(1), "A", "rock\nPOP MUSIC\n");
+    pg1[4] = mk_item(JF_ITEM_TRACK, PID(2), "B", "Pop\nRock\n");
+    pg1[5] = pg1[3];
+    for (int k = 6; k < JF_MIX_PAGE; k++) pg1[k] = mk_item(JF_ITEM_TRACK, PID(10 + (unsigned)k), "T", "Rock\nPop\n");
+    r = *c;
+    reply_items(&r, pg1, JF_MIX_PAGE, 5000);
+    c = find(JF_CMD_REQUEST);
+    CHECK(c && c->list == &app.lists[JF_LIST_POOL] && app.mix.found_n == 36 && strcmp(c->path, want) == 0 && app.busy,
+          "after page 1: 36 kept (seed, album, 'Rock' only and the repeat dropped), same request again (found %d)", app.mix.found_n);
+
+    /* page 2: a repeat from page 1 and 39 new -> 75; page 3: 40 new, the mix stops at 100 */
+    JfItem pg2[JF_MIX_PAGE];
+    pg2[0] = pg1[4];
+    for (int k = 1; k < JF_MIX_PAGE; k++) pg2[k] = mk_item(JF_ITEM_TRACK, PID(100 + (unsigned)k), "T", "Pop\nRock\n");
+    r = *c;
+    reply_items(&r, pg2, JF_MIX_PAGE, 5000);
+    CHECK(app.mix.found_n == 75, "page 2: the cross-page repeat dropped (found %d)", app.mix.found_n);
+    c = find(JF_CMD_REQUEST);
+    CHECK(c && c->list == &app.lists[JF_LIST_POOL], "a third page is asked for");
+    JfItem pg3[JF_MIX_PAGE];
+    for (int k = 0; k < JF_MIX_PAGE; k++) pg3[k] = mk_item(JF_ITEM_TRACK, PID(200 + (unsigned)k), "T", "Rock\nPop\n");
+    r = *c;
+    reply_items(&r, pg3, JF_MIX_PAGE, 5000);
+
+    CHECK(!pool_req() && app.mix.phase == JF_MIX_OFF, "100 found: no fourth request, run over");
+    CHECK(app.screen == JF_SCR_TRACKS && app.nav_n == nav_before, "the tick screen is popped (screen %d nav %d, want %d)", app.screen, app.nav_n, nav_before);
+    CHECK(app.queue_n == 101 && queue_unique(), "queue = seed + 100 matches, each once (n %d)", app.queue_n);
+    CHECK(strcmp(app.queue[0].id, app.lists[JF_LIST_TRACKS].items[1].id) == 0, "the seed leads");
+    int bad = 0;
+    for (int k = 1; k < app.queue_n; k++) {
+        const char *id = app.queue[k].id;
+        if (!strcmp(id, hexid(PID(900))) || !strcmp(id, hexid(PID(901))) || !strcmp(id, app.queue[0].id)) bad++;
+    }
+    CHECK(bad == 0, "no album, no Rock-only track, no second seed in the queue (%d)", bad);
+    int inorder = 0;
+    for (int k = 2; k < app.queue_n; k++) if (strcmp(app.queue[k - 1].id, app.queue[k].id) < 0) inorder++;
+    CHECK(inorder < app.queue_n - 2, "the matches are shuffled, not in page order");
+    CHECK(app.queue_cur == 0 && has(JF_CMD_PLAY_STREAM) && strstr(find(JF_CMD_PLAY_STREAM)->path, app.queue[0].id) && !has(JF_CMD_STOP),
+          "the seed starts (nothing was playing: no STOP)");
+    CHECK(strcmp(app.queue_name, "Similar: Rock+Pop Music+The Band (1980s)") == 0, "queue_name '%s'", app.queue_name);
+}
+
+static void test_mix_choice(void)
+{
+    char want[JF_PATH_MAX];
+    const char *r1[] = { hexid(GID(1)) }, *p1[] = { hexid(GID(2)) };
+
+    mix_run(100, 900);                   /* Rock is rarer, and small: stable order from the start */
+    const JfCmd *c = pool_req();
+    jf_path_mix_pool(want, sizeof(want), UID, r1, 1, NULL, 0, false, 0, JF_MIX_PAGE);
+    CHECK(c && strcmp(c->path, want) == 0, "rock 100 < pop 900: rock's id, SortName, start 0\n  got  %s\n  want %s", c ? c->path : "-", want);
+    CHECK(c && !strstr(c->path, hexid(GID(2))), "pop's id is not asked for");
+
+    mix_run(900, 100);
+    c = pool_req();
+    jf_path_mix_pool(want, sizeof(want), UID, p1, 1, NULL, 0, false, 0, JF_MIX_PAGE);
+    CHECK(c && strcmp(c->path, want) == 0, "pop 100 < rock 900: pop's id\n  got  %s\n  want %s", c ? c->path : "-", want);
+    CHECK(c && !strstr(c->path, hexid(GID(1))), "rock's id is not asked for");
+
+    mix_run(500, 900);
+    c = pool_req();
+    jf_path_mix_pool(want, sizeof(want), UID, r1, 1, NULL, 0, true, 0, JF_MIX_PAGE);
+    CHECK(c && strcmp(c->path, want) == 0, "a count over %d starts in Random order", JF_MIX_SMALL);
+    mix_run(JF_MIX_SMALL, 900);
+    c = pool_req();
+    CHECK(c && strstr(c->path, "SortBy=SortName"), "a count of exactly %d starts stable", JF_MIX_SMALL);
+    mix_run(JF_MIX_SMALL + 1, 900);
+    c = pool_req();
+    CHECK(c && strstr(c->path, "SortBy=Random"), "a count of %d starts Random", JF_MIX_SMALL + 1);
+
+    /* a ticked key the index does not have: nothing can match, no pool request */
+    mix_open("Rock\nPop\n", 0, false);
+    send(JF_EV_MIX_START, 0);
+    JfCmd r = *find(JF_CMD_REQUEST);
+    struct gs only_rock[1] = { { "Rock", GID(1), 10 } };
+    reply_genre_page(&r, 0, 3, only_rock, 1);
+    CHECK(!pool_req() && cm.n == 0 && app.screen == JF_SCR_MIX && app.mix.phase == JF_MIX_TICKS && strcmp(app.banner, "NO MIX FOUND") == 0 && !app.busy,
+          "a ticked genre the server lacks: NO MIX FOUND on the tick screen, no pool request (banner '%s', n %d)", app.banner, cm.n);
+
+    /* artist/decade only: straight to the pool, no index */
+    mix_open("Rock\n", 1984, true);
+    send(JF_EV_MIX_TOGGLE, 0); send(JF_EV_MIX_TOGGLE, 1);
+    send(JF_EV_MIX_START, 0);
+    c = find(JF_CMD_REQUEST);
+    jf_path_mix_pool(want, sizeof(want), UID, NULL, 0, ARTID, 0, true, 0, JF_MIX_PAGE);
+    CHECK(c && cm.n == 1 && c->list == &app.lists[JF_LIST_POOL] && strcmp(c->path, want) == 0 && app.mix.phase == JF_MIX_POOL,
+          "artist only: pool directly\n  got  %s\n  want %s", c ? c->path : "-", want);
+    mix_open("Rock\n", 1984, true);
+    send(JF_EV_MIX_TOGGLE, 0); send(JF_EV_MIX_TOGGLE, 2);
+    send(JF_EV_MIX_START, 0);
+    c = find(JF_CMD_REQUEST);
+    jf_path_mix_pool(want, sizeof(want), UID, NULL, 0, NULL, 1980, true, 0, JF_MIX_PAGE);
+    CHECK(c && cm.n == 1 && strcmp(c->path, want) == 0, "decade only: Years list, no ids\n  got  %s\n  want %s", c ? c->path : "-", want);
+}
+
+static void test_mix_stops(void)
+{
+    /* request cap: 5 keepers per page, never 100 -> exactly JF_MIX_REQ_MAX requests, then what was found */
+    mix_run(500, 900);
+    pg_reset(5000, JF_MIX_PAGE, 5, false);
+    int reqs = pg_run(JF_MIX_REQ_MAX + 4);
+    CHECK(reqs == JF_MIX_REQ_MAX, "request cap: %d pool requests, want %d", reqs, JF_MIX_REQ_MAX);
+    CHECK(!pool_req() && app.queue_n == 1 + 5 * JF_MIX_REQ_MAX && has(JF_CMD_PLAY_STREAM), "then the %d found play (queue %d)", 5 * JF_MIX_REQ_MAX, app.queue_n);
+    CHECK(queue_unique() && strcmp(app.queue_name, "Similar: Rock+Pop") == 0, "name '%s'", app.queue_name);
+
+    /* an empty page ends it */
+    mix_run(500, 900);
+    pg_reset(5000, JF_MIX_PAGE, 10, false);
+    pg_run(1);
+    CHECK(pool_req() != NULL, "10 found, the second page is asked for");
+    JfCmd c = *pool_req();
+    reply_items(&c, NULL, 0, 5000);
+    CHECK(!pool_req() && app.queue_n == 11 && app.mix.phase == JF_MIX_OFF, "an empty page ends the run with what was found (queue %d)", app.queue_n);
+
+    /* a short random page: the whole answer was in it */
+    mix_run(500, 900);
+    pg_reset(5000, 17, 17, false);
+    reqs = pg_run(5);
+    CHECK(reqs == 1 && app.queue_n == 18 && !pool_req(), "random page of 17 < %d: one request, 17 found (reqs %d queue %d)", JF_MIX_PAGE, reqs, app.queue_n);
+
+    /* a full random page that is the whole total */
+    mix_run(500, 900);
+    pg_reset(JF_MIX_PAGE, JF_MIX_PAGE, JF_MIX_PAGE, false);
+    reqs = pg_run(5);
+    CHECK(reqs == 1 && app.queue_n == 1 + JF_MIX_PAGE, "random page with loaded == total: one request (reqs %d queue %d)", reqs, app.queue_n);
+
+    /* a random page of a small total: switch once to stable order, from 0, and the repeats are not doubled */
+    mix_run(500, 900);
+    pg_reset(90, JF_MIX_PAGE, JF_MIX_PAGE, true);
+    reqs = pg_run(10);
+    CHECK(reqs == 4, "1 random + 3 stable requests (got %d)", reqs);
+    CHECK(pg.rnd[0] && !pg.rnd[1] && !pg.rnd[2] && !pg.rnd[3], "the first is Random, the rest SortName");
+    CHECK(pg.starts[0] == 0 && pg.starts[1] == 0 && pg.starts[2] == 40 && pg.starts[3] == 80,
+          "starts %d %d %d %d: stable paging restarts at 0 then follows what is consumed", pg.starts[0], pg.starts[1], pg.starts[2], pg.starts[3]);
+    CHECK(!pool_req() && app.queue_n == 91 && queue_unique(), "consumed 90 >= total 90 ends it: 90 distinct found (queue %d)", app.queue_n);
+
+    /* stable from the index */
+    mix_run(100, 900);
+    pg_reset(100, JF_MIX_PAGE, JF_MIX_PAGE, true);
+    reqs = pg_run(10);
+    CHECK(reqs == 3 && pg.starts[0] == 0 && pg.starts[1] == 40 && pg.starts[2] == 80 && !pg.rnd[0], "stable run: 3 requests at 0, 40, 80 (got %d)", reqs);
+    CHECK(app.queue_n == 101 && queue_unique(), "all 100 found (queue %d)", app.queue_n);
+
+    /* stable, total 70: consumed 80 >= 70 on the second page */
+    mix_run(100, 900);
+    pg_reset(70, JF_MIX_PAGE, JF_MIX_PAGE, true);
+    reqs = pg_run(10);
+    CHECK(reqs == 2 && !pool_req() && app.queue_n == 71, "stable run of 70: two requests (got %d, queue %d)", reqs, app.queue_n);
+
+    /* nothing found: banner, stay on the ticks, queue untouched */
+    mix_run(500, 900);
+    int qn = app.queue_n;
+    JfItem only[2];
+    only[0] = app.mix.seed;
+    only[1] = mk_item(JF_ITEM_TRACK, PID(5), "OnlyRock", "Rock\n");
+    JfCmd p = *pool_req();
+    reply_items(&p, only, 2, 2);
+    CHECK(strcmp(app.banner, "NO MIX FOUND") == 0 && app.screen == JF_SCR_MIX && app.mix.phase == JF_MIX_TICKS && !app.busy && cm.n == 0 && app.queue_n == qn,
+          "0 found: NO MIX FOUND, tick screen kept, no commands (banner '%s' screen %d n %d)", app.banner, app.screen, cm.n);
+    send(JF_EV_MIX_START, 0);
+    CHECK(app.mix.phase == JF_MIX_INDEX && find(JF_CMD_REQUEST) && find(JF_CMD_REQUEST)->list == &app.lists[JF_LIST_GENRES], "START again runs it again");
+}
+
+static void test_mix_cancel_and_errors(void)
+{
+    /* BACK during the pool: cancel, stay on the ticks; a late reply is ignored; BACK again leaves */
+    mix_run(500, 900);
+    JfCmd late = *pool_req();
+    send(JF_EV_BACK, 0);
+    CHECK(app.mix.phase == JF_MIX_TICKS && app.screen == JF_SCR_MIX && !app.busy, "BACK in the pool cancels the run (phase %d screen %d)", app.mix.phase, app.screen);
+    const JfCmd *cc = find(JF_CMD_CANCEL);
+    CHECK(cc && cc->kind == JF_KIND_LIST && !pool_req() && !has(JF_CMD_PLAY_STREAM), "a CANCEL, no request, no playback");
+    JfItem pg1[JF_MIX_PAGE];
+    for (int k = 0; k < JF_MIX_PAGE; k++) pg1[k] = mk_item(JF_ITEM_TRACK, PID((unsigned)k + 1), "T", "Rock\nPop\n");
+    reply_items(&late, pg1, JF_MIX_PAGE, 5000);
+    CHECK(cm.n == 0 && app.queue_n == 0 && app.screen == JF_SCR_MIX && app.mix.phase == JF_MIX_TICKS, "the stale pool reply changes nothing (n %d queue %d)", cm.n, app.queue_n);
+    send(JF_EV_BACK, 0);
+    CHECK(app.screen == JF_SCR_TRACKS && app.mix.phase == JF_MIX_OFF, "the second BACK leaves");
+
+    /* BACK during the index */
+    mix_open("Rock\nPop\n", 0, false);
+    send(JF_EV_MIX_START, 0);
+    JfCmd idx = *find(JF_CMD_REQUEST);
+    send(JF_EV_BACK, 0);
+    CHECK(app.mix.phase == JF_MIX_TICKS && app.screen == JF_SCR_MIX && has(JF_CMD_CANCEL) && !find(JF_CMD_REQUEST), "BACK in the index cancels too");
+    JfItem g[2] = { mk_item(JF_ITEM_GENRE, GID(1), "Rock", NULL), mk_item(JF_ITEM_GENRE, GID(2), "Pop", NULL) };
+    reply_items(&idx, g, 2, 2);
+    CHECK(cm.n == 0 && app.mix.phase == JF_MIX_TICKS, "the stale index reply starts nothing");
+
+    /* errors */
+    mix_run(500, 900);
+    JfCmd pr = *pool_req();
+    reply_raw(&pr, JF_ERR_SERVER);
+    CHECK(app.overlay && app.overlay_buttons == JF_BTN_CLOSE && app.mix.phase == JF_MIX_TICKS && app.screen == JF_SCR_MIX && !app.busy,
+          "pool error: overlay with CLOSE only, back to the ticks (buttons %u phase %d)", app.overlay_buttons, app.mix.phase);
+    send(JF_EV_RETRY, 0);
+    CHECK(cm.n == 0 && app.overlay, "RETRY does nothing");
+    send(JF_EV_CLOSE_ERROR, 0);
+    CHECK(!app.overlay && app.screen == JF_SCR_MIX, "CLOSE returns to the ticks");
+
+    mix_open("Rock\nPop\n", 0, false);
+    send(JF_EV_MIX_START, 0);
+    JfCmd ir = *find(JF_CMD_REQUEST);
+    reply_raw(&ir, JF_ERR_UNREACHABLE);
+    CHECK(app.overlay && app.overlay_buttons == JF_BTN_CLOSE && app.mix.phase == JF_MIX_TICKS, "index error: CLOSE only (buttons %u)", app.overlay_buttons);
+
+    in_tracks(4, 4);
+    send(JF_EV_MIX, 1);
+    JfCmd sr = *find(JF_CMD_REQUEST);
+    reply_raw(&sr, JF_ERR_NOTFOUND);
+    CHECK(app.overlay && app.overlay_buttons == JF_BTN_CLOSE && app.mix.phase == JF_MIX_OFF && app.screen == JF_SCR_TRACKS, "seed error: CLOSE only, MIX off");
+
+    mix_run(500, 900);
+    pr = *pool_req();
+    reply_raw(&pr, JF_ERR_UNAUTH);
+    CHECK(app.screen == JF_SCR_SIGNIN && app.mix.phase == JF_MIX_OFF, "401 in the pool: signed out, MIX off");
+}
+
+static void test_mix_nowplaying(void)
+{
+    in_tracks(4, 4);
+    start_playing(0);
+    send(JF_EV_OPEN_NOWPLAYING, 0);
+    CHECK(app.screen == JF_SCR_NOWPLAYING, "now playing");
+    send(JF_EV_MIX, -1);
+    const JfCmd *c = find(JF_CMD_REQUEST);
+    char want[JF_PATH_MAX];
+    jf_path_item_by_id(want, sizeof(want), UID, app.queue[app.queue_cur].id);
+    CHECK(c && c->list == &app.lists[JF_LIST_SEED] && strcmp(c->path, want) == 0, "i = -1 seeds with the playing track (%s)", c ? c->path : "-");
+    JfCmd sr = *c;
+    JfItem s = app.queue[app.queue_cur];
+    snprintf(s.genres, sizeof(s.genres), "Rock\n");
+    s.year = 1984;
+    reply_items(&sr, &s, 1, 1);
+    CHECK(app.screen == JF_SCR_MIX && app.mix.opt_n == 2, "tick screen from NOW PLAYING (screen %d n %d)", app.screen, app.mix.opt_n);
+    send(JF_EV_MIX_TOGGLE, 1);
+    send(JF_EV_MIX_START, 0);
+    JfCmd ir = *find(JF_CMD_REQUEST);
+    struct gs sp[1] = { { "Rock", GID(1), 400 } };
+    reply_genre_page(&ir, 0, 1, sp, 1);
+    pg_reset(5000, JF_MIX_PAGE, JF_MIX_PAGE, false);
+    pg_run(3);
+    CHECK(app.screen == JF_SCR_NOWPLAYING && app.queue_n == 101 && app.queue_cur == 0, "the run pops back to NOW PLAYING with a 101-track queue (screen %d queue %d)", app.screen, app.queue_n);
+    CHECK(cm.n == 2 && cm.c[0].type == JF_CMD_STOP && cm.c[1].type == JF_CMD_PLAY_STREAM, "audio was live: STOP, then the seed streams");
+    CHECK(strcmp(app.queue_name, "Similar: Rock (1980s)") == 0, "queue_name '%s'", app.queue_name);
+}
+
 static void test_save(void)
 {
     in_tracks(5, 5);
@@ -833,7 +1318,8 @@ int main(void)
 {
     test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue();
     test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit(); test_categories();
-    test_action_bar(); test_queue_insert(); test_mix(); test_save();
+    test_action_bar(); test_queue_insert(); test_mix(); test_mix_seed_and_ticks(); test_mix_flow(); test_mix_choice(); test_mix_stops();
+    test_mix_cancel_and_errors(); test_mix_nowplaying(); test_save();
     printf("jf_core_test: %d checks, %d failures\n", checks, fails);
     return fails ? 1 : 0;
 }

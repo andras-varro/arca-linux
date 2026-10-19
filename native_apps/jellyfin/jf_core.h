@@ -29,6 +29,7 @@
 #include "jf_model.h"
 #include "jf_login.h"
 #include "jf_api.h"
+#include "jf_url.h"
 
 /* Page sizes (items per request) and storage caps per list.  The artists cap
  * covers the 1505 album artists and the 1120 genres of the test server (the root list
@@ -43,6 +44,19 @@
 #define JF_CAP_TRACKS    300
 #define JF_CAP_SEARCH    200
 #define JF_CAP_MIX       200      /* an instant mix: JF_MIX_LIMIT items fit */
+#define JF_CAP_SEED        2
+#define JF_CAP_GENRES    100      /* JF_MIX_GENRE_PAGE */
+#define JF_CAP_POOL       40      /* JF_MIX_PAGE */
+
+/* MIX.  A page of 50 Audio items with Fields=Genres is ~66 KB and ~4700 tokens (measured), too near the 5000-token
+ * budget, so 40; a genre-index page of 100 with SongCount is ~38 KB and ~3700 tokens. */
+#define JF_MIX_OPT_MAX    20      /* tick rows: the genres of one track + artist + decade (JF_GENRES_BYTES holds < 20 names) */
+#define JF_MIX_VARIANTS    4      /* spellings of one genre key whose ids are kept (the path holds 4 x 32 hex) */
+#define JF_MIX_WANT      100      /* matches a mix tries for */
+#define JF_MIX_PAGE       40
+#define JF_MIX_GENRE_PAGE 100
+#define JF_MIX_REQ_MAX     8      /* pool requests, then take what is found */
+#define JF_MIX_SMALL     120      /* a server total up to this is paged in a stable order and shuffled here: random pages would repeat */
 #define JF_QUEUE_MAX     200
 #define JF_NAV_MAX        16
 #define JF_CMDS_MAX        4
@@ -51,10 +65,14 @@
 #define JF_SHORT_MS     5000      /* a track that played less than this failed */
 
 typedef enum { JF_SCR_SIGNIN = 0, JF_SCR_ARTISTS, JF_SCR_ALBUMS, JF_SCR_TRACKS,
-               JF_SCR_SEARCH, JF_SCR_NOWPLAYING, JF_SCR_QUEUE } JfScreen;
+               JF_SCR_SEARCH, JF_SCR_NOWPLAYING, JF_SCR_QUEUE,
+               JF_SCR_MIX       /* the tick screen of MIX: JfApp.mix.opt */ } JfScreen;
 
 typedef enum { JF_LIST_ARTISTS = 0, JF_LIST_ALBUMS, JF_LIST_TRACKS, JF_LIST_SEARCH,
                JF_LIST_MIX,       /* no screen of its own: the reply of an INSTANT MIX request */
+               JF_LIST_SEED,      /* no screen: the one-row reply that gives MIX its seed's genres, year and artist */
+               JF_LIST_GENRES,    /* no screen: one page of the genre index, folded into the ticked keys and cleared */
+               JF_LIST_POOL,      /* no screen: one page of candidate tracks for a MIX */
                JF_LIST_COUNT } JfListId;
 
 /* The root browse category (JF_SCR_ARTISTS shows it), in the order JF_EV_CATEGORY cycles. */
@@ -80,7 +98,9 @@ typedef enum {
                           * again drops it, another track row moves it); any other row opens as ACTIVATE does */
     JF_EV_PLAY_NEXT,     /* .i: list row (>= 0, a track); inserts after the queue position, or plays it when nothing plays */
     JF_EV_ADD_QUEUE,     /* .i: list row; appends, or plays it when nothing plays */
-    JF_EV_MIX,           /* .i: list row, or -1 = the playing track.  Placeholder: the core only shows "MIX: COMING" */
+    JF_EV_MIX,           /* .i: list row, or -1 = the playing track.  Fetches the track's genres, then opens the tick screen (JF_SCR_MIX) */
+    JF_EV_MIX_TOGGLE,    /* .i: tick row (JfApp.mix.opt); only on the MIX screen while ticking */
+    JF_EV_MIX_START,     /* start the mix with the ticks; none ticked = a notice.  BACK cancels a running mix, then leaves */
     JF_EV_INSTANT_MIX,   /* .i: list row, or -1 = the playing track; the mix replaces the queue and plays */
     JF_EV_SAVE_PLAYLIST, /* .term: the playlist name (the UI never sends an empty one); saves the queue's first JF_SAVE_IDS_MAX */
     JF_EV_DISMISS,       /* drop the action bar */
@@ -165,6 +185,44 @@ typedef bool (*JfSessionFn)(char out[33]);
 typedef struct { JfScreen screen; char id[96]; char title[96]; int sub; } JfNavEntry;
 typedef struct { char id[96]; char title[96]; int sub; } JfListCtx;
 
+typedef enum { JF_MIXOPT_GENRE = 0, JF_MIXOPT_ARTIST, JF_MIXOPT_DECADE } JfMixOptKind;
+
+/* One tick row.  GENRE rows come first (the track's own spelling, deduped by jf_genre_key), then SAME ARTIST (absent
+ * without an artist id), then SAME DECADE (absent without a year; the label names it: "SAME DECADE (1980S)"). */
+typedef struct { JfMixOptKind kind; char label[96]; bool on; } JfMixOpt;
+
+/* SEED: the track's genres are being fetched.  TICKS: JF_SCR_MIX waits for ticks.  INDEX: walking the genre index to find the
+ * ids of the ticked keys.  POOL: collecting matches (`found_n` is the progress to show: "MIXING... 37"). */
+typedef enum { JF_MIX_OFF = 0, JF_MIX_SEED, JF_MIX_TICKS, JF_MIX_INDEX, JF_MIX_POOL } JfMixPhase;
+
+typedef struct {
+    char key[64];
+    char ids[JF_MIX_VARIANTS][JF_ID_LEN + 1];
+    int nids;
+    long count;              /* sum of the variants' SongCount */
+} JfMixKey;
+
+typedef struct {
+    JfMixPhase phase;
+    JfItem seed;             /* the track as the list showed it: it leads the queue */
+    char artist_id[JF_ID_LEN + 1];
+    int year;
+    JfMixOpt opt[JF_MIX_OPT_MAX];
+    int opt_n;
+    /* the run */
+    JfMixKey gk[JF_MIX_OPT_MAX];   /* the ticked genre keys */
+    int gk_n;
+    int chosen;              /* the gk asked of the server (smallest count); -1 = none ticked */
+    bool use_artist;
+    int decade;              /* 0 = any year, else the first year of the decade */
+    bool random;             /* pool pages: SortBy=Random, else SortName by `consumed` */
+    int consumed;            /* index or pool items read so far: the next StartIndex */
+    int reqs;
+    int found_n;
+    JfItem found[JF_MIX_WANT + 1];   /* [1..found_n] the matches; [0] is filled with the seed when the mix is queued */
+    unsigned rng;
+} JfMix;
+
 typedef struct {
     /* ── what the UI reads ─────────────────────────────────────────────── */
     JfScreen screen;
@@ -180,6 +238,7 @@ typedef struct {
                               * and owns focus there.  Dropped by any other user intent, a screen change or a re-aim */
     int action_row;
     char queue_name[96];     /* the name SAVE AS PLAYLIST offers: set by whatever built the queue ("Queue: <first>", "Mix: <seed>") */
+    JfMix mix;               /* MIX: the tick rows (JF_SCR_MIX) and the run's progress; ~45 KB */
     unsigned banner_seq;     /* bumps on every new banner, so the UI can time it */
     bool busy;               /* any request in flight or being waited for: show a spinner */
     JfPlayState play_state;  /* IDLE; FETCHING (stream requested); PLAYING; END = "END OF QUEUE" */
@@ -208,6 +267,9 @@ typedef struct {
     JfItem store_tracks[JF_CAP_TRACKS];
     JfItem store_search[JF_CAP_SEARCH];
     JfItem store_mix[JF_CAP_MIX];
+    JfItem store_seed[JF_CAP_SEED];
+    JfItem store_genres[JF_CAP_GENRES];
+    JfItem store_pool[JF_CAP_POOL];
 } JfApp;
 
 /** Zero the app, wire the list storage, session_fn = jf_session_id, volume = default. */

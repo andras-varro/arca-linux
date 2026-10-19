@@ -67,7 +67,7 @@ static void read_item(const char *s, const JsonTok *t, int n, int o, JfItem *it)
 {
     long long v;
     double d;
-    int i;
+    int i, e;
 
     sfield(s, t, n, o, "Name", it->name, sizeof it->name);
 
@@ -78,11 +78,39 @@ static void read_item(const char *s, const JsonTok *t, int n, int o, JfItem *it)
     i = json_obj_get(s, t, n, o, "NormalizationGain");
     if (i >= 0 && json_num(s, &t[i], &d)) it->norm_gain_mdb = gain_mdb(d);
 
+    i = json_obj_get(s, t, n, o, "SongCount");
+    if (i >= 0 && json_i64(s, &t[i], &v)) it->count = clamp_i(v, 0, INT_MAX);
+
     if (it->type == JF_ITEM_ARTIST || it->type == JF_ITEM_GENRE || it->type == JF_ITEM_PLAYLIST) return;
+    i = json_obj_get(s, t, n, o, "ProductionYear");
+    if (i >= 0 && json_i64(s, &t[i], &v)) it->year = clamp_i(v, 0, 9999);
+    i = json_obj_get(s, t, n, o, "ArtistItems");
+    e = i >= 0 ? json_arr_first(t, n, i) : -1;
+    if (e >= 0 && t[e].type == JSON_OBJECT) {
+        char aid[40];
+        int al = -1;
+        int ai = json_obj_get(s, t, n, e, "Id");
+        if (ai >= 0 && t[ai].type == JSON_STRING) al = json_str(s, &t[ai], aid, sizeof aid);
+        if (al == 32 && hex32(aid)) memcpy(it->artist_id, aid, 33);
+    }
+    i = json_obj_get(s, t, n, o, "Genres");
+    if (i >= 0 && t[i].type == JSON_ARRAY) {
+        size_t used = 0;
+        for (int g = json_arr_first(t, n, i); g >= 0; g = json_arr_next(t, n, i, g)) {
+            char nm[JF_GENRES_BYTES];
+            if (t[g].type != JSON_STRING || json_str(s, &t[g], nm, sizeof nm) <= 0) continue;
+            size_t l = strlen(nm);
+            if (strchr(nm, '\n') || used + l + 1 >= sizeof it->genres) continue;   /* whole names only */
+            memcpy(it->genres + used, nm, l);
+            used += l;
+            it->genres[used++] = '\n';
+            it->genres[used] = '\0';
+        }
+    }
     sfield(s, t, n, o, "Album", it->album, sizeof it->album);
     if (sfield(s, t, n, o, "AlbumArtist", it->artist, sizeof it->artist)) return;
     i = json_obj_get(s, t, n, o, "Artists");
-    int e = i >= 0 ? json_arr_first(t, n, i) : -1;   /* only [0]: some tracks list dozens */
+    e = i >= 0 ? json_arr_first(t, n, i) : -1;   /* only [0]: some tracks list dozens */
     if (e >= 0 && t[e].type == JSON_STRING && json_str(s, &t[e], it->artist, sizeof it->artist) < 0)
         it->artist[0] = '\0';
 }
@@ -145,6 +173,24 @@ int jf_parse_auth(const char *body, size_t len, JsonTok *toks, int ntoks,
         return JF_PARSE_BAD;
     }
     return JF_PARSE_OK;
+}
+
+int jf_genre_key(char *out, size_t cap, const char *name)
+{
+    if (!out || cap == 0) return 0;
+    size_t w = 0;
+    bool gap = false;
+    for (const char *p = name ? name : ""; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c == '-' || c == '_' || c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == '\v') { gap = true; continue; }
+        if (gap && w > 0) { if (w + 1 >= cap) break; out[w++] = ' '; }
+        gap = false;
+        if (w + 1 >= cap) break;
+        out[w++] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : (char)c;
+    }
+    out[w] = '\0';
+    if (w > 6 && !strcmp(out + w - 6, " music")) { w -= 6; out[w] = '\0'; }
+    return (int)w;
 }
 
 void jf_list_init(JfList *l, JfItem *storage, int cap)

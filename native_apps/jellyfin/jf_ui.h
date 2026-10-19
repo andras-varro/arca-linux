@@ -1,6 +1,7 @@
 /*
  * jf_ui — the Jellyfin client's screens: draw from JfApp, map touch / keyboard /
  * pad to user-intent events.  No policy: every decision is jf_core's.
+ * Screens: sign-in, root / browse lists, queue, now playing, and the MIX tick screen (JF_SCR_MIX).
  *
  * jf_ui_layout() is the one place the rectangles are computed; it is pure (the
  * screen extents are an argument), so tests/jf_ui_layout_test.c calls the very
@@ -26,6 +27,7 @@
 #define JF_UI_FIELDS 3     /* sign-in: SERVER, USER, PASSWORD */
 #define JF_UI_ABAR   5     /* action bar: PLAY, PLAY NEXT, ADD QUEUE, MIX, INSTANT MIX */
 #define JF_UI_NPMIX  2     /* now playing: MIX, INSTANT MIX (focus 5 and 6, after the row5 buttons) */
+#define JF_UI_MIXBTN 2     /* MIX screen: START, CANCEL */
 #define JF_UI_BTN_H  44
 #define JF_UI_CAT_H  40     /* root category strip: arrows and name */
 #define JF_UI_CAT_W  72     /* one arrow */
@@ -43,6 +45,7 @@ typedef struct {
     UiRect abar[JF_UI_ABAR];        /* the action bar: in the button row's place while it is up; pressable */
     UiRect save;                    /* the queue screen's SAVE AS PLAYLIST, in the button row; pressable */
     UiRect np_mix[JF_UI_NPMIX];     /* now playing: a row above row5; pressable */
+    UiRect mixb[JF_UI_MIXBTN];      /* MIX screen: START, CANCEL in the button row; pressable (the tick rows are the list) */
     UiRect list_root;               /* the browse list on the root screen: under the category strip */
     UiRect cat_prev, cat_next;      /* root category arrows, pressable */
     UiRect cat_label;               /* root category name and count, drawn only */
@@ -69,6 +72,8 @@ typedef struct {
     TopBar bar;
     ListView lv;
     Button row3[JF_UI_ROW3], row5[JF_UI_ROW5], abar[JF_UI_ABAR], np_mix[JF_UI_NPMIX], save;
+    Button mixb[JF_UI_MIXBTN];
+    char mixrow[JF_MIX_OPT_MAX][112];    /* "[X] LABEL" of the tick rows being drawn */
     bool abar_up;                        /* the core's action_bar as of the last frame: a rising edge moves focus onto it */
     Button field[JF_UI_FIELDS], signin, signexit;
     ModalDialog dlg;

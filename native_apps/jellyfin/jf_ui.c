@@ -50,6 +50,8 @@ void jf_ui_layout(JfLayout *L, const JfExtents *e)
     for (int i = 0; i < JF_UI_ABAR; i++)
         L->abar[i] = rect_of(sl + i * (w5 + GAP), rowy, w5, JF_UI_BTN_H);
     L->save = rect_of(sl, rowy, sw, JF_UI_BTN_H);
+    for (int i = 0; i < JF_UI_MIXBTN; i++)
+        L->mixb[i] = rect_of(sl + i * ((sw - GAP) / 2 + GAP), rowy, (sw - GAP) / 2, JF_UI_BTN_H);
     int wm = (sw - GAP) / 2;
     for (int i = 0; i < JF_UI_NPMIX; i++)
         L->np_mix[i] = rect_of(sl + i * (wm + GAP), rowy - GAP - JF_UI_BTN_H, wm, JF_UI_BTN_H);
@@ -86,6 +88,7 @@ static int src_count(void *ctx)
 {
     const JfUi *ui = ctx;
     if (ui->app->screen == JF_SCR_QUEUE) return ui->app->queue_n;
+    if (ui->app->screen == JF_SCR_MIX) return ui->app->mix.opt_n;
     if (is_list_screen(ui->app->screen) && ui->app->list) return ui->app->list->n;
     return 0;
 }
@@ -101,6 +104,14 @@ static void src_row(void *ctx, int index, LvRow *out)
     JfUi *ui = ctx;
     const JfApp *app = ui->app;
     const JfItem *it;
+    if (app->screen == JF_SCR_MIX) {
+        if (index < 0 || index >= app->mix.opt_n || index >= JF_MIX_OPT_MAX) return;
+        char *m = ui->mixrow[index];
+        snprintf(m, sizeof ui->mixrow[0], "%s %s", app->mix.opt[index].on ? "[X]" : "[ ]", app->mix.opt[index].label);
+        out->title = m;
+        out->glyph = LV_GLYPH_NONE;
+        return;
+    }
     if (app->screen == JF_SCR_QUEUE) {
         if (index < 0 || index >= app->queue_n) return;
         it = &app->queue[index];
@@ -152,6 +163,8 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
     for (int i = 0; i < JF_UI_ABAR; i++) style(&ui->abar[i], ui->L.abar[i], ta[i], 2);
     for (int i = 0; i < JF_UI_NPMIX; i++) style(&ui->np_mix[i], ui->L.np_mix[i], tm[i], 2);
     style(&ui->save, ui->L.save, "SAVE AS PLAYLIST", 2);
+    style(&ui->mixb[0], ui->L.mixb[0], "START", 2);
+    style(&ui->mixb[1], ui->L.mixb[1], "CANCEL", 2);
     for (int i = 0; i < JF_UI_FIELDS; i++) style(&ui->field[i], ui->L.field[i], "", 2);
     style(&ui->signin, ui->L.signin, "SIGN IN", 3);
     style(&ui->signexit, ui->L.signexit, "EXIT", 3);
@@ -263,7 +276,7 @@ static void begin_screen(JfUi *ui)
         if (!ui->fields[0][0]) snprintf(ui->fields[0], sizeof ui->fields[0], "%s", app->login.server);
         if (!ui->fields[1][0]) snprintf(ui->fields[1], sizeof ui->fields[1], "%s", app->login.user);
     }
-    if (app->screen == JF_SCR_QUEUE || is_list_screen(app->screen)) {
+    if (app->screen == JF_SCR_QUEUE || app->screen == JF_SCR_MIX || is_list_screen(app->screen)) {
         ui->lv.rect = app->screen == JF_SCR_ARTISTS ? ui->L.list_root : ui->L.list;
         lv_reset(&ui->lv);
         if (app->screen == JF_SCR_QUEUE && app->queue_n > 0) lv_move_to(&ui->lv, app->queue_cur);
@@ -430,6 +443,47 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         return n;
     }
 
+    if (sc == JF_SCR_MIX) {
+        /* Tick rows are the list; START / CANCEL are the button row (focus 0 / 1).  While the run is going the
+         * rows are locked and START is off; CANCEL (BACK) is what the core turns into "stop the run". */
+        bool locked = app->mix.phase == JF_MIX_INDEX || app->mix.phase == JF_MIX_POOL;
+        int cnt = app->mix.opt_n;
+        if (go_back) emit(out, &n, max, JF_EV_BACK);
+        ui->mixb[0].disabled = locked;
+        const InputState *lin = NULL;
+        if (ui->zone == JF_ZONE_LIST) {
+            lin = in;
+            if (bp(in, BTN_ID_DOWN) && (cnt == 0 || ui->lv.cursor >= cnt - 1)) {
+                ui->zone = JF_ZONE_ROW; ui->focus = locked ? 1 : 0; lin = NULL; ui->dirty = true;
+            } else if (bp(in, BTN_ID_UP) && ui->lv.cursor <= 0) {
+                ui->zone = JF_ZONE_BAR; ui->bar_focus = ui->bar.has_back ? 0 : 1; lin = NULL; ui->dirty = true;
+            }
+        }
+        ui->lv.active = ui->zone == JF_ZONE_LIST;
+        lv_sync(&ui->lv);
+        LvEvent ev = lv_input(&ui->lv, ts, lin, now);
+        if (ev != LV_EV_NONE) ui->dirty = true;
+        bool pick = ev == LV_EV_TAP || ev == LV_EV_ACTIVATE;
+        if (ui->zone == JF_ZONE_LIST && lin && bp(lin, BTN_ID_JUMP)) pick = true;
+        if (pick && !locked && ui->lv.cursor >= 0 && ui->lv.cursor < cnt) {
+            int k = emit(out, &n, max, JF_EV_MIX_TOGGLE);
+            if (k >= 0) out[k].i = ui->lv.cursor;
+        }
+        if (ui->zone == JF_ZONE_ROW) {
+            if (locked) ui->focus = 1;
+            else if (bp(in, BTN_ID_LEFT) || bp(in, BTN_ID_RIGHT)) ui->focus ^= 1;
+            if (bp(in, BTN_ID_UP) || bp(in, BTN_ID_DOWN)) ui->zone = JF_ZONE_LIST;
+            else if (act) emit(out, &n, max, ui->focus == 0 ? JF_EV_MIX_START : JF_EV_BACK);
+        } else if (ui->zone == JF_ZONE_BAR) {
+            if ((bp(in, BTN_ID_LEFT) || bp(in, BTN_ID_RIGHT)) && ui->bar.has_back) ui->bar_focus ^= 1;
+            if (bp(in, BTN_ID_DOWN)) ui->zone = JF_ZONE_LIST;
+            else if (act) emit(out, &n, max, ui->bar_focus == 0 ? JF_EV_BACK : JF_EV_QUIT);
+        }
+        if (!locked && button_check_tap(&ui->mixb[0], ts, now)) emit(out, &n, max, JF_EV_MIX_START);
+        if (button_check_tap(&ui->mixb[1], ts, now)) emit(out, &n, max, JF_EV_BACK);
+        return n;
+    }
+
     /* list screens and the queue */
     bool queue = sc == JF_SCR_QUEUE;
     bool has_row = queue ? app->queue_n > 0 : true;   /* the queue's one button is SAVE AS PLAYLIST */
@@ -533,6 +587,12 @@ static void draw_banner(JfUi *ui)
         fb_draw_text(ui->fb, b.x + 4, b.y + 2, c, DIM, 2);
     }
     if (app->busy) fb_draw_text(ui->fb, b.x + b.w - 8 - text_measure_width("LOADING", 2), b.y + 2, "LOADING", DIM, 2);
+    if (app->screen == JF_SCR_MIX && !app->banner[0] &&
+        (app->mix.phase == JF_MIX_INDEX || app->mix.phase == JF_MIX_POOL)) {
+        char c[32];
+        snprintf(c, sizeof c, "MIXING... %d", app->mix.found_n);
+        fb_draw_text(ui->fb, b.x + 4, b.y + 2, c, RING, 2);
+    }
 }
 
 static void draw_signin(JfUi *ui)
@@ -645,7 +705,7 @@ void jf_ui_draw(JfUi *ui)
 
     const char *title = "JELLYFIN";
     switch (app->screen) {
-    case JF_SCR_ALBUMS: case JF_SCR_TRACKS: case JF_SCR_SEARCH:
+    case JF_SCR_ALBUMS: case JF_SCR_TRACKS: case JF_SCR_SEARCH: case JF_SCR_MIX:
         if (app->crumb[0]) title = app->crumb;
         break;
     case JF_SCR_NOWPLAYING: title = "NOW PLAYING"; break;
@@ -679,6 +739,16 @@ void jf_ui_draw(JfUi *ui)
         if (app->queue_n > 0) {
             button_draw(fb, &ui->save);
             if (ui->show_ring && ui->zone == JF_ZONE_ROW) ring(ui, ui->L.save);
+        }
+        break;
+    case JF_SCR_MIX:
+        ui->lv.active = ui->zone == JF_ZONE_LIST;
+        lv_sync(&ui->lv);
+        lv_draw(fb, &ui->lv, "NOTHING TO TICK");
+        ui->mixb[0].disabled = app->mix.phase == JF_MIX_INDEX || app->mix.phase == JF_MIX_POOL;
+        for (int i = 0; i < JF_UI_MIXBTN; i++) {
+            button_draw(fb, &ui->mixb[i]);
+            if (ui->show_ring && ui->zone == JF_ZONE_ROW && ui->focus == i) ring(ui, ui->L.mixb[i]);
         }
         break;
     default:

@@ -265,6 +265,53 @@ int jf_path_instant_mix(char *out, size_t cap, const char *uid, const char *trac
                         "&EnableImages=false&EnableUserData=false", track_id, uid, limit), cap);
 }
 
+int jf_path_item_by_id(char *out, size_t cap, const char *uid, const char *id)
+{
+    if (!jf_id_valid(uid) || !jf_id_valid(id)) return -1;
+    return fin(snprintf(out, cap, "/Items?userId=%s&Ids=%s&Fields=Genres"
+                        "&EnableImages=false&EnableUserData=false", uid, id), cap);
+}
+
+int jf_path_genre_index(char *out, size_t cap, const char *uid, int start, int limit)
+{
+    if (!jf_id_valid(uid)) return -1;
+    return fin(snprintf(out, cap, "/MusicGenres?userId=%s&StartIndex=%d&Limit=%d&Fields=ItemCounts"
+                        "&EnableImages=false&EnableUserData=false", uid, start, limit), cap);
+}
+
+int jf_path_mix_pool(char *out, size_t cap, const char *uid, const char *const *genre_ids, int n_genre_ids,
+                     const char *artist_id, int decade, bool random, int start, int limit)
+{
+    if (!jf_id_valid(uid) || n_genre_ids < 0 || (artist_id && artist_id[0] && !jf_id_valid(artist_id))) return -1;
+    if (decade != 0 && (decade < 1000 || decade > 9990 || decade % 10 != 0)) return -1;
+    size_t w = 0;
+    int r = snprintf(out, cap, "/Items?userId=%s&IncludeItemTypes=Audio&Recursive=true", uid);
+    if (r < 0 || (size_t)r >= cap) return -1;
+    w = (size_t)r;
+    for (int k = 0; k < n_genre_ids; k++) {
+        if (!genre_ids[k] || !jf_id_valid(genre_ids[k])) return -1;
+        r = snprintf(out + w, cap - w, "%s%s", k == 0 ? "&GenreIds=" : ",", genre_ids[k]);   /* commas: the server ORs them, a '|' is ignored */
+        if (r < 0 || (size_t)r >= cap - w) return -1;
+        w += (size_t)r;
+    }
+    if (artist_id && artist_id[0]) {
+        r = snprintf(out + w, cap - w, "&ArtistIds=%s", artist_id);
+        if (r < 0 || (size_t)r >= cap - w) return -1;
+        w += (size_t)r;
+    }
+    if (decade) {
+        for (int y = 0; y < 10; y++) {
+            r = snprintf(out + w, cap - w, "%s%d", y == 0 ? "&Years=" : ",", decade + y);
+            if (r < 0 || (size_t)r >= cap - w) return -1;
+            w += (size_t)r;
+        }
+    }
+    r = snprintf(out + w, cap - w, "&SortBy=%s&StartIndex=%d&Limit=%d&Fields=Genres"
+                 "&EnableImages=false&EnableUserData=false", random ? "Random" : "SortName", start, limit);
+    if (r < 0 || (size_t)r >= cap - w) return -1;
+    return (int)(w + (size_t)r);
+}
+
 int jf_path_playlist_create(char *out, size_t cap)
 {
     return fin(snprintf(out, cap, "/Playlists"), cap);

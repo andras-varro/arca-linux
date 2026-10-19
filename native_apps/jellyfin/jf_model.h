@@ -23,6 +23,9 @@
 /** Token budget for one page (~20 B per JsonTok = ~100 KB); a page of 50 tracks with MediaSources noise fits. */
 #define JF_TOKENS_PAGE  5000
 
+/** Bytes of a track's genre names; JF_MIX_OPT_MAX in jf_core.h counts what fits. */
+#define JF_GENRES_BYTES 160
+
 typedef enum { JF_ITEM_NONE = 0, JF_ITEM_ARTIST, JF_ITEM_ALBUM, JF_ITEM_TRACK,
                JF_ITEM_PLAYLIST, JF_ITEM_GENRE } JfItemType;
 
@@ -36,6 +39,10 @@ typedef struct {
     int index;              /**< IndexNumber (track number), 0 if absent */
     int runtime_s;
     int norm_gain_mdb;      /**< NormalizationGain dB * 1000, rounded; 0 if absent */
+    int year;               /**< ProductionYear, 0 if absent */
+    int count;              /**< SongCount of a genre (Fields=ItemCounts), 0 if absent */
+    char artist_id[33];     /**< ArtistItems[0].Id of a track, empty if absent */
+    char genres[JF_GENRES_BYTES];  /**< a track's Genres (Fields=Genres): each name whole, each ended by a newline; one that does not fit is dropped */
 } JfItem;
 
 typedef struct {
@@ -55,6 +62,13 @@ typedef enum {
     JF_PARSE_TRUNC,         /**< the body ended early */
     JF_PARSE_NOMEM          /**< `toks` too small for this document */
 } JfParse;
+
+/**
+ * The key two genre spellings share: ASCII-lowercased, every run of whitespace, '-' and '_' one space, the ends
+ * trimmed, a trailing " music" cut ("Hip-Hop" and "Hip Hop Music" are both "hip hop").  Writes at most cap-1 bytes;
+ * "" when nothing is left.  Returns the length.
+ */
+int jf_genre_key(char *out, size_t cap, const char *name);
 
 void jf_list_init(JfList *l, JfItem *storage, int cap);
 /** n = loaded = total = 0 and full = false; generation, pending and storage stay. */

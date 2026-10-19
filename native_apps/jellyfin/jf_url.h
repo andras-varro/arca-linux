@@ -54,6 +54,17 @@ int jf_path_playlist_items(char *out, size_t cap, const char *uid, const char *p
 int jf_path_genre_albums(char *out, size_t cap, const char *uid, const char *genre_id, int start, int limit);
 /** An instant mix seeded by one track: Audio items, the seed first, parsed like any list; images and user data left out (-30% bytes). */
 int jf_path_instant_mix(char *out, size_t cap, const char *uid, const char *track_id, int limit);
+/** One item by id as a one-row list (Ids=): the seed of a MIX, with Genres, ProductionYear and ArtistItems. */
+int jf_path_item_by_id(char *out, size_t cap, const char *uid, const char *id);
+/** The genre index with SongCount (Fields=ItemCounts; the plain list has none): 100 per page is ~38 KB and ~3700 tokens. */
+int jf_path_genre_index(char *out, size_t cap, const char *uid, int start, int limit);
+/**
+ * Audio items for a MIX.  `genre_ids` joined by ',' (the server ORs them; a '|' is ignored and returns the whole library),
+ * `artist_id` NULL/"" = any artist, `decade` 0 = any year else the decade's first year (1980 -> Years=1980,...,1989),
+ * `random` = SortBy=Random else SortName (a stable order to page with `start`).  Fields=Genres, no images, no user data.
+ */
+int jf_path_mix_pool(char *out, size_t cap, const char *uid, const char *const *genre_ids, int n_genre_ids,
+                     const char *artist_id, int decade, bool random, int start, int limit);
 /** `session_id` is 32 hex from jf_session_id(); a fresh one per request, or the server reuses an old transcode job. */
 int jf_path_stream(char *out, size_t cap, const char *id, const char *session_id);
 

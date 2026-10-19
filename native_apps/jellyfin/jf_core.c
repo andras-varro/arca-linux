@@ -8,7 +8,8 @@
 #include <stdio.h>
 #include <string.h>
 
-static const int PAGE[JF_LIST_COUNT] = { JF_PAGE_ARTISTS, JF_PAGE_ALBUMS, JF_PAGE_TRACKS, JF_PAGE_SEARCH, JF_MIX_LIMIT };
+static const int PAGE[JF_LIST_COUNT] = { JF_PAGE_ARTISTS, JF_PAGE_ALBUMS, JF_PAGE_TRACKS, JF_PAGE_SEARCH, JF_MIX_LIMIT,
+                                         1, JF_MIX_GENRE_PAGE, JF_MIX_PAGE };
 
 /* ── small helpers ─────────────────────────────────────────────────────── */
 
@@ -94,6 +95,15 @@ static int build_path(const JfApp *app, int lid, int start, char *out, size_t ca
         return sub == JF_SUB_PLAYLIST ? jf_path_playlist_items(out, cap, uid, id, start, lim)
                                       : jf_path_tracks(out, cap, uid, id, start, lim);
     case JF_LIST_MIX:     return jf_path_instant_mix(out, cap, uid, id, JF_MIX_LIMIT);
+    case JF_LIST_SEED:    return jf_path_item_by_id(out, cap, uid, id);
+    case JF_LIST_GENRES:  return jf_path_genre_index(out, cap, uid, start, lim);
+    case JF_LIST_POOL: {
+        const JfMix *m = &app->mix;
+        const char *ids[JF_MIX_VARIANTS];
+        int n = 0;
+        if (m->chosen >= 0) for (; n < m->gk[m->chosen].nids; n++) ids[n] = m->gk[m->chosen].ids[n];
+        return jf_path_mix_pool(out, cap, uid, ids, n, m->use_artist ? m->artist_id : NULL, m->decade, m->random, start, lim);
+    }
     default:              return jf_path_search(out, cap, uid, id, start, lim);
     }
 }
@@ -191,6 +201,7 @@ static void refresh(JfApp *app)
     case JF_SCR_SEARCH:     snprintf(app->crumb, sizeof(app->crumb), "SEARCH: %s", app->ctx[lid].id); break;
     case JF_SCR_NOWPLAYING: copy(app->crumb, sizeof(app->crumb), "NOW PLAYING"); break;
     case JF_SCR_QUEUE:      copy(app->crumb, sizeof(app->crumb), "QUEUE"); break;
+    case JF_SCR_MIX:        snprintf(app->crumb, sizeof(app->crumb), "MIX: %.100s", app->mix.seed.name); break;
     }
     bool any = app->auth_pending || app->save_pending || app->play_wait || app->play_state == JF_PLAY_FETCHING;
     for (int k = 0; k < JF_LIST_COUNT; k++) any = any || app->lists[k].pending;
@@ -339,19 +350,6 @@ static void on_add_queue(JfApp *app, int i, JfCmds *out)
     set_banner(app, "ADDED TO QUEUE");
 }
 
-/* MIX is not built yet: this is the one place a later job grows (a tick screen over the seed's neighbours). */
-static void mix_request(JfApp *app, const JfItem *seed, JfCmds *out)
-{
-    (void)seed; (void)out;
-    set_banner(app, "MIX: COMING");
-}
-
-static void on_mix(JfApp *app, int i, JfCmds *out)
-{
-    JfItem it;
-    if (seed_item(app, i, &it)) mix_request(app, &it, out);
-}
-
 /* Ask the server for a mix of `seed`.  The reply (on_mix_reply) replaces the queue. */
 static void on_instant_mix(JfApp *app, int i, JfCmds *out)
 {
@@ -379,6 +377,288 @@ static void on_mix_reply(JfApp *app, JfCmds *out)
     start_items(app, l->items, l->n, nm, out);
 }
 
+/* ── MIX: seed fetch, tick screen, genre index, candidate pool ─────────── */
+
+static unsigned mix_rand(JfMix *m)
+{
+    unsigned x = m->rng ? m->rng : 2463534242u;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    m->rng = x;
+    return x;
+}
+
+/* The shuffle's seed is the first 8 hex digits of a fresh session id, so a test that fixes session_fn fixes the order. */
+static void mix_seed_rng(JfApp *app)
+{
+    char s[33];
+    unsigned v = 0;
+    if (app->session_fn && app->session_fn(s))
+        for (int k = 0; k < 8 && s[k]; k++)
+            v = v * 16u + (unsigned)(s[k] <= '9' ? s[k] - '0' : (s[k] | 32) - 'a' + 10);
+    app->mix.rng = v;
+}
+
+/* Does the track's newline-separated `genres` hold a name whose key is `key`? */
+static bool genres_have(const char *genres, const char *key)
+{
+    char line[JF_GENRES_BYTES], k[64];
+    for (const char *p = genres; *p; ) {
+        const char *nl = strchr(p, '\n');
+        size_t l = nl ? (size_t)(nl - p) : strlen(p);
+        if (l >= sizeof line) l = sizeof line - 1;
+        memcpy(line, p, l);
+        line[l] = '\0';
+        jf_genre_key(k, sizeof k, line);
+        if (!strcmp(k, key)) return true;
+        if (!nl) break;
+        p = nl + 1;
+    }
+    return false;
+}
+
+/* Drop every request a MIX has in flight (the seed fetch, an index page, a pool page). */
+static void mix_stop_requests(JfApp *app, JfCmds *out)
+{
+    bool any = false;
+    for (int k = JF_LIST_SEED; k <= JF_LIST_POOL; k++) { any = any || app->lists[k].pending; app->lists[k].pending = false; }
+    if (any) emit(out, JF_CMD_CANCEL)->kind = JF_KIND_LIST;
+}
+
+/* MIX on list row `i` (or -1 = the playing track): ask the server for the track's genres, year and artist; the
+ * reply (on_seed_reply) opens the tick screen.  The list rows carry none of them. */
+static void on_mix(JfApp *app, int i, JfCmds *out)
+{
+    JfItem it;
+    if (!seed_item(app, i, &it) || !have_token(app)) return;
+    JfMix *m = &app->mix;
+    memset(m, 0, sizeof *m);
+    m->seed = it;
+    m->chosen = -1;
+    m->phase = JF_MIX_SEED;
+    JfList *l = &app->lists[JF_LIST_SEED];
+    copy(app->ctx[JF_LIST_SEED].id, sizeof(app->ctx[JF_LIST_SEED].id), it.id);
+    jf_list_clear(l);
+    l->pending = false;
+    l->generation++;
+    app->play_wait = false;
+    if (!request_page(app, JF_LIST_SEED, 0, out)) m->phase = JF_MIX_OFF;
+}
+
+static void mix_add_opt(JfMix *m, JfMixOptKind kind, const char *label, bool on)
+{
+    JfMixOpt *o = &m->opt[m->opt_n++];
+    o->kind = kind;
+    o->on = on;
+    copy(o->label, sizeof o->label, label);
+}
+
+static void on_seed_reply(JfApp *app)
+{
+    JfMix *m = &app->mix;
+    const JfList *l = &app->lists[JF_LIST_SEED];
+    if (m->phase != JF_MIX_SEED) return;
+    m->phase = JF_MIX_OFF;
+    if (l->n < 1 || l->items[0].type != JF_ITEM_TRACK) { set_banner(app, "TRACK NOT FOUND"); return; }
+    const JfItem *s = &l->items[0];
+    m->year = s->year >= 1000 ? s->year : 0;
+    copy(m->artist_id, sizeof m->artist_id, s->artist_id);
+    m->opt_n = 0;
+    char keys[JF_MIX_OPT_MAX][64];
+    for (const char *p = s->genres; *p && m->opt_n < JF_MIX_OPT_MAX - 2; ) {
+        const char *nl = strchr(p, '\n');
+        size_t len = nl ? (size_t)(nl - p) : strlen(p);
+        char name[96];
+        if (len >= sizeof name) len = sizeof name - 1;
+        memcpy(name, p, len);
+        name[len] = '\0';
+        p = nl ? nl + 1 : p + strlen(p);
+        if (!jf_genre_key(keys[m->opt_n], sizeof keys[0], name)) continue;
+        bool dup = false;
+        for (int k = 0; k < m->opt_n; k++) dup = dup || !strcmp(keys[k], keys[m->opt_n]);
+        if (!dup) mix_add_opt(m, JF_MIXOPT_GENRE, name, true);
+    }
+    if (m->artist_id[0]) mix_add_opt(m, JF_MIXOPT_ARTIST, "SAME ARTIST", false);
+    if (m->year) {
+        char d[96];
+        snprintf(d, sizeof d, "SAME DECADE (%dS)", m->year - m->year % 10);
+        mix_add_opt(m, JF_MIXOPT_DECADE, d, false);
+    }
+    if (m->opt_n == 0) { set_banner(app, "NOTHING TO MIX ON"); return; }
+    nav_push(app);
+    app->screen = JF_SCR_MIX;
+    m->phase = JF_MIX_TICKS;
+}
+
+static void on_mix_toggle(JfApp *app, int i)
+{
+    JfMix *m = &app->mix;
+    if (app->screen != JF_SCR_MIX || m->phase != JF_MIX_TICKS || i < 0 || i >= m->opt_n) return;
+    m->opt[i].on = !m->opt[i].on;
+}
+
+static void mix_cat(char *dst, size_t cap, const char *s)
+{
+    size_t l = strlen(dst);
+    if (l + 1 < cap) snprintf(dst + l, cap - l, "%s", s);
+}
+
+/* "Similar: Rock+Pop+<artist> (1980s)": the ticked rows, cut to the field. */
+static void mix_queue_name(const JfApp *app, char *out, size_t cap)
+{
+    const JfMix *m = &app->mix;
+    snprintf(out, cap, "Similar: ");
+    bool first = true;
+    for (int k = 0; k < m->opt_n; k++) {
+        const JfMixOpt *o = &m->opt[k];
+        if (!o->on || o->kind == JF_MIXOPT_DECADE) continue;
+        if (!first) mix_cat(out, cap, "+");
+        mix_cat(out, cap, o->kind == JF_MIXOPT_ARTIST ? (m->seed.artist[0] ? m->seed.artist : "artist") : o->label);
+        first = false;
+    }
+    if (m->decade) {
+        char d[16];
+        snprintf(d, sizeof d, " (%ds)", m->decade);
+        mix_cat(out, cap, d);
+    }
+}
+
+/* One pool page; random pages always start at 0, stable-order pages at what is consumed. */
+static void mix_pool_request(JfApp *app, JfCmds *out)
+{
+    JfMix *m = &app->mix;
+    JfList *l = &app->lists[JF_LIST_POOL];
+    jf_list_clear(l);
+    l->pending = false;
+    l->generation++;
+    if (!request_page(app, JF_LIST_POOL, m->random ? 0 : m->consumed, out)) { m->phase = JF_MIX_TICKS; return; }
+    m->reqs++;
+}
+
+static void mix_begin_pool(JfApp *app, JfCmds *out)
+{
+    JfMix *m = &app->mix;
+    m->phase = JF_MIX_POOL;
+    m->found_n = 0;
+    m->reqs = 0;
+    m->consumed = 0;
+    /* The index's count is an upper bound of the server total (variants may overlap): small = stable order. */
+    m->random = !(m->chosen >= 0 && m->gk[m->chosen].count <= JF_MIX_SMALL);
+    mix_pool_request(app, out);
+}
+
+static void on_mix_start(JfApp *app, JfCmds *out)
+{
+    JfMix *m = &app->mix;
+    if (app->screen != JF_SCR_MIX || m->phase != JF_MIX_TICKS || !have_token(app)) return;
+    int ticks = 0;
+    for (int k = 0; k < m->opt_n; k++) if (m->opt[k].on) ticks++;
+    if (ticks == 0) { set_banner(app, "TICK AT LEAST ONE"); return; }
+    memset(m->gk, 0, sizeof m->gk);
+    m->gk_n = 0;
+    m->chosen = -1;
+    m->use_artist = false;
+    m->decade = 0;
+    for (int k = 0; k < m->opt_n; k++) {
+        if (!m->opt[k].on) continue;
+        switch (m->opt[k].kind) {
+        case JF_MIXOPT_GENRE:  jf_genre_key(m->gk[m->gk_n++].key, sizeof m->gk[0].key, m->opt[k].label); break;
+        case JF_MIXOPT_ARTIST: m->use_artist = true; break;
+        default:               m->decade = m->year - m->year % 10; break;
+        }
+    }
+    m->found_n = 0;
+    m->reqs = 0;
+    m->consumed = 0;
+    mix_seed_rng(app);
+    if (m->gk_n == 0) { mix_begin_pool(app, out); return; }   /* artist and/or decade only: nothing to look up */
+    m->phase = JF_MIX_INDEX;
+    JfList *l = &app->lists[JF_LIST_GENRES];
+    jf_list_clear(l);
+    l->pending = false;
+    l->generation++;
+    if (!request_page(app, JF_LIST_GENRES, 0, out)) m->phase = JF_MIX_TICKS;
+}
+
+/* A page of the genre index: every genre whose key is a ticked key adds its id (and count) to that key. */
+static void on_genres_reply(JfApp *app, JfCmds *out)
+{
+    JfMix *m = &app->mix;
+    JfList *l = &app->lists[JF_LIST_GENRES];
+    if (m->phase != JF_MIX_INDEX) return;
+    for (int k = 0; k < l->n; k++) {
+        const JfItem *it = &l->items[k];
+        char key[64];
+        if (it->type != JF_ITEM_GENRE || !jf_genre_key(key, sizeof key, it->name)) continue;
+        for (int g = 0; g < m->gk_n; g++) {
+            if (strcmp(m->gk[g].key, key)) continue;
+            if (m->gk[g].nids < JF_MIX_VARIANTS) copy(m->gk[g].ids[m->gk[g].nids++], sizeof m->gk[g].ids[0], it->id);
+            m->gk[g].count += it->count;
+        }
+    }
+    m->consumed += l->loaded;
+    if (l->loaded > 0 && m->consumed < l->total) {
+        jf_list_clear(l);
+        l->generation++;
+        if (!request_page(app, JF_LIST_GENRES, m->consumed, out)) m->phase = JF_MIX_TICKS;
+        return;
+    }
+    int best = -1;
+    for (int g = 0; g < m->gk_n; g++) {
+        if (m->gk[g].nids == 0) { best = -1; break; }      /* a ticked key the server has no genre for: nothing can match */
+        if (best < 0 || m->gk[g].count < m->gk[best].count) best = g;
+    }
+    if (best < 0) { m->phase = JF_MIX_TICKS; set_banner(app, "NO MIX FOUND"); return; }
+    m->chosen = best;
+    mix_begin_pool(app, out);
+}
+
+/* The mix is the seed first, then the matches in a random order; the screen goes back to where MIX was raised. */
+static void mix_finish(JfApp *app, JfCmds *out)
+{
+    JfMix *m = &app->mix;
+    if (m->found_n == 0) { m->phase = JF_MIX_TICKS; set_banner(app, "NO MIX FOUND"); return; }
+    for (int k = m->found_n; k > 1; k--) {                  /* found[1..found_n]; found[0] is the seed's */
+        int j = 1 + (int)(mix_rand(m) % (unsigned)k);
+        JfItem t = m->found[j];
+        m->found[j] = m->found[k];
+        m->found[k] = t;
+    }
+    m->found[0] = m->seed;
+    char nm[96];
+    mix_queue_name(app, nm, sizeof nm);
+    m->phase = JF_MIX_OFF;
+    if (app->screen == JF_SCR_MIX && app->nav_n > 0) pop(app, out);
+    start_items(app, m->found, m->found_n + 1, nm, out);
+}
+
+/* A page of candidates: keep the tracks that carry every other ticked key (the server filtered the chosen one), once each. */
+static void on_pool_reply(JfApp *app, JfCmds *out)
+{
+    JfMix *m = &app->mix;
+    const JfList *l = &app->lists[JF_LIST_POOL];
+    if (m->phase != JF_MIX_POOL) return;
+    for (int k = 0; k < l->n && m->found_n < JF_MIX_WANT; k++) {
+        const JfItem *it = &l->items[k];
+        if (it->type != JF_ITEM_TRACK || !strcmp(it->id, m->seed.id)) continue;
+        bool keep = true;
+        for (int g = 0; g < m->gk_n && keep; g++) keep = g == m->chosen || genres_have(it->genres, m->gk[g].key);
+        for (int f = 1; f <= m->found_n && keep; f++) keep = strcmp(m->found[f].id, it->id) != 0;
+        if (keep) m->found[++m->found_n] = *it;
+    }
+    m->consumed += l->loaded;
+    bool done = m->found_n >= JF_MIX_WANT || l->loaded == 0 || m->reqs >= JF_MIX_REQ_MAX;
+    if (!done && m->random) {
+        if (l->loaded < JF_MIX_PAGE || l->loaded >= l->total) done = true;   /* the whole answer was in this page */
+        else if (l->total <= JF_MIX_SMALL) { m->random = false; m->consumed = 0; }   /* few: page in a stable order instead */
+    } else if (!done && m->consumed >= l->total) {
+        done = true;
+    }
+    if (done) mix_finish(app, out);
+    else mix_pool_request(app, out);
+}
+
 /* SAVE AS PLAYLIST: the POST carries the first JF_SAVE_IDS_MAX queue ids (the loop reads them from
  * app->queue).  It is never put in app->retry: the overlay offers CLOSE only, so nothing re-POSTs. */
 static void on_save(JfApp *app, const char *name, JfCmds *out)
@@ -398,6 +678,7 @@ static void on_save(JfApp *app, const char *name, JfCmds *out)
 static void session_expired(JfApp *app, JfCmds *out)
 {
     app->save_pending = false;
+    app->mix.phase = JF_MIX_OFF;
     jf_wipe(app->login.token, sizeof(app->login.token));
     app->login.user_id[0] = '\0';
     emit(out, JF_CMD_CLEAR_LOGIN);
@@ -460,7 +741,9 @@ static void on_list(JfApp *app, const JfResult *r, JfCmds *out)
     JfErr e = r->err;
     if (e == JF_ERR_NONE && r->parse != JF_PARSE_OK) e = JF_ERR_BADREPLY;
     if (e != JF_ERR_NONE) {
-        bool again = e == JF_ERR_UNREACHABLE || e == JF_ERR_SERVER;
+        bool mixl = lid == JF_LIST_SEED || lid == JF_LIST_GENRES || lid == JF_LIST_POOL;
+        if (mixl) app->mix.phase = app->mix.phase == JF_MIX_SEED ? JF_MIX_OFF : JF_MIX_TICKS;   /* CLOSE only: a retry would not know the phase */
+        bool again = !mixl && (e == JF_ERR_UNREACHABLE || e == JF_ERR_SERVER);
         app->play_wait = false;
         char t[48];
         set_overlay(app, err_text(t, sizeof t, e, r->status), again ? (JF_BTN_RETRY | JF_BTN_CLOSE) : JF_BTN_CLOSE);
@@ -469,6 +752,9 @@ static void on_list(JfApp *app, const JfResult *r, JfCmds *out)
     /* A page that consumed nothing while the server claims more would be asked for forever. */
     if (l->loaded <= app->req_loaded[lid]) l->total = l->loaded;
     if (lid == JF_LIST_MIX) { on_mix_reply(app, out); return; }
+    if (lid == JF_LIST_SEED) { on_seed_reply(app); return; }
+    if (lid == JF_LIST_GENRES) { on_genres_reply(app, out); return; }
+    if (lid == JF_LIST_POOL) { on_pool_reply(app, out); return; }
     if (app->play_wait && lid == JF_LIST_TRACKS) {
         if (l->loaded < l->total && !l->full) request_page(app, lid, l->loaded, out);
         else { app->play_wait = false; start_queue(app, lid, app->play_wait_from, out); }
@@ -656,6 +942,12 @@ static void on_back(JfApp *app, JfCmds *out)
         emit(out, JF_CMD_EXIT);
         return;
     }
+    if (app->mix.phase == JF_MIX_INDEX || app->mix.phase == JF_MIX_POOL) {   /* BACK cancels the run, a second one leaves */
+        app->mix.phase = JF_MIX_TICKS;
+        mix_stop_requests(app, out);
+        return;
+    }
+    if (app->screen == JF_SCR_MIX) app->mix.phase = JF_MIX_OFF;
     pop(app, out);
 }
 
@@ -670,7 +962,7 @@ static void on_category(JfApp *app, int dir, JfCmds *out)
 static void on_need_more(JfApp *app, JfCmds *out)
 {
     int lid = cur_list(app);
-    if (lid < 0 || !have_token(app)) return;
+    if (lid < 0 || !have_token(app) || app->mix.phase == JF_MIX_SEED) return;   /* a page request would supersede the seed fetch */
     const JfList *l = &app->lists[lid];
     if (l->loaded >= l->total || l->pending || l->full) return;
     request_page(app, lid, l->loaded, out);
@@ -693,6 +985,9 @@ void jf_app_init(JfApp *app)
     jf_list_init(&app->lists[JF_LIST_TRACKS], app->store_tracks, JF_CAP_TRACKS);
     jf_list_init(&app->lists[JF_LIST_SEARCH], app->store_search, JF_CAP_SEARCH);
     jf_list_init(&app->lists[JF_LIST_MIX], app->store_mix, JF_CAP_MIX);
+    jf_list_init(&app->lists[JF_LIST_SEED], app->store_seed, JF_CAP_SEED);
+    jf_list_init(&app->lists[JF_LIST_GENRES], app->store_genres, JF_CAP_GENRES);
+    jf_list_init(&app->lists[JF_LIST_POOL], app->store_pool, JF_CAP_POOL);
     app->cat = JF_CAT_ARTISTS;
     app->session_fn = jf_session_id;
     app->volume_step = JF_VOLUME_DEFAULT;
@@ -735,7 +1030,12 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
     }
 
     if (ev->type != JF_EV_NEED_MORE) app->banner[0] = '\0';
-
+    /* A seed fetch is not a screen yet: any intent but the passive ones abandons it, and BACK is then spent. */
+    if (app->mix.phase == JF_MIX_SEED && ev->type != JF_EV_NEED_MORE && ev->type != JF_EV_VOL_UP && ev->type != JF_EV_VOL_DOWN) {
+        app->mix.phase = JF_MIX_OFF;
+        mix_stop_requests(app, out);
+        if (ev->type == JF_EV_BACK) goto done;
+    }
     /* The action bar lives for one gesture: any user intent other than the ones that keep it (more
      * rows arriving, volume, picking a row) drops it, and a BACK that found it up only drops it. */
     bool bar_was = app->action_bar;
@@ -749,6 +1049,8 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
     case JF_EV_PLAY_NEXT: on_play_next(app, ev->i, out); break;
     case JF_EV_ADD_QUEUE: on_add_queue(app, ev->i, out); break;
     case JF_EV_MIX:      on_mix(app, ev->i, out); break;
+    case JF_EV_MIX_TOGGLE: on_mix_toggle(app, ev->i); break;
+    case JF_EV_MIX_START: on_mix_start(app, out); break;
     case JF_EV_INSTANT_MIX: on_instant_mix(app, ev->i, out); break;
     case JF_EV_SAVE_PLAYLIST: on_save(app, ev->term, out); break;
     case JF_EV_DISMISS:  break;

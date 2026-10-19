@@ -360,6 +360,52 @@ static void test_auth(void)
     CHECK(jf_parse_auth(AUTH, len, toks, JF_TOKENS_PAGE, t, sizeof t, u, 10) == JF_PARSE_BAD, "user id cap too small");
 }
 
+/* year, count, artist_id and genres: the fields MIX reads off a track and off the genre index */
+#define A60 "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+static void test_mix_fields(void)
+{
+    JfItem it[6];
+    JfList l;
+    jf_list_init(&l, it, 6);
+    const char *body =
+        "{\"Items\":["
+        "{\"Name\":\"Song\",\"Id\":\"" ID1 "\",\"Type\":\"Audio\",\"ProductionYear\":1984,"
+        "\"ArtistItems\":[{\"Name\":\"Ann\",\"Id\":\"" ID3 "\"},{\"Name\":\"Bob\",\"Id\":\"" ID4 "\"}],"
+        "\"Genres\":[\"Rock\",\"Hip-Hop\",\"New Wave\"],\"Artists\":[\"Ann\"]},"
+        "{\"Name\":\"Bare\",\"Id\":\"" ID2 "\",\"Type\":\"Audio\"},"
+        "{\"Name\":\"Pop Music\",\"Id\":\"" ID3 "\",\"Type\":\"MusicGenre\",\"SongCount\":4321,\"ProductionYear\":1999},"
+        "{\"Name\":\"Odd\",\"Id\":\"" ID4 "\",\"Type\":\"Audio\",\"ProductionYear\":12345678,"
+        "\"ArtistItems\":[{\"Name\":\"Bad\",\"Id\":\"nothex\"}],\"Genres\":[]},"
+        "{\"Name\":\"Long\",\"Id\":\"" ID1 "\",\"Type\":\"Audio\",\"Genres\":[\"" A60 "\",\"" A60 "\",\"" A60 "\",\"Pop\",\"x\134ny\",7]},"
+        "{\"Name\":\"Tag\",\"Id\":\"" ID2 "\",\"Type\":\"MusicArtist\",\"SongCount\":-5}"
+        "],\"TotalRecordCount\":6}";
+    int pr = parse(body, &l);
+    CHECK(pr == JF_PARSE_OK, "mix fields page (%d)", pr);
+    CHECK(l.n == 6, "n=%d", l.n);
+
+    CHECK(it[0].year == 1984, "year %d", it[0].year);
+    CHECK(strcmp(it[0].artist_id, ID3) == 0, "artist_id is ArtistItems[0] (got '%s')", it[0].artist_id);
+    CHECK(strcmp(it[0].genres, "Rock\nHip-Hop\nNew Wave\n") == 0, "genres newline-ended: '%s'", it[0].genres);
+    CHECK(strcmp(it[0].artist, "Ann") == 0, "artist still read (%s)", it[0].artist);
+
+    CHECK(it[1].year == 0 && !it[1].artist_id[0] && !it[1].genres[0] && it[1].count == 0, "absent fields stay zero");
+
+    CHECK(it[2].type == JF_ITEM_GENRE && it[2].count == 4321, "genre SongCount %d", it[2].count);
+    CHECK(it[2].year == 0 && !it[2].genres[0] && !it[2].artist_id[0], "a genre item takes no track fields");
+
+    CHECK(it[3].year == 9999, "absurd year clamped (%d)", it[3].year);
+    CHECK(!it[3].artist_id[0], "a non-hex artist id is dropped ('%s')", it[3].artist_id);
+    CHECK(!it[3].genres[0], "empty Genres array");
+
+    /* 3 x 60 chars cannot all fit in JF_GENRES_BYTES: whole names or nothing, later short ones still fit */
+    size_t gl = strlen(it[4].genres);
+    CHECK(gl < JF_GENRES_BYTES, "genres within the field (%zu)", gl);
+    CHECK(strcmp(it[4].genres, A60 "\n" A60 "\nPop\n") == 0, "third long name dropped whole, 'Pop' kept, name with newline and number skipped: '%s'", it[4].genres);
+    CHECK(it[4].genres[gl - 1] == '\n', "ends on a newline, never on half a name");
+
+    CHECK(it[5].type == JF_ITEM_ARTIST && it[5].count == 0, "negative SongCount clamps to 0 (%d)", it[5].count);
+}
+
 int main(void)
 {
     test_pages();
@@ -371,6 +417,7 @@ int main(void)
     test_skips_and_cap();
     test_root_types();
     test_auth();
+    test_mix_fields();
     printf("jf_model_test: %d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;
 }

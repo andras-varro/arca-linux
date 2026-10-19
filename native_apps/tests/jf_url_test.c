@@ -18,6 +18,7 @@
 #include <string.h>
 
 #include "jf_url.h"
+#include "jf_api.h"
 
 static int fails, checks;
 #define CHECK(c, ...) do { checks++; if (!(c)) { fails++; printf("FAIL line %d: ", __LINE__); \
@@ -365,6 +366,87 @@ static void test_mix_and_save(void)
     CHECK(jf_save_body(b, 0, "Mix", UID, ids, 1) == -1, "save cap 0 accepted");
 }
 
+/* MIX: the seed lookup, the genre index and the candidate pool */
+static void test_mix_paths(void)
+{
+    char b[1024];
+    int n = jf_path_item_by_id(b, sizeof(b), UID, ART);
+    EXPECT("item by id", n, b, "/Items?userId=" UID "&Ids=" ART "&Fields=Genres&EnableImages=false&EnableUserData=false");
+    CHECK(jf_path_item_by_id(b, sizeof(b), "short", ART) == -1, "bad uid accepted");
+    CHECK(jf_path_item_by_id(b, sizeof(b), UID, "../x") == -1, "bad item id accepted");
+    CHECK(jf_path_item_by_id(b, sizeof(b), UID, NULL) == -1, "NULL item id accepted");
+    CAP_EDGE("item by id", jf_path_item_by_id(b_, cap, UID, ART));
+
+    n = jf_path_genre_index(b, sizeof(b), UID, 200, 100);
+    EXPECT("genre index", n, b, "/MusicGenres?userId=" UID "&StartIndex=200&Limit=100&Fields=ItemCounts&EnableImages=false&EnableUserData=false");
+    CHECK(jf_path_genre_index(b, sizeof(b), "short", 0, 100) == -1, "genre index: bad uid accepted");
+    CAP_EDGE("genre index", jf_path_genre_index(b_, cap, UID, 0, 100));
+
+    const char *g1[] = { ART };
+    const char *g2[] = { ART, ALB };
+    const char *g3[] = { ART, ALB, SES };
+    const char *g4[] = { ART, ALB, SES, UID };
+
+    n = jf_path_mix_pool(b, sizeof(b), UID, g1, 1, NULL, 0, true, 0, 40);
+    EXPECT("pool, one genre, random", n, b, "/Items?userId=" UID "&IncludeItemTypes=Audio&Recursive=true&GenreIds=" ART
+           "&SortBy=Random&StartIndex=0&Limit=40&Fields=Genres&EnableImages=false&EnableUserData=false");
+    n = jf_path_mix_pool(b, sizeof(b), UID, g3, 3, "", 0, false, 80, 40);
+    EXPECT("pool, three genres, stable, empty artist", n, b, "/Items?userId=" UID "&IncludeItemTypes=Audio&Recursive=true&GenreIds="
+           ART "," ALB "," SES "&SortBy=SortName&StartIndex=80&Limit=40&Fields=Genres&EnableImages=false&EnableUserData=false");
+    CHECK(strchr(b, '|') == NULL && !strstr(b, "%7C"), "no '|' joiner");
+    CHECK(!strstr(b, "ArtistIds") && !strstr(b, "Years"), "artist and decade absent when not asked");
+
+    n = jf_path_mix_pool(b, sizeof(b), UID, g1, 1, ALB, 1980, true, 0, 40);
+    EXPECT("pool, genre + artist + decade", n, b, "/Items?userId=" UID "&IncludeItemTypes=Audio&Recursive=true&GenreIds=" ART
+           "&ArtistIds=" ALB "&Years=1980,1981,1982,1983,1984,1985,1986,1987,1988,1989"
+           "&SortBy=Random&StartIndex=0&Limit=40&Fields=Genres&EnableImages=false&EnableUserData=false");
+    n = jf_path_mix_pool(b, sizeof(b), UID, NULL, 0, ALB, 0, true, 0, 40);
+    EXPECT("pool, artist only", n, b, "/Items?userId=" UID "&IncludeItemTypes=Audio&Recursive=true&ArtistIds=" ALB
+           "&SortBy=Random&StartIndex=0&Limit=40&Fields=Genres&EnableImages=false&EnableUserData=false");
+    n = jf_path_mix_pool(b, sizeof(b), UID, NULL, 0, NULL, 2000, false, 40, 40);
+    EXPECT("pool, decade only", n, b, "/Items?userId=" UID "&IncludeItemTypes=Audio&Recursive=true"
+           "&Years=2000,2001,2002,2003,2004,2005,2006,2007,2008,2009"
+           "&SortBy=SortName&StartIndex=40&Limit=40&Fields=Genres&EnableImages=false&EnableUserData=false");
+
+    /* length budget: 4 ids + artist + decade + a large start must fit what jf_api sends, or the MIX request is refused at enqueue */
+    n = jf_path_mix_pool(b, sizeof(b), UID, g4, 4, ART, 1980, false, 9999, 40);
+    CHECK(n > 0 && n < JF_API_PATH_MAX, "4 ids + artist + decade + start 9999 fits JF_API_PATH_MAX (got %d)", n);
+    int n2 = jf_path_mix_pool(b + 600, 400, UID, g2, 2, ART, 1980, false, 9999, 40);
+    CHECK(n2 > 0 && n2 < JF_API_PATH_MAX, "2 ids + artist + decade + start 9999 fits JF_API_PATH_MAX (got %d)", n2);
+    CHECK(strstr(b, "GenreIds=" ART "," ALB "," SES "," UID "&ArtistIds=") != NULL, "four ids comma-joined, in order");
+
+    /* refusals */
+    const char *bad1[] = { ART, "../x" };
+    const char *bad2[] = { ART, NULL };
+    CHECK(jf_path_mix_pool(b, sizeof(b), "short", g1, 1, NULL, 0, true, 0, 40) == -1, "bad uid accepted");
+    CHECK(jf_path_mix_pool(b, sizeof(b), UID, bad1, 2, NULL, 0, true, 0, 40) == -1, "bad genre id accepted");
+    CHECK(jf_path_mix_pool(b, sizeof(b), UID, bad2, 2, NULL, 0, true, 0, 40) == -1, "NULL genre id accepted");
+    CHECK(jf_path_mix_pool(b, sizeof(b), UID, g1, -1, NULL, 0, true, 0, 40) == -1, "negative id count accepted");
+    CHECK(jf_path_mix_pool(b, sizeof(b), UID, g1, 1, "nothex", 0, true, 0, 40) == -1, "bad artist id accepted");
+    CHECK(jf_path_mix_pool(b, sizeof(b), UID, g1, 1, NULL, 1985, true, 0, 40) == -1, "decade 1985 (not a multiple of 10) accepted");
+    CHECK(jf_path_mix_pool(b, sizeof(b), UID, g1, 1, NULL, 990, true, 0, 40) == -1, "decade 990 accepted");
+    CHECK(jf_path_mix_pool(b, sizeof(b), UID, g1, 1, NULL, 10000, true, 0, 40) == -1, "decade 10000 accepted");
+    CHECK(jf_path_mix_pool(b, sizeof(b), UID, g1, 1, NULL, -1980, true, 0, 40) == -1, "negative decade accepted");
+
+    /* every cap short of the length fails, for each shape */
+    int shapes[3] = { 1, 2, 3 };
+    for (int s = 0; s < 3; s++) {
+        const char *art = shapes[s] >= 2 ? ALB : NULL;
+        int dec = shapes[s] >= 3 ? 1980 : 0;
+        int len = jf_path_mix_pool(b, sizeof(b), UID, g3, 3, art, dec, true, 0, 40);
+        CHECK(len > 0, "shape %d baseline", s);
+        int wrong = 0;
+        for (size_t cap = 0; cap <= (size_t)len; cap++) {
+            char c[1024];
+            memset(c, 'X', sizeof c);
+            if (jf_path_mix_pool(c, cap, UID, g3, 3, art, dec, true, 0, 40) != -1) wrong++;
+        }
+        CHECK(wrong == 0, "shape %d: %d caps <= len accepted", s, wrong);
+        char c[1024];
+        CHECK(jf_path_mix_pool(c, (size_t)len + 1, UID, g3, 3, art, dec, true, 0, 40) == len, "shape %d: cap=len+1 refused", s);
+    }
+}
+
 int main(void)
 {
     test_builders();
@@ -375,6 +457,7 @@ int main(void)
     test_header();
     test_body();
     test_mix_and_save();
+    test_mix_paths();
     printf("jf_url_test: %d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;
 }
