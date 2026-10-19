@@ -311,18 +311,15 @@ directories in simple mode; expert mode adds `/` with protected paths refused. E
 
 Open, in order:
 
-1. **Backup on a freshly flashed unit (operator, .115, 2026-10-18): "No Backup support"** after reflash + `deploy-all.sh`. Expected:
-   the engine `/usr/sbin/arca-backup` and `device-files/backup.d/` reach a unit only through `provision.sh` (or a new card image),
-   never through `deploy-all.sh`. Run `./provision.sh 192.168.50.115`, then import one of the operator's pre-flash exports.
-2. **Files app does not follow plug/unplug:** a pulled stick still shows its old listing; a new one appears only after RESCAN.
+1. **Files app does not follow plug/unplug:** a pulled stick still shows its old listing; a new one appears only after RESCAN.
    The Backup page's 1 Hz `/dev` scan (`disk_sig`, `bk_is_disk_name` in `control_panel/backup_*`) is the model; move it into one
    shared helper both use rather than copying it.
-3. **Files app startup shows a black screen until the first frame** (nice to have): paint a LOADING… frame first, as Backup does.
-4. **The Backup engine must travel with the page:** `deploy-all.sh` on a reflashed unit brought the page and not `arca-backup` or
+2. **Files app startup shows a black screen until the first frame** (nice to have): paint a LOADING… frame first, as Backup does.
+3. **The Backup engine must travel with the page:** `deploy-all.sh` on a reflashed unit brought the page and not `arca-backup` or
    `device-files/backup.d/` (operator, 2026-10-18), because only `provision.sh` installs them. Give them a `backup` group in
    `provision-rules.conf` and have `native_apps/build-and-deploy.sh` install it, the way `usb_host` installs the `usb` group.
 
-**Done when** 1–4 pass at the panel. ScummVM games from a stick: confirmed by the operator 2026-10-18 (BASS).
+**Done when** 1–3 pass at the panel.
 
 ### F152. A Jellyfin music client playing to a Bluetooth speaker — open, operator wish 2026-10-16, nice to have, not designed
 
