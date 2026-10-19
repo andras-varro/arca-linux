@@ -301,15 +301,39 @@ follow its shape. Navigation stays as it is: the pages' `*_page_focusables` rect
 from, or a draw callback owned by the widget. **Done when** buttons, toggles, sliders, launcher tiles, dialog buttons and the bar draw
 focus through one mechanism, and the Control Panel's generic ring is gone.
 
-### F152. A Jellyfin music client playing to a Bluetooth speaker — open, operator wish 2026-10-16, nice to have, not designed
+### F152. A Jellyfin music client — open, operator wish 2026-10-16, raised to the top 2026-10-19, not designed
 
-Browse and search a local Jellyfin server and stream a track to the A2DP sink BlueALSA already serves
-(BlueALSA: `SYSTEM_ANALYSIS.md#36-usb`). Builds on the file manager's `list_view` + `thumb_cache` (search results with album art). **[inferred, not
-measured]** The network is not the limit: an SSH copy saturated the CPU at ~3.1 MB/s, while a 320 kbit/s stream is ~40 KB/s (~1-2% of
-that cost) and 48 kHz stereo PCM ~192 KB/s (~6%). The unknowns are decode and SBC encode on one 600 MHz core: no MP3/AAC/FLAC decoder
-exists in `native_apps/common` (`audio_wav.c` only), there is no HTTP client or JSON parser and no libcurl in the rootfs. Having the
-server transcode to one codec (or to PCM) keeps the device to one decoder. **Done when** the first question is answered: CPU of
-BlueALSA plus a decoder for a server-transcoded stream, measured on `.188` with a speaker connected.
+A plain foreground app that browses and searches a local Jellyfin server and plays a track; leaving the app stops the
+music (operator ruling 2026-10-19: background play needs task switching and a task manager, which nothing has).
+**Where the sound goes is not the app's business:** `audio_init()` picks the sink, headset > any BT sink > USB DAC >
+onboard (`audio_out_device_for()`, `common/audio_out.h:492`), so the app plays through `common/audio.c` like every
+other. It plays mono (the bus is mono); stereo is F154.
+
+**Measured 2026-10-19:** the server (Jellyfin 12.1.0; mp3 and flac, some wmav2 and mp2) transcodes any track to the bus
+format faster than realtime with `/Audio/<id>/stream?static=false&container=wav&audioCodec=pcm_s16le&audioSampleRate=44100&audioChannels=1&playSessionId=<new>`,
+so the device carries no decoder. ⚠️ Without a fresh `playSessionId` the server reused the previous job and sent 48 kHz
+stereo. The RIFF size field reads `0xFFFFFFFF` and a `LIST` chunk precedes `data`. Receiving costs under 5% of the
+core on `.73`: 100 s of 48 kHz stereo (19.2 MB) arrived in 8.2 s for 4.9 CPU-s (`wget | head | wc`, an upper bound),
+and the mono stream is half the bytes.
+
+**What is missing (read from source):** `audio_music_start()` (`common/audio.h:660`) takes a path that
+`audio_wav_open()` `fopen`s (`common/audio_wav.c:33`), so nothing plays a stream fed from a socket; `native_apps/common`
+has no HTTP client and no JSON parser. `list_view` and `keyboard_enter()` exist; a thumbnail cache does not, nor a
+JPEG decoder for album art (whether the server sends BMP is unverified). **Order:** (1) a socket source for the music
+player with a few seconds of buffer and a stated underrun rule, driven by a throwaway command-line tool; (2) a minimal
+HTTP/1.1 client and JSON parser in `common/`, server, user and token set in the Control Panel, the unit keeping a token
+and never the password, no credential in the repo or an image; (3) the app: Artists → Albums → Tracks in `list_view`,
+search through `keyboard_enter()`, now playing, a queue, pad and keyboard as well as touch. **Done when** step 1 plays a
+server track on onboard, USB and Bluetooth, with CPU measured while a BT speaker is connected (on `.188`).
+
+### F154. Stereo music through the mono mix bus — open, operator request 2026-10-19, feasibility not assessed
+
+Music plays mono because the bus is: every voice is single-channel at 44100 Hz and `audio_interleave()`
+(`common/audio_gen.h:262`) copies it into both channels of the stereo-only `hw:0,0` (`native_apps/CLAUDE.md` →
+*Audio: the generator is separate from the device*). The device is already opened stereo, so the question is the bus,
+not the hardware: a stereo music source mixed beside the mono voices (effects summed into both channels), or a stereo
+bus. The onboard speaker sums L + R, so only BT and USB gain. **Done when** feasibility is answered: which shape, and
+the CPU of a stereo stream measured on `.188`; then decide with the operator.
 
 ### F106. Support BeagleBone Black boards — open, operator idea 2026-10-01, future
 
