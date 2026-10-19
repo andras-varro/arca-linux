@@ -318,8 +318,11 @@ Open, in order:
    The Backup page's 1 Hz `/dev` scan (`disk_sig`, `bk_is_disk_name` in `control_panel/backup_*`) is the model; move it into one
    shared helper both use rather than copying it.
 3. **Files app startup shows a black screen until the first frame** (nice to have): paint a LOADING… frame first, as Backup does.
+4. **The Backup engine must travel with the page:** `deploy-all.sh` on a reflashed unit brought the page and not `arca-backup` or
+   `device-files/backup.d/` (operator, 2026-10-18), because only `provision.sh` installs them. Give them a `backup` group in
+   `provision-rules.conf` and have `native_apps/build-and-deploy.sh` install it, the way `usb_host` installs the `usb` group.
 
-**Done when** 1–3 pass at the panel. ScummVM games from a stick: confirmed by the operator 2026-10-18 (BASS).
+**Done when** 1–4 pass at the panel. ScummVM games from a stick: confirmed by the operator 2026-10-18 (BASS).
 
 ### F152. A Jellyfin music client playing to a Bluetooth speaker — open, operator wish 2026-10-16, nice to have, not designed
 
