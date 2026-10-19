@@ -318,15 +318,19 @@ and the mono stream is half the bytes.
 
 **Built:** `audio_music_start_fd()` (`common/audio.h`) plays a WAV from a non-blocking fd through a ring buffer, with a
 1 s pre-roll, silence plus re-buffer on an underrun and a fade at each edge (rules in `common/audio_wav.c`), and the
-throwaway `stream_play <host> <port> <path> [seconds]` drives it. On `.73` it played a server track to the onboard
-speaker for 20 s with 0 underruns and about 5% CPU, and refused a 48 kHz stereo stream. **Missing:** `native_apps/common`
-has no HTTP client and no JSON parser; `list_view` and `keyboard_enter()` exist, a thumbnail cache does not. Album art
-needs a PNG decoder: asked for `format=Bmp` the server sends JPEG, while `format=Png` is honoured. **Order:** (1) the
-same track on USB and Bluetooth, CPU measured with a BT speaker connected (on `.188`); (2) a minimal HTTP/1.0 client
-(HTTP/1.0 makes the server send the body unchunked, measured) and JSON parser in `common/`, server, user and token set
-in the Control Panel, the unit keeping a token and never the password, no credential in the repo or an image; (3) the
-app: Artists → Albums → Tracks in `list_view`, search through `keyboard_enter()`, now playing, a queue, pad and keyboard
-as well as touch, and `stream_play` deleted. **Done when** step 1 is measured.
+throwaway `stream_play <host> <port> <path> [seconds]` drives it. **Measured on `.115`, 2026-10-19,** forcing
+`audio_device` in `/opt/games/arca_config.conf`: a server track played 30 s on the BT headset (`bluealsa`, A2DP), the
+USB card (`plughw:1,0`) and onboard (`plughw:0,0`), each 0 underruns, `stream_play` ~3% CPU and `bluealsa` below
+`top`'s resolution; the operator heard all three with no clicks, onboard **very faint**, quieter than game music on the same speaker. The
+source is quiet: the first 30 s of that track as served measure peak -10.5 dBFS, RMS -37.3 dBFS mono (stereo -6.4 /
+-36.9), about 20 dB under a game asset (`sounds/fx_burst.wav`, RMS -15.9), so step 1 below starts by applying the server's
+per-track normalisation gain, if it serves one (unverified). Whole-system CPU on the panel's monitor during playback: ~15%. A 48 kHz stereo stream is refused. **Missing:** `native_apps/common` has no HTTP
+client and no JSON parser; `list_view` and `keyboard_enter()` exist, a thumbnail cache does not. Album art needs a PNG
+decoder: asked for `format=Bmp` the server sends JPEG, while `format=Png` is honoured. **Order:** (1) a minimal
+HTTP/1.0 client (HTTP/1.0 makes the server send the body unchunked, measured) and JSON parser in `common/`, server, user
+and token set in the Control Panel, the unit keeping a token and never the password, no credential in the repo or an
+image; (2) the app: Artists → Albums → Tracks in `list_view`, search through `keyboard_enter()`, now playing, a queue,
+pad and keyboard as well as touch, and `stream_play` deleted. **Done when** the app plays a searched track at the panel.
 
 ### F154. Stereo music through the mono mix bus — open, operator request 2026-10-19, feasibility not assessed
 
