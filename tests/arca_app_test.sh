@@ -30,10 +30,11 @@ if [ ! -x "$BB" ]; then
 fi
 
 T="$(mktemp -d)"
+SECS=$((100000 + $$))   # a duration no other sleeper on the host has: the app is found by it
 cleanup() {
     for p in /proc/[0-9]*; do
         case "$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)" in
-            *"$T"*) kill -9 "${p#/proc/}" 2>/dev/null ;;
+            *"$T"*|"sleep $SECS "*) kill -9 "${p#/proc/}" 2>/dev/null ;;
         esac
     done
     rm -rf "$T"
@@ -59,7 +60,7 @@ done
 echo $! > "$P"
 SSD
 chmod +x "$T/bin/start-stop-daemon"
-printf '#!/bin/sh\nexec sleep 300\n' > "$T/opt/arca/app_launcher"; chmod +x "$T/opt/arca/app_launcher"
+printf '#!/bin/sh\nexec sleep %s\n' "$SECS" > "$T/opt/arca/app_launcher"; chmod +x "$T/opt/arca/app_launcher"
 echo "$T/opt/arca/app_launcher" > "$T/opt/arca/default-app"
 sed -e "s#/opt/#$T/opt/#g" -e "s#/var/#$T/var/#g" \
     -e "s#^PATH=#PATH=$T/bin:#" "${ARCA_APP_SRC:-$REPO_DIR/device-files/arca-app}" > "$T/arca-app"
@@ -78,7 +79,7 @@ apps() {
     local n=0 p
     for p in /proc/[0-9]*; do
         case "$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)" in
-            "sleep 300 ") n=$((n+1)) ;;
+            "sleep $SECS ") n=$((n+1)) ;;
         esac
     done
     echo "$n"
