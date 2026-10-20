@@ -122,6 +122,7 @@ typedef struct {
     int      scale;      /* text scale; lv_init derives it from row_h, a caller may set it after */
     bool     active;     /* keys act only on the active list; touch always does */
     int      top, cursor;
+    bool     cursor_dragged;  /* a drag carried the cursor into view: the next tap on it is not a second tap */
     int      count;      /* as of the last lv_sync() */
     LvDrag   drag;
     uint8_t *marks;      /* bitmap, malloc'd, owned */

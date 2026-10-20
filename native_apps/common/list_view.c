@@ -197,6 +197,7 @@ void lv_reset(ListView *lv) {
 
 void lv_move_to(ListView *lv, int index) {
     lv->cursor = lv_clamp_cursor(index, lv->count);
+    lv->cursor_dragged = false;
     lv->top = lv_top_for_cursor(lv->top, lv->cursor, lv->count, lv_visible_rows(lv));
 }
 
@@ -272,6 +273,11 @@ static LvEvent touch_input_frame(ListView *lv, const TouchState *ts) {
             int before = lv->top;
             lv->top = lv_clamp_top(lv->top + d, lv->count, vis);
             if (lv->top != before) ev = LV_EV_CHANGED;
+            /* The cursor comes along, or lv_sync() would scroll back to it next frame. */
+            int cur = lv->cursor;
+            if (cur >= 0 && cur < lv->top) cur = lv->top;
+            if (cur >= 0 && vis > 0 && cur >= lv->top + vis) cur = lv->top + vis - 1;
+            if (cur != lv->cursor) { lv->cursor = cur; lv->cursor_dragged = true; }
         }
     }
 
@@ -280,7 +286,7 @@ static LvEvent touch_input_frame(ListView *lv, const TouchState *ts) {
             int idx = lv_hit_row(lv->top, lv->drag.down_y - first_y, lv->row_h,
                                  vis, lv->count);
             if (idx >= 0) {
-                bool again = (idx == lv->cursor);
+                bool again = (idx == lv->cursor && !lv->cursor_dragged);
                 lv_move_to(lv, idx);
                 ev = (again && lv->active) ? LV_EV_ACTIVATE : LV_EV_TAP;
             }

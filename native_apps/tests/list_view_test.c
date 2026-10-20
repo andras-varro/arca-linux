@@ -187,7 +187,14 @@ int main(void) {
     t = T(100, 380, false, true, false); lv_input(&lv, &t, NULL, 131);
     t = T(100, 20, false, true, false); lv_input(&lv, &t, NULL, 132);
     CHECK(lv.top == 11);
+    lv_sync(&lv);                            /* every frame: must not snap back to the cursor */
+    CHECK(lv.top == 11 && lv.cursor >= 11 && lv.cursor < 21);
     t = T(100, 20, false, false, true); lv_input(&lv, &t, NULL, 133);
+    /* the cursor the drag carried along is not "the row already chosen" */
+    t = T(100, 21 + 40 * (lv.cursor - lv.top) + 5, true, false, true);
+    CHECK(lv_input(&lv, &t, NULL, 133) == LV_EV_TAP);
+    t = T(100, 21 + 40 * (lv.cursor - lv.top) + 5, true, false, true);
+    CHECK(lv_input(&lv, &t, NULL, 133) == LV_EV_ACTIVATE);
     t = T(100, 400, true, true, false); lv_input(&lv, &t, NULL, 134);
     t = T(100, 380, false, true, false); lv_input(&lv, &t, NULL, 135);
     t = T(100, 20, false, true, false); lv_input(&lv, &t, NULL, 136);
