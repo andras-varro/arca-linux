@@ -30,23 +30,23 @@ static bool page_has(const char **keys, char ch) {
 }
 
 int main(void) {
-    /* (b) untouched tables */
-    static const char *alpha[]    = { "ABCDEFGHI", "JKLMNOPQR", "STUVWXYZ_", NULL };
+    /* (b) the ABC-order tables (ALPHA now 10 wide, padded with KB_GAP) */
+    static const char *alpha[]    = { "ABCDEFGHIJ", "KLMNOPQRST", "UVWXYZ_\001\001\001", NULL };
     static const char *alphanum[] = { "ABCDEFGHIJ", "KLMNOPQRST", "UVWXYZ.-_ ", "0123456789", NULL };
     static const char *upper[]    = { "ABCDEFGHIJ", "KLMNOPQRST", "UVWXYZ.-_!", "0123456789", NULL };
     static const char *lower[]    = { "abcdefghij", "klmnopqrst", "uvwxyz.-_!", "0123456789", NULL };
     static const char *numeric[]  = { "123.", "456:", "789 ", " 0  ", NULL };
-    CHECK(same(alpha_keys, alpha));
-    CHECK(same(alphanum_keys, alphanum));
-    CHECK(same(full_upper_keys, upper));
-    CHECK(same(full_lower_keys, lower));
+    CHECK(same(alpha_abc_keys, alpha));
+    CHECK(same(alphanum_abc_keys, alphanum));
+    CHECK(same(full_upper_abc_keys, upper));
+    CHECK(same(full_lower_abc_keys, lower));
     CHECK(same(numeric_keys, numeric));
 
     /* (a) symbols page */
     const char *want = ":;\"'<>/?=+()*&{[}]~`@#$%^,\\|";
     for (const char *p = want; *p; p++) {
         CHECK(page_has(full_sym_keys, *p));
-        CHECK(!page_has(full_upper_keys, *p) || strchr(".-_!", *p));
+        CHECK(!page_has(full_upper_abc_keys, *p) || strchr(".-_!", *p));
     }
     CHECK(kb_row_count(full_sym_keys) == 4);
     for (int r = 0; r < 4; r++) CHECK(strlen(full_sym_keys[r]) == 10);

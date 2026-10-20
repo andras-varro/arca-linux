@@ -13,37 +13,70 @@
 
 /* ── Layout definitions ──────────────────────────────────────────────────── */
 
-/* KB_LAYOUT_ALPHA: 9 cols × 3 rows (matches original highscore keyboard) */
-static const char *alpha_keys[] = {
-    "ABCDEFGHI",
-    "JKLMNOPQR",
-    "STUVWXYZ_",   /* _ displayed as _ on key, stored as space */
+/* Every letter layout has two orders, QWERTY (the default) and ABC, of the SAME
+ * grid size and key set, so the geometry never depends on the order.  A short
+ * QWERTY row is padded with KB_GAP: a slot that is no key, is not drawn and is
+ * skipped by touch and focus. */
+#define KB_GAP '\001'
+
+/* KB_LAYOUT_ALPHA: 10 cols × 3 rows (_ displayed as _ on key, stored as space) */
+static const char *alpha_abc_keys[] = {
+    "ABCDEFGHIJ",
+    "KLMNOPQRST",
+    "UVWXYZ_\001\001\001",
+    NULL
+};
+static const char *alpha_qwerty_keys[] = {
+    "QWERTYUIOP",
+    "ASDFGHJKL_",
+    "ZXCVBNM\001\001\001",
     NULL
 };
 
 /* KB_LAYOUT_ALPHANUM: 10 cols × 4 rows */
-static const char *alphanum_keys[] = {
+static const char *alphanum_abc_keys[] = {
     "ABCDEFGHIJ",
     "KLMNOPQRST",
     "UVWXYZ.-_ ",
     "0123456789",
     NULL
 };
+static const char *alphanum_qwerty_keys[] = {
+    "QWERTYUIOP",
+    "ASDFGHJKL.",
+    "ZXCVBNM-_ ",
+    "0123456789",
+    NULL
+};
 
 /* KB_LAYOUT_FULL: 10 cols × 4 rows, upper case */
-static const char *full_upper_keys[] = {
+static const char *full_upper_abc_keys[] = {
     "ABCDEFGHIJ",
     "KLMNOPQRST",
     "UVWXYZ.-_!",
     "0123456789",
     NULL
 };
+static const char *full_upper_qwerty_keys[] = {
+    "QWERTYUIOP",
+    "ASDFGHJKL!",
+    "ZXCVBNM.-_",
+    "0123456789",
+    NULL
+};
 
 /* KB_LAYOUT_FULL: 10 cols × 4 rows, lower case */
-static const char *full_lower_keys[] = {
+static const char *full_lower_abc_keys[] = {
     "abcdefghij",
     "klmnopqrst",
     "uvwxyz.-_!",
+    "0123456789",
+    NULL
+};
+static const char *full_lower_qwerty_keys[] = {
+    "qwertyuiop",
+    "asdfghjkl!",
+    "zxcvbnm.-_",
     "0123456789",
     NULL
 };
@@ -70,6 +103,30 @@ static const char *numeric_keys[] = {
 };
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
+
+/* The letter order, kept for the life of the process so a reopened keyboard
+ * keeps the player's choice.  QWERTY is the default. */
+static bool kb_qwerty = true;
+
+/* The symbols page's way back to the letters; kept apart from the order
+ * key's "ABC" / "QWE" so the two never read alike. */
+#define KB_SYM_BACK_LABEL "LTRS"
+
+/* What the order key offers: the order it switches TO. */
+static const char *kb_order_label(bool qwerty) { return qwerty ? "ABC" : "QWE"; }
+
+/* The letter page for a layout in the given order and case (FULL only). */
+static const char **kb_letter_keys(KeyboardLayout layout, bool qwerty, bool shifted) {
+    switch (layout) {
+    case KB_LAYOUT_ALPHA:    return qwerty ? alpha_qwerty_keys : alpha_abc_keys;
+    case KB_LAYOUT_ALPHANUM: return qwerty ? alphanum_qwerty_keys : alphanum_abc_keys;
+    case KB_LAYOUT_FULL:
+        if (shifted) return qwerty ? full_upper_qwerty_keys : full_upper_abc_keys;
+        return qwerty ? full_lower_qwerty_keys : full_lower_abc_keys;
+    case KB_LAYOUT_NUMERIC:  break;
+    }
+    return numeric_keys;
+}
 
 /* Count rows in a NULL-terminated key array */
 static int kb_row_count(const char **keys) {
@@ -103,9 +160,10 @@ static void kb_drain_touches(TouchInput *touch) {
 
 /* ── Main entry point ────────────────────────────────────────────────────── */
 
-/* Is (r, c) a real key?  NUMERIC leaves empty slots that are not rendered. */
+/* Is (r, c) a real key?  NUMERIC leaves empty slots (spaces) and the QWERTY
+ * letter pages leave KB_GAP slots; neither is rendered. */
 static bool kb_cell_ok(const char **keys, KeyboardLayout layout, int r, int c) {
-    return !(layout == KB_LAYOUT_NUMERIC && keys[r][c] == ' ');
+    return keys[r][c] != KB_GAP && !(layout == KB_LAYOUT_NUMERIC && keys[r][c] == ' ');
 }
 
 static int kb_abs(int v) { return v < 0 ? -v : v; }
@@ -142,35 +200,18 @@ static void kb_focus_move(const char **keys, KeyboardLayout layout, int rows, in
     if (best >= 0) { *fr = nr; *fc = best; }
 }
 
-enum { KA_DEL, KA_CLEAR, KA_SHIFT, KA_SYM, KA_SPACE, KA_CANCEL, KA_OK };
+enum { KA_DEL, KA_CLEAR, KA_SHIFT, KA_SYM, KA_SPACE, KA_CANCEL, KA_OK, KA_ORDER };
 
 static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
                   const char *title, char *buf, int max_len, KeyboardLayout layout,
                   bool mask) {
 
     /* ── Select key layout ───────────────────────────────────────────── */
-    const char **keys      = alpha_keys;
-    const char **alt_keys  = NULL;          /* for FULL shift toggle */
     bool         shifted   = true;          /* FULL starts upper */
     bool         symbols   = false;         /* FULL: showing the symbols page */
-    bool         is_alpha  = false;         /* ALPHA _ → space mapping */
-
-    switch (layout) {
-    case KB_LAYOUT_ALPHA:
-        keys     = alpha_keys;
-        is_alpha = true;
-        break;
-    case KB_LAYOUT_ALPHANUM:
-        keys = alphanum_keys;
-        break;
-    case KB_LAYOUT_FULL:
-        keys     = full_upper_keys;
-        alt_keys = full_lower_keys;
-        break;
-    case KB_LAYOUT_NUMERIC:
-        keys = numeric_keys;
-        break;
-    }
+    bool         is_alpha  = (layout == KB_LAYOUT_ALPHA);   /* ALPHA _ → space mapping */
+    /* Geometry comes from this page; both orders share one grid size. */
+    const char **keys      = kb_letter_keys(layout, true, true);
 
     int rows = kb_row_count(keys);
     int cols = kb_col_count(keys);
@@ -220,12 +261,13 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
     bool has_shift = (layout == KB_LAYOUT_FULL);
     bool has_space = (layout == KB_LAYOUT_FULL);   /* the others keep a space on a key */
     bool has_sym   = (layout == KB_LAYOUT_FULL);
-    int n_action = 4 + (has_shift ? 1 : 0) + (has_sym ? 1 : 0) + (has_space ? 1 : 0);   /* DEL CLEAR [SHIFT] [#+=] [SPACE] CANCEL OK */
+    bool has_order = (layout != KB_LAYOUT_NUMERIC);   /* every letter layout */
+    int n_action = 4 + (has_shift ? 1 : 0) + (has_sym ? 1 : 0) + (has_order ? 1 : 0) + (has_space ? 1 : 0);   /* DEL CLEAR [SHIFT] [#+=] [ABC/QWE] [SPACE] CANCEL OK */
     int aw = safe_w / n_action;
 
     const char *del_label = (layout == KB_LAYOUT_NUMERIC) ? "<-" : "DEL";
 
-    Button btn_del, btn_clear, btn_shift, btn_sym, btn_space, btn_cancel, btn_ok;
+    Button btn_del, btn_clear, btn_shift, btn_sym, btn_order, btn_space, btn_cancel, btn_ok;
     int col_idx = 0;
 
     button_init_full(&btn_del, safe_l + col_idx * aw, action_y, aw - 4, btn_h,
@@ -252,6 +294,13 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
         col_idx++;
     }
 
+    if (has_order) {
+        button_init_full(&btn_order, safe_l + col_idx * aw, action_y, aw - 4, btn_h,
+                         kb_order_label(kb_qwerty),
+                         RGB(30, 30, 80), COLOR_WHITE, RGB(100, 100, 220), 2);
+        col_idx++;
+    }
+
     if (has_space) {
         button_init_full(&btn_space, safe_l + col_idx * aw, action_y, aw - 4, btn_h,
                          "SPACE",
@@ -269,13 +318,14 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
                      RGB(0, 70, 0), COLOR_WHITE, RGB(0, 180, 0), 2);
 
     /* The action row in order, so a focus column maps to one button and one id. */
-    Button *act_btn[7];
-    int     act_id[7];
+    Button *act_btn[8];
+    int     act_id[8];
     int     na = 0;
     act_btn[na] = &btn_del;    act_id[na++] = KA_DEL;
     act_btn[na] = &btn_clear;  act_id[na++] = KA_CLEAR;
     if (has_shift) { act_btn[na] = &btn_shift; act_id[na++] = KA_SHIFT; }
     if (has_sym)   { act_btn[na] = &btn_sym;   act_id[na++] = KA_SYM; }
+    if (has_order) { act_btn[na] = &btn_order; act_id[na++] = KA_ORDER; }
     if (has_space) { act_btn[na] = &btn_space; act_id[na++] = KA_SPACE; }
     act_btn[na] = &btn_cancel; act_id[na++] = KA_CANCEL;
     act_btn[na] = &btn_ok;     act_id[na++] = KA_OK;
@@ -306,11 +356,8 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
     for (;;) {
         /* Which glyph set the keys show — needed by input as well as drawing,
          * so it is computed whether or not this frame paints. */
-        const char **cur_keys = keys;
-        if (has_sym && symbols)
-            cur_keys = full_sym_keys;
-        else if (has_shift && !shifted)
-            cur_keys = alt_keys;
+        const char **cur_keys = (has_sym && symbols)
+            ? full_sym_keys : kb_letter_keys(layout, kb_qwerty, shifted);
 
         /* ── Draw ────────────────────────────────────────────────────── */
         if (dirty) {
@@ -349,7 +396,7 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
             for (int r = 0; r < rows; r++) {
                 for (int c = 0; c < cols; c++) {
                     char ch = cur_keys[r][c];
-                    if (layout == KB_LAYOUT_NUMERIC && ch == ' ')
+                    if (!kb_cell_ok(cur_keys, layout, r, c))
                         continue;   /* empty slot */
 
                     /* Update label to reflect current shift state */
@@ -366,8 +413,12 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
             if (has_shift)
                 button_draw(fb, &btn_shift);
             if (has_sym) {
-                strncpy(btn_sym.text, symbols ? "ABC" : "#+=", sizeof(btn_sym.text) - 1);
+                strncpy(btn_sym.text, symbols ? KB_SYM_BACK_LABEL : "#+=", sizeof(btn_sym.text) - 1);
                 button_draw(fb, &btn_sym);
+            }
+            if (has_order) {
+                strncpy(btn_order.text, kb_order_label(kb_qwerty), sizeof(btn_order.text) - 1);
+                button_draw(fb, &btn_order);
             }
             if (has_space)
                 button_draw(fb, &btn_space);
@@ -452,7 +503,7 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
                 dirty = true;
             } else if (dir >= 0) {
                 int fr = frow, fc = fcol;
-                kb_focus_move(keys, layout, rows, cols, na, btn_w, aw, &fr, &fc, dir);
+                kb_focus_move(cur_keys, layout, rows, cols, na, btn_w, aw, &fr, &fc, dir);
                 if (fr != frow || fc != fcol) { frow = fr; fcol = fc; dirty = true; }
             } else if (act) {
                 if (frow == rows) pick_a = act_id[fcol];
@@ -484,8 +535,11 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
             if (!symbols) {          /* no case on the symbols page */
                 shifted = !shifted;
                 dirty = true;
-                /* Swap key pointer for next frame redraw */
-                keys = shifted ? full_upper_keys : full_lower_keys;
+            }
+        } else if (pick_a == KA_ORDER) {
+            if (!symbols) {          /* the symbols page has no letters to reorder */
+                kb_qwerty = !kb_qwerty;
+                dirty = true;
             }
         } else if (pick_a == KA_SYM) {
             symbols = !symbols;
