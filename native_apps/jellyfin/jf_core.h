@@ -48,8 +48,8 @@
 #define JF_CAP_GENRES    100      /* JF_MIX_GENRE_PAGE */
 #define JF_CAP_POOL       40      /* JF_MIX_PAGE */
 
-/* MIX.  A page of 50 Audio items with Fields=Genres is ~66 KB and ~4700 tokens (measured), too near the 5000-token
- * budget, so 40; a genre-index page of 100 with SongCount is ~38 KB and ~3700 tokens. */
+/* MIX.  A page of 50 Audio items with Fields=Genres is ~66 KB and ~4700 tokens (measured), too near the old 5000-token
+ * budget, so 40 (measured up to 5259 tokens and 83670 bytes: JF_TOKENS_PAGE is 8000 and JF_API_BODY_BYTES 160 KB for it); a genre-index page of 100 with SongCount is ~38 KB and ~3700 tokens. */
 #define JF_MIX_OPT_MAX    20      /* tick rows: the genres of one track + artist + decade (JF_GENRES_BYTES holds < 20 names) */
 #define JF_MIX_VARIANTS    4      /* spellings of one genre key whose ids are kept (the path holds 4 x 32 hex) */
 #define JF_MIX_WANT      100      /* matches a mix tries for */

@@ -20,8 +20,8 @@
 #include <stddef.h>
 #include "json.h"
 
-/** Token budget for one page (~20 B per JsonTok = ~100 KB); a page of 50 tracks with MediaSources noise fits. */
-#define JF_TOKENS_PAGE  5000
+/** Token budget for one page (~20 B per JsonTok = ~160 KB heap).  Measured on the live server: a pool page of 40 tracks with Fields=Genres needs up to 5259 tokens (4 of 50 pages failed at 5000: UNEXPECTED REPLY), an instant mix of 50 up to 4399. */
+#define JF_TOKENS_PAGE  8000
 
 /** Bytes of a track's genre names; JF_MIX_OPT_MAX in jf_core.h counts what fits. */
 #define JF_GENRES_BYTES 160

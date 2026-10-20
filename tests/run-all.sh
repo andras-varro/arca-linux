@@ -106,6 +106,7 @@ SUITE_ROWS=(
     "dump_boot_regs_test.sh|deploy"
     "setup_build_env_test.sh|deploy"
     "smoke_first_screen_test.sh|deploy"
+    "arca_app_test.sh|deploy"
     "doc_check.sh|docs"
 )
 
@@ -161,6 +162,7 @@ CTEST_ROWS=(
     "jf_genre_test|-I common -I jellyfin -fsanitize=undefined|jellyfin/jf_model.c common/json.c"
     "jf_url_test|-I common -I jellyfin|jellyfin/jf_url.c"
     "icon_grid_focus_test|-I common|common/icon_grid.c common/ppm.c common/common.c common/framebuffer.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c"
+    "icon_grid_nav_test|-I common|common/icon_grid.c common/ppm.c common/common.c common/framebuffer.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c"
     "icon_grid_nav_test|-I common|common/icon_grid.c common/ppm.c common/common.c common/framebuffer.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c"
     "keyboard_symbols_test|-I common|common/common.c common/framebuffer.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c"
     "launcher_args_test|-I. -Dmain=app_launcher_main_unused|common/framebuffer.c common/touch_input.c common/hardware.c common/common.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_wav.c common/config.c common/gamepad.c common/input_slots.c common/input_scan.c common/ppm.c common/icon_grid.c common/logger.c common/product.c common/pointer.c common/start_menu.c common/status_line.c common/top_bar.c control_panel/cpu_load.c"

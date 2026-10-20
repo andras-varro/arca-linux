@@ -77,6 +77,24 @@ app_pids() {
     done
 }
 
+# Print the PID of every running respawn wrapper, matched on its command line.
+#
+# `pidof -x` and `killall respawn.sh` are NOT usable here: this busybox (1.37, measured
+# on 192.168.50.115 2026-10-19) has no `pidof -x` - it prints "invalid option" and exits
+# 1, which every guard read as "no wrapper is running".  So `start` never saw an existing
+# wrapper (a second loop appeared, and the pidfile now named only that one), and `stop`
+# never reached its orphan sweep (the first loop survived, restarted app_launcher, and the
+# next scp failed with "Text file busy").  A script runs as `/bin/sh /opt/arca/respawn.sh`,
+# so the path is an argument of the interpreter, which is what we match.
+wrapper_pids() {
+    for _p in /proc/[0-9]*; do
+        _cl=$(tr '\0' ' ' < "$_p/cmdline" 2>/dev/null)
+        case " $_cl" in
+            *" $RESPAWN_SCRIPT "*) echo "${_p#/proc/}" ;;
+        esac
+    done
+}
+
 do_start() {
     echo "Starting $DESC..."
 
@@ -99,7 +117,7 @@ do_start() {
     # Never launch a second wrapper.  Checked BEFORE the heredoc below, because
     # truncating and rewriting a script file that a running /bin/sh still has
     # open can make that sh misparse the remainder of the file.
-    if pidof -x respawn.sh >/dev/null 2>&1; then
+    if [ -n "$(wrapper_pids)" ]; then
         echo "  Already running — use 'restart' to pick up a new default-app"
         return 0
     fi
@@ -275,7 +293,7 @@ RESPAWN_EOF
         # rc=1 also means "already running", and the old unconditional fallback
         # fired exactly then — launching a second wrapper, so two apps fought
         # over /dev/fb0.  Only exec directly if nothing is actually up.
-        if pidof -x respawn.sh >/dev/null 2>&1; then
+        if [ -n "$(wrapper_pids)" ]; then
             echo "  start-stop-daemon rc=$SSD_RC but the wrapper is running — not starting a second one"
         else
             echo "  start-stop-daemon failed (rc=$SSD_RC) — starting the wrapper directly"
@@ -289,20 +307,30 @@ RESPAWN_EOF
 
 do_stop() {
     echo "Stopping $DESC..."
-    if [ -f "$PIDFILE" ]; then
-        PID=$(cat "$PIDFILE")
-        # Send TERM to respawn wrapper (its trap forwards to child app)
-        start-stop-daemon --stop --pidfile "$PIDFILE" --retry 5 2>/dev/null || \
-            kill "$PID" 2>/dev/null || true
-        rm -f "$PIDFILE"
-    fi
-
-    # Kill ALL respawn.sh instances (catches orphans from previous restarts)
-    if pidof -x respawn.sh >/dev/null 2>&1; then
-        echo "  Killing remaining respawn.sh processes..."
-        killall respawn.sh 2>/dev/null || true
-        sleep 1
-        killall -9 respawn.sh 2>/dev/null || true
+    # The wrapper loops die BEFORE their child: a live loop restarts the app within
+    # seconds.  The pidfile names one loop; the /proc scan also catches orphans whose
+    # pidfile entry was overwritten by a later start.  TERM first - the wrapper's trap
+    # forwards it to its child - but the trap runs only when its foreground `sleep` ends
+    # (up to MAX_BACKOFF_SECS), so a loop still alive after 8 s is killed outright and
+    # its child is left to the executable sweep below.
+    WPIDS=$(wrapper_pids)
+    [ -f "$PIDFILE" ] && WPIDS="$WPIDS $(cat "$PIDFILE" 2>/dev/null)"
+    rm -f "$PIDFILE"
+    if [ -n "$(printf %s "$WPIDS" | tr -d " ")" ]; then
+        kill $WPIDS 2>/dev/null || true
+        _tries=0
+        while [ "$_tries" -lt 8 ]; do
+            _left=
+            for _w in $WPIDS; do kill -0 "$_w" 2>/dev/null && _left="$_left $_w"; done
+            [ -z "$_left" ] && break
+            sleep 1
+            _tries=$((_tries + 1))
+        done
+        if [ -n "$_left" ]; then
+            echo "  Killing remaining respawn.sh processes:" $_left
+            kill -9 $_left 2>/dev/null || true
+            sleep 1
+        fi
     fi
     rm -f "$RESPAWN_SCRIPT"
 

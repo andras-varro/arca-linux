@@ -14,6 +14,7 @@
 #include <string.h>
 #include <limits.h>
 #include "jf_model.h"
+#include "jf_core.h"
 
 static int checks, fails;
 #define CHECK(c, ...) do { checks++; if (!(c)) { fails++; printf("FAIL line %d: ", __LINE__); \
@@ -406,8 +407,57 @@ static void test_mix_fields(void)
     CHECK(it[5].type == JF_ITEM_ARTIST && it[5].count == 0, "negative SongCount clamps to 0 (%d)", it[5].count);
 }
 
+/* A MIX pool page must parse with the real token budget and arrive inside the body buffer, for the worst track a
+ * real server sends: Fields=Genres makes it list every genre twice (Genres and GenreItems) plus ArtistItems,
+ * AlbumArtists, ImageBlurHashes.  Measured on the live server, 50 random pool pages of 40: up to 5259 tokens and
+ * 83670 bytes, and 4 of the 50 failed json_parse at 5000 tokens (UNEXPECTED REPLY on the device).  The shape here is
+ * a 12-genre track (~135 tokens, ~1.9 KB, the average of that sample's worst pages).  The page must use at most
+ * three quarters of either budget, so a heavier page than the sample still fits. */
+static size_t put_pool_item(char *b, size_t cap, size_t w, int k)
+{
+    w += (size_t)snprintf(b + w, cap - w, "%s{\"Name\":\"Track %d\",\"ServerId\":\"%s\",\"Id\":\"%031d1\","
+        "\"HasLyrics\":false,\"Container\":\"flac\",\"PremiereDate\":\"2000-08-15T04:00:00.0000000Z\",\"ChannelId\":null,"
+        "\"Genres\":[", k ? "," : "", k, ID1, k);
+    for (int g = 0; g < 12; g++)
+        w += (size_t)snprintf(b + w, cap - w, "%s\"Some Genre Name %d\"", g ? "," : "", g);
+    w += (size_t)snprintf(b + w, cap - w, "],\"RunTimeTicks\":2746933330,\"ProductionYear\":2000,\"IndexNumber\":5,"
+        "\"ParentIndexNumber\":1,\"IsFolder\":false,\"Type\":\"Audio\",\"GenreItems\":[");
+    for (int g = 0; g < 12; g++)
+        w += (size_t)snprintf(b + w, cap - w, "%s{\"Name\":\"Some Genre Name %d\",\"Id\":\"%s\"}", g ? "," : "", g, ID2);
+    w += (size_t)snprintf(b + w, cap - w, "],\"Artists\":[\"Mike Oldfield\"],\"ArtistItems\":[{\"Name\":\"Mike Oldfield\","
+        "\"Id\":\"%s\"}],\"Album\":\"Discovery\",\"AlbumId\":\"%s\",\"AlbumPrimaryImageTag\":\"%s\","
+        "\"AlbumArtist\":\"Mike Oldfield\",\"AlbumArtists\":[{\"Name\":\"Mike Oldfield\",\"Id\":\"%s\"}],"
+        "\"ImageBlurHashes\":{\"Primary\":{\"%s\":\"eIAS+6sk14S%%$gIqRis.xBWqJAoI$%%S5R.Sin$jaWrsloefkayoJWV\"}},"
+        "\"LocationType\":\"FileSystem\",\"MediaType\":\"Audio\"}", ID3, ID3, ID4, ID3, ID4);
+    return w;
+}
+
+static void test_pool_page_budget(void)
+{
+    static char body[160 * 1024];
+    static JsonTok big[40000];
+    static JfItem st[JF_MIX_PAGE];
+    size_t w = (size_t)snprintf(body, sizeof body, "{\"Items\":[");
+    for (int k = 0; k < JF_MIX_PAGE; k++) w = put_pool_item(body, sizeof body, w, k);
+    w += (size_t)snprintf(body + w, sizeof body - w, "],\"TotalRecordCount\":5000,\"StartIndex\":0}");
+    int need = json_parse(body, w, big, 40000);
+    CHECK(need > 0, "pool page json_parse (%d)", need);
+    CHECK(need * 4 <= JF_TOKENS_PAGE * 3, "a pool page of %d needs %d tokens, budget %d (75%% = %d)",
+          JF_MIX_PAGE, need, JF_TOKENS_PAGE, JF_TOKENS_PAGE * 3 / 4);
+    CHECK((long)w * 4 <= (long)JF_API_BODY_BYTES * 3, "a pool page is %zu bytes, body buffer %d", w, JF_API_BODY_BYTES);
+    JfList l;
+    jf_list_init(&l, st, JF_MIX_PAGE);
+    CHECK(jf_parse_items(body, w, toks, JF_TOKENS_PAGE, &l) == JF_PARSE_OK && l.n == JF_MIX_PAGE,
+          "the pool page parses with the real budget (n %d)", l.n);
+
+    /* an instant mix: JF_MIX_LIMIT plain items, up to 88 tokens each (4399 for 50, measured) */
+    int plain = JF_MIX_LIMIT * 88;
+    CHECK(plain * 4 <= JF_TOKENS_PAGE * 3, "an instant mix of %d needs ~%d tokens, budget %d", JF_MIX_LIMIT, plain, JF_TOKENS_PAGE);
+}
+
 int main(void)
 {
+    test_pool_page_budget();
     test_pages();
     test_rounding_and_clamp();
     test_many_artists();

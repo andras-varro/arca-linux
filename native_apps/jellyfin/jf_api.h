@@ -44,7 +44,7 @@
 #include "logger.h"
 
 #define JF_API_SLOTS      4
-#define JF_API_BODY_BYTES (96 * 1024)
+#define JF_API_BODY_BYTES (160 * 1024)
 #define JF_API_PATH_MAX   512   /* = JF_PATH_MAX: a MIX pool path with 4 genre ids + artist + decade is 418 */
 #define JF_API_BODY_OUT   320       /**< largest AUTH request body */
 #define JF_API_POST_BYTES 4608      /**< largest request body: a SAVE of JF_SAVE_IDS_MAX ids (~3.6 KB) */
