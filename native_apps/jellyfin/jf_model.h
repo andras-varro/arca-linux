@@ -32,7 +32,8 @@ typedef enum { JF_ITEM_NONE = 0, JF_ITEM_ARTIST, JF_ITEM_ALBUM, JF_ITEM_TRACK,
 typedef struct {
     char id[33];
     char name[96];
-    char artist[64];        /**< AlbumArtist, else Artists[0]; empty for an artist */
+    char artist[64];        /**< Artists[0], else AlbumArtist when Artists is empty; empty for an artist */
+    char album_artist[64];  /**< AlbumArtist of a track or album, empty if absent */
     char album[64];
     char image_tag[40];     /**< reserved, always empty for now */
     JfItemType type;
@@ -80,5 +81,23 @@ int jf_parse_items(const char *body, size_t len, JsonTok *toks, int ntoks, JfLis
 /** AuthenticateByName reply -> token and user id; both emptied on failure. */
 int jf_parse_auth(const char *body, size_t len, JsonTok *toks, int ntoks,
                   char *token, size_t token_cap, char *user_id, size_t uid_cap);
+
+
+/** Characters of an artist name a list row's detail text shows; longer is cut to JF_ROW_ARTIST_CHARS-2 characters + "..". */
+#define JF_ROW_ARTIST_CHARS 22
+
+/**
+ * Does a list row show the track's artist?  Queue, search, mixes and playlists: always for a track.  An ALBUM's own
+ * track list (`album_list` true): only when the track's artist differs (ASCII case-insensitive) from the album
+ * artist, i.e. on a compilation.  False for anything that is not a track.
+ */
+bool jf_row_shows_artist(bool album_list, const JfItem *it);
+
+/**
+ * The detail text of a track row: "ARTIST  M:SS" (artist cut on a UTF-8 boundary to JF_ROW_ARTIST_CHARS characters,
+ * the cut marked ".."), or "M:SS" when `show_artist` is false or the artist is empty.  A track without a runtime
+ * has no time part.  Always NUL-terminated within `n` (n >= 1).
+ */
+void jf_row_detail(const JfItem *it, bool show_artist, char *out, int n);
 
 #endif

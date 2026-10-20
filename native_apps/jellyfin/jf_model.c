@@ -1,6 +1,7 @@
 /* jf_model.c — see jf_model.h. */
 
 #include <limits.h>
+#include <stdio.h>
 #include <string.h>
 #include "jf_model.h"
 
@@ -108,11 +109,14 @@ static void read_item(const char *s, const JsonTok *t, int n, int o, JfItem *it)
         }
     }
     sfield(s, t, n, o, "Album", it->album, sizeof it->album);
-    if (sfield(s, t, n, o, "AlbumArtist", it->artist, sizeof it->artist)) return;
+    sfield(s, t, n, o, "AlbumArtist", it->album_artist, sizeof it->album_artist);
     i = json_obj_get(s, t, n, o, "Artists");
     e = i >= 0 ? json_arr_first(t, n, i) : -1;   /* only [0]: some tracks list dozens */
     if (e >= 0 && t[e].type == JSON_STRING && json_str(s, &t[e], it->artist, sizeof it->artist) < 0)
         it->artist[0] = '\0';
+    if (!it->artist[0] || it->type == JF_ITEM_ALBUM) {   /* Artists empty: the album artist; an ALBUM row always names its album artist */
+        if (it->album_artist[0]) memcpy(it->artist, it->album_artist, sizeof it->artist);
+    }
 }
 
 int jf_parse_items(const char *body, size_t len, JsonTok *toks, int ntoks, JfList *out)
@@ -204,4 +208,56 @@ void jf_list_clear(JfList *l)
 {
     l->n = l->loaded = l->total = 0;
     l->full = false;
+}
+
+static bool ieq(const char *a, const char *b)
+{
+    for (; *a && *b; a++, b++) {
+        char x = (*a >= 'A' && *a <= 'Z') ? (char)(*a + 32) : *a;
+        char y = (*b >= 'A' && *b <= 'Z') ? (char)(*b + 32) : *b;
+        if (x != y) return false;
+    }
+    return *a == *b;
+}
+
+bool jf_row_shows_artist(bool album_list, const JfItem *it)
+{
+    if (!it || it->type != JF_ITEM_TRACK) return false;
+    if (!album_list) return true;
+    return it->artist[0] && !ieq(it->artist, it->album_artist);
+}
+
+void jf_row_detail(const JfItem *it, bool show_artist, char *out, int n)
+{
+    if (!out || n < 1) return;
+    out[0] = '\0';
+    if (!it) return;
+    int w = 0;
+    if (show_artist && it->artist[0]) {
+        const char *p = it->artist;
+        int chars = 0, cut = -1;           /* cut: byte offset after JF_ROW_ARTIST_CHARS-2 characters */
+        for (const char *q = p; *q; q++) {
+            if (((unsigned char)*q & 0xC0) == 0x80) continue;   /* continuation byte */
+            if (chars == JF_ROW_ARTIST_CHARS - 2) cut = (int)(q - p);
+            chars++;
+        }
+        int len = (int)strlen(p);
+        bool trim = chars > JF_ROW_ARTIST_CHARS;
+        int take = trim ? cut : len;
+        if (take > n - 1) {                /* a small buffer: back up to a character start */
+            take = n - 1;
+            while (take > 0 && ((unsigned char)p[take] & 0xC0) == 0x80) take--;
+            trim = false;
+        }
+        memcpy(out, p, (size_t)take);
+        w = take;
+        if (trim && w + 2 < n) { out[w++] = '.'; out[w++] = '.'; }
+        out[w] = '\0';
+    }
+    if (it->runtime_s > 0) {
+        int m = it->runtime_s / 60, s = it->runtime_s % 60;
+        char t[24];
+        int tl = snprintf(t, sizeof t, "%s%d:%02d", w > 0 ? "  " : "", m, s);
+        if (tl > 0 && w + tl < n) { memcpy(out + w, t, (size_t)tl + 1); }
+    }
 }

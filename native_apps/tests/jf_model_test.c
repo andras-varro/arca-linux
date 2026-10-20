@@ -455,9 +455,80 @@ static void test_pool_page_budget(void)
     CHECK(plain * 4 <= JF_TOKENS_PAGE * 3, "an instant mix of %d needs ~%d tokens, budget %d", JF_MIX_LIMIT, plain, JF_TOKENS_PAGE);
 }
 
+/* Operator rule: a track shows its ARTIST (Artists[0]); AlbumArtist only when Artists is empty.  A compilation track
+ * used to read "Various Artists" because AlbumArtist won.  Both are kept; an ALBUM row names its album artist. */
+static void test_artist_rule(void)
+{
+    static const char B[] = "{\"Items\":["
+        "{\"Id\":\"" ID1 "\",\"Type\":\"Audio\",\"Name\":\"Comp\",\"AlbumArtist\":\"Various Artists\",\"Artists\":[\"Real Band\",\"Guest\"]},"
+        "{\"Id\":\"" ID2 "\",\"Type\":\"Audio\",\"Name\":\"NoArtists\",\"AlbumArtist\":\"Album Person\",\"Artists\":[]},"
+        "{\"Id\":\"" ID3 "\",\"Type\":\"Audio\",\"Name\":\"OnlyArtists\",\"Artists\":[\"Solo\"]},"
+        "{\"Id\":\"" ID4 "\",\"Type\":\"MusicAlbum\",\"Name\":\"Album\",\"AlbumArtist\":\"Various Artists\",\"Artists\":[\"Real Band\"]}"
+        "],\"TotalRecordCount\":4}";
+    JfItem it[6];
+    JfList l;
+    jf_list_init(&l, it, 6);
+    CHECK(parse(B, &l) == JF_PARSE_OK && l.n == 4, "artist rule page parses");
+    CHECK(!strcmp(it[0].artist, "Real Band") && !strcmp(it[0].album_artist, "Various Artists"), "track: artist '%s', album artist '%s'", it[0].artist, it[0].album_artist);
+    CHECK(!strcmp(it[1].artist, "Album Person") && !strcmp(it[1].album_artist, "Album Person"), "empty Artists falls back to AlbumArtist: '%s'", it[1].artist);
+    CHECK(!strcmp(it[2].artist, "Solo") && !it[2].album_artist[0], "no AlbumArtist: '%s' / '%s'", it[2].artist, it[2].album_artist);
+    CHECK(!strcmp(it[3].artist, "Various Artists"), "an album row names its album artist: '%s'", it[3].artist);
+
+    CHECK(jf_row_shows_artist(false, &it[0]) && jf_row_shows_artist(false, &it[2]), "queue/search/mix/playlist rows: always for a track");
+    CHECK(jf_row_shows_artist(true, &it[0]), "album list: the compilation track differs from its album artist");
+    CHECK(!jf_row_shows_artist(true, &it[1]), "album list: artist == album artist hides it");
+    JfItem same = it[0];
+    snprintf(same.artist, sizeof same.artist, "VARIOUS artists");
+    CHECK(!jf_row_shows_artist(true, &same), "album list: the comparison ignores case");
+    CHECK(!jf_row_shows_artist(false, &it[3]) && !jf_row_shows_artist(true, &it[3]), "a non-track never shows an artist");
+}
+
+static void test_row_detail(void)
+{
+    char o[64];
+    JfItem t;
+    memset(&t, 0, sizeof t);
+    t.type = JF_ITEM_TRACK;
+    t.runtime_s = 245;
+    snprintf(t.artist, sizeof t.artist, "Short Band");
+    jf_row_detail(&t, true, o, sizeof o);
+    CHECK(!strcmp(o, "Short Band  4:05"), "artist and time: '%s'", o);
+    jf_row_detail(&t, false, o, sizeof o);
+    CHECK(!strcmp(o, "4:05"), "time only: '%s'", o);
+    snprintf(t.artist, sizeof t.artist, "ABCDEFGHIJKLMNOPQRSTUV");   /* exactly 22 */
+    jf_row_detail(&t, true, o, sizeof o);
+    CHECK(!strcmp(o, "ABCDEFGHIJKLMNOPQRSTUV  4:05"), "22 characters stay whole: '%s'", o);
+    snprintf(t.artist, sizeof t.artist, "ABCDEFGHIJKLMNOPQRSTUVW");  /* 23 */
+    jf_row_detail(&t, true, o, sizeof o);
+    CHECK(!strcmp(o, "ABCDEFGHIJKLMNOPQRST..  4:05"), "23 characters cut to 20 + '..': '%s'", o);
+    /* 30 two-byte characters: cut on a character boundary */
+    char u[64] = "";
+    for (int i = 0; i < 30; i++) strcat(u, "\xC3\xA9");
+    snprintf(t.artist, sizeof t.artist, "%s", u);
+    jf_row_detail(&t, true, o, sizeof o);
+    size_t ol = strlen(o);
+    CHECK(utf8_ok(o) && ol == 20 * 2 + 2 + 2 + 4 && !strncmp(o + 40, "..", 2), "UTF-8 cut on a boundary (len %zu '%s')", ol, o);
+    t.runtime_s = 0;
+    snprintf(t.artist, sizeof t.artist, "Band");
+    jf_row_detail(&t, true, o, sizeof o);
+    CHECK(!strcmp(o, "Band"), "no runtime: no time part: '%s'", o);
+    t.runtime_s = 3600 + 61;
+    t.artist[0] = '\0';
+    jf_row_detail(&t, true, o, sizeof o);
+    CHECK(!strcmp(o, "61:01"), "no artist: time only, minutes not wrapped: '%s'", o);
+    char tiny[6];
+    snprintf(t.artist, sizeof t.artist, "Some Artist");
+    jf_row_detail(&t, true, tiny, sizeof tiny);
+    CHECK(strlen(tiny) < sizeof tiny, "a small buffer is never overrun ('%s')", tiny);
+    jf_row_detail(&t, true, tiny, 1);
+    CHECK(tiny[0] == '\0', "n == 1 gives the empty string");
+}
+
 int main(void)
 {
     test_pool_page_budget();
+    test_artist_rule();
+    test_row_detail();
     test_pages();
     test_rounding_and_clamp();
     test_many_artists();
