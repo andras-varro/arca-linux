@@ -52,9 +52,9 @@ void jf_ui_layout(JfLayout *L, const JfExtents *e)
     L->save = rect_of(sl, rowy, sw, JF_UI_BTN_H);
     for (int i = 0; i < JF_UI_MIXBTN; i++)
         L->mixb[i] = rect_of(sl + i * ((sw - GAP) / 2 + GAP), rowy, (sw - GAP) / 2, JF_UI_BTN_H);
-    int wm = (sw - GAP) / 2;
+    int w4 = (sw - 3 * GAP) / 4;
     for (int i = 0; i < JF_UI_NPMIX; i++)
-        L->np_mix[i] = rect_of(sl + i * (wm + GAP), rowy - GAP - JF_UI_BTN_H, wm, JF_UI_BTN_H);
+        L->np_mix[i] = rect_of(sl + i * (w4 + GAP), rowy - GAP - JF_UI_BTN_H, w4, JF_UI_BTN_H);
     for (int i = 0; i < JF_UI_ROW5; i++)
         L->row5[i] = rect_of(sl + i * (w5 + GAP), rowy, w5, JF_UI_BTN_H);
 
@@ -67,6 +67,17 @@ void jf_ui_layout(JfLayout *L, const JfExtents *e)
 
     L->info = rect_of(sl, top + 6, sw, 120);
     L->progress = rect_of(sl + 20, top + 6 + 120 + 10, sw - 40, 14);
+    L->seek = rect_of(L->progress.x, L->progress.y - 10, L->progress.w, 34);
+
+    /* mini player: a strip right above the button row; the lists shrink by its height + a gap */
+    int mini_y = rowy - 4 - JF_UI_MINI_H;
+    L->list_mini = L->list;      L->list_mini.h = mini_y - 4 - L->list.y;
+    L->list_root_mini = L->list_root; L->list_root_mini.h = mini_y - 4 - L->list_root.y;
+    L->mini = rect_of(sl, mini_y, sw, JF_UI_MINI_H);
+    int wmb = 88;
+    for (int i = 0; i < JF_UI_MINI; i++)
+        L->mini_btn[i] = rect_of(sl + sw - (JF_UI_MINI - i) * wmb - (JF_UI_MINI - 1 - i) * GAP, mini_y, wmb, JF_UI_MINI_H);
+    L->mini_title = rect_of(sl, mini_y, L->mini_btn[0].x - GAP - sl, JF_UI_MINI_H);
 }
 
 void jf_ui_extents_live(JfExtents *e)
@@ -122,7 +133,12 @@ static void src_row(void *ctx, int index, LvRow *out)
     char *d = ui->rowtxt[ui->rowtxt_i];
     ui->rowtxt_i = (ui->rowtxt_i + 1) % 32;
     d[0] = '\0';
-    if (it->type == JF_ITEM_TRACK) mmss(d, sizeof ui->rowtxt[0], it->runtime_s);
+    if (it->type == JF_ITEM_TRACK) {
+        /* the plain album's track list repeats its album artist on every row; every other list (a compilation shows
+         * per-track artists through the helper) names the artist so a mixed list is readable */
+        bool album_list = app->screen == JF_SCR_TRACKS && app->ctx[JF_LIST_TRACKS].sub == JF_SUB_PLAIN;
+        jf_row_detail(it, jf_row_shows_artist(album_list, it), d, sizeof ui->rowtxt[0]);
+    }
     out->title = it->name;
     out->detail = d;
     out->glyph = it->type == JF_ITEM_TRACK ? LV_GLYPH_FILE : LV_GLYPH_FOLDER;
@@ -155,11 +171,13 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
     lv_init(&ui->lv, src, ui->L.list, 40);
 
     static const char *t3[JF_UI_ROW3] = { "SEARCH", "NOW PLAYING", "PLAY ALL" };
-    static const char *t5[JF_UI_ROW5] = { "NEXT", "VOL -", "VOL +", "QUEUE", "BACK" };
+    static const char *t5[JF_UI_ROW5] = { "PAUSE", "STOP", "NEXT", "QUEUE", "BACK" };
     for (int i = 0; i < JF_UI_ROW3; i++) style(&ui->row3[i], ui->L.row3[i], t3[i], 2);
     for (int i = 0; i < JF_UI_ROW5; i++) style(&ui->row5[i], ui->L.row5[i], t5[i], 2);
     static const char *ta[JF_UI_ABAR] = { "PLAY", "PLAY NEXT", "ADD QUEUE", "MIX", "INSTANT MIX" };
-    static const char *tm[JF_UI_NPMIX] = { "MIX", "INSTANT MIX" };
+    static const char *tm[JF_UI_NPMIX] = { "VOL -", "VOL +", "MIX", "INSTANT MIX" };
+    static const char *tmini[JF_UI_MINI] = { "PAUSE", "VOL -", "VOL +" };
+    for (int i = 0; i < JF_UI_MINI; i++) style(&ui->mini_b[i], ui->L.mini_btn[i], tmini[i], 2);
     for (int i = 0; i < JF_UI_ABAR; i++) style(&ui->abar[i], ui->L.abar[i], ta[i], 2);
     for (int i = 0; i < JF_UI_NPMIX; i++) style(&ui->np_mix[i], ui->L.np_mix[i], tm[i], 2);
     style(&ui->save, ui->L.save, "SAVE AS PLAYLIST", 2);
@@ -261,6 +279,24 @@ static void do_save(JfUi *ui, Pointer *ptr, JfEvent *out, int *n, int max)
 
 static bool bp(const InputState *in, int id) { return in && in->buttons[id].pressed; }
 
+/* The mini player rides on the browse screens while a queue exists. */
+static bool mini_wanted(const JfApp *app)
+{
+    return app->queue_n > 0 && is_list_screen(app->screen);
+}
+
+static const char *mini_play_label(const JfApp *app)
+{
+    return app->play_state == JF_PLAY_PLAYING || app->play_state == JF_PLAY_FETCHING ? "PAUSE" : "PLAY";
+}
+
+static UiRect list_rect_for(const JfUi *ui, JfScreen s)
+{
+    bool m = ui->mini_on;
+    if (s == JF_SCR_ARTISTS) return m ? ui->L.list_root_mini : ui->L.list_root;
+    return m ? ui->L.list_mini : ui->L.list;
+}
+
 static void begin_screen(JfUi *ui)
 {
     const JfApp *app = ui->app;
@@ -277,7 +313,8 @@ static void begin_screen(JfUi *ui)
         if (!ui->fields[1][0]) snprintf(ui->fields[1], sizeof ui->fields[1], "%s", app->login.user);
     }
     if (app->screen == JF_SCR_QUEUE || app->screen == JF_SCR_MIX || is_list_screen(app->screen)) {
-        ui->lv.rect = app->screen == JF_SCR_ARTISTS ? ui->L.list_root : ui->L.list;
+        ui->mini_on = mini_wanted(app);
+        ui->lv.rect = list_rect_for(ui, app->screen);
         lv_reset(&ui->lv);
         if (app->screen == JF_SCR_QUEUE && app->queue_n > 0) lv_move_to(&ui->lv, app->queue_cur);
     }
@@ -311,9 +348,19 @@ static void row3_act(JfUi *ui, Pointer *ptr, int i, JfEvent *out, int *n, int ma
 static void row5_act(JfUi *ui, int i, JfEvent *out, int *n, int max)
 {
     (void)ui;
-    static const JfEventType t[JF_UI_ROW5] = { JF_EV_NEXT, JF_EV_VOL_DOWN, JF_EV_VOL_UP,
+    static const JfEventType t[JF_UI_ROW5] = { JF_EV_PAUSE, JF_EV_STOP, JF_EV_NEXT,
                                                JF_EV_OPEN_QUEUE, JF_EV_BACK };
     emit(out, n, max, t[i]);
+}
+
+static void abar_act(int i, int row, JfEvent *out, int *n, int max);
+
+/* The now-playing upper row: VOL -, VOL +, MIX, INSTANT MIX (of the playing track). */
+static void np_act(int i, JfEvent *out, int *n, int max)
+{
+    if (i == 0) emit(out, n, max, JF_EV_VOL_DOWN);
+    else if (i == 1) emit(out, n, max, JF_EV_VOL_UP);
+    else abar_act(i + 1, -1, out, n, max);   /* MIX = abar 3, INSTANT MIX = abar 4 */
 }
 
 /* The five buttons of the action bar, on list row `row` (-1 = the playing track, NOW PLAYING's MIX pair). */
@@ -371,6 +418,33 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     }
     ui->dlg_up = false;
 
+    /* The INSTANT MIX question owns every input while it is up (OK / CANCEL; Esc, B and Select cancel). */
+    if (app->confirm != JF_CONFIRM_NONE) {
+        if (!ui->cdlg_up) {
+            char msg[128], nm[64];
+            lv_fit(nm, sizeof nm, app->confirm_seed.name, 8 * 6 * 2, 2);
+            snprintf(msg, sizeof msg, "REPLACE QUEUE WITH INSTANT MIX OF %s?", nm);
+            modal_dialog_init(&ui->cdlg, "INSTANT MIX", msg, 2);
+            modal_dialog_set_button(&ui->cdlg, 0, "OK", BTN_BG, COLOR_WHITE);
+            modal_dialog_set_button(&ui->cdlg, 1, "CANCEL", RGB(90, 40, 40), COLOR_WHITE);
+            modal_dialog_set_focus(&ui->cdlg, 1);
+            modal_dialog_show(&ui->cdlg);
+            ui->cdlg_up = true;
+            ui->dirty = true;
+        }
+        int a = modal_dialog_input(&ui->cdlg, in, 1);
+        if (a < 0) a = modal_dialog_update(&ui->cdlg, ts->x, ts->y, ts->pressed || ts->held, now);
+        if (ts->pressed || ts->released || bp(in, BTN_ID_LEFT) || bp(in, BTN_ID_RIGHT) || bp(in, BTN_ID_UP) ||
+            bp(in, BTN_ID_DOWN)) ui->dirty = true;
+        if (a >= 0) {
+            emit(out, &n, max, a == 0 ? JF_EV_CONFIRM : JF_EV_BACK);
+            ui->cdlg_up = false;
+            ui->dirty = true;
+        }
+        return n;
+    }
+    ui->cdlg_up = false;
+
     bool pad_nav = bp(in, BTN_ID_UP) || bp(in, BTN_ID_DOWN) || bp(in, BTN_ID_LEFT) ||
                    bp(in, BTN_ID_RIGHT) || bp(in, BTN_ID_JUMP) || bp(in, BTN_ID_ACTION);
     if (ts->pressed) ui->show_ring = false;
@@ -424,22 +498,41 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     }
 
     if (sc == JF_SCR_NOWPLAYING) {
-        /* focus 0..4 the row5 buttons, 5 and 6 MIX / INSTANT MIX of the playing track; Up / Down walk all seven */
+        /* focus 0..4 the row5 buttons (PAUSE, STOP, NEXT, QUEUE, BACK), 5..8 the row above (VOL -, VOL +, MIX,
+         * INSTANT MIX); Up / Down walk all nine.  Start / Esc and Space pause, Select / Backspace go back. */
         enum { NP_N = JF_UI_ROW5 + JF_UI_NPMIX };
-        if (go_back) emit(out, &n, max, JF_EV_BACK);
+        if (bp(in, BTN_ID_BACK)) emit(out, &n, max, JF_EV_BACK);
+        if (bp(in, BTN_ID_PAUSE) || bp(in, BTN_ID_JUMP)) emit(out, &n, max, JF_EV_PAUSE);
         if (bp(in, BTN_ID_LEFT))  emit(out, &n, max, JF_EV_VOL_DOWN);
         if (bp(in, BTN_ID_RIGHT)) emit(out, &n, max, JF_EV_VOL_UP);
         if (bp(in, BTN_ID_UP))   ui->focus = (ui->focus + NP_N - 1) % NP_N;
         if (bp(in, BTN_ID_DOWN)) ui->focus = (ui->focus + 1) % NP_N;
-        if (bp(in, BTN_ID_JUMP))   emit(out, &n, max, JF_EV_NEXT);
-        else if (bp(in, BTN_ID_ACTION)) {
+        if (bp(in, BTN_ID_ACTION)) {
             if (ui->focus < JF_UI_ROW5) row5_act(ui, ui->focus, out, &n, max);
-            else abar_act(ui->focus - JF_UI_ROW5 + 3, -1, out, &n, max);
+            else np_act(ui->focus - JF_UI_ROW5, out, &n, max);
         }
         for (int i = 0; i < JF_UI_ROW5; i++)
             if (button_check_tap(&ui->row5[i], ts, now)) row5_act(ui, i, out, &n, max);
         for (int i = 0; i < JF_UI_NPMIX; i++)
-            if (button_check_tap(&ui->np_mix[i], ts, now)) abar_act(i + 3, -1, out, &n, max);
+            if (button_check_tap(&ui->np_mix[i], ts, now)) np_act(i, out, &n, max);
+        /* seek: a finger on the bar shows the target, lifting it sends the seek; a tap is a jump */
+        const JfItem *cur = jf_now(app);
+        int total_ms = cur ? cur->runtime_s * 1000 : 0;
+        UiRect sk = ui->L.seek, pr = ui->L.progress;
+        if (ts->pressed && total_ms > 0 && ts->x >= sk.x && ts->x < sk.x + sk.w && ts->y >= sk.y && ts->y < sk.y + sk.h)
+            ui->seeking = true;
+        if (ui->seeking) {
+            int dx = ts->x - pr.x;
+            if (dx < 0) dx = 0;
+            if (dx > pr.w) dx = pr.w;
+            ui->seek_ms = (int)((long long)total_ms * dx / pr.w);
+            ui->dirty = true;
+            if (ts->released) {
+                int k = emit(out, &n, max, JF_EV_SEEK);
+                if (k >= 0) out[k].i = ui->seek_ms;
+                ui->seeking = false;
+            } else if (!ts->held && !ts->pressed) ui->seeking = false;
+        }
         return n;
     }
 
@@ -664,29 +757,32 @@ static void draw_nowplaying(JfUi *ui)
         lv_fit(buf, sizeof buf, it->album, in.w - 8, 2);
         fb_draw_text(fb, in.x + 4, in.y + 66, buf, DIM, 2);
     }
-    const char *state = app->play_state == JF_PLAY_FETCHING ? "LOADING..."
+    const char *state = app->play_state == JF_PLAY_FETCHING ? "LOADING..." : app->play_state == JF_PLAY_PAUSED ? "PAUSED"
+                      : app->play_state == JF_PLAY_STOPPED ? "STOPPED"
                       : app->play_state == JF_PLAY_END ? "END OF QUEUE" : "";
     if (state[0]) fb_draw_text(fb, in.x + 4, in.y + 94, state, RING, 2);
 
     UiRect p = ui->L.progress;
     int total = it ? it->runtime_s : 0;
     int sec = ui->played_ms / 1000;
-    if (app->play_state != JF_PLAY_PLAYING) sec = 0;
+    if (app->play_state != JF_PLAY_PLAYING && app->play_state != JF_PLAY_PAUSED) sec = 0;
+    if (ui->seeking) sec = ui->seek_ms / 1000;   /* the would-be position under the finger */
     fb_fill_rect(fb, p.x, p.y, p.w, p.h, PANEL);
     if (total > 0) {
         int fill = sec >= total ? p.w : (int)((long)p.w * sec / total);
-        fb_fill_rect(fb, p.x, p.y, fill, p.h, BTN_HL);
+        fb_fill_rect(fb, p.x, p.y, fill, p.h, ui->seeking ? RING : BTN_HL);
     }
     fb_draw_rect(fb, p.x, p.y, p.w, p.h, DIM);
     char a[16], z[16];
     mmss(a, sizeof a, sec);
     mmss(z, sizeof z, total);
     snprintf(buf, sizeof buf, "%s / %s", a, z);
-    fb_draw_text(fb, p.x, p.y + p.h + 8, buf, COLOR_WHITE, 2);
+    fb_draw_text(fb, p.x, p.y + p.h + 8, buf, ui->seeking ? RING : COLOR_WHITE, 2);
     if (app->volume_step == 0) snprintf(buf, sizeof buf, "MUTE");
     else snprintf(buf, sizeof buf, "VOLUME %d/%d", app->volume_step, JF_VOLUME_MAX);
     fb_draw_text(fb, p.x + p.w - text_measure_width(buf, 2), p.y + p.h + 8, buf, COLOR_WHITE, 2);
 
+    snprintf(ui->row5[0].text, sizeof ui->row5[0].text, "%s", mini_play_label(app));
     for (int i = 0; i < JF_UI_NPMIX; i++) {
         button_draw(fb, &ui->np_mix[i]);
         if (ui->show_ring && ui->focus == JF_UI_ROW5 + i) ring(ui, ui->L.np_mix[i]);
@@ -695,6 +791,24 @@ static void draw_nowplaying(JfUi *ui)
         button_draw(fb, &ui->row5[i]);
         if (ui->show_ring && ui->focus == i) ring(ui, ui->L.row5[i]);
     }
+}
+
+static void draw_mini(JfUi *ui)
+{
+    const JfApp *app = ui->app;
+    Framebuffer *fb = ui->fb;
+    UiRect m = ui->L.mini_title;
+    fb_fill_rect(fb, m.x, m.y, m.w, m.h, PANEL);
+    const JfItem *it = jf_now(app);
+    if (it) {
+        char t[192], f[160];
+        if (it->artist[0]) snprintf(t, sizeof t, "%s - %s", it->name, it->artist);
+        else snprintf(t, sizeof t, "%s", it->name);
+        lv_fit(f, sizeof f, t, m.w - 12, 2);
+        fb_draw_text(fb, m.x + 6, m.y + (m.h - 14) / 2, f, COLOR_WHITE, 2);
+    }
+    snprintf(ui->mini_b[0].text, sizeof ui->mini_b[0].text, "%s", mini_play_label(app));
+    for (int i = 0; i < JF_UI_MINI; i++) button_draw(fb, &ui->mini_b[i]);
 }
 
 void jf_ui_draw(JfUi *ui)
@@ -726,6 +840,7 @@ void jf_ui_draw(JfUi *ui)
         draw_nowplaying(ui);
         break;
     case JF_SCR_ARTISTS:
+        if (mini_wanted(app)) draw_mini(ui);
         draw_category(ui);
         ui->lv.active = ui->zone == JF_ZONE_LIST;
         lv_sync(&ui->lv);
@@ -752,11 +867,13 @@ void jf_ui_draw(JfUi *ui)
         }
         break;
     default:
+        if (mini_wanted(app)) draw_mini(ui);
         ui->lv.active = ui->zone == JF_ZONE_LIST;
         lv_sync(&ui->lv);
         lv_draw(fb, &ui->lv, app->busy ? "" : "NOTHING HERE");
         draw_row3(ui);
         break;
     }
+    if (app->confirm != JF_CONFIRM_NONE && ui->cdlg_up) modal_dialog_draw(&ui->cdlg, fb);
     if (app->overlay && ui->dlg_up) modal_dialog_draw(&ui->dlg, fb);
 }

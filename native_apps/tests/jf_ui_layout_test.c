@@ -30,7 +30,7 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     JfExtents e = { 0, 0, 800, 480, inset_l, inset_t, 800 - inset_r, 480 - inset_b };
     JfLayout L;
     jf_ui_layout(&L, &e);
-    UiRect press[32];
+    UiRect press[48];
     int n = 0;
     for (int i = 0; i < JF_UI_ROW3; i++) press[n++] = L.row3[i];
     for (int i = 0; i < JF_UI_ROW5; i++) press[n++] = L.row5[i];
@@ -38,6 +38,10 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     press[n++] = L.signin; press[n++] = L.signexit;
     for (int i = 0; i < JF_UI_ABAR; i++) press[n++] = L.abar[i];
     for (int i = 0; i < JF_UI_NPMIX; i++) press[n++] = L.np_mix[i];
+    for (int i = 0; i < JF_UI_MINI; i++) press[n++] = L.mini_btn[i];
+    press[n++] = L.mini_title; press[n++] = L.seek;
+    for (int i = 0; i < JF_UI_MIXBTN; i++) press[n++] = L.mixb[i];
+    press[n++] = L.list_mini; press[n++] = L.list_root_mini;
     press[n++] = L.save;
     press[n++] = L.cat_prev; press[n++] = L.cat_next;
     for (int i = 0; i < n; i++)
@@ -75,6 +79,30 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     CHECK(inside(L.progress, e.vis_l, e.vis_t, e.vis_r, e.vis_b), "D: progress outside VISIBLE");
     CHECK(inside(L.info, e.vis_l, e.vis_t, e.vis_r, e.vis_b), "D: info outside VISIBLE");
     CHECK(L.progress.y + L.progress.h + 30 <= L.row5[0].y, "D: progress and its label leave the button row clear");
+    /* G  mini player: the strip sits between the shortened lists and the button row, clear of SEARCH / the category
+     * bar / every row; its buttons are disjoint; the lists keep two rows */
+    CHECK(disjoint(L.mini, L.list_mini) && disjoint(L.mini, L.list_root_mini), "G: mini overlaps a shortened list (inset %d)", inset_t);
+    CHECK(L.list_mini.h >= 2 * 40 && L.list_root_mini.h >= 2 * 40, "G: shortened list under two rows (inset %d)", inset_t);
+    CHECK(L.list_mini.y == L.list.y && L.list_root_mini.y == L.list_root.y, "G: shortened list moved its top");
+    for (int i = 0; i < JF_UI_ROW3; i++) CHECK(disjoint(L.mini, L.row3[i]), "G: mini overlaps row3[%d] (inset %d)", i, inset_t);
+    for (int i = 0; i < JF_UI_ABAR; i++) CHECK(disjoint(L.mini, L.abar[i]), "G: mini overlaps abar[%d]", i);
+    CHECK(disjoint(L.mini, L.save) && disjoint(L.mini, L.cat_prev) && disjoint(L.mini, L.cat_next) && disjoint(L.mini, L.banner), "G: mini overlaps save / category / banner");
+    CHECK(disjoint(L.mini_title, L.mini_btn[0]), "G: mini title overlaps PLAY");
+    for (int i = 0; i < JF_UI_MINI; i++) {
+        CHECK(L.mini_btn[i].h >= 40 && L.mini_btn[i].w >= 60, "G: mini button %d too small", i);
+        for (int j = i + 1; j < JF_UI_MINI; j++) CHECK(disjoint(L.mini_btn[i], L.mini_btn[j]), "G: mini buttons %d/%d overlap", i, j);
+    }
+    CHECK(L.mini_title.w >= 200, "G: mini title too narrow: %d", L.mini_title.w);
+    /* H  now playing: two button rows, the seek area (taller than the 14 px bar) clear of both and of each other */
+    CHECK(L.seek.h >= 30 && L.seek.y <= L.progress.y && L.seek.y + L.seek.h >= L.progress.y + L.progress.h, "H: seek area does not cover the bar");
+    for (int i = 0; i < JF_UI_NPMIX; i++) {
+        CHECK(disjoint(L.seek, L.np_mix[i]), "H: seek overlaps np_mix[%d] (inset %d)", i, inset_t);
+        for (int j = i + 1; j < JF_UI_NPMIX; j++) CHECK(disjoint(L.np_mix[i], L.np_mix[j]), "H: np_mix %d/%d overlap", i, j);
+    }
+    for (int i = 0; i < JF_UI_ROW5; i++) CHECK(disjoint(L.seek, L.row5[i]), "H: seek overlaps row5[%d]", i);
+    CHECK(L.np_mix[0].h >= JF_UI_BTN_H && L.row5[0].h >= JF_UI_BTN_H, "H: now-playing buttons shrank");
+    for (int i = 0; i < JF_UI_MIXBTN; i++) CHECK(disjoint(L.mixb[i], L.list), "H: MIX screen button %d overlaps the list", i);
+    CHECK(disjoint(L.mixb[0], L.mixb[1]), "H: MIX START / CANCEL overlap");
 }
 
 int main(void)

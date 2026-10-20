@@ -23,10 +23,12 @@
 #include "jf_core.h"
 
 #define JF_UI_ROW3   3     /* browse screens: SEARCH, NOW PLAYING, PLAY ALL */
-#define JF_UI_ROW5   5     /* now playing: NEXT, VOL-, VOL+, QUEUE, BACK */
+#define JF_UI_ROW5   5     /* now playing, lower row: PAUSE/PLAY, STOP, NEXT, QUEUE, BACK */
 #define JF_UI_FIELDS 3     /* sign-in: SERVER, USER, PASSWORD */
 #define JF_UI_ABAR   5     /* action bar: PLAY, PLAY NEXT, ADD QUEUE, MIX, INSTANT MIX */
-#define JF_UI_NPMIX  2     /* now playing: MIX, INSTANT MIX (focus 5 and 6, after the row5 buttons) */
+#define JF_UI_NPMIX  4     /* now playing, upper row: VOL -, VOL +, MIX, INSTANT MIX (focus 5..8, after the row5 buttons) */
+#define JF_UI_MINI   3     /* mini player: PLAY/PAUSE, VOL -, VOL + */
+#define JF_UI_MINI_H 40    /* the strip above the button row */
 #define JF_UI_MIXBTN 2     /* MIX screen: START, CANCEL */
 #define JF_UI_BTN_H  44
 #define JF_UI_CAT_H  40     /* root category strip: arrows and name */
@@ -44,7 +46,12 @@ typedef struct {
     UiRect list;                    /* browse list and queue list (above the button row) */
     UiRect abar[JF_UI_ABAR];        /* the action bar: in the button row's place while it is up; pressable */
     UiRect save;                    /* the queue screen's SAVE AS PLAYLIST, in the button row; pressable */
-    UiRect np_mix[JF_UI_NPMIX];     /* now playing: a row above row5; pressable */
+    UiRect np_mix[JF_UI_NPMIX];     /* now playing: the row above row5; pressable */
+    UiRect list_mini, list_root_mini; /* list / root list while the mini player strip is up (shorter, same top) */
+    UiRect mini;                    /* mini player strip, drawn only (its parts are pressable) */
+    UiRect mini_title;              /* tap: open NOW PLAYING; pressable */
+    UiRect mini_btn[JF_UI_MINI];    /* PLAY/PAUSE, VOL -, VOL +; pressable */
+    UiRect seek;                    /* now playing: the progress bar's touch area (taller than the bar); pressable */
     UiRect mixb[JF_UI_MIXBTN];      /* MIX screen: START, CANCEL in the button row; pressable (the tick rows are the list) */
     UiRect list_root;               /* the browse list on the root screen: under the category strip */
     UiRect cat_prev, cat_next;      /* root category arrows, pressable */
@@ -71,7 +78,12 @@ typedef struct {
     JfLayout L;
     TopBar bar;
     ListView lv;
-    Button row3[JF_UI_ROW3], row5[JF_UI_ROW5], abar[JF_UI_ABAR], np_mix[JF_UI_NPMIX], save;
+    Button row3[JF_UI_ROW3], row5[JF_UI_ROW5], abar[JF_UI_ABAR], np_mix[JF_UI_NPMIX], save, mini_b[JF_UI_MINI];
+    ModalDialog cdlg;                    /* the INSTANT MIX confirmation */
+    bool cdlg_up;
+    bool mini_on;                        /* the strip is up (and the list rect is the shorter one) */
+    bool seeking;                        /* a finger is on the progress bar */
+    int  seek_ms;                        /* its target */
     Button mixb[JF_UI_MIXBTN];
     char mixrow[JF_MIX_OPT_MAX][112];    /* "[X] LABEL" of the tick rows being drawn */
     bool abar_up;                        /* the core's action_bar as of the last frame: a rising edge moves focus onto it */
@@ -90,7 +102,7 @@ typedef struct {
     int  bar_focus;                      /* 0 back, 1 exit */
     int  played_ms;                      /* the loop's wall-clock count for the track */
     bool exit_press, back_press;
-    char rowtxt[32][24];                 /* detail strings of the rows being drawn */
+    char rowtxt[32][48];                 /* detail strings of the rows being drawn */
     int  rowtxt_i;
     bool dirty;
     unsigned seen_banner;
