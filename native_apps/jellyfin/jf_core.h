@@ -82,7 +82,11 @@ typedef enum { JF_CAT_ALBUMS = 0, JF_CAT_ARTISTS, JF_CAT_PLAYLISTS, JF_CAT_GENRE
  * TRACKS of an album (plain) or of a playlist. */
 typedef enum { JF_SUB_PLAIN = 0, JF_SUB_GENRE, JF_SUB_PLAYLIST } JfSub;
 
-typedef enum { JF_PLAY_IDLE = 0, JF_PLAY_FETCHING, JF_PLAY_PLAYING, JF_PLAY_END } JfPlayState;
+/* PAUSED: audio stopped, position held in JfApp.pos_ms (resume restarts the stream there).  STOPPED: stopped by the user, queue and
+ * queue_cur kept; PAUSE then restarts the current track from 0. */
+typedef enum { JF_PLAY_IDLE = 0, JF_PLAY_FETCHING, JF_PLAY_PLAYING, JF_PLAY_END, JF_PLAY_PAUSED, JF_PLAY_STOPPED } JfPlayState;
+
+typedef enum { JF_CONFIRM_NONE = 0, JF_CONFIRM_INSTANT_MIX } JfConfirm;
 
 /* Buttons of the error overlay (JfApp.overlay_buttons). */
 #define JF_BTN_RETRY  1u
@@ -107,6 +111,10 @@ typedef enum {
     JF_EV_BACK,
     JF_EV_PLAY_ALL,
     JF_EV_NEXT,
+    JF_EV_PAUSE,         /* toggle: PLAYING/FETCHING -> PAUSED, PAUSED -> resume, STOPPED/END -> restart the current track from 0.  .played_ms = the position now (jellyfin.c fills it from jf_position_ms) */
+    JF_EV_STOP,          /* playback ends, queue and queue_cur stay (STOPPED) */
+    JF_EV_SEEK,          /* .i: target position in ms (clamped to [0, runtime)); restarts the stream there, or only moves pos_ms while PAUSED */
+    JF_EV_CONFIRM,       /* proceed with app->confirm */
     JF_EV_VOL_UP,
     JF_EV_VOL_DOWN,
     JF_EV_SEARCH,        /* .term; empty = cancel any search in flight */
@@ -246,6 +254,10 @@ typedef struct {
     int queue_n;
     int queue_cur;           /* index of the track playing / last played; valid when queue_n > 0 */
     int volume_step;         /* 0..JF_VOLUME_MAX; 0 = mute (also in .login.volume_step) */
+    int start_ms;            /* where the live stream started (0, or a seek / resume offset): shown elapsed = start_ms + time since START_AUDIO */
+    int pos_ms;              /* PAUSED: the held position */
+    JfConfirm confirm;       /* a modal question is up (INSTANT MIX over a non-empty queue): CONFIRM proceeds, BACK / DISMISS cancels */
+    JfItem confirm_seed;     /* the seed the confirmed fetch will use */
     JfLogin login;           /* server and user are kept on 401; token is emptied */
 
     /* ── private to jf_core.c ──────────────────────────────────────────── */
@@ -283,5 +295,8 @@ int jf_volume_mdb(int step);
 
 /** The queue entry playing (or last played); NULL when the queue is empty. */
 const JfItem *jf_now(const JfApp *app);
+
+/** Position to show: PAUSED pos_ms; PLAYING start_ms + elapsed_ms (since START_AUDIO; 0 when no stream is live); FETCHING start_ms; else 0.  Clamped to the runtime. */
+int jf_position_ms(const JfApp *app, int elapsed_ms);
 
 #endif

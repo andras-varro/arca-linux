@@ -143,7 +143,9 @@ static void execute(const JfCmds *cmds, uint32_t now)
 static void step_event(const JfEvent *ev, uint32_t now)
 {
     static JfCmds cmds;
-    jf_step(&app, ev, &cmds);
+    JfEvent e2 = *ev;
+    if (e2.type == JF_EV_PAUSE) e2.played_ms = jf_position_ms(&app, track_live ? (int)(now - track_t0) : 0);
+    jf_step(&app, &e2, &cmds);
     execute(&cmds, now);
     jf_ui_mark_dirty(&ui);
 }
@@ -245,7 +247,7 @@ int main(int argc, char *argv[])
             track_live = false;
             push_type(JF_EV_TRACK_ENDED, (int)(now - track_t0));
         }
-        jf_ui_set_played(&ui, track_live ? (int)(now - track_t0) : 0);
+        jf_ui_set_played(&ui, jf_position_ms(&app, track_live ? (int)(now - track_t0) : 0));
 
         for (int i = 0; i < evq_n; i++) {
             JfEvent *e = &evq[i];

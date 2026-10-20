@@ -733,6 +733,7 @@ static void test_mix(void)
     start_playing(0);
     send(JF_EV_SELECT, 2);
     send(JF_EV_INSTANT_MIX, 2);
+    send(JF_EV_CONFIRM, 0);
     const JfCmd *c = find(JF_CMD_REQUEST);
     CHECK(c && cm.n == 1 && c->kind == JF_KIND_LIST && c->list == &app.lists[JF_LIST_MIX] && !app.action_bar,
           "INSTANT MIX requests a LIST into the mix store and drops the bar");
@@ -751,12 +752,14 @@ static void test_mix(void)
     /* seed -1 = the playing track */
     reply_stream(cm.c[1].tag, JF_ERR_NONE, 42); send(JF_EV_STREAM_STARTED, 0);
     send(JF_EV_INSTANT_MIX, -1);
+    send(JF_EV_CONFIRM, 0);
     c = find(JF_CMD_REQUEST);
     CHECK(c && strstr(c->path, app.queue[0].id), "INSTANT MIX from NOW PLAYING seeds with the playing track");
 
     /* stale: a second request supersedes the first */
     JfCmd first = *c;
     send(JF_EV_INSTANT_MIX, -1);
+    send(JF_EV_CONFIRM, 0);
     int qn = app.queue_n;
     reply_list(&first, JF_ITEM_TRACK, 3, 3);
     CHECK(app.queue_n == qn && cm.n == 0, "a superseded mix reply is ignored");
@@ -764,12 +767,14 @@ static void test_mix(void)
     /* empty answer: queue stays */
     in_tracks(4, 4); start_playing(0);
     send(JF_EV_INSTANT_MIX, 1);
+    send(JF_EV_CONFIRM, 0);
     req = *find(JF_CMD_REQUEST);
     reply_list(&req, JF_ITEM_TRACK, 0, 0);
     CHECK(strcmp(app.banner, "NO MIX FOUND") == 0 && app.queue_n == 4 && cm.n == 0 && !app.busy, "empty mix: notice, queue kept");
 
     /* errors */
     send(JF_EV_INSTANT_MIX, 1);
+    send(JF_EV_CONFIRM, 0);
     req = *find(JF_CMD_REQUEST);
     reply_raw(&req, JF_ERR_SERVER);
     CHECK(app.overlay && (app.overlay_buttons & JF_BTN_RETRY) && app.queue_n == 4, "mix server error: overlay with RETRY");
@@ -781,6 +786,7 @@ static void test_mix(void)
     CHECK(app.overlay && app.overlay_buttons == JF_BTN_CLOSE && strcmp(app.overlay_text, "NOT FOUND") == 0, "mix 404: CLOSE only");
     send(JF_EV_CLOSE_ERROR, 0);
     send(JF_EV_INSTANT_MIX, 1);
+    send(JF_EV_CONFIRM, 0);
     req = *find(JF_CMD_REQUEST);
     reply_raw(&req, JF_ERR_UNAUTH);
     CHECK(app.screen == JF_SCR_SIGNIN, "mix 401 -> session expired");
@@ -1314,12 +1320,128 @@ static void test_save(void)
     save_result(c ? c->tag : 0, JF_ERR_UNAUTH, 401);
     CHECK(app.screen == JF_SCR_SIGNIN && !app.busy, "save 401 -> session expired");
 }
+
+/* ── pause / stop / seek, and the INSTANT MIX confirmation ─────────────── */
+
+static void send_pos(JfEventType t, int ms)
+{
+    static JfEvent ev; memset(&ev, 0, sizeof(ev)); ev.type = t; ev.played_ms = ms; step_ev(&ev);
+}
+static void playing_album(void)
+{
+    in_tracks(4, 4); start_playing(0);
+    for (int k = 0; k < app.queue_n; k++) app.queue[k].runtime_s = 200;
+}
+
+static void test_pause_stop_seek(void)
+{
+    playing_album();
+    send_pos(JF_EV_PAUSE, 42000);
+    CHECK(app.play_state == JF_PLAY_PAUSED && app.pos_ms == 42000 && cm.n == 1 && cm.c[0].type == JF_CMD_STOP, "pause: STOP only, held at 42 s");
+    CHECK(app.queue_cur == 0 && app.queue_n == 4 && !app.busy && jf_position_ms(&app, 777) == 42000, "pause keeps the queue; position is held");
+    send_played(1000);
+    CHECK(cm.n == 0 && app.play_state == JF_PLAY_PAUSED, "a stale TRACK_ENDED is ignored while paused");
+    send(JF_EV_PAUSE, 0);
+    const JfCmd *c = find(JF_CMD_PLAY_STREAM);
+    CHECK(cm.n == 1 && c && strstr(c->path, "StartTimeTicks=420000000") && app.play_state == JF_PLAY_FETCHING && app.start_ms == 42000,
+          "resume: one stream request at 42 s (%s)", c ? c->path : "-");
+    reply_stream(c->tag, JF_ERR_NONE, 41); send(JF_EV_STREAM_STARTED, 0);
+    CHECK(app.play_state == JF_PLAY_PLAYING && jf_position_ms(&app, 3000) == 45000, "playing again, position = start + elapsed");
+
+    send(JF_EV_STOP, 0);
+    CHECK(app.play_state == JF_PLAY_STOPPED && cm.n == 1 && cm.c[0].type == JF_CMD_STOP && app.queue_n == 4 && app.queue_cur == 0 && jf_position_ms(&app, 9) == 0,
+          "stop: STOP, queue and index kept, position 0");
+    send(JF_EV_STOP, 0);
+    CHECK(cm.n == 0, "stop twice does nothing");
+    send(JF_EV_PAUSE, 0);
+    c = find(JF_CMD_PLAY_STREAM);
+    CHECK(c && !strstr(c->path, "StartTimeTicks") && app.play_state == JF_PLAY_FETCHING && app.queue_cur == 0, "play after stop restarts the track from 0");
+
+    send(JF_EV_STOP, 0);                       /* while FETCHING */
+    CHECK(app.play_state == JF_PLAY_STOPPED && has(JF_CMD_STOP) && has(JF_CMD_CANCEL), "stop while loading cancels the request");
+    reply_stream(c->tag, JF_ERR_NONE, 43);
+    CHECK(has(JF_CMD_CLOSE_FD) && !has(JF_CMD_START_AUDIO), "its late stream is closed, not played");
+
+    playing_album();
+    send(JF_EV_NEXT, 0); send_pos(JF_EV_PAUSE, 0);          /* pause while FETCHING holds the start offset */
+    CHECK(app.play_state == JF_PLAY_PAUSED && app.pos_ms == 0 && has(JF_CMD_CANCEL) && has(JF_CMD_STOP), "pause while loading");
+    send(JF_EV_NEXT, 0);
+    CHECK(app.queue_cur == 2 && cm.n == 1 && cm.c[0].type == JF_CMD_PLAY_STREAM && app.start_ms == 0, "next while paused starts the next track from 0, no STOP");
+
+    jf_app_init(&app);
+    send(JF_EV_PAUSE, 0); send(JF_EV_STOP, 0);
+    CHECK(cm.n == 0, "pause / stop with an empty queue do nothing");
+
+    /* seek */
+    playing_album();
+    send(JF_EV_SEEK, 90000);
+    c = find(JF_CMD_PLAY_STREAM);
+    CHECK(cm.n == 2 && cm.c[0].type == JF_CMD_STOP && c && strstr(c->path, "StartTimeTicks=900000000") && app.start_ms == 90000 && app.play_state == JF_PLAY_FETCHING,
+          "seek: STOP then a stream at 90 s");
+    reply_stream(c->tag, JF_ERR_NONE, 44); send(JF_EV_STREAM_STARTED, 0);
+    send(JF_EV_SEEK, 99999999);
+    c = find(JF_CMD_PLAY_STREAM);
+    CHECK(c && strstr(c->path, "StartTimeTicks=1999990000") && app.start_ms == 199999, "seek clamps below the runtime (%d)", app.start_ms);
+    reply_stream(c->tag, JF_ERR_NONE, 45); send(JF_EV_STREAM_STARTED, 0);
+    send(JF_EV_SEEK, -5);
+    c = find(JF_CMD_PLAY_STREAM);
+    CHECK(c && !strstr(c->path, "StartTimeTicks") && app.start_ms == 0, "seek clamps at 0");
+    reply_stream(c->tag, JF_ERR_NONE, 46); send(JF_EV_STREAM_STARTED, 0);
+    send(JF_EV_SEEK, 199000);
+    reply_stream(find(JF_CMD_PLAY_STREAM)->tag, JF_ERR_NONE, 47); send(JF_EV_STREAM_STARTED, 0);
+    send_played(900);
+    CHECK(app.fail_streak == 0 && app.queue_cur == 1 && has(JF_CMD_PLAY_STREAM), "a seek to the last second that ends fast is no failure; next track");
+    send_played(900); send_played(900);
+    send(JF_EV_NEXT, 0);
+    app.fail_streak = 0;
+    reply_stream(find(JF_CMD_PLAY_STREAM)->tag, JF_ERR_NONE, 48); send(JF_EV_STREAM_STARTED, 0);
+    send_played(900);
+    CHECK(app.fail_streak == 1, "a normal track that ends in under 5 s still counts as failed");
+
+    playing_album();
+    send_pos(JF_EV_PAUSE, 10000);
+    send(JF_EV_SEEK, 120000);
+    CHECK(cm.n == 0 && app.pos_ms == 120000 && app.play_state == JF_PLAY_PAUSED, "seek while paused only moves the position");
+    send(JF_EV_PAUSE, 0);
+    CHECK(strstr(find(JF_CMD_PLAY_STREAM)->path, "StartTimeTicks=1200000000") != NULL, "resume starts at the seeked position");
+    send(JF_EV_STOP, 0); send(JF_EV_SEEK, 5000);
+    CHECK(cm.n == 0 && app.play_state == JF_PLAY_STOPPED, "seek while stopped is ignored");
+    playing_album(); app.queue[0].runtime_s = 0; send(JF_EV_SEEK, 5000);
+    CHECK(cm.n == 0, "seek without a known runtime is ignored");
+}
+
+static void test_instant_confirm(void)
+{
+    playing_album();
+    send(JF_EV_SELECT, 2);
+    send(JF_EV_INSTANT_MIX, 2);
+    CHECK(cm.n == 0 && app.confirm == JF_CONFIRM_INSTANT_MIX && !app.busy && app.queue_n == 4 && app.play_state == JF_PLAY_PLAYING,
+          "non-empty queue: a question, no request");
+    char id[40]; snprintf(id, sizeof id, "%s", app.lists[JF_LIST_TRACKS].items[2].id);
+    send(JF_EV_BACK, 0);
+    CHECK(cm.n == 0 && app.confirm == JF_CONFIRM_NONE && app.screen == JF_SCR_TRACKS && app.queue_n == 4 && app.play_state == JF_PLAY_PLAYING,
+          "BACK cancels and is spent (no navigation)");
+    send(JF_EV_INSTANT_MIX, -1); send(JF_EV_DISMISS, 0);
+    CHECK(cm.n == 0 && app.confirm == JF_CONFIRM_NONE, "DISMISS cancels");
+    send(JF_EV_CONFIRM, 0);
+    CHECK(cm.n == 0, "CONFIRM with nothing pending does nothing");
+    send(JF_EV_INSTANT_MIX, 2); send(JF_EV_VOL_UP, 0);
+    CHECK(app.confirm == JF_CONFIRM_INSTANT_MIX, "volume keeps the question");
+    send(JF_EV_CONFIRM, 0);
+    const JfCmd *c = find(JF_CMD_REQUEST);
+    CHECK(c && c->list == &app.lists[JF_LIST_MIX] && strstr(c->path, id) && app.confirm == JF_CONFIRM_NONE && app.queue_n == 4,
+          "CONFIRM fetches with the stored seed; queue untouched until the reply");
+    in_tracks(4, 4);
+    send(JF_EV_INSTANT_MIX, 1);
+    CHECK(has(JF_CMD_REQUEST) && app.confirm == JF_CONFIRM_NONE, "empty queue: no question");
+}
 int main(void)
 {
     test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue();
     test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit(); test_categories();
     test_action_bar(); test_queue_insert(); test_mix(); test_mix_seed_and_ticks(); test_mix_flow(); test_mix_choice(); test_mix_stops();
     test_mix_cancel_and_errors(); test_mix_nowplaying(); test_save();
+    test_pause_stop_seek(); test_instant_confirm();
     printf("jf_core_test: %d checks, %d failures\n", checks, fails);
     return fails ? 1 : 0;
 }

@@ -67,6 +67,8 @@ int jf_path_mix_pool(char *out, size_t cap, const char *uid, const char *const *
                      const char *artist_id, int decade, bool random, int start, int limit);
 /** `session_id` is 32 hex from jf_session_id(); a fresh one per request, or the server reuses an old transcode job. */
 int jf_path_stream(char *out, size_t cap, const char *id, const char *session_id);
+/** The same stream starting `start_ms` into the track (StartTimeTicks, 100 ns ticks; measured to seek on Jellyfin 12.1.0 with a fresh session id).  0 = jf_path_stream.  -1 for start_ms < 0. */
+int jf_path_stream_at(char *out, size_t cap, const char *id, const char *session_id, long start_ms);
 
 /** Where the playSessionId's random bytes come from; NULL restores /dev/urandom.  Returns bytes read or -1. */
 typedef int (*JfRandomFn)(unsigned char *buf, size_t n);

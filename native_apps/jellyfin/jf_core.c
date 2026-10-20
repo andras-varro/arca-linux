@@ -186,6 +186,7 @@ static void go_signin(JfApp *app)
     app->nav_n = 0;
     app->play_wait = false;
     app->action_bar = false;
+    app->confirm = JF_CONFIRM_NONE;
 }
 
 static void refresh(JfApp *app)
@@ -210,7 +211,8 @@ static void refresh(JfApp *app)
 
 /* ── playback ──────────────────────────────────────────────────────────── */
 
-static void play_track(JfApp *app, int idx, bool stop_first, JfCmds *out);
+static void play_track_at(JfApp *app, int idx, int start_ms, bool stop_first, JfCmds *out);
+static void play_track(JfApp *app, int idx, bool stop_first, JfCmds *out) { play_track_at(app, idx, 0, stop_first, out); }
 
 static void fail_stop(JfApp *app, JfCmds *out)
 {
@@ -235,10 +237,12 @@ static void track_failed(JfApp *app, JfCmds *out)
     advance(app, out);
 }
 
-static void play_track(JfApp *app, int idx, bool stop_first, JfCmds *out)
+static void play_track_at(JfApp *app, int idx, int start_ms, bool stop_first, JfCmds *out)
 {
     if (stop_first) emit(out, JF_CMD_STOP);
     app->queue_cur = idx;
+    app->start_ms = start_ms;
+    app->pos_ms = 0;
     app->play_state = JF_PLAY_FETCHING;
     char sess[33];
     JfCmd *c = emit(out, JF_CMD_PLAY_STREAM);
@@ -247,7 +251,7 @@ static void play_track(JfApp *app, int idx, bool stop_first, JfCmds *out)
     c->norm_mdb = app->queue[idx].norm_gain_mdb;
     c->user_mdb = jf_volume_mdb(app->volume_step);
     if (!app->session_fn || !app->session_fn(sess) ||
-        jf_path_stream(c->path, sizeof(c->path), app->queue[idx].id, sess) < 0) {
+        jf_path_stream_at(c->path, sizeof(c->path), app->queue[idx].id, sess, start_ms) < 0) {
         out->n--;
         track_failed(app, out);
     }
@@ -351,10 +355,9 @@ static void on_add_queue(JfApp *app, int i, JfCmds *out)
 }
 
 /* Ask the server for a mix of `seed`.  The reply (on_mix_reply) replaces the queue. */
-static void on_instant_mix(JfApp *app, int i, JfCmds *out)
+static void fetch_instant_mix(JfApp *app, const JfItem *seed, JfCmds *out)
 {
-    JfItem it;
-    if (!seed_item(app, i, &it) || !have_token(app)) return;
+    JfItem it = *seed;
     JfList *l = &app->lists[JF_LIST_MIX];
     app->ctx[JF_LIST_MIX].sub = 0;
     copy(app->ctx[JF_LIST_MIX].id, sizeof(app->ctx[JF_LIST_MIX].id), it.id);
@@ -364,6 +367,26 @@ static void on_instant_mix(JfApp *app, int i, JfCmds *out)
     l->generation++;
     app->play_wait = false;
     request_page(app, JF_LIST_MIX, 0, out);
+}
+
+/* With something in the queue the mix would replace it: ask first (app->confirm), the fetch waits for JF_EV_CONFIRM. */
+static void on_instant_mix(JfApp *app, int i, JfCmds *out)
+{
+    JfItem it;
+    if (!seed_item(app, i, &it) || !have_token(app)) return;
+    if (app->queue_n > 0) {
+        app->confirm = JF_CONFIRM_INSTANT_MIX;
+        app->confirm_seed = it;
+        return;
+    }
+    fetch_instant_mix(app, &it, out);
+}
+
+static void on_confirm(JfApp *app, JfCmds *out)
+{
+    if (app->confirm != JF_CONFIRM_INSTANT_MIX) return;
+    app->confirm = JF_CONFIRM_NONE;
+    if (have_token(app)) fetch_instant_mix(app, &app->confirm_seed, out);
 }
 
 static void on_mix_reply(JfApp *app, JfCmds *out)
@@ -919,6 +942,72 @@ static void on_volume(JfApp *app, int delta, JfCmds *out)
     emit(out, JF_CMD_SAVE_LOGIN);
 }
 
+static int runtime_ms(const JfApp *app)
+{
+    return app->queue_n > 0 ? app->queue[app->queue_cur].runtime_s * 1000 : 0;
+}
+
+int jf_position_ms(const JfApp *app, int elapsed_ms)
+{
+    int p = 0;
+    if (app->play_state == JF_PLAY_PAUSED) p = app->pos_ms;
+    else if (app->play_state == JF_PLAY_PLAYING) p = app->start_ms + (elapsed_ms > 0 ? elapsed_ms : 0);
+    else if (app->play_state == JF_PLAY_FETCHING) p = app->start_ms;
+    int rt = runtime_ms(app);
+    if (rt > 0 && p > rt) p = rt;
+    return p < 0 ? 0 : p;
+}
+
+/* Pause is a stop that remembers where: the fd stream cannot be held (audio_music_start_fd is "not pausable"), and resuming
+ * re-requests the track at pos_ms with a fresh session id.  (A held socket would survive 120 s, measured, but nothing holds the voice.) */
+static void on_pause(JfApp *app, int pos_ms, JfCmds *out)
+{
+    if (app->queue_n == 0 || !have_token(app)) return;
+    switch (app->play_state) {
+    case JF_PLAY_PLAYING:
+    case JF_PLAY_FETCHING:
+        if (app->play_state == JF_PLAY_FETCHING) {
+            emit(out, JF_CMD_CANCEL)->kind = JF_KIND_STREAM;
+            pos_ms = app->start_ms;
+        }
+        app->pos_ms = pos_ms < 0 ? 0 : pos_ms;
+        app->play_state = JF_PLAY_PAUSED;
+        emit(out, JF_CMD_STOP);
+        break;
+    case JF_PLAY_PAUSED:
+        app->fail_streak = 0;
+        play_track_at(app, app->queue_cur, app->pos_ms, false, out);
+        break;
+    case JF_PLAY_STOPPED:
+    case JF_PLAY_END:
+        app->fail_streak = 0;
+        play_track(app, app->queue_cur, false, out);
+        break;
+    default: break;
+    }
+}
+
+static void on_stop(JfApp *app, JfCmds *out)
+{
+    if (app->play_state != JF_PLAY_PLAYING && app->play_state != JF_PLAY_FETCHING && app->play_state != JF_PLAY_PAUSED) return;
+    if (app->play_state == JF_PLAY_FETCHING) emit(out, JF_CMD_CANCEL)->kind = JF_KIND_STREAM;
+    app->play_state = JF_PLAY_STOPPED;
+    app->start_ms = app->pos_ms = 0;
+    emit(out, JF_CMD_STOP);
+}
+
+static void on_seek(JfApp *app, int ms, JfCmds *out)
+{
+    int rt = runtime_ms(app);
+    if (app->queue_n == 0 || rt <= 0 || !have_token(app)) return;
+    if (ms < 0) ms = 0;
+    if (ms > rt - 1) ms = rt - 1;
+    if (app->play_state == JF_PLAY_PAUSED) { app->pos_ms = ms; return; }
+    if (app->play_state != JF_PLAY_PLAYING && app->play_state != JF_PLAY_FETCHING) return;
+    if (app->play_state == JF_PLAY_FETCHING) emit(out, JF_CMD_CANCEL)->kind = JF_KIND_STREAM;
+    play_track_at(app, app->queue_cur, ms, true, out);
+}
+
 static void on_search(JfApp *app, const char *term, JfCmds *out)
 {
     if (!term[0]) {
@@ -972,7 +1061,8 @@ static void on_track_ended(JfApp *app, int played_ms, JfCmds *out)
 {
     if (app->play_state != JF_PLAY_PLAYING) return;
     if (!have_token(app)) { app->play_state = JF_PLAY_IDLE; return; }   /* expired: fetch nothing */
-    if (played_ms < JF_SHORT_MS) { track_failed(app, out); return; }
+    int left = runtime_ms(app) - app->start_ms;      /* a seek near the end plays little and is no failure */
+    if (played_ms < JF_SHORT_MS && (left <= 0 || left >= JF_SHORT_MS)) { track_failed(app, out); return; }
     app->fail_streak = 0;
     advance(app, out);
 }
@@ -1038,6 +1128,11 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
     }
     /* The action bar lives for one gesture: any user intent other than the ones that keep it (more
      * rows arriving, volume, picking a row) drops it, and a BACK that found it up only drops it. */
+    /* A pending question lives for one gesture too: CONFIRM acts on it, BACK / DISMISS drop it (BACK is then spent), any other
+     * intent but the passive ones drops it and acts as usual. */
+    bool confirm_was = app->confirm != JF_CONFIRM_NONE;
+    if (confirm_was && ev->type != JF_EV_CONFIRM && ev->type != JF_EV_NEED_MORE && ev->type != JF_EV_VOL_UP && ev->type != JF_EV_VOL_DOWN)
+        app->confirm = JF_CONFIRM_NONE;
     bool bar_was = app->action_bar;
     if (ev->type != JF_EV_NEED_MORE && ev->type != JF_EV_SELECT && ev->type != JF_EV_VOL_UP && ev->type != JF_EV_VOL_DOWN)
         app->action_bar = false;
@@ -1053,10 +1148,14 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
     case JF_EV_MIX_START: on_mix_start(app, out); break;
     case JF_EV_INSTANT_MIX: on_instant_mix(app, ev->i, out); break;
     case JF_EV_SAVE_PLAYLIST: on_save(app, ev->term, out); break;
+    case JF_EV_CONFIRM:  on_confirm(app, out); break;
     case JF_EV_DISMISS:  break;
-    case JF_EV_BACK:     if (!bar_was) on_back(app, out); break;
+    case JF_EV_BACK:     if (!bar_was && !confirm_was) on_back(app, out); break;
     case JF_EV_PLAY_ALL: on_play_all(app, out); break;
     case JF_EV_NEXT:     on_next(app, out); break;
+    case JF_EV_PAUSE:    on_pause(app, ev->played_ms, out); break;
+    case JF_EV_STOP:     on_stop(app, out); break;
+    case JF_EV_SEEK:     on_seek(app, ev->i, out); break;
     case JF_EV_VOL_UP:   on_volume(app, +1, out); break;
     case JF_EV_VOL_DOWN: on_volume(app, -1, out); break;
     case JF_EV_SEARCH:   on_search(app, ev->term, out); break;

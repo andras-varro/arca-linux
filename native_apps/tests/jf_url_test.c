@@ -115,6 +115,21 @@ static void test_builders(void)
     EXPECT("stream", n, b, "/Audio/" ALB "/stream?static=false&container=wav&audioCodec=pcm_s16le"
            "&audioSampleRate=44100&audioChannels=1&playSessionId=" SES);
     CAP_EDGE("stream", jf_path_stream(b_, cap, ALB, SES));
+
+    /* a seek: StartTimeTicks, 1 tick = 100 ns, so ms * 10000 (measured against the live server) */
+    n = jf_path_stream_at(b, sizeof(b), ALB, SES, 90000);
+    EXPECT("stream_at 90 s", n, b, "/Audio/" ALB "/stream?static=false&container=wav&audioCodec=pcm_s16le"
+           "&audioSampleRate=44100&audioChannels=1&playSessionId=" SES "&StartTimeTicks=900000000");
+    CAP_EDGE("stream_at", jf_path_stream_at(b_, cap, ALB, SES, 90000));
+    char plain[512];
+    jf_path_stream(plain, sizeof(plain), ALB, SES);
+    n = jf_path_stream_at(b, sizeof(b), ALB, SES, 0);
+    EXPECT("stream_at 0 = plain", n, b, plain);
+    n = jf_path_stream_at(b, sizeof(b), ALB, SES, 4000000);   /* 4000 s: 4e10 ticks overflows 32 bits */
+    EXPECT("stream_at 4000 s", n, b, "/Audio/" ALB "/stream?static=false&container=wav&audioCodec=pcm_s16le"
+           "&audioSampleRate=44100&audioChannels=1&playSessionId=" SES "&StartTimeTicks=40000000000");
+    CHECK(jf_path_stream_at(b, sizeof(b), ALB, SES, -1) == -1, "stream_at: negative offset");
+    CHECK(jf_path_stream_at(b, sizeof(b), "bad", SES, 5) == -1, "stream_at: bad id");
 }
 
 static void test_ids(void)

@@ -170,6 +170,14 @@ int jf_path_stream(char *out, size_t cap, const char *id, const char *session_id
                         "&audioSampleRate=44100&audioChannels=1&playSessionId=%s", id, session_id), cap);
 }
 
+int jf_path_stream_at(char *out, size_t cap, const char *id, const char *session_id, long start_ms)
+{
+    if (start_ms < 0) return -1;
+    int n = jf_path_stream(out, cap, id, session_id);
+    if (n < 0 || start_ms == 0) return n;
+    return fin(snprintf(out + n, cap - (size_t)n, "&StartTimeTicks=%lld", (long long)start_ms * 10000LL) + n, cap);
+}
+
 void jf_url_set_random(JfRandomFn fn) { rand_fn = fn; }
 
 static int urandom_read(unsigned char *buf, size_t n)
