@@ -1,7 +1,8 @@
 # retro: libretro cores behind our own frontend (design and feasibility)
 
-**Status: design only. Nothing in this directory runs yet** except the headless bench in `tools/retro_bench.c`
-(being written). Working name of the frontend: `arca_retro`. Every device fact is linked to
+**Status: design only. Nothing in this directory runs yet** except two benches: `tools/retro_bench.c`
+(headless core runner) and `tools/fb_bench.c` (display path, device-only, never yet run). Working name of the
+frontend: `arca_retro`. Every device fact is linked to
 [`SYSTEM_ANALYSIS.md`](../SYSTEM_ANALYSIS.md); only the few numbers that justify a design choice are repeated, with their source.
 Claims are marked **measured**, **read in source**, **inferred** or **unverified**.
 
@@ -152,12 +153,14 @@ proof. **Inferred from that analogy; nothing has been measured on a RoomWizard.*
 **Offline results so far (measured 2026-10-20, WSL, QEMU 8.2.7 `-cpu cortex-a8`; function only, never timing).**
 All five cores cross-build with `platform=unix` and the flags in section 7 (the Makefiles' own ARM platforms are
 hard-float or armv7ve, so they are unusable). All are soft-float EABI5 (`readelf -A`: no `Tag_ABI_VFP_args`), with zero
-`sdiv`/`udiv`. `retro_bench` (`retro/tools/retro_bench.c`, built with `-ldl`) dlopens each core:
+`sdiv`/`udiv`. The core clones, their build logs, the content and the frame dumps live in WSL `~/retro-src` (outside
+the repo; `env.sh` there sets the toolchain). `retro_bench` (`retro/tools/retro_bench.c`, built with `-ldl`) dlopens
+each core:
 
 | core | `.so` size | no-content run under QEMU |
 |---|---|---|
 | Fuse 1.6.0 | 1.5 MB | boots to the Sinclair copyright screen; 320×240, 50 fps, 44.1 kHz, RGB565 |
-| FCEUmm | 3.0 MB | not run (needs content) |
+| FCEUmm | 3.0 MB | with `zorchenhimer/nes-runner` (MIT, `e6b5fe2`, built with cc65 via `make -o credits_data.i`): title screen; 256×224 (max 256×240), 60.1 fps, 48 kHz, XRGB8888 |
 | VICE x64 3.10 | 3.0 MB | boots to `READY.`; 384×272, 50.125 fps, 48 kHz, RGB565; needs `vice/data` (11 MB) in the system dir |
 | ep128emu-core 1.2.13 | 3.5 MB | runs no emulation without `ep128emu/roms/exos21.rom` etc. (768×288, 50 fps) |
 | MAME 2003-Plus | 33.5 MB | segfaults in `retro_load_game` with no content; needs a romset |
@@ -170,7 +173,8 @@ answers `GET_VARIABLE` with nothing crashes it (SIGFPE): defaults from `SET_VARI
 
 1. Cross-build the cores and run `check-arm-safe.sh` on each.
 2. `tools/retro_bench.c` (headless) under QEMU 8.2 in WSL. This proves **function only, never timing**.
-3. Write `tools/fb_bench.c`: 16/32bpp copy cost, pan + vsync flip, overlay upload at native size, VRFB rotation.
+3. `tools/fb_bench.c` (written, builds ARM-safe, unrun): 16/32bpp copy cost, pan + vsync flip, nearest-neighbour
+   upscale of 256x240/320x240/384x272, and (`--test overlay` only) fb1 overlay upload and VRFB rotation.
 
 **First device session (about 15 min):**
 
