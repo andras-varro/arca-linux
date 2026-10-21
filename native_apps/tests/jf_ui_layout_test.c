@@ -36,11 +36,10 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     UiRect press[48];
     int n = 0;
     for (int i = 0; i < JF_UI_ROW3; i++) press[n++] = L.row3[i];
-    for (int i = 0; i < JF_UI_ROW5; i++) press[n++] = L.row5[i];
     for (int i = 0; i < JF_UI_FIELDS; i++) press[n++] = L.field[i];
     press[n++] = L.signin; press[n++] = L.signexit;
     for (int i = 0; i < JF_UI_ABAR; i++) press[n++] = L.abar[i];
-    for (int i = 0; i < JF_UI_NPMIX; i++) press[n++] = L.np_mix[i];
+    for (int i = 0; i < JF_UI_NP; i++) press[n++] = L.np[i];
     for (int i = 0; i < JF_UI_MINI; i++) press[n++] = L.mini_btn[i];
     press[n++] = L.mini_title; press[n++] = L.seek;
     for (int i = 0; i < JF_UI_MIXBTN; i++) press[n++] = L.mixb[i];
@@ -65,8 +64,6 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
         CHECK(disjoint(L.row3[i], L.list), "C: row3[%d] overlaps the list", i);
         for (int j = i + 1; j < JF_UI_ROW3; j++) CHECK(disjoint(L.row3[i], L.row3[j]), "C: row3 %d/%d overlap", i, j);
     }
-    for (int i = 0; i < JF_UI_ROW5; i++)
-        for (int j = i + 1; j < JF_UI_ROW5; j++) CHECK(disjoint(L.row5[i], L.row5[j]), "C: row5 %d/%d overlap", i, j);
     /* F  the action bar and the queue's SAVE take the button row, under the list; the bar's buttons are disjoint */
     for (int i = 0; i < JF_UI_ABAR; i++) {
         CHECK(disjoint(L.abar[i], L.list) && disjoint(L.abar[i], L.list_root), "F: abar[%d] overlaps a list (inset %d)", i, inset_t);
@@ -75,13 +72,15 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     }
     CHECK(disjoint(L.save, L.list), "F: SAVE overlaps the queue list (inset %d)", inset_t);
     CHECK(L.list.y + L.list.h <= L.abar[0].y, "F: the list does not end above the action bar (inset %d)", inset_t);
-    CHECK(disjoint(L.np_mix[0], L.np_mix[1]), "F: now-playing MIX buttons overlap");
-    for (int i = 0; i < JF_UI_NPMIX; i++)
-        for (int j = 0; j < JF_UI_ROW5; j++) CHECK(disjoint(L.np_mix[i], L.row5[j]), "F: np_mix[%d] overlaps row5[%d] (inset %d)", i, j, inset_t);
-    CHECK(L.progress.y + L.progress.h + 30 <= L.np_mix[0].y, "F: progress and its label leave the MIX row clear (inset %d)", inset_t);
+    for (int i = 0; i < JF_UI_NP; i++) {
+        CHECK(L.np[i].y == L.np[0].y, "F: now-playing button %d left the single landscape row", i);
+        for (int j = i + 1; j < JF_UI_NP; j++) CHECK(disjoint(L.np[i], L.np[j]), "F: np %d/%d overlap", i, j);
+        CHECK(disjoint(L.np[i], L.list) && disjoint(L.np[i], L.seek), "F: np[%d] overlaps the list or the seek area (inset %d)", i, inset_t);
+    }
+    CHECK(L.progress.y + L.progress.h + 30 <= L.np[0].y, "F: progress and its label leave the button row clear (inset %d)", inset_t);
     CHECK(inside(L.progress, e.vis_l, e.vis_t, e.vis_r, e.vis_b), "D: progress outside VISIBLE");
     CHECK(inside(L.info, e.vis_l, e.vis_t, e.vis_r, e.vis_b), "D: info outside VISIBLE");
-    CHECK(L.progress.y + L.progress.h + 30 <= L.row5[0].y, "D: progress and its label leave the button row clear");
+    CHECK(L.progress.y + L.progress.h + 30 <= L.np[0].y, "D: progress and its label leave the button row clear");
     /* G  mini player: the strip sits between the shortened lists and the button row, clear of SEARCH / the category
      * bar / every row; its buttons are disjoint; the lists keep two rows */
     CHECK(disjoint(L.mini, L.list_mini) && disjoint(L.mini, L.list_root_mini), "G: mini overlaps a shortened list (inset %d)", inset_t);
@@ -98,12 +97,7 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     CHECK(L.mini_title.w >= 200, "G: mini title too narrow: %d", L.mini_title.w);
     /* H  now playing: two button rows, the seek area (taller than the 14 px bar) clear of both and of each other */
     CHECK(L.seek.h >= 30 && L.seek.y <= L.progress.y && L.seek.y + L.seek.h >= L.progress.y + L.progress.h, "H: seek area does not cover the bar");
-    for (int i = 0; i < JF_UI_NPMIX; i++) {
-        CHECK(disjoint(L.seek, L.np_mix[i]), "H: seek overlaps np_mix[%d] (inset %d)", i, inset_t);
-        for (int j = i + 1; j < JF_UI_NPMIX; j++) CHECK(disjoint(L.np_mix[i], L.np_mix[j]), "H: np_mix %d/%d overlap", i, j);
-    }
-    for (int i = 0; i < JF_UI_ROW5; i++) CHECK(disjoint(L.seek, L.row5[i]), "H: seek overlaps row5[%d]", i);
-    CHECK(L.np_mix[0].h >= JF_UI_BTN_H && L.row5[0].h >= JF_UI_BTN_H, "H: now-playing buttons shrank");
+    CHECK(L.np[0].h >= JF_UI_BTN_H && L.np[0].w >= 72, "H: now-playing buttons shrank");
     for (int i = 0; i < JF_UI_MIXBTN; i++) CHECK(disjoint(L.mixb[i], L.list), "H: MIX screen button %d overlaps the list", i);
     CHECK(disjoint(L.mixb[0], L.mixb[1]), "H: MIX START / CANCEL overlap");
 }
@@ -228,12 +222,29 @@ static void mix_ticks(void)
     jf_ui_free(&ui);
 }
 
+/* N  portrait (480 x 800): the now-playing buttons wrap into two rows, none overlapping, all inside the safe area */
+static void portrait(void)
+{
+    JfExtents e = { 0, 0, 480, 800, 17, 17, 480 - 17, 800 - 17 };
+    JfLayout L;
+    jf_ui_layout(&L, &e);
+    int rows = 0, last_y = -1;
+    for (int i = 0; i < JF_UI_NP; i++) {
+        CHECK(inside(L.np[i], e.safe_l, e.safe_t, e.safe_r, e.safe_b), "N: np[%d] outside SAFE in portrait", i);
+        CHECK(L.np[i].w >= 72, "N: np[%d] narrower than the minimum", i);
+        for (int j = i + 1; j < JF_UI_NP; j++) CHECK(disjoint(L.np[i], L.np[j]), "N: portrait np %d/%d overlap", i, j);
+        if (L.np[i].y != last_y) { rows++; last_y = L.np[i].y; }
+    }
+    CHECK(rows == 2, "N: portrait now-playing buttons in %d rows, want 2", rows);
+}
+
 int main(void)
 {
     run(0, 0, 0, 0);
     run(17, 17, 3, 3);       /* the measured unit */
     run(30, 30, 10, 10);
     run(48, 48, 48, 48);     /* the largest inset the library allows */
+    portrait();
     mini_taps();
     mini_flip(JF_SCR_ALBUMS, "albums");
     mini_flip(JF_SCR_ARTISTS, "artists");

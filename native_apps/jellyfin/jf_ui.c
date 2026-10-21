@@ -20,6 +20,7 @@
 #define BANNER_H  18
 #define GAP        6
 #define FIELD_H   52
+#define NP_MIN_W  72   /* narrowest now-playing button; 9 of them fit one row at 700 px or more */
 
 /* ── Layout (pure) ─────────────────────────────────────────────────────── */
 
@@ -52,11 +53,18 @@ void jf_ui_layout(JfLayout *L, const JfExtents *e)
     L->save = rect_of(sl, rowy, sw, JF_UI_BTN_H);
     for (int i = 0; i < JF_UI_MIXBTN; i++)
         L->mixb[i] = rect_of(sl + i * ((sw - GAP) / 2 + GAP), rowy, (sw - GAP) / 2, JF_UI_BTN_H);
-    int w4 = (sw - 3 * GAP) / 4;
-    for (int i = 0; i < JF_UI_NPMIX; i++)
-        L->np_mix[i] = rect_of(sl + i * (w4 + GAP), rowy - GAP - JF_UI_BTN_H, w4, JF_UI_BTN_H);
-    for (int i = 0; i < JF_UI_ROW5; i++)
-        L->row5[i] = rect_of(sl + i * (w5 + GAP), rowy, w5, JF_UI_BTN_H);
+    /* now playing: one row of JF_UI_NP buttons, none narrower than NP_MIN_W; when the width does not hold them all
+     * (portrait) they wrap into the fewest equal rows, stacked upward from the button row */
+    int per = (sw + GAP) / (NP_MIN_W + GAP);
+    if (per < 1) per = 1;
+    if (per > JF_UI_NP) per = JF_UI_NP;
+    int rows = (JF_UI_NP + per - 1) / per;
+    per = (JF_UI_NP + rows - 1) / rows;
+    int wn = (sw - (per - 1) * GAP) / per;
+    for (int i = 0; i < JF_UI_NP; i++) {
+        int r = i / per, c = i - r * per;
+        L->np[i] = rect_of(sl + c * (wn + GAP), rowy - (rows - 1 - r) * (JF_UI_BTN_H + GAP), wn, JF_UI_BTN_H);
+    }
 
     for (int i = 0; i < JF_UI_FIELDS; i++)
         L->field[i] = rect_of(sl, top + 4 + i * (FIELD_H + GAP), sw, FIELD_H);
@@ -187,15 +195,13 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
     lv_init(&ui->lv, src, ui->L.list, 40);
 
     static const char *t3[JF_UI_ROW3] = { "SEARCH", "NOW PLAYING", "PLAY ALL" };
-    static const char *t5[JF_UI_ROW5] = { "PAUSE", "STOP", "NEXT", "QUEUE", "BACK" };
     for (int i = 0; i < JF_UI_ROW3; i++) style(&ui->row3[i], ui->L.row3[i], t3[i], 2);
-    for (int i = 0; i < JF_UI_ROW5; i++) style(&ui->row5[i], ui->L.row5[i], t5[i], 2);
     static const char *ta[JF_UI_ABAR] = { "PLAY", "PLAY NEXT", "ADD QUEUE", "MIX", "INSTANT MIX" };
-    static const char *tm[JF_UI_NPMIX] = { "VOL -", "VOL +", "MIX", "INSTANT MIX" };
+    static const char *tn[JF_UI_NP] = { "PREV", "PAUSE", "STOP", "NEXT", "MIX", "I-MIX", "VOL+", "VOL-", "QUEUE" };
     static const char *tmini[JF_UI_MINI] = { "PAUSE", "VOL -", "VOL +" };
     for (int i = 0; i < JF_UI_MINI; i++) style(&ui->mini_b[i], ui->L.mini_btn[i], tmini[i], 2);
     for (int i = 0; i < JF_UI_ABAR; i++) style(&ui->abar[i], ui->L.abar[i], ta[i], 2);
-    for (int i = 0; i < JF_UI_NPMIX; i++) style(&ui->np_mix[i], ui->L.np_mix[i], tm[i], 2);
+    for (int i = 0; i < JF_UI_NP; i++) style(&ui->np[i], ui->L.np[i], tn[i], 2);
     style(&ui->save, ui->L.save, "SAVE AS PLAYLIST", 2);
     style(&ui->mixb[0], ui->L.mixb[0], "START", 2);
     style(&ui->mixb[1], ui->L.mixb[1], "CANCEL", 2);
@@ -362,22 +368,15 @@ static void row3_act(JfUi *ui, Pointer *ptr, int i, JfEvent *out, int *n, int ma
     else emit(out, n, max, JF_EV_PLAY_ALL);
 }
 
-static void row5_act(JfUi *ui, int i, JfEvent *out, int *n, int max)
-{
-    (void)ui;
-    static const JfEventType t[JF_UI_ROW5] = { JF_EV_PAUSE, JF_EV_STOP, JF_EV_NEXT,
-                                               JF_EV_OPEN_QUEUE, JF_EV_BACK };
-    emit(out, n, max, t[i]);
-}
-
 static void abar_act(int i, int row, JfEvent *out, int *n, int max);
 
-/* The now-playing upper row: VOL -, VOL +, MIX, INSTANT MIX (of the playing track). */
+/* The now-playing buttons: PREV, PLAY/PAUSE, STOP, NEXT, MIX and INSTANT MIX (of the playing track), VOL +, VOL -, QUEUE. */
 static void np_act(int i, JfEvent *out, int *n, int max)
 {
-    if (i == 0) emit(out, n, max, JF_EV_VOL_DOWN);
-    else if (i == 1) emit(out, n, max, JF_EV_VOL_UP);
-    else abar_act(i + 1, -1, out, n, max);   /* MIX = abar 3, INSTANT MIX = abar 4 */
+    static const JfEventType t[JF_UI_NP] = { JF_EV_PREV, JF_EV_PAUSE, JF_EV_STOP, JF_EV_NEXT, JF_EV_NONE, JF_EV_NONE,
+                                             JF_EV_VOL_UP, JF_EV_VOL_DOWN, JF_EV_OPEN_QUEUE };
+    if (i == 4 || i == 5) abar_act(i - 1, -1, out, n, max);   /* MIX = abar 3, INSTANT MIX = abar 4 */
+    else emit(out, n, max, t[i]);
 }
 
 /* The five buttons of the action bar, on list row `row` (-1 = the playing track, NOW PLAYING's MIX pair). */
@@ -566,23 +565,18 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     }
 
     if (sc == JF_SCR_NOWPLAYING) {
-        /* focus 0..4 the row5 buttons (PAUSE, STOP, NEXT, QUEUE, BACK), 5..8 the row above (VOL -, VOL +, MIX,
-         * INSTANT MIX); Up / Down walk all nine.  Start / Esc and Space pause, Select / Backspace go back. */
-        enum { NP_N = JF_UI_ROW5 + JF_UI_NPMIX };
+        /* focus 0..8 the buttons in their order (PREV, PLAY/PAUSE, STOP, NEXT, MIX, I-MIX, VOL +, VOL -, QUEUE);
+         * Up / Down walk them.  Start / Esc and Space pause, Select / Backspace go back (the header has BACK too). */
+        enum { NP_N = JF_UI_NP };
         if (bp(in, BTN_ID_BACK)) emit(out, &n, max, JF_EV_BACK);
         if (bp(in, BTN_ID_PAUSE) || bp(in, BTN_ID_JUMP)) emit(out, &n, max, JF_EV_PAUSE);
         if (bp(in, BTN_ID_LEFT))  emit(out, &n, max, JF_EV_VOL_DOWN);
         if (bp(in, BTN_ID_RIGHT)) emit(out, &n, max, JF_EV_VOL_UP);
         if (bp(in, BTN_ID_UP))   ui->focus = (ui->focus + NP_N - 1) % NP_N;
         if (bp(in, BTN_ID_DOWN)) ui->focus = (ui->focus + 1) % NP_N;
-        if (bp(in, BTN_ID_ACTION)) {
-            if (ui->focus < JF_UI_ROW5) row5_act(ui, ui->focus, out, &n, max);
-            else np_act(ui->focus - JF_UI_ROW5, out, &n, max);
-        }
-        for (int i = 0; i < JF_UI_ROW5; i++)
-            if (button_check_tap(&ui->row5[i], ts, now)) row5_act(ui, i, out, &n, max);
-        for (int i = 0; i < JF_UI_NPMIX; i++)
-            if (button_check_tap(&ui->np_mix[i], ts, now)) np_act(i, out, &n, max);
+        if (bp(in, BTN_ID_ACTION)) np_act(ui->focus, out, &n, max);
+        for (int i = 0; i < JF_UI_NP; i++)
+            if (button_check_tap(&ui->np[i], ts, now)) np_act(i, out, &n, max);
         /* seek: a finger on the bar shows the target, lifting it sends the seek; a tap is a jump */
         const JfItem *cur = jf_now(app);
         int total_ms = cur ? cur->runtime_s * 1000 : 0;
@@ -859,14 +853,10 @@ static void draw_nowplaying(JfUi *ui)
     else snprintf(buf, sizeof buf, "VOLUME %d/%d", app->volume_step, JF_VOLUME_MAX);
     fb_draw_text(fb, p.x + p.w - text_measure_width(buf, 2), p.y + p.h + 8, buf, COLOR_WHITE, 2);
 
-    snprintf(ui->row5[0].text, sizeof ui->row5[0].text, "%s", mini_play_label(app));
-    for (int i = 0; i < JF_UI_NPMIX; i++) {
-        button_draw(fb, &ui->np_mix[i]);
-        if (ui->show_ring && ui->focus == JF_UI_ROW5 + i) ring(ui, ui->L.np_mix[i]);
-    }
-    for (int i = 0; i < JF_UI_ROW5; i++) {
-        button_draw(fb, &ui->row5[i]);
-        if (ui->show_ring && ui->focus == i) ring(ui, ui->L.row5[i]);
+    snprintf(ui->np[1].text, sizeof ui->np[1].text, "%s", mini_play_label(app));
+    for (int i = 0; i < JF_UI_NP; i++) {
+        button_draw(fb, &ui->np[i]);
+        if (ui->show_ring && ui->focus == i) ring(ui, ui->L.np[i]);
     }
 }
 

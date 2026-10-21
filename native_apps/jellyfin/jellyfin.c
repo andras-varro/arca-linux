@@ -5,6 +5,7 @@
  */
 #include <signal.h>
 #include <stdio.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -149,7 +150,7 @@ static void step_event(const JfEvent *ev, uint32_t now)
 {
     static JfCmds cmds;
     JfEvent e2 = *ev;
-    if (e2.type == JF_EV_PAUSE) e2.played_ms = jf_position_ms(&app, track_live ? (int)(now - track_t0) : 0);
+    if (e2.type == JF_EV_PAUSE || e2.type == JF_EV_PREV) e2.played_ms = jf_position_ms(&app, track_live ? (int)(now - track_t0) : 0);
     jf_step(&app, &e2, &cmds);
     execute(&cmds, now);
     jf_ui_mark_dirty(&ui);
@@ -199,6 +200,7 @@ int main(int argc, char *argv[])
     if (!audio_ok) fprintf(stderr, "jellyfin: no audio output\n");
 
     jf_app_init(&app);
+    jf_seed(&app, (uint32_t)time(NULL) * 2654435761u);
     app.sink_channels_fn = sink_channels;
     if (jf_api_init(&api) != 0) {
         fprintf(stderr, "jellyfin: out of memory\n");

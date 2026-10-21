@@ -944,6 +944,79 @@ static void on_next(JfApp *app, JfCmds *out)
     }
 }
 
+/* PREV: the usual player convention.  Past JF_PREV_RESTART_MS into the track it starts over; sooner, the previous entry
+ * plays; the first entry always starts over. */
+static void on_prev(JfApp *app, int played_ms, JfCmds *out)
+{
+    if (app->queue_n == 0 || !have_token(app)) return;
+    bool live = app->play_state == JF_PLAY_PLAYING || app->play_state == JF_PLAY_FETCHING;
+    app->fail_streak = 0;
+    int idx = app->queue_cur;
+    if (played_ms <= JF_PREV_RESTART_MS && idx > 0) idx--;
+    play_track(app, idx, live, out);
+}
+
+uint32_t jf_rand_below(JfRng rng, void *ctx, uint32_t n)
+{
+    if (n <= 1) return 0;
+    return (uint32_t)(((uint64_t)rng(ctx) * n) >> 32);
+}
+
+static uint32_t xorshift_draw(void *ctx)
+{
+    uint32_t *s = ctx, x = *s;
+    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+    return *s = x;
+}
+
+void jf_seed(JfApp *app, uint32_t seed) { app->rng_state = seed ? seed : 0x9E3779B9u; }
+
+static void queue_swap(JfApp *app, int a, int b)
+{
+    JfItem t = app->queue[a];
+    app->queue[a] = app->queue[b];
+    app->queue[b] = t;
+}
+
+void jf_queue_shuffle(JfApp *app, JfRng rng, void *ctx)
+{
+    int n = app->queue_n, first = 0;
+    if (n < 2) return;
+    bool playing = app->play_state == JF_PLAY_PLAYING || app->play_state == JF_PLAY_FETCHING ||
+                   app->play_state == JF_PLAY_PAUSED;
+    if (playing) {
+        queue_swap(app, 0, app->queue_cur);     /* a swap, then everything behind position 0 is shuffled anyway */
+        app->queue_cur = 0;
+        first = 1;
+    }
+    /* queue_cur follows its entry through the swaps */
+    int cur_slot = app->queue_cur;
+    for (int i = n - 1; i > first; i--) {
+        int j = first + (int)jf_rand_below(rng, ctx, (uint32_t)(i - first + 1));
+        queue_swap(app, i, j);
+        if (cur_slot == i) cur_slot = j;
+        else if (cur_slot == j) cur_slot = i;
+    }
+    app->queue_cur = cur_slot;
+}
+
+bool jf_queue_move(JfApp *app, int from, int to)
+{
+    int n = app->queue_n;
+    if (from < 0 || from >= n || to < 0 || to >= n) return false;
+    if (from == to) return true;
+    JfItem t = app->queue[from];
+    if (from < to) memmove(&app->queue[from], &app->queue[from + 1], sizeof(app->queue[0]) * (size_t)(to - from));
+    else           memmove(&app->queue[to + 1], &app->queue[to], sizeof(app->queue[0]) * (size_t)(from - to));
+    app->queue[to] = t;
+    int c = app->queue_cur;
+    if (c == from) c = to;
+    else if (from < to && c > from && c <= to) c--;
+    else if (from > to && c >= to && c < from) c++;
+    app->queue_cur = c;
+    return true;
+}
+
 static void on_volume(JfApp *app, int delta, JfCmds *out)
 {
     int v = app->volume_step + delta;
@@ -1167,6 +1240,13 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
     case JF_EV_BACK:     if (!bar_was && !confirm_was) on_back(app, out); break;
     case JF_EV_PLAY_ALL: on_play_all(app, out); break;
     case JF_EV_NEXT:     on_next(app, out); break;
+    case JF_EV_PREV:     on_prev(app, ev->played_ms, out); break;
+    case JF_EV_SHUFFLE:
+        if (app->screen == JF_SCR_QUEUE) { if (!app->rng_state) jf_seed(app, 0); jf_queue_shuffle(app, xorshift_draw, &app->rng_state); }
+        break;
+    case JF_EV_QUEUE_MOVE:
+        if (app->screen == JF_SCR_QUEUE) jf_queue_move(app, ev->i, ev->j);
+        break;
     case JF_EV_PAUSE:    on_pause(app, ev->played_ms, out); break;
     case JF_EV_STOP:     on_stop(app, out); break;
     case JF_EV_SEEK:     on_seek(app, ev->i, out); break;

@@ -26,6 +26,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include "jf_model.h"
 #include "jf_login.h"
 #include "jf_api.h"
@@ -111,6 +112,9 @@ typedef enum {
     JF_EV_BACK,
     JF_EV_PLAY_ALL,
     JF_EV_NEXT,
+    JF_EV_PREV,          /* .played_ms = the position now (jellyfin.c fills it): past JF_PREV_RESTART_MS the track restarts, else the previous queue entry plays (the first entry restarts) */
+    JF_EV_SHUFFLE,       /* QUEUE screen: random order; the track playing keeps playing and moves to position 0 (nothing playing: all shuffled) */
+    JF_EV_QUEUE_MOVE,    /* QUEUE screen: .i = entry index, .j = the index it moves to; the track playing keeps playing */
     JF_EV_PAUSE,         /* toggle: PLAYING/FETCHING -> PAUSED, PAUSED -> resume, STOPPED/END -> restart the current track from 0.  .played_ms = the position now (jellyfin.c fills it from jf_position_ms) */
     JF_EV_STOP,          /* playback ends, queue and queue_cur stay (STOPPED) */
     JF_EV_SEEK,          /* .i: target position in ms (clamped to [0, runtime)); restarts the stream there, or only moves pos_ms while PAUSED */
@@ -137,6 +141,7 @@ typedef struct {
     JfEventType type;
     int i;
     int played_ms;
+    int j;
     char server[64];     /* as typed: "host", "host:port", "http://host:port/" */
     char user[64];
     char password[64];
@@ -261,6 +266,7 @@ typedef struct {
     int volume_step;         /* 0..JF_VOLUME_MAX; 0 = mute (also in .login.volume_step) */
     int start_ms;            /* where the live stream started (0, or a seek / resume offset): shown elapsed = start_ms + time since START_AUDIO */
     int pos_ms;              /* PAUSED: the held position */
+    uint32_t rng_state;      /* the shuffle's generator (xorshift32); jf_seed() */
     JfConfirm confirm;       /* a modal question is up (INSTANT MIX over a non-empty queue): CONFIRM proceeds, BACK / DISMISS cancels */
     JfItem confirm_seed;     /* the seed the confirmed fetch will use */
     JfLogin login;           /* server and user are kept on 401; token is emptied */
@@ -310,5 +316,25 @@ const JfItem *jf_now(const JfApp *app);
 
 /** Position to show: PAUSED pos_ms; PLAYING start_ms + elapsed_ms (since START_AUDIO; 0 when no stream is live); FETCHING start_ms; else 0.  Clamped to the runtime. */
 int jf_position_ms(const JfApp *app, int elapsed_ms);
+
+
+/** A track further than this into its length restarts on PREV; before it, PREV goes to the previous entry. */
+#define JF_PREV_RESTART_MS 3000
+
+/** A source of 32 random bits; tests pass their own. */
+typedef uint32_t (*JfRng)(void *ctx);
+
+/** r in [0, n) from one draw, by multiply-shift (no divide on this core; the bias is below 2^-20 for a queue). */
+uint32_t jf_rand_below(JfRng rng, void *ctx, uint32_t n);
+
+/** Reseed the generator JF_EV_SHUFFLE uses (a zero seed is replaced). */
+void jf_seed(JfApp *app, uint32_t seed);
+
+/** Fisher-Yates the queue.  Playing / paused / fetching: the current entry goes to position 0 and the rest are shuffled behind it,
+ *  queue_cur = 0.  Otherwise every entry is shuffled and queue_cur follows its entry. */
+void jf_queue_shuffle(JfApp *app, JfRng rng, void *ctx);
+
+/** Move queue entry `from` to index `to` (both in range; else false).  queue_cur follows the track it names. */
+bool jf_queue_move(JfApp *app, int from, int to);
 
 #endif

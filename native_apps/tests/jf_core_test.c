@@ -1468,13 +1468,87 @@ static void test_back_restores_view(void)
 }
 
 
+
+/* PREV, SHUFFLE and QUEUE_MOVE */
+static uint32_t lcg_state;
+static uint32_t lcg_draw(void *ctx) { (void)ctx; lcg_state = lcg_state * 1664525u + 1013904223u; return lcg_state; }
+static uint32_t fixed_draw(void *ctx) { return *(uint32_t *)ctx; }
+
+static int qpos(const char *name)
+{
+    for (int k = 0; k < app.queue_n; k++) if (strcmp(app.queue[k].name, name) == 0) return k;
+    return -1;
+}
+
+static void test_prev(void)
+{
+    playing_album();
+    send(JF_EV_NEXT, 0); send(JF_EV_NEXT, 0);
+    CHECK(app.queue_cur == 2, "NEXT twice -> entry 2");
+    send_pos(JF_EV_PREV, 1000);
+    CHECK(app.queue_cur == 1 && has(JF_CMD_PLAY_STREAM) && app.start_ms == 0, "PREV within 3 s -> the previous entry (cur %d)", app.queue_cur);
+    send_pos(JF_EV_PREV, 3001);
+    CHECK(app.queue_cur == 1 && has(JF_CMD_PLAY_STREAM) && app.start_ms == 0, "PREV past 3 s restarts the track (cur %d)", app.queue_cur);
+    send_pos(JF_EV_PREV, 3000);
+    CHECK(app.queue_cur == 0, "PREV at exactly 3 s still goes back (cur %d)", app.queue_cur);
+    send_pos(JF_EV_PREV, 500);
+    CHECK(app.queue_cur == 0 && has(JF_CMD_PLAY_STREAM), "PREV on the first entry restarts it");
+}
+
+static void test_queue_edit(void)
+{
+    /* move: the playing track keeps playing wherever the others go */
+    fake_queue(5);
+    CHECK(jf_queue_move(&app, 3, 1) && qpos("q3") == 1 && qpos("q1") == 2 && qpos("q4") == 4 && app.queue_cur == 0, "move up past none of cur");
+    app.queue_cur = 2;                              /* q1 plays */
+    CHECK(jf_queue_move(&app, 3, 0) && app.queue_cur == 3 && strcmp(app.queue[app.queue_cur].name, "q1") == 0, "an entry moved above cur pushes cur down");
+    CHECK(jf_queue_move(&app, 0, 4) && app.queue_cur == 2 && strcmp(app.queue[app.queue_cur].name, "q1") == 0, "an entry moved from above cur to below pulls cur up");
+    CHECK(jf_queue_move(&app, app.queue_cur, 0) && app.queue_cur == 0 && strcmp(app.queue[0].name, "q1") == 0, "moving the playing entry carries cur");
+    CHECK(!jf_queue_move(&app, 0, 5) && !jf_queue_move(&app, -1, 2) && app.queue_n == 5, "out of range refused");
+    /* through the core, only on the QUEUE screen */
+    fake_queue(4);
+    static JfEvent ev; memset(&ev, 0, sizeof ev); ev.type = JF_EV_QUEUE_MOVE; ev.i = 2; ev.j = 1;
+    app.screen = JF_SCR_TRACKS; step_ev(&ev);
+    CHECK(qpos("q2") == 2, "QUEUE_MOVE off the queue screen does nothing");
+    app.screen = JF_SCR_QUEUE; step_ev(&ev);
+    CHECK(qpos("q2") == 1 && cm.n == 0, "QUEUE_MOVE reorders and sends no command");
+
+    /* shuffle while playing: cur to position 0, a permutation, deterministic under a seed */
+    fake_queue(8); app.queue_cur = 5;
+    lcg_state = 12345;
+    jf_queue_shuffle(&app, lcg_draw, NULL);
+    int seen = 0;
+    for (int k = 0; k < 8; k++) { char nm[8]; snprintf(nm, sizeof nm, "q%d", k); int p = qpos(nm); if (p >= 0) seen |= 1 << p; }
+    CHECK(seen == 0xFF && app.queue_n == 8, "shuffle keeps every entry once");
+    CHECK(app.queue_cur == 0 && strcmp(app.queue[0].name, "q5") == 0, "the playing entry is at 0 and still the current one");
+    bool moved = false;
+    for (int k = 1; k < 8; k++) { char nm[8]; snprintf(nm, sizeof nm, "q%d", k < 5 ? k - 1 : k); if (strcmp(app.queue[k].name, nm) != 0) moved = true; }
+    CHECK(moved, "the rest is actually reordered");
+    /* rng stuck at 0 -> every pick is index 0 of its range: the order is a fixed rotation, so the bound is right */
+    fake_queue(4); uint32_t zero = 0;
+    jf_queue_shuffle(&app, fixed_draw, &zero);
+    CHECK(strcmp(app.queue[0].name, "q0") == 0 && strcmp(app.queue[3].name, "q1") == 0, "draw 0 picks the lowest of each range");
+    uint32_t top = 0xFFFFFFFFu;
+    CHECK(jf_rand_below(fixed_draw, &top, 7) == 6 && jf_rand_below(fixed_draw, &zero, 7) == 0 && jf_rand_below(fixed_draw, &top, 1) == 0, "multiply-shift bound stays in [0,n)");
+
+    /* shuffle with nothing playing: all shuffled, cur follows its entry */
+    fake_queue(8); app.play_state = JF_PLAY_STOPPED; app.queue_cur = 5;
+    lcg_state = 99;
+    jf_queue_shuffle(&app, lcg_draw, NULL);
+    CHECK(strcmp(app.queue[app.queue_cur].name, "q5") == 0, "stopped: cur follows q5 to %d", app.queue_cur);
+    /* through the core */
+    fake_queue(6); app.screen = JF_SCR_QUEUE; app.queue_cur = 3;
+    static JfEvent sh; memset(&sh, 0, sizeof sh); sh.type = JF_EV_SHUFFLE; step_ev(&sh);
+    CHECK(app.queue_cur == 0 && strcmp(app.queue[0].name, "q3") == 0 && app.play_state == JF_PLAY_PLAYING && cm.n == 0, "SHUFFLE event: playing track first, no restart");
+}
+
 int main(void)
 {
     test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue(); test_sink_channels();
     test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit(); test_categories();
     test_action_bar(); test_queue_insert(); test_mix(); test_mix_seed_and_ticks(); test_mix_flow(); test_mix_choice(); test_mix_stops();
     test_mix_cancel_and_errors(); test_mix_nowplaying(); test_save();
-    test_pause_stop_seek(); test_instant_confirm(); test_back_restores_view();
+    test_pause_stop_seek(); test_instant_confirm(); test_back_restores_view(); test_prev(); test_queue_edit();
     printf("jf_core_test: %d checks, %d failures\n", checks, fails);
     return fails ? 1 : 0;
 }

@@ -23,10 +23,9 @@
 #include "jf_core.h"
 
 #define JF_UI_ROW3   3     /* browse screens: SEARCH, NOW PLAYING, PLAY ALL */
-#define JF_UI_ROW5   5     /* now playing, lower row: PAUSE/PLAY, STOP, NEXT, QUEUE, BACK */
+#define JF_UI_NP     9     /* now playing, one row (wraps in portrait): PREV, PLAY/PAUSE, STOP, NEXT, MIX, I-MIX, VOL +, VOL -, QUEUE */
 #define JF_UI_FIELDS 3     /* sign-in: SERVER, USER, PASSWORD */
 #define JF_UI_ABAR   5     /* action bar: PLAY, PLAY NEXT, ADD QUEUE, MIX, INSTANT MIX */
-#define JF_UI_NPMIX  4     /* now playing, upper row: VOL -, VOL +, MIX, INSTANT MIX (focus 5..8, after the row5 buttons) */
 #define JF_UI_MINI   3     /* mini player: PLAY/PAUSE, VOL -, VOL + */
 #define JF_UI_MINI_H 40    /* the strip above the button row */
 #define JF_UI_MIXBTN 2     /* MIX screen: START, CANCEL */
@@ -46,7 +45,7 @@ typedef struct {
     UiRect list;                    /* browse list and queue list (above the button row) */
     UiRect abar[JF_UI_ABAR];        /* the action bar: in the button row's place while it is up; pressable */
     UiRect save;                    /* the queue screen's SAVE AS PLAYLIST, in the button row; pressable */
-    UiRect np_mix[JF_UI_NPMIX];     /* now playing: the row above row5; pressable */
+    UiRect np[JF_UI_NP];            /* now playing buttons, in a row at the bottom (two rows when the width is too small); pressable */
     UiRect list_mini, list_root_mini; /* list / root list while the mini player strip is up (shorter, same top) */
     UiRect mini;                    /* mini player strip, drawn only (its parts are pressable) */
     UiRect mini_title;              /* tap: open NOW PLAYING; pressable */
@@ -57,7 +56,6 @@ typedef struct {
     UiRect cat_prev, cat_next;      /* root category arrows, pressable */
     UiRect cat_label;               /* root category name and count, drawn only */
     UiRect row3[JF_UI_ROW3];        /* pressable */
-    UiRect row5[JF_UI_ROW5];        /* pressable */
     UiRect field[JF_UI_FIELDS];     /* sign-in rows, pressable */
     UiRect signin, signexit;        /* sign-in buttons, pressable */
     UiRect progress;                /* now playing bar, drawn only */
@@ -78,7 +76,7 @@ typedef struct {
     JfLayout L;
     TopBar bar;
     ListView lv;
-    Button row3[JF_UI_ROW3], row5[JF_UI_ROW5], abar[JF_UI_ABAR], np_mix[JF_UI_NPMIX], save, mini_b[JF_UI_MINI];
+    Button row3[JF_UI_ROW3], np[JF_UI_NP], abar[JF_UI_ABAR], save, mini_b[JF_UI_MINI];
     ModalDialog cdlg;                    /* the INSTANT MIX confirmation */
     bool cdlg_up;
     bool mini_on;                        /* the strip is up (and the list rect is the shorter one) */
