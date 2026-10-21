@@ -1322,7 +1322,8 @@ int main(int argc, char *argv[]) {
 
         bool ptr_moved = !needs_redraw && pointer_paint(&ptr, &fb);
         fb_overtemp_poll(&fb);
-        usleep((needs_redraw || job_active || ptr_moved) ? FRAME_DELAY_ACTIVE_US : FRAME_DELAY_IDLE_US);
+        bool lists_live = lv_needs_frames(&P[0].lv) || lv_needs_frames(&P[1].lv);
+        usleep((needs_redraw || job_active || ptr_moved || lists_live) ? FRAME_DELAY_ACTIVE_US : FRAME_DELAY_IDLE_US);
     }
 
     if (job_active) { fm_job_cancel(&job); fm_job_free(&job); }

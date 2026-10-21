@@ -139,16 +139,21 @@ int lv_drag_move(LvDrag *d, int y, int row_h) {
     return -steps;
 }
 
-/* Velocity of the finger over the last LV_FLING_WINDOW_MS, in milli-rows/s. */
+/* Velocity of the finger over the LV_FLING_WINDOW_MS before it stopped moving,
+ * in milli-rows/s.  The release is seen a frame or two after the last move, so
+ * a still tail up to LV_FLING_HOLD_MS is dropped; a longer one is a hold. */
 int lv_fling_velocity(const LvSample *s, int n, int row_h) {
     if (!s || n < 2 || row_h <= 0) return 0;
-    uint32_t newest = s[n - 1].ms;
-    int first = n - 1;
+    int last = n - 1;
+    while (last > 0 && abs(s[last - 1].y - s[n - 1].y) <= LV_FLING_STILL_PX) last--;
+    if ((uint32_t)(s[n - 1].ms - s[last].ms) > LV_FLING_HOLD_MS) return 0;
+    uint32_t newest = s[last].ms;
+    int first = last;
     while (first > 0 && (uint32_t)(newest - s[first - 1].ms) <= LV_FLING_WINDOW_MS) first--;
     uint32_t dt = newest - s[first].ms;
     if (dt < LV_FLING_MIN_MS) return 0;
     /* dy px over dt ms, finger up = toward later rows: -dy*1e6 / (dt*row_h) */
-    int dy = s[n - 1].y - s[first].y;
+    int dy = s[last].y - s[first].y;
     int v = (-dy * 1000) / row_h;            /* milli-rows moved */
     v = (v * 1000) / (int)dt;                /* per second */
     if (v > LV_FLING_MAX) v = LV_FLING_MAX;
@@ -404,6 +409,10 @@ LvEvent lv_input(ListView *lv, const TouchState *ts, const InputState *in,
         }
     }
     return ev;
+}
+
+bool lv_needs_frames(const ListView *lv) {
+    return lv->drag.active || lv->fling_v != 0;
 }
 
 /* ── Drawing ────────────────────────────────────────────────────────────── */

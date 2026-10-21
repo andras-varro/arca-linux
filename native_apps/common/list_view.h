@@ -122,13 +122,17 @@ int  lv_drag_move(LvDrag *d, int y, int row_h);
 #define LV_FLING_STOP    2000      /* the fling ends once it slows to this */
 #define LV_FLING_MAX    60000
 #define LV_FLING_DECAY_MS  350     /* v loses dt/LV_FLING_DECAY_MS of itself per step */
+#define LV_FLING_HOLD_MS   100     /* a finger still this long before lifting flings nothing */
+#define LV_FLING_STILL_PX    2     /* touch jitter that still counts as "not moving" */
 #define LV_SAMPLES 8
 
 typedef struct { uint32_t ms; int y; } LvSample;
 
-/* Velocity from samples[0..n-1] (oldest first) as of the newest one: 0 when
- * below LV_FLING_START or the span is under LV_FLING_MIN_MS; clamped to
- * +-LV_FLING_MAX.  Finger moving up (y falling) scrolls toward later rows. */
+/* Velocity from samples[0..n-1] (oldest first) over the window before the
+ * finger stopped (a still tail up to LV_FLING_HOLD_MS is the release lag, not
+ * a hold): 0 when below LV_FLING_START, the span is under LV_FLING_MIN_MS or
+ * the finger held still longer; clamped to +-LV_FLING_MAX.  Finger moving up
+ * (y falling) scrolls toward later rows. */
 int lv_fling_velocity(const LvSample *samples, int n, int row_h);
 
 /* ── The widget ─────────────────────────────────────────────────────────── */
@@ -187,6 +191,11 @@ LvEvent lv_key(ListView *lv, LvKey key);
  * NULL.  now_ms is get_time_ms(). */
 LvEvent lv_input(ListView *lv, const TouchState *ts, const InputState *in,
                  uint32_t now_ms);
+/* True while a finger is down on the list or a fling runs: the caller's loop
+ * must then run at its ACTIVE frame rate.  The fling velocity is read from the
+ * frames lv_input saw, so a loop that idles at 100 ms while a finger moves
+ * inside one row records too few samples and no swipe ever flings. */
+bool lv_needs_frames(const ListView *lv);
 
 /* ── Drawing ────────────────────────────────────────────────────────────── */
 

@@ -255,6 +255,14 @@ int main(void) {
         LvSample brief[2] = { {0,400}, {10,300} };                 /* span under LV_FLING_MIN_MS */
         CHECK(lv_fling_velocity(brief, 2, 40) == 0);
         CHECK(lv_fling_velocity(s, 1, 40) == 0);
+        /* measured on .115 (file_manager, arca_tap): the release frame came 72 ms after
+         * the finger stopped, so a window ending at the release saw only the still tail */
+        LvSample flick[6] = { {0,274}, {34,230}, {104,208}, {138,186}, {172,130}, {244,130} };
+        CHECK(lv_fling_velocity(flick, 6, 40) > LV_FLING_START);
+        LvSample drag[8] = { {0,158}, {34,154}, {68,149}, {102,143}, {136,139}, {170,134}, {203,130}, {237,130} };
+        CHECK(lv_fling_velocity(drag, 8, 40) == 0);                /* the same rig, a 1500 ms drag */
+        LvSample held[5] = { {0,400}, {16,300}, {32,200}, {150,199}, {200,200} };  /* stop, hold, lift */
+        CHECK(lv_fling_velocity(held, 5, 40) == 0);
     }
 
     /* 11. fling: a flick keeps scrolling after release, cursor rides along */
@@ -278,7 +286,23 @@ int main(void) {
         CHECK(lv.fling_v == 0 && i < 100);                         /* it decays and stops */
         CHECK(changed > 5 && lv.top >= top_release + 10);
         CHECK(lv_input(&lv, NULL, NULL, now + 16) == LV_EV_NONE);  /* and then reports nothing */
+        CHECK(!lv_needs_frames(&lv));                              /* the loop may idle again */
     }
+    lv_free(&lv);
+
+    /* frame pacing: a finger down inside one row, and a running fling, both need frames */
+    make(&lv, 100, 402, 40);
+    lv.active = true;
+    CHECK(!lv_needs_frames(&lv));
+    t = T(100, 400, true, true, false);  lv_input(&lv, &t, NULL, 16000);
+    CHECK(lv_needs_frames(&lv));                                   /* nothing redrew yet */
+    t = T(100, 380, false, true, false); lv_input(&lv, &t, NULL, 16033);
+    CHECK(lv_needs_frames(&lv) && lv.top == 0);                    /* dragging, still row 0 */
+    t = T(100, 340, false, true, false); lv_input(&lv, &t, NULL, 16066);
+    t = T(100, 300, false, false, true); lv_input(&lv, &t, NULL, 16099);
+    CHECK(lv.fling_v != 0 && lv_needs_frames(&lv));                /* 33 ms frames do fling */
+    lv_move_to(&lv, 0);
+    CHECK(!lv_needs_frames(&lv));
     lv_free(&lv);
 
     /* a slow drag that ends still, and a plain tap, start no fling */

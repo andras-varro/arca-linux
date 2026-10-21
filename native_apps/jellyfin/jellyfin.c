@@ -267,7 +267,7 @@ int main(int argc, char *argv[])
         }
         bool ptr_moved = !redraw && pointer_paint(&ptr, &fb);
         fb_overtemp_poll(&fb);
-        bool active = redraw || ptr_moved || app.busy || (audio_ok && audio_pump_active(&audio));
+        bool active = redraw || ptr_moved || app.busy || lv_needs_frames(&ui.lv) || (audio_ok && audio_pump_active(&audio));
         usleep(active ? FRAME_DELAY_ACTIVE_US : FRAME_DELAY_IDLE_US);
     }
 
