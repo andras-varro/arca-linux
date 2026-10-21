@@ -428,6 +428,26 @@ bool button_check_tap(Button *btn, const TouchState *ts, uint32_t current_time_m
     return button_check_press(btn, down, current_time_ms);
 }
 
+void touch_guard_init(TouchGuard *g) {
+    g->armed = true;
+    g->prev_down = false;
+    g->last_down_ms = 0;
+}
+
+void touch_guard_screen_changed(TouchGuard *g, uint32_t now_ms) {
+    g->armed = false;
+    g->last_down_ms = now_ms;          // the change itself counts as the last touch: a release lands here
+}
+
+bool touch_guard_pass(TouchGuard *g, bool down, uint32_t now_ms) {
+    bool continuing = down && g->prev_down;     // not a fresh press: the same contact as the last frame
+    g->prev_down = down;
+    if (g->armed) return true;
+    if (!continuing && (uint32_t)(now_ms - g->last_down_ms) >= TOUCH_GUARD_QUIET_MS) g->armed = true;
+    if (!g->armed && down) g->last_down_ms = now_ms;   // a contact (or a bounce) keeps the guard shut
+    return g->armed;
+}
+
 // ============================================================================
 // RENDERING
 // ============================================================================

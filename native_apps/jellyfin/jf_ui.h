@@ -107,6 +107,7 @@ typedef struct {
     unsigned seen_banner;
     unsigned seen_restore;               /* the core's restore_seq as of the last frame */
     bool restore_pend;                   /* a BACK came: put the list view back once the rows are loaded */
+    TouchGuard guard;                    /* a touch from before a screen change does not reach the new screen (common.h) */
 } JfUi;
 
 void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm, const JfApp *app);

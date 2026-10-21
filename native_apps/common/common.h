@@ -140,6 +140,25 @@ bool button_check_press(Button *btn, bool currently_pressed, uint32_t current_ti
 // tests/button_latch_test.c).
 bool button_check_tap(Button *btn, const TouchState *ts, uint32_t current_time_ms);
 
+// ── TouchGuard: no touch that began before a screen change may act on the new screen ──
+//
+// A button fires on the leading edge of a press (button_check_press), so when a tap switches the
+// screen, a button on the NEW screen at the same spot fires on ANY press that follows within a
+// moment: the digitizer bounces (lift, then touch again at the same place) or a scroll gesture
+// that dropped contact resumes.  touch_guard_screen_changed() disarms; touch_guard_pass() says
+// whether widgets may see the touch this frame.  It re-arms only on a fresh press (or a quiet frame) at least
+// TOUCH_GUARD_QUIET_MS after the last contact -- the finger has been up
+// (and nothing has touched) for TOUCH_GUARD_QUIET_MS, so a contact that is down, or lifts and
+// bounces, keeps the guard shut and only a press that starts after that quiet counts.
+// The decision is pure (tests/button_latch_test.c group F).  Opt-in: an app that never calls
+// touch_guard_screen_changed() is unaffected.
+#define TOUCH_GUARD_QUIET_MS 200
+typedef struct { bool armed; bool prev_down; uint32_t last_down_ms; } TouchGuard;
+void touch_guard_init(TouchGuard *g);
+void touch_guard_screen_changed(TouchGuard *g, uint32_t now_ms);
+/** Call once per frame with whether a finger is down; true = widgets may act on this frame's touch. */
+bool touch_guard_pass(TouchGuard *g, bool down, uint32_t now_ms);
+
 // Has ANY button's visual_state been changed by button_update() or
 // button_check_press() since the last call?  Clears the flag.  One process-wide
 // question, so a caller that repaints only on change asks it once per loop

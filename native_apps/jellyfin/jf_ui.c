@@ -206,6 +206,7 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
     style(&ui->cat_btn[1], ui->L.cat_next, ">", 3);
 
     ui->last_screen = (JfScreen)-1;
+    touch_guard_init(&ui->guard);
     ui->last_cat = app->cat;
     ui->show_ring = true;
     ui->dirty = true;
@@ -458,7 +459,17 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     const JfApp *app = ui->app;
     int n = 0;
 
-    if (app->screen != ui->last_screen) begin_screen(ui);
+    if (app->screen != ui->last_screen) {
+        begin_screen(ui);
+        touch_guard_screen_changed(&ui->guard, now);
+    }
+    /* Whatever finger was down when the screen changed (a release, a bounce, a dropped contact that resumes) must not press
+     * a widget of the new screen: until the panel has been quiet for a moment the widgets see no touch at all. */
+    TouchState gated;
+    if (!touch_guard_pass(&ui->guard, ts && (ts->pressed || ts->held), now)) {
+        memset(&gated, 0, sizeof gated);
+        ts = &gated;
+    }
     restore_view(ui);
     /* a queue can start or empty on an open screen: the list makes room for the strip, or takes it back */
     if (is_list_screen(app->screen) && mini_wanted(app) != ui->mini_on) {

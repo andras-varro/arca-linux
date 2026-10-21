@@ -233,6 +233,55 @@ int main(void) {
               "and its return to NORMAL is reported");
     }
 
+    printf("\n=== F. touch guard: a touch from before a screen change never reaches the new screen ===\n");
+    {
+        /* Control: with no guard, the bounce re-press 60 ms after the change fires the new screen's button. */
+        Button b; make_button(&b);
+        uint32_t t = 500000;
+        TouchState bounce = frame_down(IN_X, IN_Y);
+        check(button_check_tap(&b, &bounce, t + 60), "control: unguarded bounce re-press fires the button");
+
+        /* Guarded: the tap that changed the screen released at t; bounce at +60, held, lifted, bounce again. */
+        TouchGuard g; touch_guard_init(&g);
+        make_button(&b);
+        check(touch_guard_pass(&g, false, t - 20), "armed guard passes a quiet frame");
+        touch_guard_screen_changed(&g, t);
+        bool fired = false;
+        TouchState q = frame_quiet(IN_X, IN_Y);
+        fired |= touch_guard_pass(&g, false, t + 16) && button_check_tap(&b, &q, t + 16);
+        TouchState d = frame_down(IN_X, IN_Y);
+        for (uint32_t k = 60; k < 400; k += 16) {              /* bounce, then a long contact: all shut */
+            bool pass = touch_guard_pass(&g, true, t + k);
+            fired |= pass && button_check_tap(&b, &d, t + k);
+        }
+        check(!fired, "bounce and the contact that follows never fire the new screen's button");
+        for (uint32_t k = 400; k < 640; k += 16) (void)touch_guard_pass(&g, false, t + k);
+        check(g.armed, "quiet period re-arms");
+        check(touch_guard_pass(&g, true, t + 700) && button_check_tap(&b, &d, t + 700),
+              "a fresh press after the finger was up for the quiet period counts");
+
+        /* A lift-and-bounce inside the quiet period keeps it shut; the quiet restarts from the last contact. */
+        TouchGuard h; touch_guard_init(&h);
+        touch_guard_screen_changed(&h, t);
+        (void)touch_guard_pass(&h, true, t + 100);
+        check(!touch_guard_pass(&h, false, t + 250), "150 ms after the last contact is still shut");
+        check(touch_guard_pass(&h, false, t + 300), "200 ms after the last contact re-arms");
+        /* No quiet frame needed: a press that starts long after the change (an idle loop sends none) counts at once. */
+        TouchGuard s; touch_guard_init(&s);
+        touch_guard_screen_changed(&s, t);
+        check(touch_guard_pass(&s, true, t + 1000), "a first press a second after the change passes");
+        /* ...but the same contact started inside the quiet period never earns the pass by lasting. */
+        TouchGuard c; touch_guard_init(&c);
+        touch_guard_screen_changed(&c, t);
+        bool any = false;
+        for (uint32_t k = 50; k < 1000; k += 16) any |= touch_guard_pass(&c, true, t + k);
+        check(!any, "a contact begun inside the quiet period stays shut however long it is held");
+        /* Clock wrap does not strand the guard shut. */
+        TouchGuard w; touch_guard_init(&w);
+        touch_guard_screen_changed(&w, 0xFFFFFFF0u);
+        check(touch_guard_pass(&w, false, 0xFFFFFFF0u + 300u), "re-arms across the 32-bit clock wrap");
+    }
+
     printf("\n%s  %d checks, %d failure(s)\n",
            failures ? "FAILED" : "PASSED", checks, failures);
     return failures ? 1 : 0;
