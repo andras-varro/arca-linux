@@ -45,6 +45,7 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     for (int i = 0; i < JF_UI_MIXBTN; i++) press[n++] = L.mixb[i];
     press[n++] = L.list_mini; press[n++] = L.list_root_mini;
     press[n++] = L.save;
+    press[n++] = L.qshuf; press[n++] = L.qup; press[n++] = L.qdn;
     press[n++] = L.cat_prev; press[n++] = L.cat_next;
     for (int i = 0; i < n; i++)
         CHECK(inside(press[i], e.safe_l, e.safe_t, e.safe_r, e.safe_b),
@@ -71,6 +72,8 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
         for (int j = i + 1; j < JF_UI_ABAR; j++) CHECK(disjoint(L.abar[i], L.abar[j]), "F: abar %d/%d overlap", i, j);
     }
     CHECK(disjoint(L.save, L.list), "F: SAVE overlaps the queue list (inset %d)", inset_t);
+    CHECK(disjoint(L.save, L.qshuf) && disjoint(L.qshuf, L.qup) && disjoint(L.qup, L.qdn) && disjoint(L.qdn, L.list) && disjoint(L.qshuf, L.list), "F: queue row buttons overlap each other or the list (inset %d)", inset_t);
+    CHECK(L.qup.w >= 60 && L.qshuf.w >= 100 && L.save.w >= 200 && L.qdn.x + L.qdn.w <= e.safe_r, "F: queue row button sizes / right edge (inset %d)", inset_t);
     CHECK(L.list.y + L.list.h <= L.abar[0].y, "F: the list does not end above the action bar (inset %d)", inset_t);
     for (int i = 0; i < JF_UI_NP; i++) {
         CHECK(L.np[i].y == L.np[0].y, "F: now-playing button %d left the single landscape row", i);
