@@ -35,7 +35,8 @@ typedef struct {
     char artist[64];        /**< Artists[0], else AlbumArtist when Artists is empty; empty for an artist */
     char album_artist[64];  /**< AlbumArtist of a track or album, empty if absent */
     char album[64];
-    char image_tag[40];     /**< reserved, always empty for now */
+    char album_id[33];      /**< a track's AlbumId; an album's own Id; empty for other types or when absent */
+    char image_tag[40];     /**< a track's AlbumPrimaryImageTag, an album's ImageTags.Primary; empty if absent (EnableImages=false requests carry none) */
     JfItemType type;
     int index;              /**< IndexNumber (track number), 0 if absent */
     int runtime_s;

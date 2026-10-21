@@ -82,6 +82,12 @@ static void read_item(const char *s, const JsonTok *t, int n, int o, JfItem *it)
     i = json_obj_get(s, t, n, o, "SongCount");
     if (i >= 0 && json_i64(s, &t[i], &v)) it->count = clamp_i(v, 0, INT_MAX);
 
+    if (it->type == JF_ITEM_ALBUM) {   /* an album is its own art source: its Id and ImageTags.Primary */
+        memcpy(it->album_id, it->id, sizeof it->album_id);
+        i = json_obj_get(s, t, n, o, "ImageTags");
+        if (i >= 0 && t[i].type == JSON_OBJECT) sfield(s, t, n, i, "Primary", it->image_tag, sizeof it->image_tag);
+    }
+
     if (it->type == JF_ITEM_ARTIST || it->type == JF_ITEM_GENRE || it->type == JF_ITEM_PLAYLIST) return;
     i = json_obj_get(s, t, n, o, "ProductionYear");
     if (i >= 0 && json_i64(s, &t[i], &v)) it->year = clamp_i(v, 0, 9999);
@@ -110,6 +116,13 @@ static void read_item(const char *s, const JsonTok *t, int n, int o, JfItem *it)
     }
     sfield(s, t, n, o, "Album", it->album, sizeof it->album);
     sfield(s, t, n, o, "AlbumArtist", it->album_artist, sizeof it->album_artist);
+    if (it->type == JF_ITEM_TRACK) {   /* the cover is the album's: AlbumId + AlbumPrimaryImageTag */
+        char aid[40];
+        i = json_obj_get(s, t, n, o, "AlbumId");
+        if (i >= 0 && t[i].type == JSON_STRING && json_str(s, &t[i], aid, sizeof aid) == 32 && hex32(aid))
+            memcpy(it->album_id, aid, 33);
+        sfield(s, t, n, o, "AlbumPrimaryImageTag", it->image_tag, sizeof it->image_tag);
+    }
     i = json_obj_get(s, t, n, o, "Artists");
     e = i >= 0 ? json_arr_first(t, n, i) : -1;   /* only [0]: some tracks list dozens */
     if (e >= 0 && t[e].type == JSON_STRING && json_str(s, &t[e], it->artist, sizeof it->artist) < 0)

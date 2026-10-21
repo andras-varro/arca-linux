@@ -361,6 +361,32 @@ static void test_auth(void)
     CHECK(jf_parse_auth(AUTH, len, toks, JF_TOKENS_PAGE, t, sizeof t, u, 10) == JF_PARSE_BAD, "user id cap too small");
 }
 
+/* album_id and image_tag: the cover source of a track (its album) and of an album (itself) */
+static void test_art_fields(void)
+{
+    JfItem it[6];
+    JfList l;
+    jf_list_init(&l, it, 6);
+    const char *body =
+        "{\"Items\":["
+        "{\"Name\":\"T\",\"Id\":\"" ID1 "\",\"Type\":\"Audio\",\"AlbumId\":\"" ID2 "\",\"AlbumPrimaryImageTag\":\"abc123\"},"
+        "{\"Name\":\"A\",\"Id\":\"" ID3 "\",\"Type\":\"MusicAlbum\",\"ImageTags\":{\"Backdrop\":\"no\",\"Primary\":\"tag9\"}},"
+        "{\"Name\":\"Bare\",\"Id\":\"" ID4 "\",\"Type\":\"Audio\"},"
+        "{\"Name\":\"BadAlb\",\"Id\":\"" ID4 "\",\"Type\":\"Audio\",\"AlbumId\":\"nothex\",\"AlbumPrimaryImageTag\":\"t\"},"
+        "{\"Name\":\"NoTag\",\"Id\":\"" ID2 "\",\"Type\":\"MusicAlbum\",\"ImageTags\":{}},"
+        "{\"Name\":\"Art\",\"Id\":\"" ID1 "\",\"Type\":\"MusicArtist\",\"ImageTags\":{\"Primary\":\"x\"}}"
+        "],\"TotalRecordCount\":6}";
+    CHECK(parse(body, &l) == JF_PARSE_OK && l.n == 6, "art fields page n=%d", l.n);
+    CHECK(strcmp(it[0].album_id, ID2) == 0 && strcmp(it[0].image_tag, "abc123") == 0,
+          "track: AlbumId + AlbumPrimaryImageTag ('%s','%s')", it[0].album_id, it[0].image_tag);
+    CHECK(strcmp(it[1].album_id, ID3) == 0 && strcmp(it[1].image_tag, "tag9") == 0,
+          "album: its own Id + ImageTags.Primary ('%s','%s')", it[1].album_id, it[1].image_tag);
+    CHECK(!it[2].album_id[0] && !it[2].image_tag[0], "absent stays empty");
+    CHECK(!it[3].album_id[0], "a non-hex AlbumId is dropped ('%s')", it[3].album_id);
+    CHECK(strcmp(it[4].album_id, ID2) == 0 && !it[4].image_tag[0], "album without a Primary tag: id set, tag empty");
+    CHECK(!it[5].album_id[0] && !it[5].image_tag[0], "an artist item takes no art fields");
+}
+
 /* year, count, artist_id and genres: the fields MIX reads off a track and off the genre index */
 #define A60 "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 static void test_mix_fields(void)
@@ -539,6 +565,7 @@ int main(void)
     test_root_types();
     test_auth();
     test_mix_fields();
+    test_art_fields();
     printf("jf_model_test: %d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;
 }
