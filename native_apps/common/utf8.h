@@ -9,8 +9,8 @@
  *     call re-synchronises at the following lead byte), so a loop always makes
  *     progress.  Malformed means: a stray continuation byte (0x80-0xBF), the
  *     never-valid leads 0xC0 0xC1 0xF5-0xFF, a truncated sequence (including
- *     one cut short by the NUL), an overlong form (E0 80.., F0 80..), a UTF-16
- *     surrogate (ED A0..) and anything above U+10FFFF (F4 90..).
+ *     one cut short by the NUL), an overlong form (0xE0 0x80.., 0xF0 0x80..), a UTF-16
+ *     surrogate (0xED 0xA0..) and anything above U+10FFFF (0xF4 0x90..).
  *   - it reads at most one byte past the last valid byte of a sequence, and
  *     stops at the first byte that is not a valid continuation, so a NUL ends
  *     every sequence it appears in.
