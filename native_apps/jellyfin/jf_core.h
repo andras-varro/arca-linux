@@ -79,6 +79,11 @@ typedef enum { JF_LIST_ARTISTS = 0, JF_LIST_ALBUMS, JF_LIST_TRACKS, JF_LIST_SEAR
 /* The root browse category (JF_SCR_ARTISTS shows it), in the order JF_EV_CATEGORY cycles. */
 typedef enum { JF_CAT_ALBUMS = 0, JF_CAT_ARTISTS, JF_CAT_PLAYLISTS, JF_CAT_GENRES, JF_CAT_SONGS, JF_CAT_COUNT } JfCat;
 
+/** The category name as the screens show it (ALBUMS, ARTISTS, ...); "" for a value outside the enum. */
+const char *jf_cat_name(JfCat c);
+/** The neighbouring category in enum order, wrapping at both ends: dir > 0 the next, otherwise the previous. */
+JfCat jf_cat_step(JfCat c, int dir);
+
 /* What an ALBUMS or TRACKS list is the child of: ALBUMS of an artist (plain) or of a genre,
  * TRACKS of an album (plain) or of a playlist. */
 typedef enum { JF_SUB_PLAIN = 0, JF_SUB_GENRE, JF_SUB_PLAYLIST } JfSub;
@@ -129,6 +134,7 @@ typedef enum {
     JF_EV_CLOSE_ERROR,   /* overlay button */
     JF_EV_NEED_MORE,     /* the list cursor is near the end of the loaded rows */
     JF_EV_CATEGORY,      /* .i: +1 next, -1 previous root category; only at the root (ARTISTS screen, nav empty) */
+    JF_EV_CATEGORY_SET,  /* .i: a JfCat to show (the root header picker); same conditions as JF_EV_CATEGORY, no-op when it is already shown */
     JF_EV_QUIT,          /* the X / EXIT button */
     /* results and audio facts */
     JF_EV_RESULT,        /* .res: a copy of the JfResult from jf_api_poll */

@@ -524,6 +524,37 @@ static void test_quit(void)
     CHECK(sizeof(JfApp) < 2000000, "JfApp stays small enough to be static (%zu)", sizeof(JfApp));
 }
 
+/* The neighbour labels of the root's bottom row, and picking a category outright (the header picker). */
+static void test_category_pick(void)
+{
+    /* neighbours in enum order, wrapping at both ends */
+    CHECK(jf_cat_step(JF_CAT_ALBUMS, -1) == JF_CAT_SONGS && strcmp(jf_cat_name(jf_cat_step(JF_CAT_ALBUMS, -1)), "SONGS") == 0,
+          "before ALBUMS wraps to SONGS");
+    CHECK(jf_cat_step(JF_CAT_ALBUMS, 1) == JF_CAT_ARTISTS && strcmp(jf_cat_name(jf_cat_step(JF_CAT_ALBUMS, 1)), "ARTISTS") == 0,
+          "after ALBUMS is ARTISTS");
+    CHECK(jf_cat_step(JF_CAT_SONGS, 1) == JF_CAT_ALBUMS && strcmp(jf_cat_name(jf_cat_step(JF_CAT_SONGS, 1)), "ALBUMS") == 0,
+          "after SONGS wraps to ALBUMS");
+    CHECK(jf_cat_step(JF_CAT_SONGS, -1) == JF_CAT_GENRES, "before SONGS is GENRES");
+    CHECK(strcmp(jf_cat_name(JF_CAT_PLAYLISTS), "PLAYLISTS") == 0 && jf_cat_name((JfCat)JF_CAT_COUNT)[0] == '\0' &&
+          jf_cat_name((JfCat)-1)[0] == '\0', "names, and none for a value outside the enum");
+    for (int c = 0; c < JF_CAT_COUNT; c++)
+        CHECK(jf_cat_step(jf_cat_step((JfCat)c, 1), -1) == (JfCat)c, "step forward then back returns to %d", c);
+
+    char want[JF_PATH_MAX];
+    signed_in(); artists_loaded(3, 3);
+    send(JF_EV_CATEGORY_SET, JF_CAT_SONGS);
+    jf_path_songs(want, sizeof(want), UID, 0, JF_PAGE_TRACKS);
+    CHECK(app.cat == JF_CAT_SONGS && find(JF_CMD_REQUEST) && strcmp(find(JF_CMD_REQUEST)->path, want) == 0 &&
+          strcmp(app.crumb, "SONGS") == 0 && app.nav_n == 0, "SET jumps straight to SONGS (cat %d)", app.cat);
+    send(JF_EV_CATEGORY_SET, JF_CAT_SONGS);
+    CHECK(!has(JF_CMD_REQUEST) && app.cat == JF_CAT_SONGS, "SET to the category already shown reloads nothing");
+    send(JF_EV_CATEGORY_SET, 17);
+    send(JF_EV_CATEGORY_SET, -3);
+    CHECK(app.cat == JF_CAT_SONGS && !has(JF_CMD_REQUEST), "SET outside the enum is ignored");
+    send(JF_EV_CATEGORY_SET, JF_CAT_ALBUMS);
+    CHECK(app.cat == JF_CAT_ALBUMS && has(JF_CMD_REQUEST), "SET from SONGS back to ALBUMS");
+}
+
 /* The root category: ALBUMS <-> ARTISTS <-> PLAYLISTS <-> GENRES <-> SONGS, default ARTISTS. */
 static void test_categories(void)
 {
@@ -1545,7 +1576,7 @@ static void test_queue_edit(void)
 int main(void)
 {
     test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue(); test_sink_channels();
-    test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit(); test_categories();
+    test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit(); test_categories(); test_category_pick();
     test_action_bar(); test_queue_insert(); test_mix(); test_mix_seed_and_ticks(); test_mix_flow(); test_mix_choice(); test_mix_stops();
     test_mix_cancel_and_errors(); test_mix_nowplaying(); test_save();
     test_pause_stop_seek(); test_instant_confirm(); test_back_restores_view(); test_prev(); test_queue_edit();

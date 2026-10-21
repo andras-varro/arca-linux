@@ -1127,11 +1127,30 @@ static void on_back(JfApp *app, JfCmds *out)
     pop(app, out);
 }
 
+const char *jf_cat_name(JfCat c)
+{
+    return c >= 0 && c < JF_CAT_COUNT ? CAT_NAME[c] : "";
+}
+
+JfCat jf_cat_step(JfCat c, int dir)
+{
+    return (JfCat)((c + (dir > 0 ? 1 : JF_CAT_COUNT - 1)) % JF_CAT_COUNT);
+}
+
+/* The header picker names the category outright. */
+static void on_category_set(JfApp *app, int cat, JfCmds *out)
+{
+    if (app->screen != JF_SCR_ARTISTS || app->nav_n != 0 || !have_token(app)) return;
+    if (cat < 0 || cat >= JF_CAT_COUNT || cat == (int)app->cat) return;
+    app->cat = (JfCat)cat;
+    retarget(app, JF_LIST_ARTISTS, "", CAT_NAME[app->cat], JF_SUB_PLAIN, out);
+}
+
 /* Root level only: step the category and reload the root list (the nav stack is empty, so it does not grow). */
 static void on_category(JfApp *app, int dir, JfCmds *out)
 {
     if (app->screen != JF_SCR_ARTISTS || app->nav_n != 0 || !have_token(app) || dir == 0) return;
-    app->cat = (JfCat)((app->cat + (dir > 0 ? 1 : JF_CAT_COUNT - 1)) % JF_CAT_COUNT);
+    app->cat = jf_cat_step(app->cat, dir);
     retarget(app, JF_LIST_ARTISTS, "", CAT_NAME[app->cat], JF_SUB_PLAIN, out);
 }
 
@@ -1255,6 +1274,7 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
     case JF_EV_SEARCH:   on_search(app, ev->term, out); break;
     case JF_EV_NEED_MORE: on_need_more(app, out); break;
     case JF_EV_CATEGORY: on_category(app, ev->i, out); break;
+    case JF_EV_CATEGORY_SET: on_category_set(app, ev->i, out); break;
     case JF_EV_OPEN_NOWPLAYING:
         if (cur_list(app) >= 0 && app->queue_n > 0) { nav_push(app); app->screen = JF_SCR_NOWPLAYING; }
         break;
