@@ -374,6 +374,11 @@ void audio_pump(Audio *audio);
  *  stream is the transition (and the click) the stream exists to remove. */
 bool audio_pump_active(const Audio *audio);
 
+/** The system equaliser on this stream (audio_eq.h), live and click-free; a forward to audio_out_set_eq() on
+ *  the Audio's own stream.  Safe to call when the stream failed to open (then it does nothing). */
+void audio_set_eq(Audio *audio, const int gains_db[EQ_BANDS]);
+void audio_get_eq(const Audio *audio, int gains_db[EQ_BANDS]);
+
 /** Hold for `ms` while SERVICING the bus, for a caller with no render loop.
  *
  * ⚠️ **A tone lives in the MIXER until something pumps it, and `audio_close()`

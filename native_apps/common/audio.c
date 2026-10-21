@@ -413,6 +413,15 @@ static void bus_reset(Audio *audio)
     audio->pump_period  = 0;
 }
 
+void audio_set_eq(Audio *audio, const int gains_db[EQ_BANDS]) {
+    if (audio && audio_out_is_open(&audio->out)) audio_out_set_eq(&audio->out, gains_db);
+}
+
+void audio_get_eq(const Audio *audio, int gains_db[EQ_BANDS]) {
+    if (audio && audio_out_is_open(&audio->out)) { audio_out_get_eq(&audio->out, gains_db); return; }
+    for (int i = 0; i < EQ_BANDS; i++) gains_db[i] = 0;
+}
+
 bool audio_pump_active(const Audio *audio)
 {
     /* ⚠️ True whenever the stream is open: it must be serviced whatever the bus is

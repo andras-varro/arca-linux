@@ -156,6 +156,7 @@ CTEST_ROWS=(
     "gamepad_rescan_hold_test|-I common|common/gamepad.c common/input_slots.c common/framebuffer.c common/font.c common/hardware.c common/config.c common/touch_input.c"
     "gamepad_slots_test|-I common|common/gamepad.c common/input_slots.c common/framebuffer.c common/font.c common/hardware.c common/config.c common/touch_input.c"
     "gradient_test|-I common|common/framebuffer.c common/font.c common/hardware.c common/config.c common/touch_input.c"
+    "eq_panel_test|-I common|common/eq_panel.c common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c"
     "icons_test|-I common|common/icons.c common/framebuffer.c common/font.c common/hardware.c common/config.c common/touch_input.c"
     "http_test|-I common -fsanitize=undefined|common/http.c"
     "input_config_test|-I common|common/input_scan.c"
