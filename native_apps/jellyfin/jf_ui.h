@@ -23,6 +23,7 @@
 #include "jf_core.h"
 
 #define JF_UI_ROW3   3     /* browse screens: SEARCH, NOW PLAYING, PLAY ALL */
+#define JF_UI_ART   120    /* now playing: the cover square, the height of the info block */
 #define JF_UI_NP     9     /* now playing, one row (wraps in portrait): PREV, PLAY/PAUSE, STOP, NEXT, MIX, I-MIX, VOL +, VOL -, QUEUE */
 #define JF_UI_FIELDS 3     /* sign-in: SERVER, USER, PASSWORD */
 #define JF_UI_ABAR   5     /* action bar: PLAY, PLAY NEXT, ADD QUEUE, MIX, INSTANT MIX */

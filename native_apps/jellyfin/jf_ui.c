@@ -8,6 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "jf_art.h"
 #include "keyboard.h"
 
 #define BG        RGB(16, 18, 26)
@@ -820,18 +821,31 @@ static void draw_nowplaying(JfUi *ui)
     const JfItem *it = jf_now(app);
     UiRect in = ui->L.info;
     char buf[128];
+    int tx = in.x + 4;                       /* text column: right of the cover when there is one */
+    if (it && it->album_id[0]) {
+        jf_art_request(it->album_id, it->image_tag);   /* cheap; the fetch runs in jf_art_poll */
+        const LvIcon *art = jf_art_get(it->album_id, it->image_tag);
+        if (art && art->pixels && art->w == JF_UI_ART && art->h == JF_UI_ART)
+            fb_blit_sprite(fb, art->pixels, art->w, 0, 0, in.x, in.y, art->w, art->h, 0x00000000u);
+        else {                                         /* loading or none: a quiet box */
+            fb_fill_rect(fb, in.x, in.y, JF_UI_ART, JF_UI_ART, PANEL);
+            fb_draw_rect(fb, in.x, in.y, JF_UI_ART, JF_UI_ART, DIM);
+        }
+        tx = in.x + JF_UI_ART + 12;
+    }
+    int tw = in.x + in.w - tx - 4;
     if (it) {
-        lv_fit(buf, sizeof buf, it->name, in.w - 8, 3);
-        fb_draw_text(fb, in.x + 4, in.y, buf, COLOR_WHITE, 3);
-        lv_fit(buf, sizeof buf, it->artist, in.w - 8, 2);
-        fb_draw_text(fb, in.x + 4, in.y + 40, buf, DIM, 2);
-        lv_fit(buf, sizeof buf, it->album, in.w - 8, 2);
-        fb_draw_text(fb, in.x + 4, in.y + 66, buf, DIM, 2);
+        lv_fit(buf, sizeof buf, it->name, tw, 3);
+        fb_draw_text(fb, tx, in.y, buf, COLOR_WHITE, 3);
+        lv_fit(buf, sizeof buf, it->artist, tw, 2);
+        fb_draw_text(fb, tx, in.y + 40, buf, DIM, 2);
+        lv_fit(buf, sizeof buf, it->album, tw, 2);
+        fb_draw_text(fb, tx, in.y + 66, buf, DIM, 2);
     }
     const char *state = app->play_state == JF_PLAY_FETCHING ? "LOADING..." : app->play_state == JF_PLAY_PAUSED ? "PAUSED"
                       : app->play_state == JF_PLAY_STOPPED ? "STOPPED"
                       : app->play_state == JF_PLAY_END ? "END OF QUEUE" : "";
-    if (state[0]) fb_draw_text(fb, in.x + 4, in.y + 94, state, RING, 2);
+    if (state[0]) fb_draw_text(fb, tx, in.y + 94, state, RING, 2);
 
     UiRect p = ui->L.progress;
     int total = it ? it->runtime_s : 0;

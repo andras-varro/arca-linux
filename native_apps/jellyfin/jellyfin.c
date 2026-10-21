@@ -19,6 +19,7 @@
 #include "audio.h"
 #include "audio_out.h"
 #include "logger.h"
+#include "jf_art.h"
 #include "jf_ui.h"
 
 #define EVQ_MAX 8
@@ -56,6 +57,9 @@ static void push_type(JfEventType t, int played_ms)
     push(&e);
 }
 
+static char art_host[JF_HOST_MAX + 1];     /* the server the cover art is fetched from (set with the API) */
+static int art_port;
+
 static void execute(const JfCmds *cmds, uint32_t now)
 {
     for (int i = 0; i < cmds->n; i++) {
@@ -63,9 +67,12 @@ static void execute(const JfCmds *cmds, uint32_t now)
         switch (c->type) {
         case JF_CMD_SET_SERVER:
             jf_api_set_server(&api, c->host, c->port);
+            snprintf(art_host, sizeof art_host, "%s", c->host);
+            art_port = c->port;
             break;
         case JF_CMD_SET_AUTH:
             jf_api_set_auth(&api, "Arca", app.login.device_id, app.login.token);
+            jf_art_set_server(art_host, art_port, "Arca", app.login.device_id, app.login.token);
             break;
         case JF_CMD_REQUEST:
             if (c->kind == JF_KIND_AUTH) {
@@ -210,6 +217,7 @@ int main(int argc, char *argv[])
     logger_init(&logger, "jellyfin", LOG_LEVEL_INFO, false);
     api.log = &logger;
     jf_ui_init(&ui, &fb, &touch, &gp, &app);
+    jf_art_init(JF_ART_CACHE_DIR, JF_UI_ART);
 
     {
         JfEvent *e = &evq[0];
@@ -219,6 +227,7 @@ int main(int argc, char *argv[])
         evq_n = 1;
     }
 
+    unsigned art_gen = jf_art_generation();
     InputState in;
     memset(&in, 0, sizeof in);
     bool first = true;
@@ -246,6 +255,8 @@ int main(int argc, char *argv[])
         for (int i = 0; i < un; i++) push(&uev[i]);
 
         static JfResult res;
+        jf_art_poll(now);
+        if (jf_art_generation() != art_gen) { art_gen = jf_art_generation(); jf_ui_mark_dirty(&ui); }
         while (jf_api_poll(&api, &res)) {
             JfEvent e;
             memset(&e, 0, sizeof e);
@@ -279,7 +290,7 @@ int main(int argc, char *argv[])
         }
         bool ptr_moved = !redraw && pointer_paint(&ptr, &fb);
         fb_overtemp_poll(&fb);
-        bool active = redraw || ptr_moved || app.busy || lv_needs_frames(&ui.lv) || (audio_ok && audio_pump_active(&audio));
+        bool active = redraw || ptr_moved || app.busy || jf_art_busy() || lv_needs_frames(&ui.lv) || (audio_ok && audio_pump_active(&audio));
         usleep(active ? FRAME_DELAY_ACTIVE_US : FRAME_DELAY_IDLE_US);
     }
 
@@ -288,6 +299,7 @@ int main(int argc, char *argv[])
         for (int i = 0; i < 20; i++) { audio_pump(&audio); usleep(16667); }
         audio_close(&audio);
     }
+    jf_art_shutdown();
     jf_api_free(&api);
     logger_close(&logger);
     jf_ui_free(&ui);
