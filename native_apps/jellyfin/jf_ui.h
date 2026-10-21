@@ -28,6 +28,8 @@
 #define JF_UI_ART   120    /* now playing: the cover square, the height of the info block */
 #define JF_UI_NP     10    /* now playing, one row (wraps in portrait): PREV, PLAY/PAUSE, STOP, NEXT, QUEUE, MIX, I-MIX, EQ, VOL +, VOL - */
 #define JF_UI_NP_EQ  7     /* the EQ button's index in that row */
+#define JF_UI_QROW  12     /* the queue view of now playing: PREV, PLAY/PAUSE, STOP, NEXT, SAVE, CLR, RND, UP, DN, EQ, VOL +, VOL - */
+#define JF_UI_QROW_EQ 9    /* the EQ button's index in that row */
 #define JF_UI_FIELDS 3     /* sign-in: SERVER, USER, PASSWORD */
 #define JF_UI_ABAR   5     /* action bar: PLAY, PLAY NEXT, ADD QUEUE, MIX, INSTANT MIX */
 #define JF_UI_MINI   3     /* mini player: PLAY/PAUSE, VOL -, VOL + */
@@ -46,8 +48,9 @@ typedef struct {
     UiRect banner;                  /* notice / busy line under the bar */
     UiRect list;                    /* browse list and queue list (above the button row) */
     UiRect abar[JF_UI_ABAR];        /* the action bar: in the button row's place while it is up; pressable */
-    UiRect save;                    /* the queue screen's SAVE AS PLAYLIST, in the button row; pressable */
-    UiRect qshuf, qup, qdn;         /* the queue screen's SHUFFLE, UP, DN (move the cursor row one place), right of SAVE; pressable */
+    UiRect qrow[JF_UI_QROW];        /* the queue screen's button row (one row, or the fewest equal rows stacked upward when narrow); pressable */
+    UiRect list_q;                  /* the queue list: above that row, whatever its row count */
+    int    qrow_rows;               /* how many rows the queue button row wrapped into */
     UiRect np[JF_UI_NP];            /* now playing buttons, in a row at the bottom (two rows when the width is too small); pressable */
     UiRect list_mini;               /* the list while the mini player strip is up (shorter, same top) */
     UiRect mini;                    /* mini player strip, drawn only (its parts are pressable) */
@@ -77,7 +80,7 @@ typedef struct {
     JfLayout L;
     TopBar bar;
     ListView lv;
-    Button row3[JF_UI_ROW3], row4[JF_UI_ROW4], np[JF_UI_NP], abar[JF_UI_ABAR], save, qshuf, qup, qdn, mini_b[JF_UI_MINI];
+    Button row3[JF_UI_ROW3], row4[JF_UI_ROW4], np[JF_UI_NP], abar[JF_UI_ABAR], qrow[JF_UI_QROW], mini_b[JF_UI_MINI];
     ModalDialog cdlg;                    /* the INSTANT MIX confirmation */
     bool cdlg_up;
     bool mini_on;                        /* the strip is up (and the list rect is the shorter one) */

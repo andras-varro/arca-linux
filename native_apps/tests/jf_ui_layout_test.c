@@ -9,6 +9,7 @@
  *   F  the action bar, SAVE AS PLAYLIST and the now-playing MIX pair (all pressable, so also under A) do not
  *      overlap the list or each other, and the list ends above the bar.
  *   I  mini player taps send their events; a queue that starts on an open list shortens it (mini_taps, mini_flip).
+ *   R  the queue view of now playing: 12 buttons in one row (wrapping when narrower than 738 px), the transport sends now playing's events, CLR, EQ, the title returns (queue_row, queue_widths).
  *   Q  the EQ door: the NOW PLAYING button and Shift open the panel, Back cancels, DONE saves (eq_door).
  *   M  MIX tick rows carry no bracket text or checkbox glyph; ticks draw as the ListView mark (mix_ticks).
  */
@@ -45,8 +46,7 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     press[n++] = L.mini_title; press[n++] = L.seek;
     for (int i = 0; i < JF_UI_MIXBTN; i++) press[n++] = L.mixb[i];
     press[n++] = L.list_mini;
-    press[n++] = L.save;
-    press[n++] = L.qshuf; press[n++] = L.qup; press[n++] = L.qdn;
+    for (int i = 0; i < JF_UI_QROW; i++) press[n++] = L.qrow[i];
 
     for (int i = 0; i < n; i++)
         CHECK(inside(press[i], e.safe_l, e.safe_t, e.safe_r, e.safe_b),
@@ -72,9 +72,15 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
         CHECK(L.abar[i].y == L.row3[0].y, "F: abar[%d] is not in the button row", i);
         for (int j = i + 1; j < JF_UI_ABAR; j++) CHECK(disjoint(L.abar[i], L.abar[j]), "F: abar %d/%d overlap", i, j);
     }
-    CHECK(disjoint(L.save, L.list), "F: SAVE overlaps the queue list (inset %d)", inset_t);
-    CHECK(disjoint(L.save, L.qshuf) && disjoint(L.qshuf, L.qup) && disjoint(L.qup, L.qdn) && disjoint(L.qdn, L.list) && disjoint(L.qshuf, L.list), "F: queue row buttons overlap each other or the list (inset %d)", inset_t);
-    CHECK(L.qup.w >= 60 && L.qshuf.w >= 100 && L.save.w >= 200 && L.qdn.x + L.qdn.w <= e.safe_r, "F: queue row button sizes / right edge (inset %d)", inset_t);
+    for (int i = 0; i < JF_UI_QROW; i++) {
+        CHECK(disjoint(L.qrow[i], L.list_q), "F: queue row button %d overlaps the queue list (inset %d)", i, inset_t);
+        CHECK(L.qrow[i].w >= 56 && L.qrow[i].h >= JF_UI_BTN_H, "F: queue row button %d narrower than 56 px (%d, inset %d)", i, L.qrow[i].w, inset_t);
+        for (int j = i + 1; j < JF_UI_QROW; j++) CHECK(disjoint(L.qrow[i], L.qrow[j]), "F: queue row buttons %d/%d overlap (inset %d)", i, j, inset_t);
+    }
+    CHECK(L.list_q.h >= 2 * 40 && L.list_q.y + L.list_q.h <= L.qrow[0].y, "F: queue list too short or not above its row (h %d, inset %d)", L.list_q.h, inset_t);
+    bool q_one = (e.safe_r - e.safe_l) >= JF_UI_QROW * 56 + (JF_UI_QROW - 1) * 6;
+    for (int i = 0; i < JF_UI_QROW; i++) CHECK(!q_one || L.qrow[i].y == L.qrow[0].y, "F: queue row button %d left the single landscape row (inset %d)", i, inset_t);
+    CHECK(q_one == (L.qrow_rows == 1), "F: queue row is in %d rows, one-row prediction %d (inset %d)", L.qrow_rows, q_one, inset_t);
     CHECK(L.list.y + L.list.h <= L.abar[0].y, "F: the list does not end above the action bar (inset %d)", inset_t);
     /* one row when the safe width holds 10 buttons at the 72 px minimum plus gaps, else the fewest equal rows (the largest inset) */
     bool one_row = (e.safe_r - e.safe_l) >= JF_UI_NP * 72 + (JF_UI_NP - 1) * 6;
@@ -95,7 +101,7 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     CHECK(L.list_mini.y == L.list.y, "G: shortened list moved its top");
     for (int i = 0; i < JF_UI_ROW3; i++) CHECK(disjoint(L.mini, L.row3[i]), "G: mini overlaps row3[%d] (inset %d)", i, inset_t);
     for (int i = 0; i < JF_UI_ABAR; i++) CHECK(disjoint(L.mini, L.abar[i]), "G: mini overlaps abar[%d]", i);
-    CHECK(disjoint(L.mini, L.save) && disjoint(L.mini, L.banner), "G: mini overlaps save / category / banner");
+    CHECK(disjoint(L.mini, L.banner), "G: mini overlaps save / category / banner");
     CHECK(disjoint(L.mini_title, L.mini_btn[0]), "G: mini title overlaps PLAY");
     for (int i = 0; i < JF_UI_MINI; i++) {
         CHECK(L.mini_btn[i].h >= 40 && L.mini_btn[i].w >= 60, "G: mini button %d too small", i);
@@ -265,10 +271,92 @@ static void queue_shuffle_cursor(void)
     feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
     lv_move_to(&ui.lv, 15);
     CHECK(ui.lv.cursor == 15 && ui.lv.top > 0, "S: setup: cursor %d top %d", ui.lv.cursor, ui.lv.top);
-    int n = tap_at(&ui, ui.L.qshuf.x + 20, ui.L.qshuf.y + 20, 2000, ev);
+    int n = tap_at(&ui, ui.L.qrow[6].x + 20, ui.L.qrow[6].y + 20, 2000, ev);
     CHECK(has_event(ev, n, JF_EV_SHUFFLE), "S: SHUFFLE sent no event");
     CHECK(ui.lv.cursor == 0 && ui.lv.top == 0, "S: after SHUFFLE the cursor is %d and the top %d (want 0, 0)", ui.lv.cursor, ui.lv.top);
     jf_ui_free(&ui);
+}
+
+/* R  the queue view of now playing: its transport buttons send the events now playing's do, CLR asks to clear, the title
+ * returns to now playing, EQ opens the panel, and the pad walks all twelve. */
+static JfEventType first_event(JfUi *ui, int x, int y, uint32_t now)
+{
+    JfEvent ev[MINI_MAX];
+    int n = tap_at(ui, x, y, now, ev);
+    return n > 0 ? ev[0].type : JF_EV_NONE;
+}
+
+static void queue_row(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    JfApp app, nowp;
+    JfUi ui, np;
+    JfEvent ev[MINI_MAX];
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_QUEUE;
+    app.queue_n = 5;
+    nowp = app;
+    nowp.screen = JF_SCR_NOWPLAYING;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    jf_ui_init(&np, &fb, &touch, NULL, &nowp);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    feed(&np, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    uint32_t t = 3000;
+    for (int i = 0; i < 4; i++, t += 1000) {
+        JfEventType q = first_event(&ui, ui.L.qrow[i].x + 20, ui.L.qrow[i].y + 20, t);
+        JfEventType p = first_event(&np, np.L.np[i].x + 20, np.L.np[i].y + 20, t);
+        CHECK(q != JF_EV_NONE && q == p, "R: queue transport button %d sent event %d, now playing's sends %d", i, q, p);
+        static const JfEventType want[4] = { JF_EV_PREV, JF_EV_PAUSE, JF_EV_STOP, JF_EV_NEXT };
+        CHECK(q == want[i], "R: queue transport button %d sent event %d, want %d", i, q, want[i]);
+    }
+    /* EQ opens the shared panel, quietly */
+    int n = tap_at(&ui, ui.L.qrow[JF_UI_QROW_EQ].x + 20, ui.L.qrow[JF_UI_QROW_EQ].y + 20, t, ev);
+    CHECK(ui.eq_up && n == 0, "R: EQ did not open the panel quietly (up %d, %d events)", ui.eq_up, n);
+    feed_btn(&ui, BTN_ID_BACK, t + 3000, ev, MINI_MAX);
+    CHECK(!ui.eq_up, "R: Back did not close the panel");
+    t += 8000;
+    CHECK(first_event(&ui, ui.L.qrow[10].x + 20, ui.L.qrow[10].y + 20, t) == JF_EV_VOL_UP, "R: VOL+ sent the wrong event"); t += 1000;
+    CHECK(first_event(&ui, ui.L.qrow[11].x + 20, ui.L.qrow[11].y + 20, t) == JF_EV_VOL_DOWN, "R: VOL- sent the wrong event"); t += 1000;
+    CHECK(first_event(&ui, ui.L.qrow[5].x + 20, ui.L.qrow[5].y + 20, t) == JF_EV_QUEUE_CLEAR, "R: CLR did not send QUEUE_CLEAR"); t += 1000;
+    CHECK(first_event(&ui, ui.L.qrow[6].x + 20, ui.L.qrow[6].y + 20, t) == JF_EV_SHUFFLE, "R: RND did not send SHUFFLE"); t += 1000;
+    /* the title: a tap on it goes back; a tap elsewhere in the bar's middle row of the list does not */
+    TopBarLayout *TL = &ui.bar.L;
+    CHECK(first_event(&ui, TL->title_x + TL->title_w / 2, TL->top + TL->h / 2, t) == JF_EV_BACK, "R: a tap on the QUEUE title did not send BACK");
+    t += 1000;
+    /* the pad: Right walks the twelve and wraps; ACTION on the last is VOL- */
+    feed(&ui, 0, 0, false, false, false, t, ev, MINI_MAX);
+    ui.zone = JF_ZONE_ROW;
+    ui.focus = 0;
+    for (int i = 0; i < JF_UI_QROW - 1; i++) feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.focus == JF_UI_QROW - 1, "R: the pad reached button %d after %d Rights, want %d", ui.focus, JF_UI_QROW - 1, JF_UI_QROW - 1);
+    int k = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
+    CHECK(has_event(ev, k, JF_EV_VOL_DOWN), "R: ACTION on the last button did not send VOL-");
+    feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.focus == 0, "R: the pad did not wrap to the first button (%d)", ui.focus);
+    jf_ui_free(&ui);
+    jf_ui_free(&np);
+}
+
+/* the numbers the operator asked for, at the measured unit and a narrower one */
+static void queue_widths(void)
+{
+    JfExtents u = { 0, 0, 800, 480, 17, 17, 797, 463 };      /* the measured unit: 780 px of safe width */
+    JfExtents z = { 0, 0, 800, 480, 0, 0, 800, 480 };
+    JfExtents nar = { 0, 0, 800, 480, 30, 17, 770, 463 };    /* 740 px: still one row at 56 */
+    JfExtents tight = { 0, 0, 800, 480, 31, 17, 769, 463 };  /* 738 px: the last width of one row */
+    JfExtents wrap = { 0, 0, 800, 480, 32, 17, 768, 463 };   /* 736 px: wraps */
+    const JfExtents *es[5] = { &u, &z, &nar, &tight, &wrap };
+    const int want_rows[5] = { 1, 1, 1, 1, 2 };
+    for (int k = 0; k < 5; k++) {
+        JfLayout L;
+        jf_ui_layout(&L, es[k]);
+        CHECK(L.qrow_rows == want_rows[k], "R: width %d gives %d rows, want %d", es[k]->safe_r - es[k]->safe_l, L.qrow_rows, want_rows[k]);
+        for (int i = 0; i < JF_UI_QROW; i++) CHECK(L.qrow[i].w >= 56, "R: width %d button %d is %d px", es[k]->safe_r - es[k]->safe_l, i, L.qrow[i].w);
+    }
+    JfLayout L;
+    jf_ui_layout(&L, &u);
+    printf("queue row at 780 px: %d buttons of %d px, gap 6, %d row(s)\n", JF_UI_QROW, L.qrow[0].w, L.qrow_rows);
 }
 
 /* the list (or root list) takes the strip's room the frame the queue starts, and gives it back when it empties */
@@ -408,6 +496,8 @@ int main(void)
     mix_ticks();
     root_picker();
     queue_shuffle_cursor();
+    queue_row();
+    queue_widths();
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");
     return 0;
