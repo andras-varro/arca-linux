@@ -111,25 +111,38 @@ static void test_builders(void)
            "&IncludeItemTypes=MusicAlbum&Recursive=true&SortBy=SortName&StartIndex=0&Limit=30");
     CAP_EDGE("genre_albums", jf_path_genre_albums(b_, cap, UID, ART, 0, 30));
 
-    n = jf_path_stream(b, sizeof(b), ALB, SES);
+    n = jf_path_stream(b, sizeof(b), ALB, SES, 1);
     EXPECT("stream", n, b, "/Audio/" ALB "/stream?static=false&container=wav&audioCodec=pcm_s16le"
            "&audioSampleRate=44100&audioChannels=1&playSessionId=" SES);
-    CAP_EDGE("stream", jf_path_stream(b_, cap, ALB, SES));
+    CAP_EDGE("stream", jf_path_stream(b_, cap, ALB, SES, 1));
 
     /* a seek: StartTimeTicks, 1 tick = 100 ns, so ms * 10000 (measured against the live server) */
-    n = jf_path_stream_at(b, sizeof(b), ALB, SES, 90000);
+    n = jf_path_stream_at(b, sizeof(b), ALB, SES, 90000, 1);
     EXPECT("stream_at 90 s", n, b, "/Audio/" ALB "/stream?static=false&container=wav&audioCodec=pcm_s16le"
            "&audioSampleRate=44100&audioChannels=1&playSessionId=" SES "&StartTimeTicks=900000000");
-    CAP_EDGE("stream_at", jf_path_stream_at(b_, cap, ALB, SES, 90000));
+    CAP_EDGE("stream_at", jf_path_stream_at(b_, cap, ALB, SES, 90000, 1));
     char plain[512];
-    jf_path_stream(plain, sizeof(plain), ALB, SES);
-    n = jf_path_stream_at(b, sizeof(b), ALB, SES, 0);
+    jf_path_stream(plain, sizeof(plain), ALB, SES, 1);
+    n = jf_path_stream_at(b, sizeof(b), ALB, SES, 0, 1);
     EXPECT("stream_at 0 = plain", n, b, plain);
-    n = jf_path_stream_at(b, sizeof(b), ALB, SES, 4000000);   /* 4000 s: 4e10 ticks overflows 32 bits */
+    n = jf_path_stream_at(b, sizeof(b), ALB, SES, 4000000, 1);   /* 4000 s: 4e10 ticks overflows 32 bits */
     EXPECT("stream_at 4000 s", n, b, "/Audio/" ALB "/stream?static=false&container=wav&audioCodec=pcm_s16le"
            "&audioSampleRate=44100&audioChannels=1&playSessionId=" SES "&StartTimeTicks=40000000000");
-    CHECK(jf_path_stream_at(b, sizeof(b), ALB, SES, -1) == -1, "stream_at: negative offset");
-    CHECK(jf_path_stream_at(b, sizeof(b), "bad", SES, 5) == -1, "stream_at: bad id");
+    CHECK(jf_path_stream_at(b, sizeof(b), ALB, SES, -1, 1) == -1, "stream_at: negative offset");
+    CHECK(jf_path_stream_at(b, sizeof(b), "bad", SES, 5, 1) == -1, "stream_at: bad id");
+
+    /* the sink decides the channel count: 2 only for exactly 2, and the rest of the URL is the same */
+    n = jf_path_stream(b, sizeof(b), ALB, SES, 2);
+    EXPECT("stream stereo", n, b, "/Audio/" ALB "/stream?static=false&container=wav&audioCodec=pcm_s16le"
+           "&audioSampleRate=44100&audioChannels=2&playSessionId=" SES);
+    CAP_EDGE("stream stereo", jf_path_stream(b_, cap, ALB, SES, 2));
+    n = jf_path_stream_at(b, sizeof(b), ALB, SES, 90000, 2);
+    EXPECT("stream_at stereo", n, b, "/Audio/" ALB "/stream?static=false&container=wav&audioCodec=pcm_s16le"
+           "&audioSampleRate=44100&audioChannels=2&playSessionId=" SES "&StartTimeTicks=900000000");
+    jf_path_stream(b, sizeof(b), ALB, SES, 0);
+    CHECK(strstr(b, "audioChannels=1&") != NULL, "channels 0 asks for mono");
+    jf_path_stream(b, sizeof(b), ALB, SES, 6);
+    CHECK(strstr(b, "audioChannels=1&") != NULL, "channels 6 asks for mono");
 }
 
 static void test_ids(void)
@@ -163,8 +176,8 @@ static void test_ids(void)
     CHECK(jf_path_songs(b, sizeof(b), short_id, 0, 1) == -1, "songs: bad uid");
     CHECK(jf_path_albums_all(b, sizeof(b), short_id, 0, 1) == -1, "albums_all: bad uid");
     CHECK(jf_path_playlists(b, sizeof(b), short_id, 0, 1) == -1, "playlists: bad uid");
-    CHECK(jf_path_stream(b, sizeof(b), inject, SES) == -1, "stream: bad id");
-    CHECK(jf_path_stream(b, sizeof(b), ALB, "short") == -1, "stream: bad session");
+    CHECK(jf_path_stream(b, sizeof(b), inject, SES, 1) == -1, "stream: bad id");
+    CHECK(jf_path_stream(b, sizeof(b), ALB, "short", 1) == -1, "stream: bad session");
 }
 
 static void test_session(void)

@@ -250,8 +250,10 @@ static void play_track_at(JfApp *app, int idx, int start_ms, bool stop_first, Jf
     c->tag = ++app->stream_tag;
     c->norm_mdb = app->queue[idx].norm_gain_mdb;
     c->user_mdb = jf_volume_mdb(app->volume_step);
+    app->stream_channels = (app->sink_channels_fn && app->sink_channels_fn() == 2) ? 2 : 1;
     if (!app->session_fn || !app->session_fn(sess) ||
-        jf_path_stream_at(c->path, sizeof(c->path), app->queue[idx].id, sess, start_ms) < 0) {
+        jf_path_stream_at(c->path, sizeof(c->path), app->queue[idx].id, sess, start_ms,
+                           app->stream_channels) < 0) {
         out->n--;
         track_failed(app, out);
     }
@@ -798,6 +800,7 @@ static void on_stream(JfApp *app, const JfResult *r, JfCmds *out)
     if (r->err != JF_ERR_NONE || r->fd < 0) { track_failed(app, out); return; }
     JfCmd *c = emit(out, JF_CMD_START_AUDIO);
     c->fd = r->fd;
+    c->channels = app->stream_channels;
     c->tag = r->tag;
     c->norm_mdb = app->queue[app->queue_cur].norm_gain_mdb;
     c->user_mdb = jf_volume_mdb(app->volume_step);

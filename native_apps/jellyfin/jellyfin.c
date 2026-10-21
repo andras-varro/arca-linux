@@ -16,6 +16,7 @@
 #include "hardware.h"
 #include "pointer.h"
 #include "audio.h"
+#include "audio_out.h"
 #include "logger.h"
 #include "jf_ui.h"
 
@@ -23,6 +24,10 @@
 
 static volatile sig_atomic_t running = 1;
 static void signal_handler(int sig) { (void)sig; running = 0; }
+
+/* Stereo for a USB or Bluetooth sink; the panel speaker is permanently mono, so asking the
+ * server for two channels there only doubles the bytes and the CPU. */
+static int sink_channels(void) { return audio_out_device_is_onboard() ? 1 : 2; }
 
 static JfApp app;          /* ~0.8 MB: static */
 static JfApi api;
@@ -105,7 +110,7 @@ static void execute(const JfCmds *cmds, uint32_t now)
             }
             break;
         case JF_CMD_START_AUDIO:
-            if (audio_ok && audio_music_start_fd(&audio, c->fd, 1)) {
+            if (audio_ok && audio_music_start_fd(&audio, c->fd, c->channels == 2 ? 2 : 1)) {
                 audio_music_set_gain(&audio, c->norm_mdb, c->user_mdb);
                 track_live = true;
                 track_t0 = now;
@@ -194,6 +199,7 @@ int main(int argc, char *argv[])
     if (!audio_ok) fprintf(stderr, "jellyfin: no audio output\n");
 
     jf_app_init(&app);
+    app.sink_channels_fn = sink_channels;
     if (jf_api_init(&api) != 0) {
         fprintf(stderr, "jellyfin: out of memory\n");
         fb_close(&fb);

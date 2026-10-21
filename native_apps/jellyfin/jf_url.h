@@ -66,9 +66,10 @@ int jf_path_genre_index(char *out, size_t cap, const char *uid, int start, int l
 int jf_path_mix_pool(char *out, size_t cap, const char *uid, const char *const *genre_ids, int n_genre_ids,
                      const char *artist_id, int decade, bool random, int start, int limit);
 /** `session_id` is 32 hex from jf_session_id(); a fresh one per request, or the server reuses an old transcode job. */
-int jf_path_stream(char *out, size_t cap, const char *id, const char *session_id);
+/** `channels` is the audioChannels asked of the server: 2 for a stereo sink, anything else 1 (the device has no downmix for a mono sink to spare). */
+int jf_path_stream(char *out, size_t cap, const char *id, const char *session_id, int channels);
 /** The same stream starting `start_ms` into the track (StartTimeTicks, 100 ns ticks; measured to seek on Jellyfin 12.1.0 with a fresh session id).  0 = jf_path_stream.  -1 for start_ms < 0. */
-int jf_path_stream_at(char *out, size_t cap, const char *id, const char *session_id, long start_ms);
+int jf_path_stream_at(char *out, size_t cap, const char *id, const char *session_id, long start_ms, int channels);
 
 /** Where the playSessionId's random bytes come from; NULL restores /dev/urandom.  Returns bytes read or -1. */
 typedef int (*JfRandomFn)(unsigned char *buf, size_t n);

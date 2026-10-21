@@ -162,18 +162,19 @@ int jf_path_genre_albums(char *out, size_t cap, const char *uid, const char *gen
                         "&SortBy=SortName&StartIndex=%d&Limit=%d", uid, genre_id, start, limit), cap);
 }
 
-int jf_path_stream(char *out, size_t cap, const char *id, const char *session_id)
+int jf_path_stream(char *out, size_t cap, const char *id, const char *session_id, int channels)
 {
     if (!jf_id_valid(id) || !jf_id_valid(session_id)) return -1;
     return fin(snprintf(out, cap,
                         "/Audio/%s/stream?static=false&container=wav&audioCodec=pcm_s16le"
-                        "&audioSampleRate=44100&audioChannels=1&playSessionId=%s", id, session_id), cap);
+                        "&audioSampleRate=44100&audioChannels=%d&playSessionId=%s",
+                        id, channels == 2 ? 2 : 1, session_id), cap);
 }
 
-int jf_path_stream_at(char *out, size_t cap, const char *id, const char *session_id, long start_ms)
+int jf_path_stream_at(char *out, size_t cap, const char *id, const char *session_id, long start_ms, int channels)
 {
     if (start_ms < 0) return -1;
-    int n = jf_path_stream(out, cap, id, session_id);
+    int n = jf_path_stream(out, cap, id, session_id, channels);
     if (n < 0 || start_ms == 0) return n;
     return fin(snprintf(out + n, cap - (size_t)n, "&StartTimeTicks=%lld", (long long)start_ms * 10000LL) + n, cap);
 }

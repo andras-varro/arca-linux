@@ -176,6 +176,7 @@ typedef struct {
     char host[64];
     int port;
     int fd;
+    int channels;        /* START_AUDIO: 1 or 2, what the URL asked the server for */
     int norm_mdb;
     int user_mdb;
     char name[96];       /* SAVE: the playlist name */
@@ -189,6 +190,8 @@ typedef struct {
 } JfCmds;
 
 typedef bool (*JfSessionFn)(char out[33]);
+/** How many channels the current sink can use (1 or 2); asked once per stream request. */
+typedef int (*JfSinkChannelsFn)(void);
 
 typedef struct { JfScreen screen; char id[96]; char title[96]; int sub; } JfNavEntry;
 typedef struct { char id[96]; char title[96]; int sub; } JfListCtx;
@@ -274,6 +277,8 @@ typedef struct {
     int play_wait_from;
     int fail_streak;
     JfSessionFn session_fn;
+    JfSinkChannelsFn sink_channels_fn;   /* NULL = mono */
+    int stream_channels;                 /* what the stream in flight was asked for, handed to START_AUDIO */
     JfItem store_artists[JF_CAP_ARTISTS];
     JfItem store_albums[JF_CAP_ALBUMS];
     JfItem store_tracks[JF_CAP_TRACKS];

@@ -274,6 +274,7 @@ static void test_stale(void)
     CHECK(!app.overlay, "a repeated reply for a settled request is dropped");
 }
 
+static int sink_stereo(void) { return 2; }static int sink_mono(void)   { return 1; }/* The channel count asked of the server follows the sink, and START_AUDIO carries what was asked. */static void test_sink_channels(void){    for (int pass = 0; pass < 3; pass++) {        in_tracks(5, 5);        app.sink_channels_fn = pass == 0 ? sink_stereo : pass == 1 ? sink_mono : NULL;        send(JF_EV_ACTIVATE, 2);        const JfCmd *p = find(JF_CMD_PLAY_STREAM);        CHECK(p && strstr(p->path, pass == 0 ? "audioChannels=2&" : "audioChannels=1&") != NULL,              "pass %d: stream path follows the sink: %s", pass, p ? p->path : "(none)");        CHECK(app.stream_channels == (pass == 0 ? 2 : 1), "pass %d: stream_channels %d", pass, app.stream_channels);    }}
 static void test_queue(void)
 {
     in_tracks(5, 5);
@@ -284,7 +285,7 @@ static void test_queue(void)
     CHECK(cm.n == 1 && cm.c[0].type == JF_CMD_PLAY_STREAM && app.play_state == JF_PLAY_FETCHING, "one PLAY_STREAM, no STOP when idle");
     const JfCmd *p = &cm.c[0];
     char want[JF_PATH_MAX], sess[33]; snprintf(sess, sizeof(sess), "%032u", sess_n);
-    jf_path_stream(want, sizeof(want), tl->items[2].id, sess);
+    jf_path_stream(want, sizeof(want), tl->items[2].id, sess, 1);
     CHECK(strcmp(p->path, want) == 0 && p->norm_mdb == tl->items[2].norm_gain_mdb && p->user_mdb == 0, "stream path, norm gain, volume 10 = 0 mdb");
     unsigned tag = p->tag;
     reply_stream(tag + 9, JF_ERR_NONE, 77);
@@ -1437,7 +1438,7 @@ static void test_instant_confirm(void)
 }
 int main(void)
 {
-    test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue();
+    test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue(); test_sink_channels();
     test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit(); test_categories();
     test_action_bar(); test_queue_insert(); test_mix(); test_mix_seed_and_ticks(); test_mix_flow(); test_mix_choice(); test_mix_stops();
     test_mix_cancel_and_errors(); test_mix_nowplaying(); test_save();
