@@ -1483,7 +1483,7 @@ bool audio_music_start_fd(Audio *audio, int fd)
 
     /* The refusal of a wrong format happens inside the stream (it names the rate
      * it was offered); no resampler, as for a file. */
-    if (!audio_wav_stream_open(&sv->stream, fd, audio->sample_rate)) return false;
+    if (!audio_wav_stream_open(&sv->stream, fd, audio->sample_rate, 1)) return false;
     sv->streaming = true;
     sv->held      = false;
     if (!sample_arm(audio, sv, "music", "start", "(stream)")) {

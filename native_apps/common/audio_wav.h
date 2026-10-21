@@ -1,5 +1,5 @@
 /*
- * audio_wav.h — the one RIFF/WAVE reader, streaming and mono.
+ * audio_wav.h — the one RIFF/WAVE reader, streaming and mono. (the fd stream source also carries 1 or 2 channels).
  *
  * ⚠️ **This exists because a 44-byte header is a WRITER's assumption and a
  * reader that shares it is silently wrong on our own files.** Measured on `.188`
@@ -10,7 +10,7 @@
  * as audio, and — this is the trap — it is *correct* on the three vendor effects,
  * which would therefore validate it. Walk the chunks.
  *
- * It reads MONO because the mix bus is mono and `audio_interleave()` is the
+ * The FILE reader (`audio_wav_read`) is MONO: the file path feeds the mono bus and `audio_interleave()` is the
  * single conversion point (../CLAUDE.md → Audio). A multi-channel file is
  * averaged, not left-channel-picked: `(L+R)/2` is what makes a stored mono file
  * audibly identical to its stereo original on this speaker, which sums L and R
@@ -88,7 +88,7 @@ void   audio_wav_hdr_skipped(AudioWavHdr *h, unsigned long long n);
  *
  * Plays a RIFF/WAVE that is still being delivered (an HTTP body on a TCP
  * socket) through the same mix-bus sample voice as a file.  Header sizes of
- * 0xFFFFFFFF mean "until EOF".  The format must BE the bus format (mono, 16-bit,
+ * 0xFFFFFFFF mean "until EOF".  The format must BE the one asked for (1 or 2 channels, 16-bit,
  * `expected_rate`); there is no resampler and no downmix here, so anything else
  * is refused and the stream ends.  Because the header arrives over the wire,
  * a refusal that is not yet visible at open time is reported later through
@@ -108,12 +108,13 @@ void   audio_wav_hdr_skipped(AudioWavHdr *h, unsigned long long n);
  *   - EOF.  Only when the peer has closed AND the ring is drained does the fill
  *     return short, which ends the voice like the end of a file.
  */
-#define AUDIO_STREAM_RING_BYTES     (1UL << 19)   /**< 512 KiB (~5.9 s); a power of two so indexing needs no divide */
-#define AUDIO_STREAM_PREROLL_BYTES  88200L        /**< 1 s of the 44100 Hz 16-bit mono bus */
+#define AUDIO_STREAM_RING_BYTES     (1UL << 19)   /**< 512 KiB: 5.9 s mono, 3.0 s stereo; a power of two so indexing needs no divide */
+#define AUDIO_STREAM_PREROLL_BYTES  88200L        /**< 1 s of the 44100 Hz bus, counted as 2 bytes per FRAME whatever the channel count (stereo holds 176400 real bytes for it) */
 
 typedef enum { AWS_PLAY, AWS_SILENCE, AWS_REBUFFER, AWS_END } AudioStreamAct;
 
-/** Pure: what the next fill should do, from the buffered byte count alone.
+/** Pure: what the next fill should do, from the buffered count alone, in units of ONE
+ *  2-byte step per FRAME (the fill passes `frames << 1`, so it is channel-independent).
  *  `playing` = output has started and has not underrun since. */
 AudioStreamAct audio_stream_decide(long buffered, bool eof, bool playing, long preroll);
 
@@ -126,6 +127,8 @@ typedef struct {
     bool           resume_ramp;   /**< fade the next block in (it follows an underrun)      */
     long           ramp_len, ramp_step;   /**< ~10 ms edge in frames; Q15 gain per frame, no divide per sample */
     int            expected_rate;
+    int            channels;      /**< 1 or 2: the stream must carry exactly this many        */
+    int            frame_shift;   /**< log2(bytes per frame): 1 mono, 2 stereo; shifts, never a divide */
     unsigned long  data_left;     /**< bytes the header still promises; ignored when unknown */
     bool           data_known;
     long           underruns;     /**< transitions from playing to rebuffering */
@@ -134,7 +137,7 @@ typedef struct {
 
 /** Take `fd` (set O_NONBLOCK here), one initial non-blocking read. Returns false if
  *  the header has already arrived and is not the bus format. Closes nothing on false. */
-bool   audio_wav_stream_open(AudioWavStream *s, int fd, int expected_rate);
+bool   audio_wav_stream_open(AudioWavStream *s, int fd, int expected_rate, int channels);
 /** `AudioVoiceFill` over an `AudioWavStream *`.  See the rules above. */
 long   audio_wav_stream_fill(void *ctx, int16_t *dst, long frames);
 /** Bytes buffered; the header failed; closes the fd (ring kept). */

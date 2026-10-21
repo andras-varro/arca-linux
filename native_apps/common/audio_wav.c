@@ -154,10 +154,10 @@ static void stream_header_bytes(AudioWavStream *s, const unsigned char *p, size_
             s->failed = s->eof = true;
             return;
         }
-        if (s->hdr.channels != 1 || s->hdr.bits != 16 || s->hdr.rate != s->expected_rate) {
+        if (s->hdr.channels != s->channels || s->hdr.bits != 16 || s->hdr.rate != s->expected_rate) {
             fprintf(stderr, "audio_wav: stream refused — %d Hz %d ch %d bit, the bus is "
-                            "%d Hz 1 ch 16 bit and there is no resampler\n",
-                    s->hdr.rate, s->hdr.channels, s->hdr.bits, s->expected_rate);
+                            "%d Hz %d ch 16 bit and there is no resampler\n",
+                    s->hdr.rate, s->hdr.channels, s->hdr.bits, s->expected_rate, s->channels);
             s->failed = s->eof = true;
             return;
         }
@@ -219,9 +219,9 @@ static void stream_pull(AudioWavStream *s)
     }
 }
 
-bool audio_wav_stream_open(AudioWavStream *s, int fd, int expected_rate)
+bool audio_wav_stream_open(AudioWavStream *s, int fd, int expected_rate, int channels)
 {
-    if (!s || fd < 0) return false;
+    if (!s || fd < 0 || (channels != 1 && channels != 2)) return false;
     unsigned char *ring = s->ring;          /* allocated once, kept across opens */
     memset(s, 0, sizeof(*s));
     s->fd = -1;
@@ -235,6 +235,8 @@ bool audio_wav_stream_open(AudioWavStream *s, int fd, int expected_rate)
     }
     s->ring          = ring;
     s->expected_rate = expected_rate;
+    s->channels      = channels;
+    s->frame_shift   = channels;          /* 2 bytes per sample: 1 ch -> 2 B (shift 1), 2 ch -> 4 B (shift 2) */
     /* ~10 ms edge for the ends and the gaps.  The one divide is here, once; the
      * per-sample loop multiplies (Cortex-A8 has no hardware divide). */
     s->ramp_len  = expected_rate > 200 ? expected_rate / 100 : 2;
@@ -256,13 +258,15 @@ bool audio_wav_stream_open(AudioWavStream *s, int fd, int expected_rate)
  * Q15 and steps by a precomputed `step`, so there is no divide per sample.  The
  * mix bus will not do this itself: a stream declares an enormous length, so its
  * envelope release never runs, and a cut to zero is a click. */
-static void stream_ramp(int16_t *d, long n, long ramp, long step, bool fade_in)
+static void stream_ramp(int16_t *d, long n, long ramp, long step, bool fade_in, int channels)
 {
     long r = n < ramp ? n : ramp;
-    int16_t *p = fade_in ? d : d + (n - r);
+    int16_t *p = fade_in ? d : d + (n - r) * channels;
     for (long k = 0; k < r; k++) {
         long gain = (fade_in ? k : (r - 1 - k)) * step;
-        p[k] = (int16_t)(((int32_t)p[k] * (int32_t)gain) >> 15);
+        for (int c = 0; c < channels; c++) {          /* one gain per FRAME, every channel */
+            p[k * channels + c] = (int16_t)(((int32_t)p[k * channels + c] * (int32_t)gain) >> 15);
+        }
     }
 }
 
@@ -274,20 +278,22 @@ long audio_wav_stream_fill(void *ctx, int16_t *dst, long frames)
     stream_pull(s);
     if (s->failed) return 0;
 
-    AudioStreamAct act = audio_stream_decide((long)s->count, s->eof, s->playing,
+    int fs = s->frame_shift;
+    long have = (long)(s->count >> fs);                 /* whole frames buffered */
+    AudioStreamAct act = audio_stream_decide(have << 1, s->eof, s->playing,
                                              AUDIO_STREAM_PREROLL_BYTES);
     if (act == AWS_END) return 0;
     if (act == AWS_SILENCE || act == AWS_REBUFFER) {
         if (act == AWS_REBUFFER) { s->playing = false; s->underruns++; s->resume_ramp = true; }
-        memset(dst, 0, (size_t)frames * sizeof(int16_t));
+        memset(dst, 0, (size_t)frames * (size_t)s->channels * sizeof(int16_t));
         return frames;
     }
     s->playing = true;
 
-    /* `>> 1`, not `/ 2`: no hardware divide on this core. */
-    long avail = (long)(s->count >> 1);
+    /* Frames, not samples or bytes: `>> fs`, not `/ n` (no hardware divide on this core). */
+    long avail = have;
     long n     = frames < avail ? frames : avail;
-    unsigned long bytes = (unsigned long)n << 1;
+    unsigned long bytes = (unsigned long)n << fs;
     unsigned long run   = AUDIO_STREAM_RING_BYTES - s->head;
     if (run > bytes) run = bytes;
     memcpy(dst, s->ring + s->head, run);
@@ -300,9 +306,9 @@ long audio_wav_stream_fill(void *ctx, int16_t *dst, long frames)
      * whenever this block leaves the ring empty (EOF drained, a real underrun, or
      * an exact drain) its last ~10 ms ramp DOWN, because what follows is silence
      * or the end of the voice and a hard cut is a click. */
-    if (s->resume_ramp) { stream_ramp(dst, n, s->ramp_len, s->ramp_step, true); s->resume_ramp = false; }
-    if (s->count < 2) {
-        stream_ramp(dst, n, s->ramp_len, s->ramp_step, false);
+    if (s->resume_ramp) { stream_ramp(dst, n, s->ramp_len, s->ramp_step, true, s->channels); s->resume_ramp = false; }
+    if ((long)(s->count >> fs) < 1) {
+        stream_ramp(dst, n, s->ramp_len, s->ramp_step, false, s->channels);
         s->resume_ramp = true;              /* the next block starts from silence */
     }
 
@@ -313,7 +319,7 @@ long audio_wav_stream_fill(void *ctx, int16_t *dst, long frames)
         s->playing = false;
         s->resume_ramp = true;
         s->underruns++;
-        memset(dst + n, 0, (size_t)(frames - n) * sizeof(int16_t));
+        memset(dst + n * s->channels, 0, (size_t)(frames - n) * (size_t)s->channels * sizeof(int16_t));
     }
     return frames;
 }

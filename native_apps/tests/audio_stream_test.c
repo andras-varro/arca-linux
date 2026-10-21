@@ -116,7 +116,7 @@ int main(void)
     size_t hl = make_header(hdr, 44100, 1, 0xFFFFFFFFUL);
     CHECK(write(sv[1], hdr, hl) == (ssize_t)hl, "header write");
     send_pcm(sv[1], 1000);                              /* far below one second */
-    CHECK(audio_wav_stream_open(&s, sv[0], 44100), "open refused a good header");
+    CHECK(audio_wav_stream_open(&s, sv[0], 44100, 1), "open refused a good header");
     CHECK(audio_wav_stream_buffered(&s) == 1000, "LIST skip lost sync: buffered %ld, want 1000",
           audio_wav_stream_buffered(&s));
     memset(out, 0x55, sizeof(out));
@@ -189,7 +189,7 @@ int main(void)
 
     /* ── D: a header split across reads ──────────────────────────────────── */
     pair(sv);
-    CHECK(audio_wav_stream_open(&s, sv[0], 44100), "open with nothing on the wire must succeed (pending)");
+    CHECK(audio_wav_stream_open(&s, sv[0], 44100, 1), "open with nothing on the wire must succeed (pending)");
     for (size_t i = 0; i < hl; i++) {
         CHECK(write(sv[1], hdr + i, 1) == 1, "byte write");
         audio_wav_stream_fill(&s, out, FRAMES);
@@ -206,7 +206,7 @@ int main(void)
     hl = make_header(hdr, 44100, 1, 6000);
     CHECK(write(sv[1], hdr, hl) == (ssize_t)hl, "header write");
     send_pcm(sv[1], 9000);                               /* 3000 bytes of trailing junk */
-    CHECK(audio_wav_stream_open(&s, sv[0], 44100), "open");
+    CHECK(audio_wav_stream_open(&s, sv[0], 44100, 1), "open");
     n = audio_wav_stream_fill(&s, out, FRAMES);          /* eof is already known: plays out */
     CHECK(n == 3000 && matches_part(out, 0, 6000 - RAMPB, 0) && out[2999] == 0, "declared length not honoured: %ld frames", n);
     audio_wav_stream_close(&s);
@@ -217,7 +217,7 @@ int main(void)
     hl = make_header(hdr, 48000, 2, 0xFFFFFFFFUL);
     CHECK(write(sv[1], hdr, hl) == (ssize_t)hl, "header write");
     send_pcm(sv[1], 100000);
-    CHECK(!audio_wav_stream_open(&s, sv[0], 44100), "48 kHz stereo was accepted");
+    CHECK(!audio_wav_stream_open(&s, sv[0], 44100, 1), "48 kHz stereo was accepted");
     CHECK(audio_wav_stream_failed(&s), "refusal not recorded");
     CHECK(audio_wav_stream_fill(&s, out, FRAMES) == 0, "a refused stream produced audio");
     close(sv[0]);
@@ -229,7 +229,7 @@ int main(void)
     hl = make_header(hdr, 44100, 1, 0xFFFFFFFFUL);
     CHECK(write(sv[1], hdr, 20) == 20, "partial header write");
     shutdown(sv[1], SHUT_WR);
-    CHECK(!audio_wav_stream_open(&s, sv[0], 44100) && audio_wav_stream_failed(&s),
+    CHECK(!audio_wav_stream_open(&s, sv[0], 44100, 1) && audio_wav_stream_failed(&s),
           "a header cut off at EOF must FAIL, not end silently");
     CHECK(audio_wav_stream_fill(&s, out, FRAMES) == 0, "a cut-off stream produced audio");
     close(sv[0]);
@@ -238,7 +238,7 @@ int main(void)
     /* (control) the same bytes with the peer still connected are merely pending */
     pair(sv);
     CHECK(write(sv[1], hdr, 20) == 20, "partial header write");
-    CHECK(audio_wav_stream_open(&s, sv[0], 44100) && !audio_wav_stream_failed(&s),
+    CHECK(audio_wav_stream_open(&s, sv[0], 44100, 1) && !audio_wav_stream_failed(&s),
           "control: a header still arriving must not be a failure");
     audio_wav_stream_close(&s);
     close(sv[1]);
@@ -249,7 +249,7 @@ int main(void)
     hl = make_header(hdr, 44100, 1, 0xFFFFFFFFUL);
     CHECK(write(sv[1], hdr, hl) == (ssize_t)hl, "header write");
     send_pcm(sv[1], 100000);
-    CHECK(!audio_wav_stream_open(&s, sv[0], 44100) && audio_wav_stream_failed(&s),
+    CHECK(!audio_wav_stream_open(&s, sv[0], 44100, 1) && audio_wav_stream_failed(&s),
           "a float-tagged stream was accepted");
     close(sv[0]);
     close(sv[1]);
@@ -279,7 +279,7 @@ int main(void)
     pair(sv);
     hl = make_header(hdr, 44100, 1, 0xFFFFFFFFUL);
     CHECK(write(sv[1], hdr, hl) == (ssize_t)hl, "header write");
-    CHECK(audio_wav_stream_open(&s, sv[0], 44100), "control: an extensible tag was refused");
+    CHECK(audio_wav_stream_open(&s, sv[0], 44100, 1), "control: an extensible tag was refused");
     audio_wav_stream_close(&s);
     close(sv[1]);
     hdr_tag = 1;
