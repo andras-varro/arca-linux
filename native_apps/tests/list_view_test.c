@@ -390,6 +390,49 @@ int main(void) {
     }
     lv_free(&lv);
 
+    /* 9. reorder: hold-to-pick, drop index, scroll-vs-pick, off by default.  rect y 20, rows 40 px: row i spans y 21+40i .. */
+    CHECK(!lv_pick_due(false, false, 0, 1000));            /* off by default: never */
+    CHECK(!lv_pick_due(true, false, 0, LV_PICK_MS - 1));   /* too soon */
+    CHECK(lv_pick_due(true, false, 0, LV_PICK_MS));        /* due on the boundary */
+    CHECK(!lv_pick_due(true, true, 0, 5000));              /* left the dead zone: it is a scroll */
+    CHECK(lv_pick_due(true, false, 0xFFFFFF00u, (uint32_t)(0xFFFFFF00u + LV_PICK_MS)));   /* wrap-safe */
+    CHECK(lv_drop_index(2, -30, 40, 5, 20) == 2);          /* above the first row: the first visible row */
+    CHECK(lv_drop_index(2, 85, 40, 5, 20) == 4);           /* third row of the window */
+    CHECK(lv_drop_index(2, 9999, 40, 5, 20) == 6);         /* below: the last visible row */
+    CHECK(lv_drop_index(0, 9999, 40, 5, 3) == 2);          /* below a short list: the last row */
+    {
+        ListView r;
+        make(&r, 10, 5 * 40 + 2, 40);
+        CHECK(!r.reorder);                                   /* default off: a long hold is a plain tap */
+        TouchState a = T(100, 21 + 40 * 1 + 5, true, true, false);
+        lv_input(&r, &a, NULL, 0);
+        a = T(100, 21 + 40 * 1 + 5, false, true, false); lv_input(&r, &a, NULL, 600);
+        a = T(100, 21 + 40 * 1 + 5, false, false, true);
+        CHECK(lv_input(&r, &a, NULL, 610) == LV_EV_TAP && !r.picked);
+        r.reorder = true; lv_move_to(&r, 0);
+        a = T(100, 21 + 40 * 1 + 5, true, true, false); lv_input(&r, &a, NULL, 1000);
+        a = T(100, 21 + 40 * 1 + 5, false, true, false); lv_input(&r, &a, NULL, 1000 + LV_PICK_MS - 1);
+        CHECK(!r.picked);                                    /* not yet */
+        lv_input(&r, &a, NULL, 1000 + LV_PICK_MS);
+        CHECK(r.picked && r.pick_from == 1 && r.pick_to == 1);
+        a = T(100, 21 + 40 * 3 + 5, false, true, false); lv_input(&r, &a, NULL, 1500);
+        CHECK(r.pick_to == 3 && r.top == 0);                 /* the finger moves the drop row, no scroll */
+        a = T(100, 21 + 40 * 3 + 5, false, false, true);
+        CHECK(lv_input(&r, &a, NULL, 1510) == LV_EV_REORDER && r.pick_from == 1 && r.pick_to == 3 && !r.picked);
+        /* hold then release in place: not a tap, no reorder */
+        a = T(100, 21 + 40 * 2 + 5, true, true, false); lv_input(&r, &a, NULL, 2000);
+        a = T(100, 21 + 40 * 2 + 5, false, true, false); lv_input(&r, &a, NULL, 2000 + LV_PICK_MS);
+        a = T(100, 21 + 40 * 2 + 5, false, false, true);
+        CHECK(lv_input(&r, &a, NULL, 2500) != LV_EV_REORDER && r.pick_from == r.pick_to);
+        CHECK(lv_input(&r, &a, NULL, 2510) == LV_EV_NONE);
+        /* a drag that leaves the dead zone early scrolls and never picks */
+        a = T(100, 21 + 40 * 4 + 5, true, true, false); lv_input(&r, &a, NULL, 3000);
+        a = T(100, 21 + 40 * 1 + 5, false, true, false); lv_input(&r, &a, NULL, 3100);
+        a = T(100, 21 + 40 * 0 + 5, false, true, false); lv_input(&r, &a, NULL, 3000 + 2 * LV_PICK_MS);
+        CHECK(!r.picked && r.top > 0);
+        lv_free(&r);
+    }
+
 
     printf("%d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;

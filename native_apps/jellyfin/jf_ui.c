@@ -721,7 +721,13 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     }
     ui->lv.active = ui->zone == JF_ZONE_LIST;
     lv_sync(&ui->lv);
+    ui->lv.reorder = queue && app->queue_n > 1;   /* hold a queue row and drag it to a new place */
     LvEvent ev = lv_input(&ui->lv, ts, lin, now);
+    if (ev == LV_EV_REORDER) {
+        int k = emit(out, &n, max, JF_EV_QUEUE_MOVE);
+        if (k >= 0) { out[k].i = ui->lv.pick_from; out[k].j = ui->lv.pick_to; }
+        lv_move_to(&ui->lv, ui->lv.pick_to);
+    }
     if (ev != LV_EV_NONE) ui->dirty = true;
     bool pick = ev == LV_EV_TAP || ev == LV_EV_ACTIVATE;
     if (ui->zone == JF_ZONE_LIST && lin && bp(lin, BTN_ID_JUMP)) pick = true;

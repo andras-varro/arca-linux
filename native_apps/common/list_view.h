@@ -60,6 +60,7 @@ typedef struct {
 #define LV_DRAG_DEADZONE 10   /* px a finger must travel before a press is a drag */
 #define LV_BORDER         1
 #define LV_BAR_W          6   /* scroll indicator column at the right edge */
+#define LV_PICK_MS      400   /* a reorder-mode press held this long inside the dead zone picks the row up */
 
 typedef enum {
     LV_KEY_UP, LV_KEY_DOWN, LV_KEY_PGUP, LV_KEY_PGDN, LV_KEY_HOME, LV_KEY_END,
@@ -73,7 +74,8 @@ typedef enum {
     LV_EV_NONE,
     LV_EV_CHANGED,    /* cursor, scroll or marks moved: redraw */
     LV_EV_TAP,        /* a tap selected a row (also fired on an inactive list) */
-    LV_EV_ACTIVATE    /* Enter / action button, or a second tap on the cursor row */
+    LV_EV_ACTIVATE,   /* Enter / action button, or a second tap on the cursor row */
+    LV_EV_REORDER     /* a held-and-dragged row was dropped (reorder mode only): lv->pick_from moves to lv->pick_to */
 } LvEvent;
 
 /* Whole rows that fit in a rect of height h (borders excluded). */
@@ -94,6 +96,10 @@ int lv_hit_row(int top, int y, int row_h, int vis, int count);
  * length == track_h when everything fits (the caller then skips the bar). */
 void lv_thumb(int count, int vis, int top, int track_h, int *off, int *len);
 
+/* Reorder: the press is due to pick its row up (reorder on, still inside the dead zone, held LV_PICK_MS; wrap-safe). */
+bool lv_pick_due(bool reorder, bool dragging, uint32_t down_ms, uint32_t now_ms);
+/* The drop row for a picked row: the row under local y (from the top of the first row), clamped into the visible rows and the list. */
+int  lv_drop_index(int top, int y, int row_h, int vis, int count);
 /* Key auto-repeat: true once `since` is 400 ms old and `last` 80 ms (wrap-safe). */
 bool lv_repeat_due(uint32_t since, uint32_t last, uint32_t now);
 /* Cut src with "..." to max_w px at `scale`, case kept (text_truncate upcases,
@@ -157,6 +163,10 @@ typedef struct {
     int      marks_cap;  /* bits */
     int      held_key;   /* auto-repeat: LvKey held, or -1 */
     uint32_t held_since, held_last;
+    bool     reorder;    /* opt-in (default off): a press held LV_PICK_MS without leaving the dead zone picks a row up; its drop reports LV_EV_REORDER */
+    bool     picked;     /* a row is held by the finger */
+    int      pick_from, pick_to;  /* valid while picked, and for the LV_EV_REORDER it reports */
+    uint32_t down_ms;    /* when the current press began */
 } ListView;
 
 /* scale 2 (14 px text) from 28 px rows up, else 1.  rows are whole; a rect

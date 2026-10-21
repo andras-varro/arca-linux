@@ -323,6 +323,19 @@ LvEvent lv_key(ListView *lv, LvKey key) {
            ? LV_EV_CHANGED : LV_EV_NONE;
 }
 
+bool lv_pick_due(bool reorder, bool dragging, uint32_t down_ms, uint32_t now_ms) {
+    return reorder && !dragging && (uint32_t)(now_ms - down_ms) >= LV_PICK_MS;
+}
+
+int lv_drop_index(int top, int y, int row_h, int vis, int count) {
+    if (count <= 0 || row_h <= 0) return 0;
+    int r = y < 0 ? 0 : y / row_h;
+    if (r > vis - 1) r = vis - 1;
+    if (r < 0) r = 0;
+    int idx = top + r;
+    return idx > count - 1 ? count - 1 : idx;
+}
+
 static LvEvent touch_input_frame(ListView *lv, const TouchState *ts, uint32_t now_ms) {
     LvEvent ev = LV_EV_NONE;
     int vis = lv_visible_rows(lv);
@@ -335,6 +348,24 @@ static LvEvent touch_input_frame(ListView *lv, const TouchState *ts, uint32_t no
         fling_stop(lv);
         lv->nsamples = 0;
         lv_drag_begin(&lv->drag, ts->y);
+        lv->down_ms = now_ms;
+        lv->picked = false;
+    }
+
+    /* reorder mode: held still long enough, the row under the finger is picked up; from then on the finger moves the drop row
+     * and the press is no longer a scroll or a tap */
+    if (lv->drag.active && !lv->picked && (ts->held || ts->pressed) &&
+        lv_pick_due(lv->reorder, lv->drag.dragging, lv->down_ms, now_ms)) {
+        int idx = lv_hit_row(lv->top, lv->drag.down_y - first_y, lv->row_h, vis, lv->count);
+        if (idx >= 0) {
+            lv->picked = true;
+            lv->pick_from = lv->pick_to = idx;
+            ev = LV_EV_CHANGED;
+        }
+    }
+    if (lv->picked && lv->drag.active && (ts->held || ts->pressed)) {
+        int to = lv_drop_index(lv->top, ts->y - first_y, lv->row_h, vis, lv->count);
+        if (to != lv->pick_to) { lv->pick_to = to; ev = LV_EV_CHANGED; }
     }
 
     if (lv->drag.active && (ts->held || ts->pressed || ts->released)) {
@@ -346,7 +377,7 @@ static LvEvent touch_input_frame(ListView *lv, const TouchState *ts, uint32_t no
         lv->samples[lv->nsamples++].y = ts->y;
     }
 
-    if (lv->drag.active && (ts->held || ts->pressed)) {
+    if (lv->drag.active && !lv->picked && (ts->held || ts->pressed)) {
         int d = lv_drag_move(&lv->drag, ts->y, lv->row_h);
         if (d != 0) {
             int before = lv->top;
@@ -357,7 +388,10 @@ static LvEvent touch_input_frame(ListView *lv, const TouchState *ts, uint32_t no
     }
 
     if (lv->drag.active && ts->released) {
-        if (lv->drag.dragging) {
+        if (lv->picked) {
+            ev = lv->pick_from != lv->pick_to ? LV_EV_REORDER : LV_EV_CHANGED;   /* a hold without moving is no tap */
+            lv->picked = false;
+        } else if (lv->drag.dragging) {
             lv->fling_v = lv_fling_velocity(lv->samples, lv->nsamples, lv->row_h);
             lv->fling_acc = 0;
             lv->fling_last = now_ms;
@@ -373,6 +407,7 @@ static LvEvent touch_input_frame(ListView *lv, const TouchState *ts, uint32_t no
         lv->drag.active = lv->drag.dragging = false;
     } else if (lv->drag.active && !ts->held && !ts->pressed) {
         lv->drag.active = lv->drag.dragging = false;   /* the release was missed */
+        lv->picked = false;
     }
     return ev;
 }
@@ -507,6 +542,16 @@ void lv_draw(Framebuffer *fb, ListView *lv, const char *empty_msg) {
     int top = lv_clamp_top(lv->top, lv->count, vis);
     for (int i = 0; i < vis && top + i < lv->count; i++)
         draw_row(fb, lv, top + i, x, R->y + LV_BORDER + i * lv->row_h + 1, w);
+
+    if (lv->picked) {   /* the picked row gets a yellow edge, the drop place a yellow line */
+        int rf = lv->pick_from - top, rt = lv->pick_to - top;
+        if (rf >= 0 && rf < vis)
+            fb_draw_rect(fb, x, R->y + LV_BORDER + rf * lv->row_h, w, lv->row_h, LV_COLOR_MARK);
+        if (rt >= 0 && rt < vis) {
+            int ly = R->y + LV_BORDER + (lv->pick_to <= lv->pick_from ? rt : rt + 1) * lv->row_h;
+            fb_fill_rect(fb, x, ly - 1, w, 3, LV_COLOR_MARK);
+        }
+    }
 
     if (lv->count > vis && vis > 0) {
         int track = vis * lv->row_h, off, len;
