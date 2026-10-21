@@ -15,6 +15,8 @@
 #include "cp_ui.h"
 #include "../common/common.h"
 #include "../common/audio.h"
+#include "../common/eq_panel.h"
+#include "../common/gamepad.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -158,6 +160,9 @@ static ToggleSwitch music_toggle, effects_toggle;
 static Button       audio_dev_btn;
 static Button       test_audio_btn;
 static Button       mix_test_btn;
+static Button       eq_btn;            /* EQUALISER: the shared panel (common/eq_panel.h), full screen */
+static bool         eq_fullscreen;     /* the pending CP_PAGE_FULLSCREEN is the panel, not MIX BUS TEST */
+static Config      *eq_cfg;            /* the page's own Config, kept from input() for the panel's save */
 
 /* Row 2 carries MUSIC / EFFECTS / OUT under the master switch; row 3 the
  * MIX BUS TEST launch, alone, so a finger aimed at it lands on nothing else. */
@@ -250,6 +255,12 @@ static void audio_page_layout(void) {
                      "MIX BUS TEST", BTN_COLOR_INFO, COLOR_WHITE,
                      BTN_COLOR_HIGHLIGHT, 2);
 
+    /* EQUALISER shares row 3, to the right of MIX BUS TEST. */
+    button_init_full(&eq_btn, mix_test_btn.x + mix_test_btn.width + 10, AUD_ROW3_Y,
+                     text_measure_width("EQUALISER", 2) + 16, 30,
+                     "EQUALISER", BTN_COLOR_INFO, COLOR_WHITE,
+                     BTN_COLOR_HIGHLIGHT, 2);
+
     /* ⚠️ THE RECEIPT.  Everything here hangs off CONTENT_Y, which comes from a
      * per-unit touch inset, so a row pushed past the touchable rect looks
      * perfect in a screenshot and is dead to a finger.  Row 3 is the lowest
@@ -266,6 +277,8 @@ static void audio_page_layout(void) {
             if (toggle_right(tg[i]) > right) right = toggle_right(tg[i]);
         if (test_audio_btn.x + test_audio_btn.width > right)
             right = test_audio_btn.x + test_audio_btn.width;
+        if (eq_btn.x + eq_btn.width > right)
+            right = eq_btn.x + eq_btn.width;
         if (mix_test_btn.x + mix_test_btn.width > right)
             right = mix_test_btn.x + mix_test_btn.width;
         const char *verdict = bottom > CONTENT_H     ? "⚠ PAST CONTENT BOTTOM"
@@ -292,6 +305,7 @@ static void audio_sync_disabled(void) {
     audio_dev_btn.disabled  = off;
     test_audio_btn.disabled = off;
     mix_test_btn.disabled   = off;
+    eq_btn.disabled         = off;
 }
 
 static void audio_page_draw(Framebuffer *fb) {
@@ -305,6 +319,7 @@ static void audio_page_draw(Framebuffer *fb) {
     toggle_draw(fb, &audio_toggle);
     button_draw(fb, &test_audio_btn);
     button_draw(fb, &mix_test_btn);
+    button_draw(fb, &eq_btn);
     toggle_draw(fb, &music_toggle);
     toggle_draw(fb, &effects_toggle);
 
@@ -389,6 +404,11 @@ static CpPageResult audio_page_input(Config *cfg, int tx, int ty,
     /* Last, so neither REDRAW above can overwrite the queued run. */
     if (button_update(&mix_test_btn, tx, ty, touching, now))
         act = CP_PAGE_FULLSCREEN;
+    eq_cfg = cfg;
+    if (button_update(&eq_btn, tx, ty, touching, now)) {
+        eq_fullscreen = true;
+        act = CP_PAGE_FULLSCREEN;
+    }
     return act;
 }
 
@@ -405,7 +425,50 @@ static CpPageResult audio_page_input(Config *cfg, int tx, int ty,
  * common/audio_out.h) — the tool would run silent, which is the one failure a
  * mix-bus test cannot report.  enter()'s reopen restores the bus on return, so
  * TEST works again without leaving the page. */
+/* After input() returned CP_PAGE_FULLSCREEN from EQUALISER: the shared panel, run here in a blocking loop (the bus stays
+ * open, so an edit is heard on the next sound the page plays).  Every edit is applied to the page's bus at once; DONE
+ * saves through the page's own Config so its in-memory copy does not clobber the key on a later write; CANCEL saves
+ * nothing and puts the opening gains back. */
+static void audio_page_run_eq(Framebuffer *fb, TouchInput *touch) {
+    int g[EQ_BANDS];
+    if (page_audio_open) audio_get_eq(&page_audio, g);
+    else eq_config_read(CONFIG_FILE_PATH, g);
+
+    EqPanel p;
+    eq_panel_open(&p, g, SCREEN_SAFE_LEFT, SCREEN_SAFE_TOP, SCREEN_SAFE_RIGHT, SCREEN_SAFE_BOTTOM, get_time_ms());
+    InputState in;
+    memset(&in, 0, sizeof in);
+    for (;;) {
+        uint32_t now = get_time_ms();
+        touch_poll(touch);
+        TouchState ts = touch_get_state(touch);
+        gamepad_poll(cp_gamepad(), &in, 0, 0, false);
+        gamepad_tick(cp_gamepad(), now);
+        if (page_audio_open) audio_pump(&page_audio);
+
+        EqPanelEvent ev = eq_panel_input(&p, &ts, &in, now);
+        if (ev != EQP_NONE && page_audio_open) audio_set_eq(&page_audio, eq_panel_gains(&p));
+        if (ev == EQP_DONE) {
+            if (eq_cfg) eq_panel_store(eq_cfg, eq_panel_gains(&p));
+            else eq_panel_store_file(CONFIG_FILE_PATH, eq_panel_gains(&p));
+        }
+        if (ev == EQP_DONE || ev == EQP_CANCEL) break;
+        if (eq_panel_take_dirty(&p)) {
+            eq_panel_draw(&p, fb);
+            fb_swap(fb);
+        }
+        usleep(16000);
+    }
+    fb_set_bpp(FB_DEVICE, 32);
+    touch_drain_events(touch);
+}
+
 static void audio_page_run_fullscreen(Framebuffer *fb, TouchInput *touch) {
+    if (eq_fullscreen) {
+        eq_fullscreen = false;
+        audio_page_run_eq(fb, touch);
+        return;
+    }
     if (access(MIX_TEST_PATH, X_OK) != 0) {
         cp_status("AUDIO_MIX_TEST NOT INSTALLED", false);
         return;
@@ -455,6 +518,7 @@ static int audio_page_focusables(UiRect *out, int max) {
     n = focus_add_button(out, n, max, &audio_dev_btn);
     n = focus_add_button(out, n, max, &test_audio_btn);
     n = focus_add_button(out, n, max, &mix_test_btn);
+    n = focus_add_button(out, n, max, &eq_btn);
     return n;
 }
 
