@@ -22,7 +22,7 @@
 #define BANNER_H  18
 #define GAP        6
 #define FIELD_H   52
-#define NP_MIN_W  72   /* narrowest now-playing button; 9 of them fit one row at 700 px or more */
+#define NP_MIN_W  72   /* narrowest now-playing button; 10 of them fit one row at 774 px or more */
 #define QB_MOVE_W  64   /* the queue screen's UP and DN */
 #define QB_SHUF_W 130   /* its SHUFFLE */
 #define NP_ICON    22   /* the now-playing glyphs: a square box in the button's middle */
@@ -212,7 +212,7 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
     static const char *t3[JF_UI_ROW3] = { "SEARCH", "NOW PLAYING", "PLAY ALL" };
     for (int i = 0; i < JF_UI_ROW3; i++) style(&ui->row3[i], ui->L.row3[i], t3[i], 2);
     static const char *ta[JF_UI_ABAR] = { "PLAY", "PLAY NEXT", "ADD QUEUE", "MIX", "INSTANT MIX" };
-    static const char *tn[JF_UI_NP] = { "", "", "", "", "QUEUE", "MIX", "I-MIX", "VOL+", "VOL-" };
+    static const char *tn[JF_UI_NP] = { "", "", "", "", "QUEUE", "MIX", "I-MIX", "EQ", "VOL+", "VOL-" };
     static const char *tmini[JF_UI_MINI] = { "PAUSE", "VOL -", "VOL +" };
     for (int i = 0; i < JF_UI_MINI; i++) style(&ui->mini_b[i], ui->L.mini_btn[i], tmini[i], 2);
     for (int i = 0; i < JF_UI_ABAR; i++) style(&ui->abar[i], ui->L.abar[i], ta[i], 2);
@@ -427,11 +427,12 @@ static void queue_row_act(JfUi *ui, Pointer *ptr, int i, JfEvent *out, int *n, i
 
 static void abar_act(int i, int row, JfEvent *out, int *n, int max);
 
-/* The now-playing buttons: PREV, PLAY/PAUSE, STOP, NEXT, QUEUE, MIX and INSTANT MIX (of the playing track), VOL +, VOL -. */
+/* The now-playing buttons: PREV, PLAY/PAUSE, STOP, NEXT, QUEUE, MIX and INSTANT MIX (of the playing track), EQ (opens the
+ * equaliser panel, handled in eq_open), VOL +, VOL -. */
 static void np_act(int i, JfEvent *out, int *n, int max)
 {
     static const JfEventType t[JF_UI_NP] = { JF_EV_PREV, JF_EV_PAUSE, JF_EV_STOP, JF_EV_NEXT, JF_EV_OPEN_QUEUE, JF_EV_NONE,
-                                             JF_EV_NONE, JF_EV_VOL_UP, JF_EV_VOL_DOWN };
+                                             JF_EV_NONE, JF_EV_NONE, JF_EV_VOL_UP, JF_EV_VOL_DOWN };
     if (i == 5 || i == 6) abar_act(i - 2, -1, out, n, max);   /* MIX = abar 3, INSTANT MIX = abar 4 */
     else emit(out, n, max, t[i]);
 }
@@ -442,6 +443,48 @@ static void abar_act(int i, int row, JfEvent *out, int *n, int max)
     static const JfEventType t[JF_UI_ABAR] = { JF_EV_ACTIVATE, JF_EV_PLAY_NEXT, JF_EV_ADD_QUEUE, JF_EV_MIX, JF_EV_INSTANT_MIX };
     int k = emit(out, n, max, t[i]);
     if (k >= 0) out[k].i = row;
+}
+
+/* The equaliser panel: opened from NOW PLAYING (the EQ button, Shift / pad B), it owns the whole screen and every input
+ * until DONE or CANCEL.  The loop applies what jf_ui_eq_take() hands back. */
+static void eq_open(JfUi *ui, uint32_t now)
+{
+    int g[EQ_BANDS] = { 0 };
+    if (ui->eq_gains_fn) ui->eq_gains_fn(g);
+    eq_panel_open(&ui->eq, g, SCREEN_SAFE_LEFT, SCREEN_SAFE_TOP, SCREEN_SAFE_RIGHT, SCREEN_SAFE_BOTTOM, now);
+    ui->eq_up = true;
+    ui->dirty = true;
+    touch_guard_screen_changed(&ui->guard, now);
+}
+
+static void eq_input(JfUi *ui, const TouchState *ts, const InputState *in, uint32_t now)
+{
+    EqPanelEvent ev = eq_panel_input(&ui->eq, ts, in, now);
+    if (ev != EQP_NONE) {
+        memcpy(ui->eq_out, eq_panel_gains(&ui->eq), sizeof ui->eq_out);
+        ui->eq_apply = true;
+        ui->eq_save = ev == EQP_DONE;
+    }
+    if (ev == EQP_DONE || ev == EQP_CANCEL) {
+        ui->eq_up = false;
+        touch_guard_screen_changed(&ui->guard, now);   /* the finger that closed it must not press what is underneath */
+    }
+    if (eq_panel_take_dirty(&ui->eq) || !ui->eq_up) ui->dirty = true;
+}
+
+bool jf_ui_eq_take(JfUi *ui, int gains[EQ_BANDS], bool *save)
+{
+    if (!ui->eq_apply) return false;
+    memcpy(gains, ui->eq_out, sizeof ui->eq_out);
+    *save = ui->eq_save;
+    ui->eq_apply = ui->eq_save = false;
+    return true;
+}
+
+static void np_press(JfUi *ui, int i, uint32_t now, JfEvent *out, int *n, int max)
+{
+    if (i == JF_UI_NP_EQ) eq_open(ui, now);
+    else np_act(i, out, n, max);
 }
 
 static void overlay_input(JfUi *ui, const TouchState *ts, const InputState *in, uint32_t now,
@@ -641,6 +684,8 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         return n;
     }
     ui->cdlg_up = false;
+    if (ui->eq_up && app->screen != JF_SCR_NOWPLAYING) ui->eq_up = false;
+    if (ui->eq_up) { eq_input(ui, ts, in, now); return n; }
     if (ui->pick_up) {
         if (app->screen != JF_SCR_ARTISTS) ui->pick_up = false;
         else { pick_input(ui, ts, in, now, out, &n, max); return n; }
@@ -709,8 +754,8 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     }
 
     if (sc == JF_SCR_NOWPLAYING) {
-        /* focus 0..8 the buttons in their order (PREV, PLAY/PAUSE, STOP, NEXT, QUEUE, MIX, I-MIX, VOL +, VOL -);
-         * Up / Down walk them.  Start / Esc and Space pause, Select / Backspace go back (the header has BACK too). */
+        /* focus 0..9 the buttons in their order (PREV, PLAY/PAUSE, STOP, NEXT, QUEUE, MIX, I-MIX, EQ, VOL +, VOL -);
+         * Up / Down walk them; Shift / the pad's B opens the equaliser.  Start / Esc and Space pause, Select / Backspace go back (the header has BACK too). */
         enum { NP_N = JF_UI_NP };
         if (bp(in, BTN_ID_BACK)) emit(out, &n, max, JF_EV_BACK);
         if (bp(in, BTN_ID_PAUSE) || bp(in, BTN_ID_JUMP)) emit(out, &n, max, JF_EV_PAUSE);
@@ -718,9 +763,10 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         if (bp(in, BTN_ID_RIGHT)) emit(out, &n, max, JF_EV_VOL_UP);
         if (bp(in, BTN_ID_UP))   ui->focus = (ui->focus + NP_N - 1) % NP_N;
         if (bp(in, BTN_ID_DOWN)) ui->focus = (ui->focus + 1) % NP_N;
-        if (bp(in, BTN_ID_ACTION)) np_act(ui->focus, out, &n, max);
+        if (bp(in, BTN_ID_RUN)) eq_open(ui, now);
+        if (bp(in, BTN_ID_ACTION)) np_press(ui, ui->focus, now, out, &n, max);
         for (int i = 0; i < JF_UI_NP; i++)
-            if (button_check_tap(&ui->np[i], ts, now)) np_act(i, out, &n, max);
+            if (button_check_tap(&ui->np[i], ts, now)) np_press(ui, i, now, out, &n, max);
         /* seek: a finger on the bar shows the target, lifting it sends the seek; a tap is a jump */
         const JfItem *cur = jf_now(app);
         int total_ms = cur ? cur->runtime_s * 1000 : 0;
@@ -1063,6 +1109,11 @@ void jf_ui_draw(JfUi *ui)
     const JfApp *app = ui->app;
     Framebuffer *fb = ui->fb;
     fb_clear(fb, BG);
+    if (ui->eq_up) {
+        eq_panel_draw(&ui->eq, fb);
+        if (app->overlay && ui->dlg_up) modal_dialog_draw(&ui->dlg, fb);
+        return;
+    }
 
     const char *title = "JELLYFIN";
     switch (app->screen) {

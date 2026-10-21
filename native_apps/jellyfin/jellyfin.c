@@ -30,7 +30,6 @@ static void signal_handler(int sig) { (void)sig; running = 0; }
 /* Stereo for a USB or Bluetooth sink; the panel speaker is permanently mono, so asking the
  * server for two channels there only doubles the bytes and the CPU. */
 static int sink_channels(void) { return audio_out_device_is_onboard() ? 1 : 2; }
-
 static JfApp app;          /* ~0.8 MB: static */
 static JfApi api;
 static Logger logger;      /* jf_api logs each request: kind, status, error, ms */
@@ -39,6 +38,13 @@ static Audio audio;
 static bool  audio_ok;
 static bool  track_live;   /* a stream was started and its end is still to be reported */
 static uint32_t track_t0;
+
+/* The gains the equaliser panel opens with: the live stream's when it is open, else the saved setting. */
+static void eq_now(int g[EQ_BANDS])
+{
+    if (audio_ok && audio_out_is_open(&audio.out)) audio_get_eq(&audio, g);
+    else eq_config_read(CONFIG_FILE_PATH, g);
+}
 
 static JfEvent evq[EVQ_MAX];
 static int evq_n;
@@ -217,6 +223,7 @@ int main(int argc, char *argv[])
     logger_init(&logger, "jellyfin", LOG_LEVEL_INFO, false);
     api.log = &logger;
     jf_ui_init(&ui, &fb, &touch, &gp, &app);
+    ui.eq_gains_fn = eq_now;
     jf_art_init(JF_ART_CACHE_DIR, JF_UI_ART);
 
     {
@@ -253,6 +260,14 @@ int main(int argc, char *argv[])
             if (jf_ui_view(&ui, &vt, &vc)) jf_note_view(&app, vt, vc);
         }
         for (int i = 0; i < un; i++) push(&uev[i]);
+        {   /* the equaliser panel: every edit is heard at once, DONE also saves */
+            int eg[EQ_BANDS];
+            bool esave;
+            if (jf_ui_eq_take(&ui, eg, &esave)) {
+                if (audio_ok) audio_set_eq(&audio, eg);
+                if (esave) eq_panel_store_file(CONFIG_FILE_PATH, eg);
+            }
+        }
 
         static JfResult res;
         jf_art_poll(now);

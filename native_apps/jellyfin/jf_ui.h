@@ -21,11 +21,13 @@
 #include "ui_focus.h"
 #include "pointer.h"
 #include "jf_core.h"
+#include "eq_panel.h"
 
 #define JF_UI_ROW3   3     /* browse screens: SEARCH, NOW PLAYING, PLAY ALL */
 #define JF_UI_ROW4   4     /* the root screen: previous category, SEARCH, NOW PLAYING, next category */
 #define JF_UI_ART   120    /* now playing: the cover square, the height of the info block */
-#define JF_UI_NP     9     /* now playing, one row (wraps in portrait): PREV, PLAY/PAUSE, STOP, NEXT, QUEUE, MIX, I-MIX, VOL +, VOL - */
+#define JF_UI_NP     10    /* now playing, one row (wraps in portrait): PREV, PLAY/PAUSE, STOP, NEXT, QUEUE, MIX, I-MIX, EQ, VOL +, VOL - */
+#define JF_UI_NP_EQ  7     /* the EQ button's index in that row */
 #define JF_UI_FIELDS 3     /* sign-in: SERVER, USER, PASSWORD */
 #define JF_UI_ABAR   5     /* action bar: PLAY, PLAY NEXT, ADD QUEUE, MIX, INSTANT MIX */
 #define JF_UI_MINI   3     /* mini player: PLAY/PAUSE, VOL -, VOL + */
@@ -106,6 +108,11 @@ typedef struct {
     unsigned seen_banner;
     unsigned seen_restore;               /* the core's restore_seq as of the last frame */
     bool restore_pend;                   /* a BACK came: put the list view back once the rows are loaded */
+    EqPanel eq;                          /* the equaliser panel (common/eq_panel.h), full screen while eq_up */
+    bool eq_up;
+    bool eq_apply, eq_save;              /* a gain set for jf_ui_eq_take(): apply it live; also save it */
+    int  eq_out[EQ_BANDS];
+    void (*eq_gains_fn)(int gains[EQ_BANDS]);   /* the gains in force now, asked when the panel opens; NULL = flat */
     TouchGuard guard;                    /* a touch from before a screen change does not reach the new screen (common.h) */
 } JfUi;
 
@@ -118,6 +125,9 @@ int  jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *
                  uint32_t now, JfEvent *out, int max);
 
 void jf_ui_draw(JfUi *ui);
+/** A gain set the equaliser panel produced since the last call: true with the five dB values in `gains` (apply them to the
+ *  audio stream) and `*save` set when the user pressed DONE (write them to the config).  Cancel returns the opening values, save false. */
+bool jf_ui_eq_take(JfUi *ui, int gains[EQ_BANDS], bool *save);
 void jf_ui_set_played(JfUi *ui, int played_ms);
 /** The list view (scroll top, cursor row) of the screen showing; false when the screen has none or has not been set up yet.
  *  The loop hands it to jf_note_view() each frame, before the frame's events reach the core. */

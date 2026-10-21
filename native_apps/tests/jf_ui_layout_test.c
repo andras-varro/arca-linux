@@ -9,6 +9,7 @@
  *   F  the action bar, SAVE AS PLAYLIST and the now-playing MIX pair (all pressable, so also under A) do not
  *      overlap the list or each other, and the list ends above the bar.
  *   I  mini player taps send their events; a queue that starts on an open list shortens it (mini_taps, mini_flip).
+ *   Q  the EQ door: the NOW PLAYING button and Shift open the panel, Back cancels, DONE saves (eq_door).
  *   M  MIX tick rows carry no bracket text or checkbox glyph; ticks draw as the ListView mark (mix_ticks).
  */
 #include <stdio.h>
@@ -75,10 +76,13 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     CHECK(disjoint(L.save, L.qshuf) && disjoint(L.qshuf, L.qup) && disjoint(L.qup, L.qdn) && disjoint(L.qdn, L.list) && disjoint(L.qshuf, L.list), "F: queue row buttons overlap each other or the list (inset %d)", inset_t);
     CHECK(L.qup.w >= 60 && L.qshuf.w >= 100 && L.save.w >= 200 && L.qdn.x + L.qdn.w <= e.safe_r, "F: queue row button sizes / right edge (inset %d)", inset_t);
     CHECK(L.list.y + L.list.h <= L.abar[0].y, "F: the list does not end above the action bar (inset %d)", inset_t);
+    /* one row when the safe width holds 10 buttons at the 72 px minimum plus gaps, else the fewest equal rows (the largest inset) */
+    bool one_row = (e.safe_r - e.safe_l) >= JF_UI_NP * 72 + (JF_UI_NP - 1) * 6;
     for (int i = 0; i < JF_UI_NP; i++) {
-        CHECK(L.np[i].y == L.np[0].y, "F: now-playing button %d left the single landscape row", i);
+        CHECK(!one_row || L.np[i].y == L.np[0].y, "F: now-playing button %d left the single landscape row", i);
+        CHECK(L.np[i].w >= 72, "F: np[%d] narrower than the minimum (inset %d)", i, inset_t);
         for (int j = i + 1; j < JF_UI_NP; j++) CHECK(disjoint(L.np[i], L.np[j]), "F: np %d/%d overlap", i, j);
-        CHECK(disjoint(L.np[i], L.list) && disjoint(L.np[i], L.seek), "F: np[%d] overlaps the list or the seek area (inset %d)", i, inset_t);
+        CHECK((!one_row || disjoint(L.np[i], L.list)) && disjoint(L.np[i], L.seek), "F: np[%d] overlaps the list or the seek area (inset %d)", i, inset_t);
     }
     CHECK(L.progress.y + L.progress.h + 30 <= L.np[0].y, "F: progress and its label leave the button row clear (inset %d)", inset_t);
     CHECK(inside(L.progress, e.vis_l, e.vis_t, e.vis_r, e.vis_b), "D: progress outside VISIBLE");
@@ -345,6 +349,51 @@ static void portrait(void)
     CHECK(rows == 2, "N: portrait now-playing buttons in %d rows, want 2", rows);
 }
 
+/* Q  the equaliser door on NOW PLAYING: the EQ button and Shift open the panel (no events, the screen is the panel's), a
+ * tap on a neighbouring button while it is up does nothing, CANCEL (Back) hands the opening gains back unsaved, DONE
+ * hands the edited gains back to save; the gains the panel opens with come from the app's callback. */
+static const int Q_OPEN[EQ_BANDS] = { 3, 0, -2, 0, 5 };
+static void q_gains(int g[EQ_BANDS]) { memcpy(g, Q_OPEN, sizeof Q_OPEN); }
+
+static void eq_door(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_NOWPLAYING;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    ui.eq_gains_fn = q_gains;
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    int g[EQ_BANDS];
+    bool save = true;
+    CHECK(!ui.eq_up && !jf_ui_eq_take(&ui, g, &save), "Q: panel up or a gain set pending before anything was pressed");
+
+    UiRect b = ui.L.np[JF_UI_NP_EQ];
+    int n = tap_at(&ui, b.x + b.w / 2, b.y + b.h / 2, 3000, ev);
+    CHECK(ui.eq_up && n == 0, "Q: a tap on EQ did not open the panel quietly (up %d, %d events)", ui.eq_up, n);
+    CHECK(memcmp(eq_panel_gains(&ui.eq), Q_OPEN, sizeof Q_OPEN) == 0, "Q: the panel did not open with the callback's gains");
+    UiRect v = ui.eq.L.title;   /* an inert spot of the panel: no event reaches the screen under it */
+    n = tap_at(&ui, v.x + v.w / 2, v.y + v.h / 2, 6000, ev);
+    CHECK(n == 0 && ui.eq_up, "Q: a tap on the panel title closed it or reached the screen under it (%d events)", n);
+    n = feed_btn(&ui, BTN_ID_BACK, 9000, ev, MINI_MAX);
+    CHECK(n == 0 && !ui.eq_up, "Q: Back did not close the panel quietly (%d events, up %d)", n, ui.eq_up);
+    CHECK(jf_ui_eq_take(&ui, g, &save) && !save && memcmp(g, Q_OPEN, sizeof Q_OPEN) == 0, "Q: cancel did not hand back the opening gains unsaved");
+    CHECK(!jf_ui_eq_take(&ui, g, &save), "Q: a taken gain set was handed out twice");
+
+    feed(&ui, 0, 0, false, false, false, 12000, ev, MINI_MAX);
+    n = feed_btn(&ui, BTN_ID_RUN, 13000, ev, MINI_MAX);
+    CHECK(ui.eq_up && n == 0, "Q: Shift did not open the panel (up %d)", ui.eq_up);
+    /* edit: a tap on the DONE button after the guards are quiet */
+    UiRect d = ui.eq.L.done;
+    n = tap_at(&ui, d.x + d.w / 2, d.y + d.h / 2, 16000, ev);
+    CHECK(!ui.eq_up && n == 0, "Q: DONE did not close the panel (up %d, %d events)", ui.eq_up, n);
+    CHECK(jf_ui_eq_take(&ui, g, &save) && save, "Q: DONE did not hand the gains back to be saved");
+    jf_ui_free(&ui);
+}
+
 int main(void)
 {
     run(0, 0, 0, 0);
@@ -352,6 +401,7 @@ int main(void)
     run(30, 30, 10, 10);
     run(48, 48, 48, 48);     /* the largest inset the library allows */
     portrait();
+    eq_door();
     mini_taps();
     mini_flip(JF_SCR_ALBUMS, "albums");
     mini_flip(JF_SCR_ARTISTS, "artists");
