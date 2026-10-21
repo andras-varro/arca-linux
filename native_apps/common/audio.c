@@ -417,6 +417,16 @@ void audio_set_eq(Audio *audio, const int gains_db[EQ_BANDS]) {
     if (audio && audio_out_is_open(&audio->out)) audio_out_set_eq(&audio->out, gains_db);
 }
 
+void audio_set_enh(Audio *audio, const AudioEnh *e) {
+    if (audio && e && audio_out_is_open(&audio->out)) audio_out_set_enh(&audio->out, e);
+}
+
+void audio_get_enh(const Audio *audio, AudioEnh *e) {
+    if (!e) return;
+    memset(e, 0, sizeof(*e));
+    if (audio && audio_out_is_open(&audio->out)) audio_out_get_enh(&audio->out, e);
+}
+
 void audio_get_eq(const Audio *audio, int gains_db[EQ_BANDS]) {
     if (audio && audio_out_is_open(&audio->out)) { audio_out_get_eq(&audio->out, gains_db); return; }
     for (int i = 0; i < EQ_BANDS; i++) gains_db[i] = 0;

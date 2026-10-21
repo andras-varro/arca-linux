@@ -17,7 +17,7 @@ W=$(mktemp -d /tmp/clip.XXXXXX)
 HARNESS_ERR=0
 SRC="common/audio.c common/audio.h common/audio_gen.c common/audio_gen.h
      common/audio_out.c common/audio_out.h common/audio_wav.c common/audio_wav.h
-     common/config.c common/config.h common/audio_eq.c common/audio_eq.h"
+     common/config.c common/config.h common/audio_eq.c common/audio_enh.c common/audio_eq.h"
 run() {
   local name="$1"; shift
   rm -rf "$W/c"; mkdir -p "$W/c/common"
@@ -27,7 +27,7 @@ run() {
      diff -q "$W/c/common/audio.h" common/audio.h >/dev/null; then
      echo "$name: NO-OP EDIT — pattern rotted"; HARNESS_ERR=1; return; fi
   gcc -Wall -Wextra -Wno-unused-parameter -I "$W/c" -o "$W/t" \
-      tests/audio_tone_test.c "$W/c/common/audio.c" "$W/c/common/audio_gen.c" "$W/c/common/audio_eq.c" \
+      tests/audio_tone_test.c "$W/c/common/audio.c" "$W/c/common/audio_gen.c" "$W/c/common/audio_eq.c" "$W/c/common/audio_enh.c" \
       "$W/c/common/audio_out.c" "$W/c/common/audio_wav.c" "$W/c/common/config.c" \
       -lm 2>"$W/cc.log" || {
       echo "$name: did not compile ($(head -1 "$W/cc.log"))"; return; }

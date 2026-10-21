@@ -1,5 +1,6 @@
 #include "audio_out.h"
 #include "audio_eq.h"
+#include "audio_enh.h"
 #include "config.h"
 
 #include <errno.h>
@@ -167,9 +168,11 @@ static void derive_geometry(AudioOut *out, const AudioOutSpace *sp)
  *  the one implementation of it and the reason a shift rather than a multiply. */
 static void attenuate(AudioOut *out, int16_t *buf, long samples)
 {
-    /* The equaliser first, on the full-scale data; the master shift after. */
+    /* The equaliser first, then the enhancer, on the full-scale data; the master shift after. */
     if (out->eq_p.n > 0 && out->channels > 0)
         eq_process(&out->eq_s, &out->eq_p, buf, samples / out->channels, out->channels);
+    if (out->enh_p.active && out->channels > 0)
+        enh_process(&out->enh_s, &out->enh_p, buf, samples / out->channels, out->channels);
     audio_attenuate(buf, samples, out->shift);
 }
 
@@ -257,6 +260,14 @@ int audio_out_open(AudioOut *out, const AudioOutDev *dev, void *dev_ctx,
         int g[EQ_BANDS];
         eq_config_read(eq_path ? eq_path : CONFIG_FILE_PATH, g);
         eq_design(&out->eq_p, out->rate, g);
+        AudioEnh en;
+        enh_config_read(eq_path ? eq_path : CONFIG_FILE_PATH, &en);
+        enh_design(&out->enh_p, out->rate, &en);
+        if (out->enh_p.active) {
+            char ev[64];
+            audio_enh_format(&en, ev, sizeof(ev));
+            fprintf(stderr, "audio_out: enhancer on (%s) at %d Hz\n", ev, out->rate);
+        }
     }
 
     out->is_open = true;
@@ -377,6 +388,21 @@ void audio_out_get_eq(const AudioOut *out, int gains_db[EQ_BANDS])
 {
     for (int b = 0; b < EQ_BANDS; b++)
         gains_db[b] = out ? out->eq_p.gains_db[b] : 0;
+}
+
+void audio_out_set_enh(AudioOut *out, const AudioEnh *e)
+{
+    if (!out || !e) return;
+    EnhParams np;
+    enh_design(&np, out->rate, e);
+    out->enh_p = np;
+}
+
+void audio_out_get_enh(const AudioOut *out, AudioEnh *e)
+{
+    if (!e) return;
+    memset(e, 0, sizeof(*e));
+    if (out) *e = out->enh_p.cfg;
 }
 
 /* ── Mode 1: serviced ───────────────────────────────────────────────────── */

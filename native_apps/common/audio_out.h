@@ -81,6 +81,7 @@
 
 #include "audio_gen.h"
 #include "audio_eq.h"
+#include "audio_enh.h"
 
 /* ── Constants ──────────────────────────────────────────────────────────── */
 
@@ -215,6 +216,10 @@ typedef struct {
     /* System equaliser, applied before the attenuation. See audio_out_set_eq(). */
     EqParams    eq_p;
     EqState     eq_s;
+
+    /* System enhancer, applied after the equaliser. See audio_out_set_enh(). */
+    EnhParams   enh_p;
+    EnhState    enh_s;
 
     AudioOutFill fill;
     void        *fill_ctx;
@@ -631,6 +636,17 @@ void audio_out_set_eq(AudioOut *out, const int gains_db[EQ_BANDS]);
 void audio_out_get_eq(const AudioOut *out, int gains_db[EQ_BANDS]);
 /** Override the config file the open reads (tests); NULL restores the default. */
 void audio_out_set_eq_path(const char *path);
+
+/**
+ * The system enhancer (audio_enh.h), after the equaliser.  audio_out_open()
+ * reads the `enh` key of the same config file (ENH_CONFIG_KEY,
+ * enh=on,hb,hbr,db,dbr,ht,htr; missing or garbled = off).  The setter changes
+ * the OPEN stream live (history kept); it does not write the config.  Off, or
+ * all amounts 0, is a bit-exact bypass.  Same single-thread rule as set_eq.
+ */
+void audio_out_set_enh(AudioOut *out, const AudioEnh *e);
+/** The settings in force (all off when closed). */
+void audio_out_get_enh(const AudioOut *out, AudioEnh *e);
 
 /**
  * Render one service's worth and write it.  Returns frames written, or -1.

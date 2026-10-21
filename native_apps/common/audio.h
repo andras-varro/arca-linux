@@ -378,6 +378,9 @@ bool audio_pump_active(const Audio *audio);
  *  the Audio's own stream.  Safe to call when the stream failed to open (then it does nothing). */
 void audio_set_eq(Audio *audio, const int gains_db[EQ_BANDS]);
 void audio_get_eq(const Audio *audio, int gains_db[EQ_BANDS]);
+/** The enhancer (audio_enh.h) on this stream, live; forwards to audio_out_set_enh()/get. */
+void audio_set_enh(Audio *audio, const AudioEnh *e);
+void audio_get_enh(const Audio *audio, AudioEnh *e);
 
 /** Hold for `ms` while SERVICING the bus, for a caller with no render loop.
  *

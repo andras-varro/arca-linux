@@ -9,7 +9,7 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 W="${EQ_PANEL_SCRATCH:-/mnt/c/work/rw-scratch/jfq_sab}"
 rm -rf "$W"; mkdir -p "$W"
 cd "$HERE" || exit 1
-read -r -a OTHERS <<< "common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c"
+read -r -a OTHERS <<< "common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c"
 
 run() {   # name, sed expression ("" = control)
     cp "$HERE/common/eq_panel.c" "$W/eq_panel.c"

@@ -18,6 +18,7 @@ index 480916a2..f7d1d5df 100755
 +		append_var OBJS "../native_apps/common/audio_out.o"
 +		append_var OBJS "../native_apps/common/audio_gen.o"
 +		append_var OBJS "../native_apps/common/audio_eq.o"
++		append_var OBJS "../native_apps/common/audio_enh.o"
 +		append_var OBJS "../native_apps/common/input_scan.o"
 +		;;
  	opendingux | miyoo | miyoomini)
