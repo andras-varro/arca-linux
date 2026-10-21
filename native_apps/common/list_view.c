@@ -1,6 +1,7 @@
 /* list_view — see list_view.h.  The top half is pure; the drawing is last. */
 #include "list_view.h"
 #include "common.h"
+#include "utf8.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -101,16 +102,16 @@ void lv_fit(char *dest, int size, const char *src, int max_w, int scale) {
     if (!dest || size <= 0) return;
     int len = (int)strlen(src);
     int cw = text_measure_width("M", scale);
-    int keep = len, ndots = 0;
+    int keep = len, ndots = 0;                /* keep is in BYTES, a whole number of code points */
     if (max_w > 0 && cw > 0 && text_measure_width(src, scale) > max_w) {
-        int fit = max_w / cw;                 /* characters that fit */
+        int fit = max_w / cw;                 /* code points that fit */
         ndots = fit < 3 ? fit : 3;
-        keep = fit > 3 ? fit - 3 : 0;
+        keep = (int)utf8_prefix_bytes(src, fit > 3 ? (size_t)(fit - 3) : 0);
     }
     int room = size - 1;
     if (keep + ndots > room) {
         ndots = 3 < room ? 3 : room;
-        keep = room - ndots;
+        keep = (int)utf8_cut_boundary(src, (size_t)(room - ndots));
     }
     memcpy(dest, src, (size_t)keep);
     for (int i = 0; i < ndots; i++) dest[keep + i] = '.';

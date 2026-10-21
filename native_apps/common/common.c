@@ -84,11 +84,27 @@ void *ui_frame_service_ctx(void) {
 // ============================================================================
 
 void text_to_uppercase(char *dest, const char *src, size_t max_len) {
-    size_t i;
-    for (i = 0; i < max_len - 1 && src[i] != '\0'; i++) {
-        dest[i] = toupper((unsigned char)src[i]);
+    if (max_len == 0) return;
+    size_t n = 0, room = max_len - 1;
+    const char *p = src;
+    while (*p) {
+        const char *q = p;
+        uint32_t cp = utf8_next(&q);
+        size_t span = (size_t)(q - p);
+        uint32_t up = utf8_upper_cp(cp);
+        char enc[4];
+        const char *out = p;             /* unchanged code point (or bad byte): copy as is */
+        size_t len = span;
+        if (up != cp) {
+            size_t el = utf8_put(enc, up);
+            if (el <= span) { out = enc; len = el; }   /* never grows */
+        }
+        if (n + len > room) break;       /* whole code points only */
+        memcpy(dest + n, out, len);
+        n += len;
+        p = q;
     }
-    dest[i] = '\0';
+    dest[n] = '\0';
 }
 
 int text_measure_width(const char *text, int scale) {
@@ -117,25 +133,25 @@ void text_truncate(char *dest, size_t dest_size, const char *src,
     text_to_uppercase(upper, src, sizeof(upper));
     size_t len = strlen(upper);
 
-    /* Decide what the pixel width allows: `keep` characters of `upper`,
-     * followed by "..." when `ellipsis` is set. */
+    /* Decide what the pixel width allows: `keep` BYTES of `upper` (a whole
+     * number of code points), followed by "..." when `ellipsis` is set. */
     size_t keep = len;
     bool ellipsis = false;
     if (max_width > 0 && text_measure_width(upper, scale) > max_width) {
         ellipsis = true;
         int available_width = max_width - text_measure_width("...", scale);
         int char_width = text_measure_width("M", scale);
-        keep = (available_width > 0) ? (size_t)(available_width / char_width) : 0;
-        if (keep > len) keep = len;
+        size_t keep_cp = (available_width > 0) ? (size_t)(available_width / char_width) : 0;
+        keep = utf8_prefix_bytes(upper, keep_cp);
     }
 
     /* Then what the buffer allows.  A result that does not fit is cut the
      * same way a too-wide one is, so the reader still sees "..." whenever
-     * there is room for it. */
+     * there is room for it.  The cut never lands inside a UTF-8 sequence. */
     size_t room = dest_size - 1;
     if (keep + (ellipsis ? 3 : 0) > room) {
         ellipsis = true;
-        keep = (room > 3) ? room - 3 : 0;
+        keep = utf8_cut_boundary(upper, (room > 3) ? room - 3 : 0);
     }
 
     memcpy(dest, upper, keep);
