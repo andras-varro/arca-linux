@@ -47,6 +47,13 @@ static void eq_now(int g[EQ_BANDS])
     else eq_config_read(CONFIG_FILE_PATH, g);
 }
 
+/* The enhancer settings the panel opens with: the live stream's when it is open, else the saved setting. */
+static void enh_now(AudioEnh *e)
+{
+    if (audio_ok && audio_out_is_open(&audio.out)) audio_get_enh(&audio, e);
+    else enh_config_read(CONFIG_FILE_PATH, e);
+}
+
 static JfEvent evq[EVQ_MAX];
 static int evq_n;
 
@@ -251,6 +258,7 @@ int main(int argc, char *argv[])
     api.log = &logger;
     jf_ui_init(&ui, &fb, &touch, &gp, &app);
     ui.eq_gains_fn = eq_now;
+    ui.enh_now_fn = enh_now;
     jf_art_init(JF_ART_CACHE_DIR, JF_UI_ART);
 
     {
@@ -292,7 +300,8 @@ int main(int argc, char *argv[])
             bool esave;
             if (jf_ui_eq_take(&ui, eg, &esave)) {
                 if (audio_ok) audio_set_eq(&audio, eg);
-                if (esave) eq_panel_store_file(CONFIG_FILE_PATH, eg);
+                if (audio_ok) audio_set_enh(&audio, jf_ui_enh_out(&ui));
+                if (esave) eq_panel_store_file_both(CONFIG_FILE_PATH, eg, jf_ui_enh_out(&ui));
             }
         }
 

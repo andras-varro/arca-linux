@@ -115,6 +115,8 @@ typedef struct {
     bool eq_up;
     bool eq_apply, eq_save;              /* a gain set for jf_ui_eq_take(): apply it live; also save it */
     int  eq_out[EQ_BANDS];
+    AudioEnh enh_out;                    /* the enhancer settings that go with eq_out (read with jf_ui_enh_out) */
+    void (*enh_now_fn)(AudioEnh *e);     /* the enhancer settings in force now, asked when the panel opens; NULL = off */
     void (*eq_gains_fn)(int gains[EQ_BANDS]);   /* the gains in force now, asked when the panel opens; NULL = flat */
     TouchGuard guard;                    /* a touch from before a screen change does not reach the new screen (common.h) */
 } JfUi;
@@ -131,6 +133,8 @@ void jf_ui_draw(JfUi *ui);
 /** A gain set the equaliser panel produced since the last call: true with the five dB values in `gains` (apply them to the
  *  audio stream) and `*save` set when the user pressed DONE (write them to the config).  Cancel returns the opening values, save false. */
 bool jf_ui_eq_take(JfUi *ui, int gains[EQ_BANDS], bool *save);
+/** The enhancer settings handed out with the gains of the last jf_ui_eq_take (apply them beside the gains; DONE saves both). */
+const AudioEnh *jf_ui_enh_out(const JfUi *ui);
 void jf_ui_set_played(JfUi *ui, int played_ms);
 /** The list view (scroll top, cursor row) of the screen showing; false when the screen has none or has not been set up yet.
  *  The loop hands it to jf_note_view() each frame, before the frame's events reach the core. */

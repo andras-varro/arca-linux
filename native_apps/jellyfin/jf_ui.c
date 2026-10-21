@@ -470,7 +470,10 @@ static void eq_open(JfUi *ui, uint32_t now)
 {
     int g[EQ_BANDS] = { 0 };
     if (ui->eq_gains_fn) ui->eq_gains_fn(g);
-    eq_panel_open(&ui->eq, g, SCREEN_SAFE_LEFT, SCREEN_SAFE_TOP, SCREEN_SAFE_RIGHT, SCREEN_SAFE_BOTTOM, now);
+    AudioEnh en;
+    memset(&en, 0, sizeof en);
+    if (ui->enh_now_fn) ui->enh_now_fn(&en);
+    eq_panel_open_enh(&ui->eq, g, &en, SCREEN_SAFE_LEFT, SCREEN_SAFE_TOP, SCREEN_SAFE_RIGHT, SCREEN_SAFE_BOTTOM, now);
     ui->eq_up = true;
     ui->dirty = true;
     touch_guard_screen_changed(&ui->guard, now);
@@ -481,6 +484,7 @@ static void eq_input(JfUi *ui, const TouchState *ts, const InputState *in, uint3
     EqPanelEvent ev = eq_panel_input(&ui->eq, ts, in, now);
     if (ev != EQP_NONE) {
         memcpy(ui->eq_out, eq_panel_gains(&ui->eq), sizeof ui->eq_out);
+        ui->enh_out = *eq_panel_enh(&ui->eq);
         ui->eq_apply = true;
         ui->eq_save = ev == EQP_DONE;
     }
@@ -1235,3 +1239,5 @@ void jf_ui_draw(JfUi *ui)
     if (app->confirm != JF_CONFIRM_NONE && ui->cdlg_up) modal_dialog_draw(&ui->cdlg, fb);
     if (app->overlay && ui->dlg_up) modal_dialog_draw(&ui->dlg, fb);
 }
+
+const AudioEnh *jf_ui_enh_out(const JfUi *ui) { return &ui->enh_out; }

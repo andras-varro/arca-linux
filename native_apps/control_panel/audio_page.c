@@ -435,7 +435,11 @@ static void audio_page_run_eq(Framebuffer *fb, TouchInput *touch) {
     else eq_config_read(CONFIG_FILE_PATH, g);
 
     EqPanel p;
-    eq_panel_open(&p, g, SCREEN_SAFE_LEFT, SCREEN_SAFE_TOP, SCREEN_SAFE_RIGHT, SCREEN_SAFE_BOTTOM, get_time_ms());
+    AudioEnh en;
+    memset(&en, 0, sizeof en);
+    if (page_audio_open) audio_get_enh(&page_audio, &en);
+    else enh_config_read(CONFIG_FILE_PATH, &en);
+    eq_panel_open_enh(&p, g, &en, SCREEN_SAFE_LEFT, SCREEN_SAFE_TOP, SCREEN_SAFE_RIGHT, SCREEN_SAFE_BOTTOM, get_time_ms());
     InputState in;
     memset(&in, 0, sizeof in);
     for (;;) {
@@ -447,10 +451,13 @@ static void audio_page_run_eq(Framebuffer *fb, TouchInput *touch) {
         if (page_audio_open) audio_pump(&page_audio);
 
         EqPanelEvent ev = eq_panel_input(&p, &ts, &in, now);
-        if (ev != EQP_NONE && page_audio_open) audio_set_eq(&page_audio, eq_panel_gains(&p));
+        if (ev != EQP_NONE && page_audio_open) {
+            audio_set_eq(&page_audio, eq_panel_gains(&p));
+            audio_set_enh(&page_audio, eq_panel_enh(&p));
+        }
         if (ev == EQP_DONE) {
-            if (eq_cfg) eq_panel_store(eq_cfg, eq_panel_gains(&p));
-            else eq_panel_store_file(CONFIG_FILE_PATH, eq_panel_gains(&p));
+            if (eq_cfg) eq_panel_store_both(eq_cfg, eq_panel_gains(&p), eq_panel_enh(&p));
+            else eq_panel_store_file_both(CONFIG_FILE_PATH, eq_panel_gains(&p), eq_panel_enh(&p));
         }
         if (ev == EQP_DONE || ev == EQP_CANCEL) break;
         if (eq_panel_take_dirty(&p)) {
