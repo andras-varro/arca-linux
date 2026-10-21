@@ -92,7 +92,7 @@ typedef enum { JF_SUB_PLAIN = 0, JF_SUB_GENRE, JF_SUB_PLAYLIST } JfSub;
  * queue_cur kept; PAUSE then restarts the current track from 0. */
 typedef enum { JF_PLAY_IDLE = 0, JF_PLAY_FETCHING, JF_PLAY_PLAYING, JF_PLAY_END, JF_PLAY_PAUSED, JF_PLAY_STOPPED } JfPlayState;
 
-typedef enum { JF_CONFIRM_NONE = 0, JF_CONFIRM_INSTANT_MIX } JfConfirm;
+typedef enum { JF_CONFIRM_NONE = 0, JF_CONFIRM_INSTANT_MIX, JF_CONFIRM_CLEAR_QUEUE } JfConfirm;
 
 /* Buttons of the error overlay (JfApp.overlay_buttons). */
 #define JF_BTN_RETRY  1u
@@ -120,6 +120,7 @@ typedef enum {
     JF_EV_PREV,          /* .played_ms = the position now (jellyfin.c fills it): past JF_PREV_RESTART_MS the track restarts, else the previous queue entry plays (the first entry restarts) */
     JF_EV_SHUFFLE,       /* QUEUE screen: random order; the track playing keeps playing and moves to position 0 (nothing playing: all shuffled) */
     JF_EV_QUEUE_MOVE,    /* QUEUE screen: .i = entry index, .j = the index it moves to; the track playing keeps playing */
+    JF_EV_QUEUE_CLEAR,   /* QUEUE screen, CLR: asks first (confirm = CLEAR_QUEUE); the CONFIRM then empties the queue, stops playback and leaves the NOW PLAYING / QUEUE screens */
     JF_EV_PAUSE,         /* toggle: PLAYING/FETCHING -> PAUSED, PAUSED -> resume, STOPPED/END -> restart the current track from 0.  .played_ms = the position now (jellyfin.c fills it from jf_position_ms) */
     JF_EV_STOP,          /* playback ends, queue and queue_cur stay (STOPPED) */
     JF_EV_SEEK,          /* .i: target position in ms (clamped to [0, runtime)); restarts the stream there, or only moves pos_ms while PAUSED */
@@ -342,5 +343,8 @@ void jf_queue_shuffle(JfApp *app, JfRng rng, void *ctx);
 
 /** Move queue entry `from` to index `to` (both in range; else false).  queue_cur follows the track it names. */
 bool jf_queue_move(JfApp *app, int from, int to);
+
+/** Put a saved queue back (start-up, before JF_EV_START): items[0..n) (tracks), `cur` clamped, PAUSED at `pos_ms` so PLAY resumes there; nothing is played.  n <= 0 changes nothing. */
+void jf_queue_restore(JfApp *app, const JfItem *items, int n, int cur, int pos_ms);
 
 #endif

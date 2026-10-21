@@ -662,11 +662,18 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     if (app->confirm != JF_CONFIRM_NONE) {
         if (!ui->cdlg_up) {
             char msg[128], nm[64];
+            if (app->confirm == JF_CONFIRM_CLEAR_QUEUE) {
+                snprintf(msg, sizeof msg, "CLEAR %d TRACKS?", app->queue_n);
+                modal_dialog_init(&ui->cdlg, "QUEUE", msg, 2);
+                modal_dialog_set_button(&ui->cdlg, 0, "YES", BTN_BG, COLOR_WHITE);
+                modal_dialog_set_button(&ui->cdlg, 1, "NO", RGB(90, 40, 40), COLOR_WHITE);
+            } else {
             lv_fit(nm, sizeof nm, app->confirm_seed.name, 8 * 6 * 2, 2);
             snprintf(msg, sizeof msg, "REPLACE QUEUE WITH INSTANT MIX OF %s?", nm);
             modal_dialog_init(&ui->cdlg, "INSTANT MIX", msg, 2);
             modal_dialog_set_button(&ui->cdlg, 0, "OK", BTN_BG, COLOR_WHITE);
             modal_dialog_set_button(&ui->cdlg, 1, "CANCEL", RGB(90, 40, 40), COLOR_WHITE);
+            }
             modal_dialog_set_focus(&ui->cdlg, 1);
             modal_dialog_show(&ui->cdlg);
             ui->cdlg_up = true;

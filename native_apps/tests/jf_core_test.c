@@ -1573,12 +1573,47 @@ static void test_queue_edit(void)
     CHECK(app.queue_cur == 0 && strcmp(app.queue[0].name, "q3") == 0 && app.play_state == JF_PLAY_PLAYING && cm.n == 0, "SHUFFLE event: playing track first, no restart");
 }
 
+/* CLR: the question first (nothing changes), then CONFIRM empties the queue, stops the music and leaves NOW PLAYING / QUEUE. */
+static void test_queue_clear(void)
+{
+    in_tracks(5, 5);
+    start_playing(0);
+    send(JF_EV_OPEN_NOWPLAYING, 0); send(JF_EV_OPEN_QUEUE, 0);
+    int n0 = app.queue_n;
+    CHECK(app.screen == JF_SCR_QUEUE && n0 > 0, "setup: on the QUEUE screen with a queue (%d)", n0);
+    send(JF_EV_QUEUE_CLEAR, 0);
+    CHECK(app.confirm == JF_CONFIRM_CLEAR_QUEUE && cm.n == 0 && app.queue_n == n0 && app.play_state == JF_PLAY_PLAYING, "CLR asks first and changes nothing");
+    send(JF_EV_BACK, 0);
+    CHECK(app.confirm == JF_CONFIRM_NONE && app.queue_n == n0 && app.screen == JF_SCR_QUEUE, "BACK cancels the question and is spent");
+    send(JF_EV_QUEUE_CLEAR, 0); send(JF_EV_CONFIRM, 0);
+    CHECK(app.queue_n == 0 && app.queue_cur == 0 && app.play_state == JF_PLAY_IDLE && has(JF_CMD_STOP), "CONFIRM empties the queue and stops the music");
+    CHECK(app.screen == JF_SCR_TRACKS && app.confirm == JF_CONFIRM_NONE, "the queue and now-playing screens are left (screen %d)", app.screen);
+    send(JF_EV_QUEUE_CLEAR, 0);
+    CHECK(app.confirm == JF_CONFIRM_NONE, "CLR off the QUEUE screen / with an empty queue asks nothing");
+}
+
+/* The saved queue comes back paused at its track; PLAY then streams that track from the saved position. */
+static void test_queue_restore(void)
+{
+    signed_in();
+    JfItem it[3];
+    for (int k = 0; k < 3; k++) { memset(&it[k], 0, sizeof it[k]); it[k].type = JF_ITEM_TRACK; snprintf(it[k].id, sizeof it[k].id, "%032x", 0x900 + k); snprintf(it[k].name, sizeof it[k].name, "r%d", k); it[k].runtime_s = 200; }
+    jf_queue_restore(&app, it, 0, 0, 0);
+    CHECK(app.queue_n == 0, "restore of nothing changes nothing");
+    jf_queue_restore(&app, it, 3, 99, 5000);
+    CHECK(app.queue_n == 3 && app.queue_cur == 2 && app.play_state == JF_PLAY_PAUSED && app.pos_ms == 5000, "restored paused, index clamped");
+    send(JF_EV_PAUSE, 0);
+    const JfCmd *p = find(JF_CMD_PLAY_STREAM);
+    CHECK(p && strstr(p->path, it[2].id) && app.play_state == JF_PLAY_FETCHING, "PLAY resumes the restored track");
+}
+
 int main(void)
 {
     test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue(); test_sink_channels();
     test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit(); test_categories(); test_category_pick();
     test_action_bar(); test_queue_insert(); test_mix(); test_mix_seed_and_ticks(); test_mix_flow(); test_mix_choice(); test_mix_stops();
     test_mix_cancel_and_errors(); test_mix_nowplaying(); test_save();
+    test_queue_clear(); test_queue_restore();
     test_pause_stop_seek(); test_instant_confirm(); test_back_restores_view(); test_prev(); test_queue_edit();
     printf("jf_core_test: %d checks, %d failures\n", checks, fails);
     return fails ? 1 : 0;

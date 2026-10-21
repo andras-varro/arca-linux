@@ -395,8 +395,28 @@ static void on_instant_mix(JfApp *app, int i, JfCmds *out)
     fetch_instant_mix(app, &it, out);
 }
 
+/* CLR, confirmed: nothing stays queued or playing, and the screens that need a queue are left. */
+static void clear_queue(JfApp *app, JfCmds *out)
+{
+    if (app->play_state == JF_PLAY_FETCHING) emit(out, JF_CMD_CANCEL)->kind = JF_KIND_STREAM;
+    emit(out, JF_CMD_STOP);
+    app->queue_n = 0;
+    app->queue_cur = 0;
+    app->play_state = JF_PLAY_IDLE;
+    app->start_ms = app->pos_ms = 0;
+    app->fail_streak = 0;
+    app->queue_name[0] = '\0';
+    while ((app->screen == JF_SCR_QUEUE || app->screen == JF_SCR_NOWPLAYING) && app->nav_n > 0) pop(app, out);
+    set_banner(app, "QUEUE CLEARED");
+}
+
 static void on_confirm(JfApp *app, JfCmds *out)
 {
+    if (app->confirm == JF_CONFIRM_CLEAR_QUEUE) {
+        app->confirm = JF_CONFIRM_NONE;
+        clear_queue(app, out);
+        return;
+    }
     if (app->confirm != JF_CONFIRM_INSTANT_MIX) return;
     app->confirm = JF_CONFIRM_NONE;
     if (have_token(app)) fetch_instant_mix(app, &app->confirm_seed, out);
@@ -1017,6 +1037,20 @@ bool jf_queue_move(JfApp *app, int from, int to)
     return true;
 }
 
+void jf_queue_restore(JfApp *app, const JfItem *items, int n, int cur, int pos_ms)
+{
+    if (n <= 0) return;
+    if (n > JF_QUEUE_MAX) n = JF_QUEUE_MAX;
+    for (int k = 0; k < n; k++) app->queue[k] = items[k];
+    app->queue_n = n;
+    app->queue_cur = cur < 0 ? 0 : cur >= n ? n - 1 : cur;
+    app->start_ms = 0;
+    app->pos_ms = pos_ms < 0 ? 0 : pos_ms;
+    app->fail_streak = 0;
+    app->play_state = JF_PLAY_PAUSED;
+    snprintf(app->queue_name, sizeof app->queue_name, "Queue: %.80s", app->queue[0].name);
+}
+
 static void on_volume(JfApp *app, int delta, JfCmds *out)
 {
     int v = app->volume_step + delta;
@@ -1266,8 +1300,11 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
     case JF_EV_QUEUE_MOVE:
         if (app->screen == JF_SCR_QUEUE) jf_queue_move(app, ev->i, ev->j);
         break;
+    case JF_EV_QUEUE_CLEAR:
+        if (app->screen == JF_SCR_QUEUE && app->queue_n > 0) app->confirm = JF_CONFIRM_CLEAR_QUEUE;
+        break;
     case JF_EV_PAUSE:    on_pause(app, ev->played_ms, out); break;
-    case JF_EV_STOP:     on_stop(app, out); break;
+    case JF_EV_STOP:    on_stop(app, out); break;
     case JF_EV_SEEK:     on_seek(app, ev->i, out); break;
     case JF_EV_VOL_UP:   on_volume(app, +1, out); break;
     case JF_EV_VOL_DOWN: on_volume(app, -1, out); break;

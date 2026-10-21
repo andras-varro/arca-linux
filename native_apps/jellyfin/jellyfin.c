@@ -21,6 +21,7 @@
 #include "logger.h"
 #include "jf_art.h"
 #include "jf_ui.h"
+#include "jf_queue_store.h"
 
 #define EVQ_MAX 8
 
@@ -48,6 +49,24 @@ static void eq_now(int g[EQ_BANDS])
 
 static JfEvent evq[EVQ_MAX];
 static int evq_n;
+
+/* The saved queue: written whenever the queue's content, order or current entry changes (a hash tells), and once more at
+ * exit with the position.  A change is a user action or a track ending, never a frame. */
+static uint32_t queue_sig;
+static uint32_t queue_signature(void)
+{
+    uint32_t h = 2166136261u ^ (uint32_t)app.queue_n;
+    h = (h ^ (uint32_t)app.queue_cur) * 16777619u;
+    for (int i = 0; i < app.queue_n; i++)
+        for (const char *p = app.queue[i].id; *p; p++) h = (h ^ (unsigned char)*p) * 16777619u;
+    return h;
+}
+
+static void queue_persist(int pos_ms)
+{
+    jf_queue_save(JF_QUEUE_PATH, app.queue, app.queue_n, app.queue_cur, pos_ms);
+    queue_sig = queue_signature();
+}
 
 static void push(const JfEvent *e)
 {
@@ -166,6 +185,7 @@ static void step_event(const JfEvent *ev, uint32_t now)
     if (e2.type == JF_EV_PAUSE || e2.type == JF_EV_PREV) e2.played_ms = jf_position_ms(&app, track_live ? (int)(now - track_t0) : 0);
     jf_step(&app, &e2, &cmds);
     execute(&cmds, now);
+    if (queue_signature() != queue_sig) queue_persist(0);
     jf_ui_mark_dirty(&ui);
 }
 
@@ -214,6 +234,13 @@ int main(int argc, char *argv[])
 
     jf_app_init(&app);
     jf_seed(&app, (uint32_t)time(NULL) * 2654435761u);
+    {   /* the saved queue comes back paused at its track: nothing plays until PLAY */
+        static JfItem saved[JF_QUEUE_MAX];
+        int cur = 0, pos = 0;
+        int n = jf_queue_load(JF_QUEUE_PATH, saved, JF_QUEUE_MAX, &cur, &pos);
+        if (n > 0) jf_queue_restore(&app, saved, n, cur, pos);
+        queue_sig = queue_signature();
+    }
     app.sink_channels_fn = sink_channels;
     if (jf_api_init(&api) != 0) {
         fprintf(stderr, "jellyfin: out of memory\n");
@@ -309,6 +336,8 @@ int main(int argc, char *argv[])
         usleep(active ? FRAME_DELAY_ACTIVE_US : FRAME_DELAY_IDLE_US);
     }
 
+    if (app.queue_n > 0)   /* the position the track was left at, so a restart resumes there */
+        queue_persist(jf_position_ms(&app, track_live ? (int)(get_time_ms() - track_t0) : 0));
     if (audio_ok) {
         audio_music_stop(&audio);
         for (int i = 0; i < 20; i++) { audio_pump(&audio); usleep(16667); }

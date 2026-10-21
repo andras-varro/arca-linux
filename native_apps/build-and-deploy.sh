@@ -342,7 +342,7 @@ $CC "${WARN[@]}" -O2 -I. file_manager/file_manager.c file_manager/fm_core.c "${C
 # jellyfin: music client.  jf_core/jf_api/jf_model/jf_url/jf_login are screen-free (host tests);
 # jf_ui.c draws, jellyfin.c is the loop.  http.o and json.o come from the common block above.
 step "35/35" "jellyfin"
-$CC "${WARN[@]}" -O2 -I. -Icommon -Ijellyfin jellyfin/jellyfin.c common/eq_panel.c jellyfin/jf_ui.c jellyfin/jf_core.c jellyfin/jf_api.c jellyfin/jf_model.c jellyfin/jf_url.c jellyfin/jf_login.c jellyfin/jf_art.c common/icons.c common/jf_img.c build/http.o build/json.o build/list_view.o build/top_bar.o build/icon_grid.o build/ppm.o build/pointer.o build/ui_flow.o build/ui_focus.o control_panel/cpu_load.c common/status_line.c common/logger.c build/product.o "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/jellyfin -lm "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. -Icommon -Ijellyfin jellyfin/jellyfin.c common/eq_panel.c jellyfin/jf_ui.c jellyfin/jf_core.c jellyfin/jf_api.c jellyfin/jf_model.c jellyfin/jf_url.c jellyfin/jf_login.c jellyfin/jf_queue_store.c jellyfin/jf_art.c common/icons.c common/jf_img.c build/http.o build/json.o build/list_view.o build/top_bar.o build/icon_grid.o build/ppm.o build/pointer.o build/ui_flow.o build/ui_focus.o control_panel/cpu_load.c common/status_line.c common/logger.c build/product.o "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/jellyfin -lm "${AUDIO_LIBS[@]}"
 
 # Collect icon files from source dirs → build/icons/.  control_panel/icons/ holds
 # the control panel's home-grid icons (gen_cp_icons.py); control_panel reads them
