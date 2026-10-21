@@ -5,7 +5,7 @@
  *   cd native_apps && gcc -Wall -Wextra -Wno-unused-parameter -I. -I common \
  *       -o build/top_bar_test tests/top_bar_test.c common/top_bar.c \
  *       common/status_line.c control_panel/cpu_load.c common/common.c \
- *       common/framebuffer.c common/touch_input.c common/hardware.c common/config.c \
+ *       common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c \
  *       common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c \
  *       common/audio_out.c common/audio_wav.c common/start_menu.c common/gamepad.c \
  *       common/input_slots.c common/input_scan.c -lm && ./build/top_bar_test

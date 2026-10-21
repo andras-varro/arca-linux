@@ -8,7 +8,7 @@
  *
  *   cd native_apps && gcc -Wall -Wextra -Wno-unused-parameter -I common \
  *       -o build/ui_scale_test tests/ui_scale_test.c \
- *       common/framebuffer.c common/hardware.c common/config.c -lm \
+ *       common/framebuffer.c common/font.c common/hardware.c common/config.c -lm \
  *       && ./build/ui_scale_test
  *
  * What can go wrong, and why each group is here.  A control that must keep its
@@ -47,7 +47,7 @@
  * tell those apart afterwards.
  *
  * Seen failing — measured 2026-09-11 against four sabotaged variants of
- * common/framebuffer.c, each applied to a pristine copy and the source restored
+ * common/framebuffer.c common/font.c, each applied to a pristine copy and the source restored
  * and md5-verified afterwards:
  *   - SAB 1, "never scale" (the pre-change behaviour, return px always):
  *     13 failures, groups 3, 4, 5, 6, 8.  Groups 1, 2 and 7 pass, as they must.

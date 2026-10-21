@@ -10,7 +10,7 @@
  *
  *   cd native_apps && gcc -Wall -Wextra -Wno-unused-parameter -I common \
  *       -o build/framebuffer_bpp_test tests/framebuffer_bpp_test.c \
- *       common/framebuffer.c common/hardware.c common/config.c \
+ *       common/framebuffer.c common/font.c common/hardware.c common/config.c \
  *       common/touch_input.c -lm && ./build/framebuffer_bpp_test
  *
  * What it asserts, and why: the back buffer is sized

@@ -23,6 +23,7 @@ SRCS = vnc_client.c \
        vnc_settings.c \
        vnc_pad.c \
        $(COMMON_DIR)/framebuffer.c \
+       $(COMMON_DIR)/font.c \
        $(COMMON_DIR)/touch_input.c \
        $(COMMON_DIR)/hardware.c \
        $(COMMON_DIR)/config.c \

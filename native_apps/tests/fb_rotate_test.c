@@ -7,7 +7,7 @@
  *
  *   cd native_apps && gcc -O2 -Wall -Wextra -Wno-unused-parameter -I common \
  *       -o build/fb_rotate_test tests/fb_rotate_test.c \
- *       common/framebuffer.c common/hardware.c common/config.c -lm \
+ *       common/framebuffer.c common/font.c common/hardware.c common/config.c -lm \
  *       && ./build/fb_rotate_test
  *
  * What it asserts: the rotated copy was rewritten so that the panel side is

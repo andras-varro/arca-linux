@@ -16,7 +16,7 @@
  *
  *   cd native_apps && gcc -Wall -Wextra -Wno-unused-parameter -I. -Dmain=app_launcher_main_unused \
  *       -o build/launcher_args_test tests/launcher_args_test.c \
- *       common/framebuffer.c common/touch_input.c common/hardware.c common/common.c \
+ *       common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/common.c \
  *       common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c \
  *       common/audio_out.c common/audio_wav.c common/config.c common/gamepad.c common/input_slots.c \
  *       common/input_scan.c common/ppm.c common/icon_grid.c common/logger.c common/product.c common/pointer.c common/status_line.c common/top_bar.c control_panel/cpu_load.c -lm && ./build/launcher_args_test

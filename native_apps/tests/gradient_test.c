@@ -10,7 +10,7 @@
  *
  *   cd native_apps && gcc -Wall -Wextra -Wno-unused-parameter -I common \
  *       -o build/gradient_test tests/gradient_test.c \
- *       common/framebuffer.c common/hardware.c common/config.c \
+ *       common/framebuffer.c common/font.c common/hardware.c common/config.c \
  *       common/touch_input.c -lm && ./build/gradient_test
  *
  * What it asserts, and why: the channel deltas used to be

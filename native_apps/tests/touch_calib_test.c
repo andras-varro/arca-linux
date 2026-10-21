@@ -11,7 +11,7 @@
  *
  *   cd native_apps && gcc -Wall -Wextra -Wno-unused-parameter -I common \
  *       -o build/touch_calib_test tests/touch_calib_test.c \
- *       common/touch_calib.c common/touch_input.c common/framebuffer.c \
+ *       common/touch_calib.c common/touch_input.c common/framebuffer.c common/font.c \
  *       common/hardware.c common/config.c -lm && ./build/touch_calib_test
  *
  * Exit 0 = the fit still reproduces the reference measurement AND the curve

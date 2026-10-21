@@ -7,7 +7,7 @@
  *
  *   cd native_apps && gcc -Wall -Wextra -Wno-unused-parameter -I common \
  *       -o build/pointer_test tests/pointer_test.c common/pointer.c \
- *       common/framebuffer.c common/hardware.c common/config.c \
+ *       common/framebuffer.c common/font.c common/hardware.c common/config.c \
  *       && ./build/pointer_test
  *
  * Group 1 is the start state, group 2 motion and the clamp to the bounds

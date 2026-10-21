@@ -19,7 +19,7 @@
  *   wsl.exe -u root -e bash -lc "cd /mnt/c/work/arca/native_apps && \
  *       gcc -Wall -Wextra -Wno-unused-parameter -I common \
  *       -o build/gamepad_announce_test tests/gamepad_announce_test.c \
- *       common/gamepad.c common/input_slots.c common/input_scan.c common/framebuffer.c common/hardware.c \
+ *       common/gamepad.c common/input_slots.c common/input_scan.c common/framebuffer.c common/font.c common/hardware.c \
  *       common/config.c common/touch_input.c -lm && ./build/gamepad_announce_test"
  *
  * Measured 2026-09-08: the whole gate under `wsl.exe -u root` does NOT reach
@@ -31,7 +31,7 @@
  * Build (this line is the CTEST_ROWS row in tests/run-all.sh):
  *   cd native_apps && gcc -Wall -Wextra -Wno-unused-parameter -I common \
  *       -o build/gamepad_announce_test tests/gamepad_announce_test.c \
- *       common/gamepad.c common/input_slots.c common/input_scan.c common/framebuffer.c common/hardware.c \
+ *       common/gamepad.c common/input_slots.c common/input_scan.c common/framebuffer.c common/font.c common/hardware.c \
  *       common/config.c common/touch_input.c -lm
  *
  * Measured against the pre-fix source, three runs, identical each time:

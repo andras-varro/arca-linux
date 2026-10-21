@@ -261,7 +261,10 @@ void fb_draw_circle(Framebuffer *fb, int cx, int cy, int radius, uint32_t color)
 // Draw filled circle
 void fb_fill_circle(Framebuffer *fb, int cx, int cy, int radius, uint32_t color);
 
-// Draw text (simple bitmap font — lowercase mapped to uppercase automatically)
+// Draw UTF-8 text with the 6x9 bitmap font (font.h): advance 6*scale per code point,
+// glyph rows 0-6 sit in the old 7-row cap box and rows 7-8 are descenders.
+// Case is NOT changed here (callers upcase, see text_to_uppercase). Controls advance a
+// blank; unmapped code points and malformed bytes draw a fallback box.
 void fb_draw_text(Framebuffer *fb, int x, int y, const char *text, uint32_t color, int scale);
 
 // Draw filled rounded rectangle (r = corner radius)

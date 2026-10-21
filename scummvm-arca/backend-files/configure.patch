@@ -2,7 +2,7 @@ diff --git a/configure b/configure
 index 480916a2..f7d1d5df 100755
 --- a/configure
 +++ b/configure
-@@ -4117,6 +4117,18 @@ case $_backend in
+@@ -4117,6 +4117,19 @@ case $_backend in
  		append_var DEFINES "-DUSE_NULL_DRIVER"
  		_text_console=yes
  		;;
@@ -11,6 +11,7 @@ index 480916a2..f7d1d5df 100755
 +		_backend="arca"
 +		append_var INCLUDES "-I\$(srcdir)/../native_apps/common"
 +		append_var OBJS "../native_apps/common/framebuffer.o"
++		append_var OBJS "../native_apps/common/font.o"
 +		append_var OBJS "../native_apps/common/touch_input.o"
 +		append_var OBJS "../native_apps/common/hardware.o"
 +		append_var OBJS "../native_apps/common/config.o"

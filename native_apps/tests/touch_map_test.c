@@ -14,7 +14,7 @@
  *
  *   cd native_apps && gcc -Wall -Wextra -Wno-unused-parameter -I common \
  *       -o build/touch_map_test tests/touch_map_test.c common/touch_input.c \
- *       common/framebuffer.c common/hardware.c common/config.c -lm \
+ *       common/framebuffer.c common/font.c common/hardware.c common/config.c -lm \
  *       && ./build/touch_map_test
  *
  * What it asserts, and why.  Ten groups, each pinning one thing the two stages
@@ -182,7 +182,7 @@ static TouchInput nonmono_fx(void) {
 /* The geometry fb_apply_viewport() actually publishes for a surface that a
  * scaling DSS overlay upscales to fill the panel.  The load-bearing fact is that
  * screen_panel_width/height are the SURFACE dims and not the panel's — the
- * assignment in common/framebuffer.c carries the argument for that — and
+ * assignment in common/framebuffer.c common/font.c carries the argument for that — and
  * touch_init()/touch_set_screen_size() copy them straight into
  * panel_width/panel_height.  So `dim` inside touch_map_axis_panel() is a SURFACE
  * extent whenever a node is scaled, and the knots at dim/4 and 3*dim/4 move with

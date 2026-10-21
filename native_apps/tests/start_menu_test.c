@@ -13,7 +13,7 @@
  * Build (host gcc, from native_apps/):
  *   gcc -Wall -Wextra -Wno-unused-parameter -I common -o build/start_menu_test \
  *       tests/start_menu_test.c common/start_menu.c common/common.c \
- *       common/framebuffer.c common/touch_input.c common/hardware.c \
+ *       common/framebuffer.c common/font.c common/touch_input.c common/hardware.c \
  *       common/config.c common/highscore.c common/keyboard.c common/audio.c \
  *       common/audio_gen.c common/audio_out.c common/audio_wav.c \
  *       common/gamepad.c common/input_slots.c common/input_scan.c -lm && \

@@ -7,7 +7,7 @@
  *
  *   cd native_apps && gcc -Wall -Wextra -Wno-unused-parameter -I common \
  *       -o build/bezel_scale_test tests/bezel_scale_test.c \
- *       common/framebuffer.c common/hardware.c common/config.c -lm \
+ *       common/framebuffer.c common/font.c common/hardware.c common/config.c -lm \
  *       && ./build/bezel_scale_test
  *
  * What can go wrong, and why each group is here.  The margins name pixels the

@@ -2,7 +2,7 @@
  * and the command parser.
  *   gcc -Wall -Wextra -Wno-unused-parameter -I common -o build/remote_tap_test \
  *       tests/remote_tap_test.c common/remote_tap.c common/touch_calib.c \
- *       common/touch_input.c common/framebuffer.c common/hardware.c common/config.c -lm
+ *       common/touch_input.c common/framebuffer.c common/font.c common/hardware.c common/config.c -lm
  */
 #include "remote_tap.h"
 #include "touch_calib.h"

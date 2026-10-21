@@ -9,7 +9,7 @@
  *
  *   cd native_apps && gcc -Wall -Wextra -Wno-unused-parameter -I common \
  *       -o build/gamepad_latch_test tests/gamepad_latch_test.c \
- *       common/gamepad.c common/input_slots.c common/input_scan.c common/framebuffer.c common/hardware.c \
+ *       common/gamepad.c common/input_slots.c common/input_scan.c common/framebuffer.c common/font.c common/hardware.c \
  *       common/config.c common/touch_input.c -lm && ./build/gamepad_latch_test
  *
  * The bug: `.held` used to be *stored* in the caller's InputState, written

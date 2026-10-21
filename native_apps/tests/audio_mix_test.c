@@ -136,7 +136,7 @@
  *     -O2 -I. -DAUDIO_OUT_HAVE_ALSA -Iarm-deps-softfp/usr/include tests/audio_mix_test.c \
  *     common/audio.c common/audio_gen.c common/audio_out.c common/audio_wav.c \
  *     common/touch_input.c \
- *     common/framebuffer.c common/hardware.c common/common.c \
+ *     common/framebuffer.c common/font.c common/hardware.c common/common.c \
  *     common/config.c common/highscore.c common/keyboard.c \
  *     -o build/audio_mix_test -lm -Larm-deps-softfp/usr/lib -lasound
  */

@@ -7,6 +7,8 @@
  * free of this include — see its PER-FRAME SERVICE block. */
 #include "audio.h"
 #include "start_menu.h"
+#include "font.h"
+#include "utf8.h"
 #include <string.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -90,11 +92,11 @@ void text_to_uppercase(char *dest, const char *src, size_t max_len) {
 }
 
 int text_measure_width(const char *text, int scale) {
-    return strlen(text) * 6 * scale;  // 5x7 font + 1px spacing = 6px per char
+    return (int)utf8_len_cp(text) * FONT_ADVANCE * scale;  // 6px advance per code point
 }
 
 int text_measure_height(int scale) {
-    return 7 * scale;  // 5x7 font height
+    return 7 * scale;  // the 7-row cap box; descenders draw 2 rows below it
 }
 
 void text_draw_centered(Framebuffer *fb, int center_x, int center_y,

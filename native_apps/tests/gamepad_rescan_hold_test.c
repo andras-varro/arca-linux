@@ -13,7 +13,7 @@
  * Build (this line is the CTEST_ROWS row in tests/run-all.sh):
  *   cd native_apps && gcc -Wall -Wextra -Wno-unused-parameter -I common \
  *       -o build/gamepad_rescan_hold_test tests/gamepad_rescan_hold_test.c \
- *       common/gamepad.c common/input_slots.c common/framebuffer.c common/hardware.c \
+ *       common/gamepad.c common/input_slots.c common/framebuffer.c common/font.c common/hardware.c \
  *       common/config.c common/touch_input.c -lm
  *
  * HOW A RESCAN IS REACHED ON A HOST WITH NO SUCH DEVICES.  Two link-time seams,

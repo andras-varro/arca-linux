@@ -190,6 +190,7 @@ mkdir -p build
 step() { echo "[$1] $2..."; }
 
 step " 1/35" "framebuffer";  $CC "${WARN[@]}" -O2 -c common/framebuffer.c    -o build/framebuffer.o
+$CC "${WARN[@]}" -O2 -c common/font.c           -o build/font.o
 step " 2/35" "touch_input";  $CC "${WARN[@]}" -O2 -c common/touch_input.c    -o build/touch_input.o
 step " 3/35" "touch_calib";  $CC "${WARN[@]}" -O2 -c common/touch_calib.c    -o build/touch_calib.o
 step " 4/35" "hardware";     $CC "${WARN[@]}" -O2 -c common/hardware.c        -o build/hardware.o
@@ -233,7 +234,7 @@ step "19/35" "gamepad";      $CC "${WARN[@]}" -O2 -c common/gamepad.c         -o
 # (gamepad.o), so every binary naming COMMON_OBJ also names GAMEPAD_OBJ.
 GAMEPAD_OBJ=(build/gamepad.o build/input_scan.o build/input_slots.o build/start_menu.o)
 
-COMMON_OBJ=(build/framebuffer.o build/touch_input.o build/hardware.o
+COMMON_OBJ=(build/framebuffer.o build/font.o build/touch_input.o build/hardware.o
             build/common.o build/highscore.o build/keyboard.o
             build/audio.o build/audio_gen.o build/audio_out.o
             build/audio_wav.o build/audio_bed.o build/config.o)

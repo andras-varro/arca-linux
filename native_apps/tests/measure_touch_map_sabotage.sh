@@ -50,7 +50,7 @@ run() {
     fi
     if ! gcc -Wall -Wextra -Wno-unused-parameter -I "$WORK/c" -I common \
             -o "$WORK/t" "$TEST" "$WORK/c/touch_input.c" \
-            common/framebuffer.c common/hardware.c common/config.c -lm \
+            common/framebuffer.c common/font.c common/hardware.c common/config.c -lm \
             2>"$WORK/cc.log"; then
         printf '  %-58s DID NOT COMPILE: %s\n' "$name" "$(head -1 "$WORK/cc.log")"
         HARNESS_ERR=1; return

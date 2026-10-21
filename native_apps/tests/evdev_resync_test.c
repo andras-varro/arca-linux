@@ -17,7 +17,7 @@
  * Build (this line is the CTEST_ROWS row in tests/run-all.sh):
  *   cd native_apps && gcc -Wall -Wextra -Wno-unused-parameter -I common \
  *       -o build/evdev_resync_test tests/evdev_resync_test.c \
- *       common/gamepad.c common/input_slots.c common/framebuffer.c common/hardware.c \
+ *       common/gamepad.c common/input_slots.c common/framebuffer.c common/font.c common/hardware.c \
  *       common/config.c common/touch_input.c -lm
  *
  * SEAMS — the two gamepad_rescan_hold_test.c uses, and no change to shipped
