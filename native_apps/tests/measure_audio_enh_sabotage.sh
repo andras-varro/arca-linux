@@ -29,7 +29,8 @@ run "guard scales dry too"         's|ol  = dl + |ol  = ((dl * guard) >> 15) + |
 run "bass shaper bypassed (no harmonics)" 's|int32_t z = shape_cubic(a, p->hb_drive);|int32_t z = a;|'
 run "mono sum replaced by left"    's|int32_t m  = (xl + xr) >> 1;|int32_t m  = xl;|'
 run "treble high-pass is low-pass" 's|biquad(&p->ht_hp, rate, 5000.0 - 20.0 \* e.ht_rng, 1);|biquad(\&p->ht_hp, rate, 5000.0 - 20.0 * e.ht_rng, 0);|'
-run "drum band collapsed"          's|biquad(&p->db_hi, rate, 200.0 + 4.0 \* e.db_rng, 0);|biquad(\&p->db_hi, rate, 50.0 + 1.0 * e.db_rng, 0);|'
+run "drum band collapsed"          's|biquad(&p->db_hi, drate, 200.0 + 4.0 \* e.db_rng, 0);|biquad(\&p->db_hi, rate, 50.0 + 1.0 * e.db_rng, 0);|'
 run "range ignored (hb drive)"     's|256 + (768 \* e.hb_rng) / 100|256|'
+run "guard fast path ignores overshoot" 's/if (guard != GUARD_ONE || (uint32_t)((ol + 32768) | (orr + 32768)) > 65535u)/if (guard != GUARD_ONE)/'
 run "parse clamp dropped"          's|enh_clamp(&e);\n    \*out|XX|; s|    \*out = e;|    *out = (AudioEnh){ (int)v[0], (int)v[1], (int)v[2], (int)v[3], (int)v[4], (int)v[5], (int)v[6] };|'
 exit $bad

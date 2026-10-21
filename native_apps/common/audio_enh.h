@@ -22,6 +22,10 @@
  *                  scaled, by a gain that drops at once (-25 % steps) when
  *                  dry + added would leave int16 and recovers in about 90 ms.
  *
+
+ * The bass parts run on the mono sum decimated by ENH_DEC (box average in,
+ * linear interpolation out); their coefficients are designed at rate / ENH_DEC.
+ *
  * Each amount and range is 0..100.  Enhancer off, or all three amounts 0, is a
  * bit-exact bypass: enh_process() returns before touching the buffer.
  * One thread owns an EnhState; there is no locking.
@@ -31,6 +35,8 @@
 #include <stddef.h>
 
 #define ENH_MAX_CH      2
+#define ENH_DEC         4        /* bass-part decimation factor (power of two) */
+#define ENH_DEC_SHIFT   2
 #define ENH_CONFIG_KEY  "enh"
 
 /** The user-facing settings; all fields 0..100 except `on` (0/1). */
@@ -60,6 +66,8 @@ typedef struct {
 typedef struct {
     EnhHist hb1, hb2, db_lo, db_hi;  /* on the mono sum */
     EnhHist ht[ENH_MAX_CH];
+    int32_t dsum, dph;               /* bass decimator: running sum, phase */
+    int32_t bv, bt, bstep;           /* bass output: current, target, per-sample step (Q8) */
     int32_t guard;                   /* Q15 gain on the added content; 0 = unset */
 } EnhState;
 

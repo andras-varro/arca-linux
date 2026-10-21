@@ -71,6 +71,7 @@ void enh_design(EnhParams *p, int rate, const AudioEnh *in)
 {
     memset(p, 0, sizeof(*p));
     p->rate = rate;
+    int drate = rate / ENH_DEC;                    /* the bass parts run decimated */
     AudioEnh e = *in;
     enh_clamp(&e);
     p->cfg = e;
@@ -88,13 +89,13 @@ void enh_design(EnhParams *p, int rate, const AudioEnh *in)
     if (p->hb) {
         p->hb_g     = gain_q15(e.hb_amt, HB_CEIL);
         p->hb_drive = 256 + (768 * e.hb_rng) / 100;                 /* 1x .. 4x */
-        biquad(&p->hb1, rate, 200.0 + 0.5 * e.hb_rng, 0);          /* 200..250 Hz */
-        biquad(&p->hb2, rate, 160.0, 0);
+        biquad(&p->hb1, drate, 200.0 + 0.5 * e.hb_rng, 0);          /* 200..250 Hz */
+        biquad(&p->hb2, drate, 160.0, 0);
     }
     if (p->db) {
         p->db_g = gain_q15(e.db_amt, DB_CEIL);
-        biquad(&p->db_lo, rate,  50.0 + 1.0 * e.db_rng, 0);        /* 50..150 Hz  */
-        biquad(&p->db_hi, rate, 200.0 + 4.0 * e.db_rng, 0);        /* 200..600 Hz */
+        biquad(&p->db_lo, drate,  50.0 + 1.0 * e.db_rng, 0);        /* 50..150 Hz  */
+        biquad(&p->db_hi, drate, 200.0 + 4.0 * e.db_rng, 0);        /* 200..600 Hz */
     }
     if (p->ht) {
         p->ht_g     = gain_q15(e.ht_amt, HT_CEIL);
@@ -105,13 +106,6 @@ void enh_design(EnhParams *p, int rate, const AudioEnh *in)
 
 void enh_state_reset(EnhState *s) { memset(s, 0, sizeof(*s)); }
 
-static inline int32_t sat_sig(int64_t v)
-{
-    if (v > SIG_MAX) return SIG_MAX;
-    if (v < SIG_MIN) return SIG_MIN;
-    return (int32_t)v;
-}
-
 static inline int32_t bq(const EnhCoef *c, EnhHist *h, int32_t x)
 {
     if (!h->primed) {
@@ -119,43 +113,100 @@ static inline int32_t bq(const EnhCoef *c, EnhHist *h, int32_t x)
         h->y1 = h->y2 = c->hp ? 0 : x;
         h->primed = 1;
     }
+    /* No saturation: a stable Butterworth section has an L1 impulse norm below
+     * 2, so a +-2^23 (Q8 int16) input cannot leave int32. */
     int64_t acc = (int64_t)c->b0 * x + (int64_t)c->b1 * h->x1 + (int64_t)c->b2 * h->x2
                 - (int64_t)c->a1 * h->y1 - (int64_t)c->a2 * h->y2;
-    int32_t y = sat_sig((acc + (1 << (COEF_SHIFT - 1))) >> COEF_SHIFT);
+    int32_t y = (int32_t)((acc + (1 << (COEF_SHIFT - 1))) >> COEF_SHIFT);
     h->x2 = h->x1; h->x1 = x;
     h->y2 = h->y1; h->y1 = y;
     return y;
 }
 
-/* Q8 in, Q8 out; f(x) = 1.5x - 0.5x^3 on |x| <= 1 (full scale), flat beyond. */
+/* Q8 in; f(x) = 1.5x - 0.5x^3 on |x| <= 1 (full scale), flat beyond.  Returns
+ * the result in Q8 (int16 units x 256).  32-bit only: v>>4 is below 2^19 and the
+ * drive at most 1024. */
 static inline int32_t shape_cubic(int32_t v, int32_t drive_q8)
 {
-    int64_t x = ((int64_t)v * drive_q8) >> SIG_SHIFT;          /* Q8 */
-    int32_t x15 = (int32_t)(x >> SIG_SHIFT);                    /* Q15 */
+    int32_t x15 = ((v >> 4) * drive_q8) >> 12;                  /* Q15 */
     if (x15 >  32767) x15 =  32767;
     if (x15 < -32767) x15 = -32767;
     int32_t x2 = (x15 * x15) >> 15;
     int32_t x3 = (x2 * x15) >> 15;
-    int32_t y15 = (3 * x15 - x3) >> 1;
-    return y15 * (1 << SIG_SHIFT);
+    return ((3 * x15 - x3) >> 1) * (1 << SIG_SHIFT);
 }
 
-/* Q8 in, Q8 out; sin(pi/2 x), linear interpolation in a 256-segment table. */
+/* Q8 in; sin(pi/2 x), linear interpolation in a 256-segment table.  Returns Q15. */
 static inline int32_t shape_sine(int32_t v, int32_t drive_q8)
 {
-    int64_t x = ((int64_t)v * drive_q8) >> SIG_SHIFT;
-    int32_t x15 = (int32_t)(x >> SIG_SHIFT);
+    int32_t x15 = ((v >> 4) * drive_q8) >> 12;
     if (x15 >  32767) x15 =  32767;
     if (x15 < -32767) x15 = -32767;
     int32_t u = x15 + 32768;                                    /* 1..65535 */
     int32_t i = u >> 8, f = u & 255;
-    int32_t y15 = sine_tab[i] + (((sine_tab[i + 1] - sine_tab[i]) * f) >> 8);
-    return y15 * (1 << SIG_SHIFT);
+    return sine_tab[i] + (((sine_tab[i + 1] - sine_tab[i]) * f) >> 8);
 }
+
+/* Q8 add of a Q15 shaper output scaled by the Q15 part gain. */
+static inline int32_t scale_q15(int32_t y15, int32_t g)
+{
+    return (y15 * g + 64) >> 7;
+}
+
+static inline int32_t mulhi(int32_t a, int32_t b) { return (int32_t)(((int64_t)a * b) >> 32); }
 
 static inline int32_t mulq15(int32_t v, int32_t g)
 {
     return (int32_t)(((int64_t)v * g + (1 << 14)) >> 15);
+}
+
+/* Slow path of the peak guard: the guard gain is below unity, or the unscaled
+ * sum overshoots.  Scales only the ADDED content; fast attack in 25 % steps
+ * (bounded), slow release.  Returns the new guard gain. */
+static __attribute__((noinline)) int32_t guard_slow(int32_t guard, int32_t add_l, int32_t add_r,
+                                                    int dl, int dr, int channels,
+                                                    int32_t *pol, int32_t *porr)
+{
+    int tries = 0;
+    int32_t ol, orr;
+    for (;;) {
+        int64_t gl = ((int64_t)add_l * guard) >> 15;
+        int64_t gr = ((int64_t)add_r * guard) >> 15;
+        ol  = dl + (int32_t)((gl + (1 << (SIG_SHIFT - 1))) >> SIG_SHIFT);
+        orr = dr + (int32_t)((gr + (1 << (SIG_SHIFT - 1))) >> SIG_SHIFT);
+        int bad = ol > 32767 || ol < -32768 || (channels > 1 && (orr > 32767 || orr < -32768));
+        if (!bad) break;
+        if (++tries > 8) { guard = 0; ol = dl; orr = dr; break; }
+        guard -= (guard >> 2) + 1;
+        if (guard < 0) guard = 0;
+    }
+    if (guard < GUARD_ONE) {
+        guard += ((GUARD_ONE - guard) >> GUARD_REL_SHIFT) + 1;
+        if (guard > GUARD_ONE) guard = GUARD_ONE;
+    }
+    *pol = ol; *porr = orr;
+    return guard;
+}
+
+#define ENH_CHUNK 256
+
+/* High-pass section + sine shaper for one channel of `n` frames, accumulating the
+ * Q8 added content into add[].  Registers only; three 32x32 high-word multiplies
+ * (b0 = b2 and b1 = -2 b0 for a high-pass, so the feed-forward is one product).
+ * Signals are Q8; the multiplier operands are scaled by 16 so that the high word
+ * of (Q28 coefficient x Q12 value) is Q8 again. */
+static void ht_pass(const EnhCoef *c, EnhHist *h, const int16_t *src, int stride,
+                    int32_t *add, int n, int32_t drive, int32_t g)
+{
+    int32_t x1 = h->x1, x2 = h->x2, y1 = h->y1, y2 = h->y2;
+    const int32_t b0 = c->b0, a1 = c->a1, a2 = c->a2;
+    for (int i = 0; i < n; i++) {
+        int32_t x = src[i * stride] * (1 << SIG_SHIFT);
+        int32_t y = mulhi(b0, (x - 2 * x1 + x2) * 16) - mulhi(a1, y1 * 16) - mulhi(a2, y2 * 16);
+        x2 = x1; x1 = x; y2 = y1; y1 = y;
+        add[i] += scale_q15(shape_sine(y, drive), g);
+    }
+    h->x1 = x1; h->x2 = x2; h->y1 = y1; h->y2 = y2;
 }
 
 void enh_process(EnhState *s, const EnhParams *p, int16_t *buf, long frames, int channels)
@@ -167,60 +218,84 @@ void enh_process(EnhState *s, const EnhParams *p, int16_t *buf, long frames, int
     if (!p->active || !p->hb) { s->hb1.primed = 0; s->hb2.primed = 0; }
     if (!p->active || !p->db) { s->db_lo.primed = 0; s->db_hi.primed = 0; }
     if (!p->active || !p->ht) for (int c = 0; c < ENH_MAX_CH; c++) s->ht[c].primed = 0;
+    if (!p->active || (!p->hb && !p->db)) s->dsum = s->dph = s->bv = s->bt = s->bstep = 0;
     if (!p->active) { s->guard = 0; return; }
     if (s->guard <= 0) s->guard = GUARD_ONE;
 
-    int32_t guard = s->guard;
-    int16_t *q = buf;
-    for (long i = 0; i < frames; i++, q += channels) {
-        int32_t xl = q[0] * (1 << SIG_SHIFT);
-        int32_t xr = channels > 1 ? q[1] * (1 << SIG_SHIFT) : xl;
-        int32_t m  = (xl + xr) >> 1;
-        int32_t add_m = 0, add_l, add_r;
-
-        if (p->hb) {
-            int32_t a = bq(&p->hb1, &s->hb1, m);
-            int32_t z = shape_cubic(a, p->hb_drive);
-            z = bq(&p->hb2, &s->hb2, z);
-            add_m += mulq15(z, p->hb_g);
-        }
-        if (p->db) {
-            int32_t lo = bq(&p->db_lo, &s->db_lo, m);
-            int32_t hi = bq(&p->db_hi, &s->db_hi, m);
-            add_m += mulq15(hi - lo, p->db_g);
-        }
-        add_l = add_r = add_m;
-        if (p->ht) {
-            int32_t hl = bq(&p->ht_hp, &s->ht[0], xl);
-            add_l += mulq15(shape_sine(hl, p->ht_drive), p->ht_g);
-            if (channels > 1) {
-                int32_t hr = bq(&p->ht_hp, &s->ht[1], xr);
-                add_r += mulq15(shape_sine(hr, p->ht_drive), p->ht_g);
+    /* Prime the treble high-pass sections from the first frame. */
+    if (p->ht)
+        for (int c = 0; c < channels; c++) {
+            EnhHist *h = &s->ht[c];
+            if (!h->primed) {
+                int32_t x = buf[c] * (1 << SIG_SHIFT);
+                h->x1 = h->x2 = x; h->y1 = h->y2 = 0; h->primed = 1;
             }
         }
 
-        /* Peak guard: scale only the added content so dry + added stays inside
-         * int16.  Fast attack in 25 % steps (bounded), slow release. */
-        int dl = q[0], dr = channels > 1 ? q[1] : 0;
-        int tries = 0;
-        int32_t ol, orr;
-        for (;;) {
-            int64_t gl = ((int64_t)add_l * guard) >> 15;
-            int64_t gr = ((int64_t)add_r * guard) >> 15;
-            ol  = dl + (int32_t)((gl + (1 << (SIG_SHIFT - 1))) >> SIG_SHIFT);
-            orr = dr + (int32_t)((gr + (1 << (SIG_SHIFT - 1))) >> SIG_SHIFT);
-            int bad = ol > 32767 || ol < -32768 || (channels > 1 && (orr > 32767 || orr < -32768));
-            if (!bad) break;
-            if (++tries > 8) { guard = 0; ol = dl; orr = dr; break; }
-            guard -= (guard >> 2) + 1;
-            if (guard < 0) guard = 0;
+    int32_t guard = s->guard;
+    int32_t addl[ENH_CHUNK], addr[ENH_CHUNK];
+    int16_t *q = buf;
+    for (long done = 0; done < frames; ) {
+        int n = frames - done < ENH_CHUNK ? (int)(frames - done) : ENH_CHUNK;
+
+        /* 1. Bass parts.  They only carry content below about 600 Hz, so they
+         * run on the mono sum decimated by ENH_DEC (a box average), and their
+         * output is linearly interpolated back up. */
+        if (p->hb || p->db) {
+            int32_t dsum = s->dsum, dph = s->dph, bv = s->bv, bt = s->bt, bstep = s->bstep;
+            for (int i = 0; i < n; i++) {
+                int32_t xl = q[i * channels] * (1 << SIG_SHIFT);
+                int32_t xr = channels > 1 ? q[i * channels + 1] * (1 << SIG_SHIFT) : xl;
+                int32_t m  = (xl + xr) >> 1;
+                dsum += m;
+                if (++dph == ENH_DEC) {
+                    dph = 0;
+                    int32_t md = dsum >> ENH_DEC_SHIFT;
+                    dsum = 0;
+                    int32_t t = 0;
+                    if (p->hb) {
+                        int32_t a = bq(&p->hb1, &s->hb1, md);
+                        int32_t z = shape_cubic(a, p->hb_drive);
+                        z = bq(&p->hb2, &s->hb2, z);
+                        t += mulq15(z, p->hb_g);
+                    }
+                    if (p->db) {
+                        int32_t lo = bq(&p->db_lo, &s->db_lo, md);
+                        int32_t hi = bq(&p->db_hi, &s->db_hi, md);
+                        t += mulq15(hi - lo, p->db_g);
+                    }
+                    bv = bt;
+                    bt = t;
+                    bstep = (t - bv) >> ENH_DEC_SHIFT;
+                }
+                bv += bstep;
+                addl[i] = bv;
+            }
+            s->dsum = dsum; s->dph = dph; s->bv = bv; s->bt = bt; s->bstep = bstep;
+        } else {
+            memset(addl, 0, (size_t)n * sizeof(addl[0]));
         }
-        if (guard < GUARD_ONE) {
-            guard += ((GUARD_ONE - guard) >> GUARD_REL_SHIFT) + 1;
-            if (guard > GUARD_ONE) guard = GUARD_ONE;
+        if (channels > 1) memcpy(addr, addl, (size_t)n * sizeof(addl[0]));
+
+        /* 2. Treble, one channel per pass. */
+        if (p->ht) {
+            ht_pass(&p->ht_hp, &s->ht[0], q, channels, addl, n, p->ht_drive, p->ht_g);
+            if (channels > 1)
+                ht_pass(&p->ht_hp, &s->ht[1], q + 1, channels, addr, n, p->ht_drive, p->ht_g);
         }
-        q[0] = (int16_t)ol;
-        if (channels > 1) q[1] = (int16_t)orr;
+
+        /* 3. Peak guard.  Fast path: gain at unity and the sum inside int16. */
+        for (int i = 0; i < n; i++, q += channels) {
+            int dl = q[0], dr = channels > 1 ? q[1] : 0;
+            int32_t ol  = dl + ((addl[i] + (1 << (SIG_SHIFT - 1))) >> SIG_SHIFT);
+            int32_t orr = dr + ((addr[i] + (1 << (SIG_SHIFT - 1))) >> SIG_SHIFT);
+            if (channels < 2) orr = 0;
+            if (guard != GUARD_ONE || (uint32_t)((ol + 32768) | (orr + 32768)) > 65535u)
+                guard = guard_slow(guard, addl[i], channels > 1 ? addr[i] : 0, dl, dr, channels, &ol, &orr);
+            q[0] = (int16_t)ol;
+            if (channels > 1) q[1] = (int16_t)orr;
+        }
+        done += n;
     }
     s->guard = guard;
 }
