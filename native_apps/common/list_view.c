@@ -139,6 +139,60 @@ int lv_drag_move(LvDrag *d, int y, int row_h) {
     return -steps;
 }
 
+/* Velocity of the finger over the last LV_FLING_WINDOW_MS, in milli-rows/s. */
+int lv_fling_velocity(const LvSample *s, int n, int row_h) {
+    if (!s || n < 2 || row_h <= 0) return 0;
+    uint32_t newest = s[n - 1].ms;
+    int first = n - 1;
+    while (first > 0 && (uint32_t)(newest - s[first - 1].ms) <= LV_FLING_WINDOW_MS) first--;
+    uint32_t dt = newest - s[first].ms;
+    if (dt < LV_FLING_MIN_MS) return 0;
+    /* dy px over dt ms, finger up = toward later rows: -dy*1e6 / (dt*row_h) */
+    int dy = s[n - 1].y - s[first].y;
+    int v = (-dy * 1000) / row_h;            /* milli-rows moved */
+    v = (v * 1000) / (int)dt;                /* per second */
+    if (v > LV_FLING_MAX) v = LV_FLING_MAX;
+    if (v < -LV_FLING_MAX) v = -LV_FLING_MAX;
+    if (v < LV_FLING_START && v > -LV_FLING_START) return 0;
+    return v;
+}
+
+static void fling_stop(ListView *lv) {
+    lv->fling_v = 0;
+    lv->fling_acc = 0;
+}
+
+/* The cursor comes along with the scroll, or lv_sync() would scroll back to it. */
+static void carry_cursor(ListView *lv, int vis) {
+    int cur = lv->cursor;
+    if (cur >= 0 && cur < lv->top) cur = lv->top;
+    if (cur >= 0 && vis > 0 && cur >= lv->top + vis) cur = lv->top + vis - 1;
+    if (cur != lv->cursor) { lv->cursor = cur; lv->cursor_dragged = true; }
+}
+
+static LvEvent fling_step(ListView *lv, uint32_t now_ms) {
+    if (lv->fling_v == 0) return LV_EV_NONE;
+    uint32_t dt = now_ms - lv->fling_last;
+    lv->fling_last = now_ms;
+    if (dt > 100) dt = 100;                  /* a stalled frame must not jump the list */
+    int vis = lv_visible_rows(lv);
+    lv->fling_acc += (lv->fling_v * (int)dt) / 1000;
+    int rows = lv->fling_acc / 1000;         /* toward zero */
+    lv->fling_acc -= rows * 1000;
+    lv->fling_v -= (lv->fling_v * (int)dt) / LV_FLING_DECAY_MS;
+
+    LvEvent ev = LV_EV_NONE;
+    if (rows != 0) {
+        int before = lv->top;
+        lv->top = lv_clamp_top(lv->top + rows, lv->count, vis);
+        if (lv->top != before) ev = LV_EV_CHANGED;
+        carry_cursor(lv, vis);
+        if (lv->top != before + rows) fling_stop(lv);       /* clamped: hit an end */
+    }
+    if (lv->fling_v < LV_FLING_STOP && lv->fling_v > -LV_FLING_STOP) fling_stop(lv);
+    return ev;
+}
+
 /* ── The widget ─────────────────────────────────────────────────────────── */
 
 void lv_init(ListView *lv, LvSource src, UiRect rect, int row_h) {
@@ -190,12 +244,16 @@ void lv_reset(ListView *lv) {
     lv->cursor = 0;
     lv->top = 0;
     lv->drag.active = lv->drag.dragging = false;
+    lv->nsamples = 0;
+    lv->swallow_tap = false;
+    fling_stop(lv);
     lv->held_key = -1;
     lv_sync(lv);
     lv->top = 0;
 }
 
 void lv_move_to(ListView *lv, int index) {
+    fling_stop(lv);
     lv->cursor = lv_clamp_cursor(index, lv->count);
     lv->cursor_dragged = false;
     lv->top = lv_top_for_cursor(lv->top, lv->cursor, lv->count, lv_visible_rows(lv));
@@ -226,6 +284,7 @@ static void mark_toggle(ListView *lv, int i) {
 
 LvEvent lv_key(ListView *lv, LvKey key) {
     int old_cur = lv->cursor, old_top = lv->top;
+    fling_stop(lv);
     bool marks_changed = false;
 
     switch (key) {
@@ -258,14 +317,28 @@ LvEvent lv_key(ListView *lv, LvKey key) {
            ? LV_EV_CHANGED : LV_EV_NONE;
 }
 
-static LvEvent touch_input_frame(ListView *lv, const TouchState *ts) {
+static LvEvent touch_input_frame(ListView *lv, const TouchState *ts, uint32_t now_ms) {
     LvEvent ev = LV_EV_NONE;
     int vis = lv_visible_rows(lv);
     int first_y = lv->rect.y + LV_BORDER;
     bool inside = ts->x >= lv->rect.x && ts->x < lv->rect.x + lv->rect.w &&
                   ts->y >= lv->rect.y && ts->y < lv->rect.y + lv->rect.h;
 
-    if (ts->pressed && inside) lv_drag_begin(&lv->drag, ts->y);
+    if (ts->pressed && inside) {
+        lv->swallow_tap = lv->fling_v != 0;   /* a press that stops a fling is not a tap */
+        fling_stop(lv);
+        lv->nsamples = 0;
+        lv_drag_begin(&lv->drag, ts->y);
+    }
+
+    if (lv->drag.active && (ts->held || ts->pressed || ts->released)) {
+        if (lv->nsamples == LV_SAMPLES) {
+            memmove(lv->samples, lv->samples + 1, sizeof(lv->samples[0]) * (LV_SAMPLES - 1));
+            lv->nsamples--;
+        }
+        lv->samples[lv->nsamples].ms = now_ms;
+        lv->samples[lv->nsamples++].y = ts->y;
+    }
 
     if (lv->drag.active && (ts->held || ts->pressed)) {
         int d = lv_drag_move(&lv->drag, ts->y, lv->row_h);
@@ -273,16 +346,16 @@ static LvEvent touch_input_frame(ListView *lv, const TouchState *ts) {
             int before = lv->top;
             lv->top = lv_clamp_top(lv->top + d, lv->count, vis);
             if (lv->top != before) ev = LV_EV_CHANGED;
-            /* The cursor comes along, or lv_sync() would scroll back to it next frame. */
-            int cur = lv->cursor;
-            if (cur >= 0 && cur < lv->top) cur = lv->top;
-            if (cur >= 0 && vis > 0 && cur >= lv->top + vis) cur = lv->top + vis - 1;
-            if (cur != lv->cursor) { lv->cursor = cur; lv->cursor_dragged = true; }
+            carry_cursor(lv, vis);   /* or lv_sync() would scroll back to it */
         }
     }
 
     if (lv->drag.active && ts->released) {
-        if (!lv->drag.dragging) {
+        if (lv->drag.dragging) {
+            lv->fling_v = lv_fling_velocity(lv->samples, lv->nsamples, lv->row_h);
+            lv->fling_acc = 0;
+            lv->fling_last = now_ms;
+        } else if (!lv->swallow_tap) {
             int idx = lv_hit_row(lv->top, lv->drag.down_y - first_y, lv->row_h,
                                  vis, lv->count);
             if (idx >= 0) {
@@ -301,7 +374,8 @@ static LvEvent touch_input_frame(ListView *lv, const TouchState *ts) {
 LvEvent lv_input(ListView *lv, const TouchState *ts, const InputState *in,
                  uint32_t now_ms) {
     LvEvent ev = LV_EV_NONE;
-    if (ts) ev = touch_input_frame(lv, ts);
+    if (ts) ev = touch_input_frame(lv, ts, now_ms);
+    if (lv->fling_v != 0 && fling_step(lv, now_ms) == LV_EV_CHANGED) ev = LV_EV_CHANGED;
     if (!in || !lv->active) {
         lv->held_key = -1;
         return ev;
@@ -311,6 +385,8 @@ LvEvent lv_input(ListView *lv, const TouchState *ts, const InputState *in,
 
     static const struct { int btn; LvKey key; } map[] = {
         { BTN_ID_UP, LV_KEY_UP }, { BTN_ID_DOWN, LV_KEY_DOWN },
+        { BTN_ID_PGUP, LV_KEY_PGUP }, { BTN_ID_PGDN, LV_KEY_PGDN },
+        { BTN_ID_HOME, LV_KEY_HOME }, { BTN_ID_END, LV_KEY_END },
     };
     for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
         const ButtonState *b = &in->buttons[map[i].btn];

@@ -110,6 +110,23 @@ static void mmss(char *out, size_t cap, int s)
     snprintf(out, cap, "%d:%02d", s / 60, s % 60);
 }
 
+/* The MIX ticks live in app state (JfApp.mix.opt[i].on); the ListView draws its own mark bar from a bitmap.  Each
+ * frame, copy the one into the other.  lv_key(LV_KEY_MARK) only toggles the cursor row, so move the cursor to each
+ * row that disagrees, toggle it, and put the cursor back.  Rows past opt_n end up unmarked. */
+static void mix_sync_marks(JfUi *ui)
+{
+    ListView *lv = &ui->lv;
+    const JfApp *app = ui->app;
+    int saved = lv->cursor;
+    for (int i = 0; i < lv->count; i++) {
+        bool want = i < app->mix.opt_n && i < JF_MIX_OPT_MAX && app->mix.opt[i].on;
+        if (lv_is_marked(lv, i) == want) continue;
+        lv->cursor = i;
+        lv_key(lv, LV_KEY_MARK);
+    }
+    lv->cursor = saved;
+}
+
 static void src_row(void *ctx, int index, LvRow *out)
 {
     JfUi *ui = ctx;
@@ -117,10 +134,9 @@ static void src_row(void *ctx, int index, LvRow *out)
     const JfItem *it;
     if (app->screen == JF_SCR_MIX) {
         if (index < 0 || index >= app->mix.opt_n || index >= JF_MIX_OPT_MAX) return;
-        char *m = ui->mixrow[index];
-        snprintf(m, sizeof ui->mixrow[0], "%s %s", app->mix.opt[index].on ? "[X]" : "[ ]", app->mix.opt[index].label);
-        out->title = m;
-        out->glyph = LV_GLYPH_NONE;
+        /* The tick is not drawn here: mix_sync_marks() mirrors it into the ListView mark, which draws the bar. */
+        out->title = app->mix.opt[index].label;
+        out->glyph = LV_GLYPH_BLANK;
         return;
     }
     if (app->screen == JF_SCR_QUEUE) {
@@ -561,6 +577,7 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         }
         ui->lv.active = ui->zone == JF_ZONE_LIST;
         lv_sync(&ui->lv);
+        mix_sync_marks(ui);
         LvEvent ev = lv_input(&ui->lv, ts, lin, now);
         if (ev != LV_EV_NONE) ui->dirty = true;
         bool pick = ev == LV_EV_TAP || ev == LV_EV_ACTIVATE;
@@ -874,6 +891,7 @@ void jf_ui_draw(JfUi *ui)
     case JF_SCR_MIX:
         ui->lv.active = ui->zone == JF_ZONE_LIST;
         lv_sync(&ui->lv);
+        mix_sync_marks(ui);
         lv_draw(fb, &ui->lv, "NOTHING TO TICK");
         ui->mixb[0].disabled = app->mix.phase == JF_MIX_INDEX || app->mix.phase == JF_MIX_POOL;
         for (int i = 0; i < JF_UI_MIXBTN; i++) {

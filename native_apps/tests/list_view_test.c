@@ -219,6 +219,126 @@ int main(void) {
     CHECK(lv_input(&lv, NULL, &in, 2100) == LV_EV_ACTIVATE);
     CHECK(lv_repeat_due(0xFFFFFF00u, 0xFFFFFF00u, 0x00000400u));              /* clock wrap */
     lv_free(&lv);
+    /* 9. keys: Page Up / Page Down / Home / End through lv_input, with repeat */
+    make(&lv, 100, 402, 40);
+    lv.active = true;
+    memset(&in, 0, sizeof(in));
+    in.buttons[BTN_ID_PGDN].pressed = in.buttons[BTN_ID_PGDN].held = true;
+    CHECK(lv_input(&lv, NULL, &in, 5000) == LV_EV_CHANGED && lv.cursor >= 9);
+    int after_one = lv.cursor;
+    in.buttons[BTN_ID_PGDN].pressed = false;
+    CHECK(lv_input(&lv, NULL, &in, 5200) == LV_EV_NONE && lv.cursor == after_one);
+    CHECK(lv_input(&lv, NULL, &in, 5400) == LV_EV_CHANGED && lv.cursor > after_one);   /* repeat */
+    memset(&in, 0, sizeof(in));
+    in.buttons[BTN_ID_END].pressed = in.buttons[BTN_ID_END].held = true;
+    CHECK(lv_input(&lv, NULL, &in, 6000) == LV_EV_CHANGED && lv.cursor == 99);
+    memset(&in, 0, sizeof(in));
+    in.buttons[BTN_ID_PGUP].pressed = in.buttons[BTN_ID_PGUP].held = true;
+    CHECK(lv_input(&lv, NULL, &in, 6100) == LV_EV_CHANGED && lv.cursor < 99 && lv.cursor >= 80);
+    memset(&in, 0, sizeof(in));
+    in.buttons[BTN_ID_HOME].pressed = in.buttons[BTN_ID_HOME].held = true;
+    CHECK(lv_input(&lv, NULL, &in, 6200) == LV_EV_CHANGED && lv.cursor == 0 && lv.top == 0);
+    lv_free(&lv);
+
+    /* 10. velocity arithmetic: 160 px up in 64 ms = 62 rows/s, capped */
+    {
+        LvSample s[5] = { {0,400}, {16,360}, {32,320}, {48,280}, {64,240} };
+        CHECK(lv_fling_velocity(s, 5, 40) == LV_FLING_MAX);
+        LvSample m[3] = { {0,400}, {50,380}, {100,360} };          /* 40 px/100 ms = 10 rows/s */
+        CHECK(lv_fling_velocity(m, 3, 40) == 10000);
+        LvSample dn[3] = { {0,300}, {50,320}, {100,340} };         /* finger down = earlier rows */
+        CHECK(lv_fling_velocity(dn, 3, 40) == -10000);
+        LvSample slow[3] = { {0,400}, {50,395}, {100,390} };       /* 1.25 rows/s */
+        CHECK(lv_fling_velocity(slow, 3, 40) == 0);
+        LvSample old[3] = { {0,400}, {300,100}, {400,99} };        /* the fast part is outside the window */
+        CHECK(lv_fling_velocity(old, 3, 40) == 0);
+        LvSample brief[2] = { {0,400}, {10,300} };                 /* span under LV_FLING_MIN_MS */
+        CHECK(lv_fling_velocity(brief, 2, 40) == 0);
+        CHECK(lv_fling_velocity(s, 1, 40) == 0);
+    }
+
+    /* 11. fling: a flick keeps scrolling after release, cursor rides along */
+    make(&lv, 100, 402, 40);
+    lv.active = true;
+    t = T(100, 400, true, true, false);  lv_input(&lv, &t, NULL, 10000);
+    t = T(100, 360, false, true, false); lv_input(&lv, &t, NULL, 10016);
+    t = T(100, 320, false, true, false); lv_input(&lv, &t, NULL, 10032);
+    t = T(100, 280, false, true, false); lv_input(&lv, &t, NULL, 10048);
+    t = T(100, 240, false, false, true); lv_input(&lv, &t, NULL, 10064);
+    CHECK(lv.fling_v > 0);
+    {
+        int top_release = lv.top, changed = 0, i;
+        uint32_t now = 10064;
+        for (i = 0; i < 100 && lv.fling_v != 0; i++) {
+            now += 16;
+            if (lv_input(&lv, NULL, NULL, now) == LV_EV_CHANGED) changed++;
+            lv_sync(&lv);                                          /* must not snap back */
+            CHECK(lv.cursor >= lv.top && lv.cursor < lv.top + 10);
+        }
+        CHECK(lv.fling_v == 0 && i < 100);                         /* it decays and stops */
+        CHECK(changed > 5 && lv.top >= top_release + 10);
+        CHECK(lv_input(&lv, NULL, NULL, now + 16) == LV_EV_NONE);  /* and then reports nothing */
+    }
+    lv_free(&lv);
+
+    /* a slow drag that ends still, and a plain tap, start no fling */
+    make(&lv, 100, 402, 40);
+    lv.active = true;
+    t = T(100, 400, true, true, false);  lv_input(&lv, &t, NULL, 11000);
+    t = T(100, 300, false, true, false); lv_input(&lv, &t, NULL, 11300);
+    t = T(100, 300, false, true, false); lv_input(&lv, &t, NULL, 11400);
+    t = T(100, 300, false, false, true); lv_input(&lv, &t, NULL, 11500);
+    CHECK(lv.fling_v == 0);
+    t = T(100, 100, true, true, false);  lv_input(&lv, &t, NULL, 12000);
+    t = T(100, 100, false, false, true);
+    CHECK(lv_input(&lv, &t, NULL, 12050) == LV_EV_TAP && lv.fling_v == 0);
+    lv_free(&lv);
+
+    /* a press during a fling stops it and its release is not a tap; a key stops it too */
+    make(&lv, 100, 402, 40);
+    lv.active = true;
+    t = T(100, 400, true, true, false);  lv_input(&lv, &t, NULL, 13000);
+    t = T(100, 360, false, true, false); lv_input(&lv, &t, NULL, 13016);
+    t = T(100, 320, false, true, false); lv_input(&lv, &t, NULL, 13032);
+    t = T(100, 280, false, true, false); lv_input(&lv, &t, NULL, 13048);
+    t = T(100, 240, false, false, true); lv_input(&lv, &t, NULL, 13064);
+    CHECK(lv.fling_v != 0);
+    lv_input(&lv, NULL, NULL, 13080);
+    int top_stop = lv.top;
+    t = T(100, 200, true, true, false);  lv_input(&lv, &t, NULL, 13096);
+    CHECK(lv.fling_v == 0 && lv.top == top_stop);
+    t = T(100, 200, false, false, true);
+    CHECK(lv_input(&lv, &t, NULL, 13112) == LV_EV_NONE);
+    t = T(100, 200, true, true, false);  lv_input(&lv, &t, NULL, 13200);   /* a fresh press taps again */
+    t = T(100, 200, false, false, true);
+    CHECK(lv_input(&lv, &t, NULL, 13250) == LV_EV_TAP);
+    t = T(100, 400, true, true, false);  lv_input(&lv, &t, NULL, 14000);
+    t = T(100, 360, false, true, false); lv_input(&lv, &t, NULL, 14016);
+    t = T(100, 320, false, true, false); lv_input(&lv, &t, NULL, 14032);
+    t = T(100, 280, false, true, false); lv_input(&lv, &t, NULL, 14048);
+    t = T(100, 240, false, false, true); lv_input(&lv, &t, NULL, 14064);
+    CHECK(lv.fling_v != 0);
+    memset(&in, 0, sizeof(in));
+    in.buttons[BTN_ID_DOWN].pressed = in.buttons[BTN_ID_DOWN].held = true;
+    lv_input(&lv, NULL, &in, 14080);
+    CHECK(lv.fling_v == 0);
+    lv_free(&lv);
+
+    /* a fling stops at the list end instead of running on */
+    make(&lv, 30, 402, 40);                                         /* max top 20 */
+    lv.active = true;
+    t = T(100, 400, true, true, false);  lv_input(&lv, &t, NULL, 15000);
+    t = T(100, 360, false, true, false); lv_input(&lv, &t, NULL, 15016);
+    t = T(100, 320, false, true, false); lv_input(&lv, &t, NULL, 15032);
+    t = T(100, 280, false, true, false); lv_input(&lv, &t, NULL, 15048);
+    t = T(100, 240, false, false, true); lv_input(&lv, &t, NULL, 15064);
+    {
+        uint32_t now = 15064;
+        for (int i = 0; i < 100 && lv.fling_v != 0; i++) { now += 16; lv_input(&lv, NULL, NULL, now); lv_sync(&lv); }
+        CHECK(lv.fling_v == 0 && lv.top == 20 && lv.cursor >= 20 && lv.cursor < 30);
+    }
+    lv_free(&lv);
+
 
     printf("%d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;

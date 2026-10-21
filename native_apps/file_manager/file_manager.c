@@ -1263,9 +1263,14 @@ int main(int argc, char *argv[]) {
                 hdr_press = -1;
             }
 
-            /* the lists: touch on both, keys on the active one */
+            /* the lists: touch on both, keys on the active one.  Paging keys
+             * arrive through the raw reader above (kernel repeat included), so
+             * the abstract copies of them are cleared or they would move twice. */
+            InputState lin = in;
+            lin.buttons[BTN_ID_PGUP] = lin.buttons[BTN_ID_PGDN] =
+                lin.buttons[BTN_ID_HOME] = lin.buttons[BTN_ID_END] = (ButtonState){ false, false, false };
             for (int k = 0; k < 2; k++) {
-                LvEvent ev = lv_input(&P[k].lv, &ts, (k == act && bar_focus < 0) ? &in : NULL, now);
+                LvEvent ev = lv_input(&P[k].lv, &ts, (k == act && bar_focus < 0) ? &lin : NULL, now);
                 if (ev == LV_EV_TAP && k != act) set_active(k);
                 else if (ev == LV_EV_ACTIVATE) pane_activate(&P[k]);
                 if (ev != LV_EV_NONE) needs_redraw = true;

@@ -931,6 +931,18 @@ static void latch_key(bool *latched, int code, bool down) {
         case KEY_BACKSPACE:
             latched[BTN_ID_BACK] = down;
             break;
+        case KEY_PAGEUP:
+            latched[BTN_ID_PGUP] = down;
+            break;
+        case KEY_PAGEDOWN:
+            latched[BTN_ID_PGDN] = down;
+            break;
+        case KEY_HOME:
+            latched[BTN_ID_HOME] = down;
+            break;
+        case KEY_END:
+            latched[BTN_ID_END] = down;
+            break;
         default:
             break;
     }

@@ -9,6 +9,7 @@
  *   F  the action bar, SAVE AS PLAYLIST and the now-playing MIX pair (all pressable, so also under A) do not
  *      overlap the list or each other, and the list ends above the bar.
  *   I  mini player taps send their events; a queue that starts on an open list shortens it (mini_taps, mini_flip).
+ *   M  MIX tick rows carry no bracket text or checkbox glyph; ticks draw as the ListView mark (mix_ticks).
  */
 #include <stdio.h>
 #include <string.h>
@@ -189,6 +190,44 @@ static void mini_flip(JfScreen s, const char *tag)
     jf_ui_free(&ui);
 }
 
+/* M  the MIX tick rows: no "[X]"/"[ ]" text and no checkbox glyph in the row; a ticked row is drawn with the
+ *    ListView mark (lv_is_marked) and an unticked one is not, and un-ticking clears it (mix_ticks). */
+static void mix_ticks(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    static const char *label[3] = { "Rock", "Jazz", "1990s" };
+    JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    LvRow r;
+
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_MIX;
+    app.mix.phase = JF_MIX_TICKS;
+    app.mix.opt_n = 3;
+    for (int i = 0; i < 3; i++) { strcpy(app.mix.opt[i].label, label[i]); app.mix.opt[i].on = (i == 1); }
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);   /* settle: begin_screen, lv_sync */
+
+    for (int i = 0; i < 3; i++) {
+        memset(&r, 0, sizeof r);
+        ui.lv.src.row(ui.lv.src.ctx, i, &r);
+        CHECK(r.title && strcmp(r.title, label[i]) == 0, "M: row %d title \"%s\" is not the bare label", i, r.title ? r.title : "(null)");
+        CHECK(r.title && !strchr(r.title, '['), "M: row %d title still carries a bracket tick", i);
+        CHECK(r.glyph == LV_GLYPH_BLANK, "M: row %d glyph %d is not LV_GLYPH_BLANK (checkbox placeholder)", i, (int)r.glyph);
+    }
+    CHECK(lv_is_marked(&ui.lv, 1), "M: ticked row 1 is not drawn with the ListView mark");
+    CHECK(!lv_is_marked(&ui.lv, 0) && !lv_is_marked(&ui.lv, 2), "M: unticked rows carry the ListView mark");
+    CHECK(lv_mark_count(&ui.lv) == 1, "M: mark count %d, expected 1", lv_mark_count(&ui.lv));
+
+    app.mix.opt[1].on = false; app.mix.opt[0].on = true;
+    feed(&ui, 0, 0, false, false, false, 1100, ev, MINI_MAX);
+    CHECK(lv_is_marked(&ui.lv, 0) && !lv_is_marked(&ui.lv, 1), "M: after re-tick the marks did not follow app state");
+    CHECK(lv_mark_count(&ui.lv) == 1, "M: after re-tick mark count %d, expected 1", lv_mark_count(&ui.lv));
+    jf_ui_free(&ui);
+}
+
 int main(void)
 {
     run(0, 0, 0, 0);
@@ -198,6 +237,7 @@ int main(void)
     mini_taps();
     mini_flip(JF_SCR_ALBUMS, "albums");
     mini_flip(JF_SCR_ARTISTS, "artists");
+    mix_ticks();
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");
     return 0;

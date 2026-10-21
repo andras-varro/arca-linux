@@ -85,7 +85,6 @@ typedef struct {
     bool seeking;                        /* a finger is on the progress bar */
     int  seek_ms;                        /* its target */
     Button mixb[JF_UI_MIXBTN];
-    char mixrow[JF_MIX_OPT_MAX][112];    /* "[X] LABEL" of the tick rows being drawn */
     bool abar_up;                        /* the core's action_bar as of the last frame: a rising edge moves focus onto it */
     Button field[JF_UI_FIELDS], signin, signexit;
     ModalDialog dlg;

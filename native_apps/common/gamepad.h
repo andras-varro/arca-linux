@@ -93,6 +93,10 @@ typedef enum {
     BTN_ID_ACTION,    /* Gamepad X/West, Keyboard Enter */
     BTN_ID_PAUSE,     /* Gamepad Start, Keyboard Escape */
     BTN_ID_BACK,      /* Gamepad Select/Back, Keyboard Backspace */
+    BTN_ID_PGUP,      /* Keyboard Page Up (list screens) */
+    BTN_ID_PGDN,      /* Keyboard Page Down */
+    BTN_ID_HOME,      /* Keyboard Home */
+    BTN_ID_END,       /* Keyboard End */
     BTN_ID_COUNT
 } ButtonId;
 

@@ -113,6 +113,24 @@ void lv_drag_begin(LvDrag *d, int y);
  * earlier rows, so it is negative then).  0 inside the dead zone. */
 int  lv_drag_move(LvDrag *d, int y, int row_h);
 
+/* Fling: momentum after a fast swipe.  Velocity is in milli-rows per second
+ * (positive scrolls toward later rows), measured over the last
+ * LV_FLING_WINDOW_MS of finger movement. */
+#define LV_FLING_WINDOW_MS  100
+#define LV_FLING_MIN_MS      20    /* a shorter span is too noisy to read */
+#define LV_FLING_START   8000      /* below this a release is just a release */
+#define LV_FLING_STOP    2000      /* the fling ends once it slows to this */
+#define LV_FLING_MAX    60000
+#define LV_FLING_DECAY_MS  350     /* v loses dt/LV_FLING_DECAY_MS of itself per step */
+#define LV_SAMPLES 8
+
+typedef struct { uint32_t ms; int y; } LvSample;
+
+/* Velocity from samples[0..n-1] (oldest first) as of the newest one: 0 when
+ * below LV_FLING_START or the span is under LV_FLING_MIN_MS; clamped to
+ * +-LV_FLING_MAX.  Finger moving up (y falling) scrolls toward later rows. */
+int lv_fling_velocity(const LvSample *samples, int n, int row_h);
+
 /* ── The widget ─────────────────────────────────────────────────────────── */
 
 typedef struct {
@@ -123,6 +141,12 @@ typedef struct {
     bool     active;     /* keys act only on the active list; touch always does */
     int      top, cursor;
     bool     cursor_dragged;  /* a drag carried the cursor into view: the next tap on it is not a second tap */
+    LvSample samples[LV_SAMPLES];  /* finger positions of the current press, oldest first */
+    int      nsamples;
+    int      fling_v;       /* milli-rows/s, 0 = no fling running */
+    int      fling_acc;     /* milli-rows carried between frames */
+    uint32_t fling_last;    /* when the fling was last advanced */
+    bool     swallow_tap;   /* this press stopped a fling: its release is not a tap */
     int      count;      /* as of the last lv_sync() */
     LvDrag   drag;
     uint8_t *marks;      /* bitmap, malloc'd, owned */
@@ -156,7 +180,10 @@ LvEvent lv_key(ListView *lv, LvKey key);
 /* One frame of input.  Touch: press inside starts a gesture, a drag scrolls, a
  * release without a drag taps the row under the press (LV_EV_TAP; on a row
  * that already holds the cursor of an ACTIVE list, LV_EV_ACTIVATE).  Keys (only
- * when lv->active): UP / DOWN with auto-repeat, ACTION = activate.  `in` may be
+ * when lv->active): UP / DOWN / PGUP / PGDN / HOME / END with auto-repeat,
+ * ACTION = activate.  A drag released above LV_FLING_START keeps scrolling,
+ * reporting LV_EV_CHANGED each step, until it decays, hits an end, or a press,
+ * key or lv_move_to() stops it.  `in` may be
  * NULL.  now_ms is get_time_ms(). */
 LvEvent lv_input(ListView *lv, const TouchState *ts, const InputState *in,
                  uint32_t now_ms);
