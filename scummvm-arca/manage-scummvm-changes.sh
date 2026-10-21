@@ -102,11 +102,20 @@ restore_from_vcs() {
     
     # Apply configure patch
     if [ -f "$ABS_BACKEND_FILES/configure.patch" ]; then
-        if git apply --check "$ABS_BACKEND_FILES/configure.patch" 2>/dev/null; then
-            git apply "$ABS_BACKEND_FILES/configure.patch"
-            echo -e "${GREEN}✓ Applied configure.patch${NC}"
-        else
+        # A failed --check does not mean "already applied": an OLDER version of the patch in
+        # the tree fails it too, and skipping then left configure without a new OBJS entry
+        # (font.o, 2026-10-21: undefined reference at link).  Applied means it reverses cleanly;
+        # anything else starts again from upstream's configure.
+        if git apply -R --check "$ABS_BACKEND_FILES/configure.patch" 2>/dev/null; then
             echo -e "${YELLOW}⚠ configure.patch already applied (skipped)${NC}"
+        else
+            git show HEAD:configure > configure || exit 1
+            if git apply "$ABS_BACKEND_FILES/configure.patch"; then
+                echo -e "${GREEN}✓ Applied configure.patch${NC}"
+            else
+                echo -e "${RED}✗ configure.patch does not apply to upstream configure${NC}"
+                exit 1
+            fi
         fi
     else
         echo -e "${YELLOW}⚠ configure.patch not found${NC}"
