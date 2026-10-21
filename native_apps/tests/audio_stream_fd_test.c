@@ -148,7 +148,7 @@ int main(void)
 
     memset(&g_fake, 0, sizeof g_fake);
     check(audio_init_unchecked(&a) == 0 && a.available, "B: the fake stream opens");
-    check(audio_music_start_fd(&a, sv[0]), "B: the stream starts");
+    check(audio_music_start_fd(&a, sv[0], 1), "B: the stream starts");
     pump_n(&a, 10);
     check(audio_music_active(&a), "B: active before the move");
     check(a.music.stream.fd == sv[0], "C: the Audio holds the fd while it plays");

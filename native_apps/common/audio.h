@@ -664,15 +664,18 @@ void audio_fx_set_path(Audio *audio, AudioFxId id, const char *path);
 bool audio_music_start(Audio *audio, const char *path, bool loop);
 
 /**
- * Play a WAV arriving on `fd` (a socket, a pipe): the bus format only (mono,
- * 16-bit, the granted rate), header sizes of 0xFFFFFFFF mean until EOF.  The fd is
+ * Play a WAV arriving on `fd` (a socket, a pipe): `channels` (1 or 2) of
+ * 16-bit at the granted rate, anything else refused; header sizes of 0xFFFFFFFF
+ * mean until EOF.  The fd is
  * made O_NONBLOCK and the call never waits; `audio_pump()` pulls from it.  Rules
  * (pre-roll ~1 s, silence on underrun, EOF ends the track) are in `audio_wav.h`.
  * Takes ownership of `fd` only when it returns true (closed on the next start, or
  * by `audio_close()`).  A bad header that has not arrived yet is logged later and
  * ends the track.  Not pausable.  `audio_music_stream_buffered()` is the status.
+ * A stereo bed on a mono device is folded to (L+R)>>1 by the mix; on a stereo
+ * device L and R stay apart (`audio_cont_fill_mix`).
  */
-bool audio_music_start_fd(Audio *audio, int fd);
+bool audio_music_start_fd(Audio *audio, int fd, int channels);
 long audio_music_stream_buffered(const Audio *audio);
 long audio_music_stream_underruns(const Audio *audio);
 

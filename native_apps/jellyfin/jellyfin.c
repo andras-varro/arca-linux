@@ -105,7 +105,7 @@ static void execute(const JfCmds *cmds, uint32_t now)
             }
             break;
         case JF_CMD_START_AUDIO:
-            if (audio_ok && audio_music_start_fd(&audio, c->fd)) {
+            if (audio_ok && audio_music_start_fd(&audio, c->fd, 1)) {
                 audio_music_set_gain(&audio, c->norm_mdb, c->user_mdb);
                 track_live = true;
                 track_t0 = now;

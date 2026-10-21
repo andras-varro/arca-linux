@@ -531,6 +531,18 @@ static int16_t *pump_scratch(Audio *audio, long frames)
 long audio_cont_fill_mix(void *ctx, int16_t *buf, long frames, int channels)
 {
     Audio *audio = (Audio *)ctx;
+
+    /* A stereo bed on a stereo device keeps its two sides: the mixer renders
+     * interleaved L,R straight into the device buffer.  Everything else (no stereo
+     * voice, a mono device, more than two channels) takes the unchanged mono
+     * render, which also folds a stereo voice to (L+R)>>1 — the onboard speaker
+     * and any mono grant get the downmix there.  `streaming` names the only
+     * stereo-capable voice; the render is byte-identical without one. */
+    if (channels == 2 && audio->music.streaming && audio->music.stream.channels == 2
+        && sample_live(audio, &audio->music)) {
+        return audio_mix_render_stereo(&audio->mix, buf, frames);
+    }
+
     int16_t *mono = pump_scratch(audio, frames);
     if (!mono) return 0;
 
@@ -1300,7 +1312,9 @@ static bool sample_arm(Audio *audio, AudioSampleVoice *sv, const char *what,
     /* Allocated once and kept: the buffer sets how often the SD read is entered,
      * and reallocating it per start would put a malloc in a tap's path. */
     if (!sv->buf) {
-        sv->buf = (int16_t *)malloc((size_t)AUDIO_SAMPLE_BUF_FRAMES * sizeof(int16_t));
+        /* Room for STEREO frames: a mono voice uses the first half, a streamed stereo
+         * bed (audio_music_start_fd) all of it. */
+        sv->buf = (int16_t *)malloc((size_t)AUDIO_SAMPLE_BUF_FRAMES * 2 * sizeof(int16_t));
         if (!sv->buf) {
             fprintf(stderr, "audio: %s out of memory for %d read-ahead frames\n",
                     what, AUDIO_SAMPLE_BUF_FRAMES);
@@ -1331,9 +1345,9 @@ static bool sample_arm(Audio *audio, AudioSampleVoice *sv, const char *what,
     bool gained  = (sv == &audio->music) && audio->music_gain_set;
     if (gained) arm_peak = audio_gain_peak(arm_peak, audio->music_gain_total_mdb);
     if (arm_peak < 1) arm_peak = 1;
-    int  slot  = audio_mix_add_sample(&audio->mix, fill, ctx,
+    int  slot  = audio_mix_add_sample_ch(&audio->mix, fill, ctx,
                                       sv->buf, sv->buf_frames, total,
-                                      arm_peak);
+                                      arm_peak, sv->streaming ? sv->stream.channels : 1);
     if (slot < 0) {
         /* ⚠️ The full bus REFUSES and never steals (audio_gen.h) — one mechanism
          * for both voice kinds, which is what keeps a UI blip from cutting the bed.
@@ -1465,7 +1479,7 @@ bool audio_music_start(Audio *audio, const char *path, bool loop)
     return sample_start(audio, &audio->music, path, loop, "music");
 }
 
-bool audio_music_start_fd(Audio *audio, int fd)
+bool audio_music_start_fd(Audio *audio, int fd, int channels)
 {
     if (!audio || fd < 0) return false;
     if (!audio->music_on || !audio->available) return false;
@@ -1483,7 +1497,7 @@ bool audio_music_start_fd(Audio *audio, int fd)
 
     /* The refusal of a wrong format happens inside the stream (it names the rate
      * it was offered); no resampler, as for a file. */
-    if (!audio_wav_stream_open(&sv->stream, fd, audio->sample_rate, 1)) return false;
+    if (!audio_wav_stream_open(&sv->stream, fd, audio->sample_rate, channels)) return false;
     sv->streaming = true;
     sv->held      = false;
     if (!sample_arm(audio, sv, "music", "start", "(stream)")) {

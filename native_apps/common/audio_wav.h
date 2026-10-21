@@ -1,5 +1,5 @@
 /*
- * audio_wav.h — the one RIFF/WAVE reader, streaming and mono. (the fd stream source also carries 1 or 2 channels).
+ * audio_wav.h — the one RIFF/WAVE reader: files mono, the fd stream 1 or 2 channels.
  *
  * ⚠️ **This exists because a 44-byte header is a WRITER's assumption and a
  * reader that shares it is silently wrong on our own files.** Measured on `.188`
