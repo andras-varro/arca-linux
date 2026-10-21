@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "font.h"
+#include "utf8.h"
 
 typedef const uint16_t *(*lookup_fn)(uint32_t);
 
@@ -59,6 +60,23 @@ static int run_checks(lookup_fn lk, int verbose) {
     for (uint32_t cp = 0x20; cp <= 0x4FF; cp++)
         for (int c = 0; c < FONT_COLS; c++) EXPECT((lk(cp)[c] & ~0x1FFu) == 0, "U+%04X has a bit above row 8", cp);
     EXPECT(has_ink_in_rows(fb, 0x7F), "fallback box is blank");
+
+    /* case map and encoder (utf8.h): an upper-cased code point must have a glyph whenever
+     * its source has one, utf8_put must round-trip through utf8_next, and spot values. */
+    for (uint32_t cp = 0x20; cp <= 0x4FF; cp++) {
+        uint32_t up = utf8_upper_cp(cp);
+        if (lk(cp) != fb) EXPECT(lk(up) != fb, "U+%04X upper U+%04X has no glyph", cp, up);
+        char enc[5] = {0};
+        size_t n = utf8_put(enc, up);
+        const char *p = enc;
+        EXPECT(n >= 1 && n <= 4 && utf8_next(&p) == up && p == enc + n, "U+%04X does not round-trip", up);
+        EXPECT(utf8_upper_cp(up) == up, "U+%04X: upper is not idempotent", cp);
+    }
+    EXPECT(utf8_upper_cp(0x151) == 0x150 && utf8_upper_cp(0xDF) == 0xDF && utf8_upper_cp(0xFF) == 0x178 &&
+           utf8_upper_cp(0x131) == 'I' && utf8_upper_cp(0x3C2) == 0x3A3 && utf8_upper_cp(0x3AD) == 0x388 &&
+           utf8_upper_cp(0x436) == 0x416 && utf8_upper_cp(0x451) == 0x401 && utf8_upper_cp(0x3C9) == 0x3A9 &&
+           utf8_upper_cp('q') == 'Q' && utf8_upper_cp(0x149) == 0x149 && utf8_upper_cp(0x4E2D) == 0x4E2D,
+           "case map spot values");
 
     /* spot: the ASCII shapes that must not change */
     EXPECT(lk('!')[2] == 0x5F && lk('H')[0] == 0x7F && lk('0')[0] == 0x3E, "ASCII spot glyphs changed");

@@ -16,6 +16,7 @@
  * tap.  Both are the panel's to judge.
  */
 #include "list_view.h"
+#include "utf8.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -111,6 +112,31 @@ int main(void) {
     CHECK(strcmp(b, "ab...") == 0);
     lv_fit(b, 1, "abc", 100, 1);
     CHECK(b[0] == '\0');
+
+    /* 5b. fit with multibyte titles: code points counted, cut on a boundary, case kept */
+    lv_fit(b, sizeof(b), "\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9", 30, 1);
+    CHECK(strcmp(b, "\xC3\xA9\xC3\xA9...") == 0);     /* 5 of 8 fit: 2 letters + dots */
+    lv_fit(b, sizeof(b), "\xC3\x9C" "n\xC3\xAF", 100, 1);
+    CHECK(strcmp(b, "\xC3\x9C" "n\xC3\xAF") == 0);    /* fits whole, case untouched */
+    lv_fit(b, 7, "\xD0\xB6\xD0\xB6\xD0\xB6\xD0\xB6\xD0\xB6\xD0\xB6\xD0\xB6\xD0\xB6", 0, 1);
+    CHECK(strcmp(b, "\xD0\xB6...") == 0);             /* buffer cut after 1 whole letter */
+    lv_fit(b, 5, "\xC3\xA9\xC3\xA9\xC3\xA9", 0, 1);   /* 6 bytes into dst[5] */
+    CHECK(strcmp(b, "...") == 0);                     /* no half sequence */
+    {
+        const char *mix = "\xC5\x91\xC3\xA9\xD0\xB6\xCE\xA9\xC3\x9F" "abc\xE2\x82\xAC" "xyz";
+        int bad = 0;
+        for (int n = 1; n <= 24; n++)
+            for (int w = 0; w <= 120; w += 6) {
+                char g[40];
+                memset(g, 0x5A, sizeof g);
+                lv_fit(g, n, mix, w, 1);
+                const char *p = g;
+                while (*p) if (utf8_next(&p) == UTF8_REPLACEMENT) { bad++; break; }
+                if (!memchr(g, '\0', (size_t)n)) bad++;
+                for (int i = n; i < 40; i++) if (g[i] != 0x5A) { bad++; break; }
+            }
+        CHECK(bad == 0);                              /* always well-formed, terminated, in bounds */
+    }
 
     /* 6. drag gesture */
     LvDrag d;
