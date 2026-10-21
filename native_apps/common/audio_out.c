@@ -1,4 +1,6 @@
 #include "audio_out.h"
+#include "audio_eq.h"
+#include "config.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -62,6 +64,9 @@ static const AudioWritePolicy AOPOL_SERVICE = { 0, 0, true };
  * header states testable on the host.  Sequential open/close pairs are fine.
  */
 static int g_live = 0;
+static const char *eq_path = NULL;   /* NULL = CONFIG_FILE_PATH */
+
+void audio_out_set_eq_path(const char *path) { eq_path = path; }
 
 /* ── Small helpers ──────────────────────────────────────────────────────── */
 
@@ -160,9 +165,12 @@ static void derive_geometry(AudioOut *out, const AudioOutSpace *sp)
 
 /** The device attenuation stage — see audio_attenuate() in audio_gen.c, which is
  *  the one implementation of it and the reason a shift rather than a multiply. */
-static void attenuate(int16_t *buf, long samples, int shift)
+static void attenuate(AudioOut *out, int16_t *buf, long samples)
 {
-    audio_attenuate(buf, samples, shift);
+    /* The equaliser first, on the full-scale data; the master shift after. */
+    if (out->eq_p.n > 0 && out->channels > 0)
+        eq_process(&out->eq_s, &out->eq_p, buf, samples / out->channels, out->channels);
+    audio_attenuate(buf, samples, out->shift);
 }
 
 /** One write of `frames` interleaved frames under `pol`, with the two faults
@@ -241,6 +249,14 @@ int audio_out_open(AudioOut *out, const AudioOutDev *dev, void *dev_ctx,
         fprintf(stderr, "audio_out: device granted %d-bit samples, expected %d — "
                         "the stream will be written as S16_LE anyway\n",
                 out->bits, AUDIO_BYTES_PER_SAMPLE * 8);
+    }
+
+    /* The equaliser curve for this stream, from the config key a settings change
+     * wrote; designed for the GRANTED rate, never the requested one. */
+    {
+        int g[EQ_BANDS];
+        eq_config_read(eq_path ? eq_path : CONFIG_FILE_PATH, g);
+        eq_design(&out->eq_p, out->rate, g);
     }
 
     out->is_open = true;
@@ -347,6 +363,22 @@ void audio_out_set_shift(AudioOut *out, int shift)
     out->shift = shift;
 }
 
+void audio_out_set_eq(AudioOut *out, const int gains_db[EQ_BANDS])
+{
+    if (!out || !gains_db) return;
+    /* Design into a local first so the live params change in one struct copy
+     * between two buffers; the history stays. */
+    EqParams np;
+    eq_design(&np, out->rate, gains_db);
+    out->eq_p = np;
+}
+
+void audio_out_get_eq(const AudioOut *out, int gains_db[EQ_BANDS])
+{
+    for (int b = 0; b < EQ_BANDS; b++)
+        gains_db[b] = out ? out->eq_p.gains_db[b] : 0;
+}
+
 /* ── Mode 1: serviced ───────────────────────────────────────────────────── */
 
 long audio_out_service(AudioOut *out)
@@ -394,7 +426,7 @@ long audio_out_service(AudioOut *out)
     if (out->fill)
         out->fill(out->fill_ctx, buf, want, out->channels);
 
-    attenuate(buf, samples, out->shift);
+    attenuate(out, buf, samples);
 
     return push(out, buf, want, &AOPOL_SERVICE);
 }
@@ -424,7 +456,7 @@ long audio_out_write(AudioOut *out, const int16_t *mono, long frames)
     if (bytes <= 0 || audio_interleave(mono, frames, out->channels, buf) != bytes)
         return -1;
 
-    attenuate(buf, frames * (long)out->channels, out->shift);
+    attenuate(out, buf, frames * (long)out->channels);
 
     AudioWritePolicy pol = blocking_policy(out->rate, frames, AUDIO_OUT_SYNC_WAIT_US);
     return push(out, buf, frames, &pol);

@@ -31,7 +31,7 @@ cd /mnt/c/work/arca/native_apps || exit 1
 
 CFLAGS=(-Wall -Wextra -Wno-unused-parameter)
 SRCS=(common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/common.c
-      common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c
+      common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_eq.c
       common/audio_out.c common/audio_wav.c common/config.c common/gamepad.c
       common/input_slots.c common/input_scan.c common/ppm.c common/icon_grid.c
       common/logger.c common/pointer.c common/start_menu.c common/status_line.c common/top_bar.c control_panel/cpu_load.c)

@@ -19,7 +19,7 @@ HARNESS_ERR=0
 run() {
   local name="$1"; shift
   rm -rf "$W/c"; mkdir -p "$W/c/common" "$W/c/tests"
-  cp common/audio_out.c common/audio_out.h common/audio_gen.c common/audio_gen.h "$W/c/common/"
+  cp common/audio_out.c common/audio_out.h common/audio_gen.c common/audio_gen.h common/audio_eq.c common/audio_eq.h common/config.h "$W/c/common/"
   cp tests/audio_out_test.c "$W/c/tests/"
   ( cd "$W/c/common" && "$@" ) || { echo "$name: SABOTAGE DID NOT APPLY"; HARNESS_ERR=1; return; }
   if ! diff -q "$W/c/common/audio_out.c" common/audio_out.c >/dev/null || \
@@ -28,7 +28,7 @@ run() {
      echo "$name: NO-OP EDIT — pattern rotted"; HARNESS_ERR=1; return; fi
   gcc -Wall -Wextra -Wno-unused-parameter -o "$W/t" \
       "$W/c/tests/audio_out_test.c" "$W/c/common/audio_out.c" \
-      "$W/c/common/audio_gen.c" -lm 2>"$W/cc.log" || {
+      "$W/c/common/audio_gen.c" "$W/c/common/audio_eq.c" -lm 2>"$W/cc.log" || {
       echo "$name: did not compile ($(head -1 "$W/cc.log"))"; return; }
   # ⚠️ `stdbuf -oL` and the exit code are both load-bearing, and their absence
   # cost a wrong answer here on 2026-08-18.  `out=$(…)` makes stdout a PIPE, so

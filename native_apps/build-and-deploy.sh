@@ -201,6 +201,7 @@ step " 8/35" "ui_layout";    $CC "${WARN[@]}" -O2 -c common/ui_layout.c       -o
                               $CC "${WARN[@]}" -O2 -c common/ui_flow.c         -o build/ui_flow.o
 step " 9/35" "audio";        $CC "${WARN[@]}" -O2 -c common/audio.c           -o build/audio.o
 step "10/35" "audio_gen";    $CC "${WARN[@]}" -O2 -c common/audio_gen.c       -o build/audio_gen.o
+                              $CC "${WARN[@]}" -O2 -c common/audio_eq.c        -o build/audio_eq.o
 step "11/35" "audio_out";    $CC "${WARN[@]}" -O2 "${AUDIO_CFLAGS[@]}" -c common/audio_out.c       -o build/audio_out.o
 step "12/35" "audio_wav";    $CC "${WARN[@]}" -O2 -c common/audio_wav.c       -o build/audio_wav.o
 step "13/35" "http";         $CC "${WARN[@]}" -O2 -c common/http.c            -o build/http.o
@@ -236,7 +237,7 @@ GAMEPAD_OBJ=(build/gamepad.o build/input_scan.o build/input_slots.o build/start_
 
 COMMON_OBJ=(build/framebuffer.o build/font.o build/touch_input.o build/hardware.o
             build/common.o build/highscore.o build/keyboard.o
-            build/audio.o build/audio_gen.o build/audio_out.o
+            build/audio.o build/audio_gen.o build/audio_eq.o build/audio_out.o
             build/audio_wav.o build/audio_bed.o build/config.o)
 
 # audio_gen.o rides with audio.o and is not optional: audio.c calls into it for

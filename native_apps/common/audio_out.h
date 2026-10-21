@@ -80,6 +80,7 @@
 #include <sys/types.h>
 
 #include "audio_gen.h"
+#include "audio_eq.h"
 
 /* ── Constants ──────────────────────────────────────────────────────────── */
 
@@ -210,6 +211,10 @@ typedef struct {
 
     /* Post-fill attenuation, as a shift count.  See audio_out_set_shift(). */
     int         shift;
+
+    /* System equaliser, applied before the attenuation. See audio_out_set_eq(). */
+    EqParams    eq_p;
+    EqState     eq_s;
 
     AudioOutFill fill;
     void        *fill_ctx;
@@ -611,6 +616,21 @@ const char *audio_out_fill_owner(const AudioOut *out);
  * pitch.  At `shift = 0` it is a parameter, nothing more.
  */
 void audio_out_set_shift(AudioOut *out, int shift);
+
+/**
+ * The system equaliser (audio_eq.h): 60/250/1k/4k/12k Hz, integer dB in
+ * -EQ_MAX_DB..+EQ_MAX_DB.  audio_out_open() reads the `eq` key of the config
+ * file (EQ_CONFIG_KEY, eq=g1,g2,g3,g4,g5 or a preset name) so a change made in
+ * settings applies to the next app; this setter changes the curve of the OPEN
+ * stream between two buffers (history kept, no click from a swap), for the
+ * in-process panel.  It does not write the config; the caller does.  All
+ * zeros is a bit-exact bypass.  Same single-thread rule as set_shift.
+ */
+void audio_out_set_eq(AudioOut *out, const int gains_db[EQ_BANDS]);
+/** The gains in force (zeros when closed). */
+void audio_out_get_eq(const AudioOut *out, int gains_db[EQ_BANDS]);
+/** Override the config file the open reads (tests); NULL restores the default. */
+void audio_out_set_eq_path(const char *path);
 
 /**
  * Render one service's worth and write it.  Returns frames written, or -1.
