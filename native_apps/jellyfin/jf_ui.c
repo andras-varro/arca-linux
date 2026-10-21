@@ -419,6 +419,39 @@ static void overlay_input(JfUi *ui, const TouchState *ts, const InputState *in, 
     }
 }
 
+bool jf_ui_view(const JfUi *ui, int *top, int *cursor)
+{
+    JfScreen s = ui->app->screen;
+    if (s != ui->last_screen) return false;
+    if (s != JF_SCR_QUEUE && s != JF_SCR_MIX && !is_list_screen(s)) return false;
+    *top = ui->lv.top;
+    *cursor = ui->lv.cursor;
+    return true;
+}
+
+/* After a BACK the list is put back where it was when the entry was opened.  A re-aimed list is empty at first, so this waits
+ * until the rows are there (or no more are coming); lv_sync() clamps what a shorter list cannot hold. */
+static void restore_view(JfUi *ui)
+{
+    const JfApp *app = ui->app;
+    if (app->restore_seq != ui->seen_restore) {
+        ui->seen_restore = app->restore_seq;
+        ui->restore_pend = true;
+    }
+    if (!ui->restore_pend) return;
+    bool lv_screen = app->screen == JF_SCR_QUEUE || app->screen == JF_SCR_MIX || is_list_screen(app->screen);
+    if (!lv_screen) { ui->restore_pend = false; return; }
+    lv_sync(&ui->lv);
+    bool more_coming = app->list && (app->list->pending || app->busy);
+    if (ui->lv.count <= app->restore_cursor && more_coming) return;
+    ui->restore_pend = false;
+    ui->lv.top = app->restore_top;
+    ui->lv.cursor = app->restore_cursor;
+    ui->lv.cursor_dragged = false;
+    lv_sync(&ui->lv);
+    ui->dirty = true;
+}
+
 int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *ptr,
                 uint32_t now, JfEvent *out, int max)
 {
@@ -426,6 +459,7 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     int n = 0;
 
     if (app->screen != ui->last_screen) begin_screen(ui);
+    restore_view(ui);
     /* a queue can start or empty on an open screen: the list makes room for the strip, or takes it back */
     if (is_list_screen(app->screen) && mini_wanted(app) != ui->mini_on) {
         ui->mini_on = mini_wanted(app);

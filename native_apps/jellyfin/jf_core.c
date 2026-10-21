@@ -157,6 +157,8 @@ static void nav_push(JfApp *app)
     e->sub = lid >= 0 ? app->ctx[lid].sub : 0;
     copy(e->id, sizeof(e->id), lid >= 0 ? app->ctx[lid].id : "");
     copy(e->title, sizeof(e->title), lid >= 0 ? app->ctx[lid].title : "");
+    e->top = app->view_top;
+    e->cursor = app->view_cursor;
 }
 
 /* Show a list screen on a new subject, with the current screen below it. */
@@ -173,11 +175,20 @@ static void pop(JfApp *app, JfCmds *out)
     JfNavEntry e = app->nav[--app->nav_n];
     app->play_wait = false;
     app->screen = e.screen;
+    app->restore_top = app->view_top = e.top;
+    app->restore_cursor = app->view_cursor = e.cursor;
+    app->restore_seq++;
     int lid = list_of_screen(e.screen);
     /* The list is shared by every visit to its screen: if another visit
      * re-aimed it, aim it back rather than show the wrong rows. */
     if (lid >= 0 && (strcmp(app->ctx[lid].id, e.id) != 0 || app->ctx[lid].sub != e.sub))
         retarget(app, lid, e.id, e.title, e.sub, out);
+}
+
+void jf_note_view(JfApp *app, int top, int cursor)
+{
+    app->view_top = top;
+    app->view_cursor = cursor;
 }
 
 static void go_signin(JfApp *app)

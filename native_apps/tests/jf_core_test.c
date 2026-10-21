@@ -1436,13 +1436,45 @@ static void test_instant_confirm(void)
     send(JF_EV_INSTANT_MIX, 1);
     CHECK(has(JF_CMD_REQUEST) && app.confirm == JF_CONFIRM_NONE, "empty queue: no question");
 }
+
+/* BACK returns to the list as it was: the UI reports the view, the core hands it back on each pop. */
+static void test_back_restores_view(void)
+{
+    signed_in(); artists_loaded(50, 50);
+    jf_note_view(&app, 17, 21);
+    send(JF_EV_ACTIVATE, 21);
+    JfCmd a = *find(JF_CMD_REQUEST); reply_list(&a, JF_ITEM_ALBUM, 30, 30);
+    jf_note_view(&app, 0, 0);                         /* the new screen starts at its top */
+    jf_note_view(&app, 5, 9);
+    unsigned seq = app.restore_seq;
+    send(JF_EV_ACTIVATE, 9);
+    CHECK(app.screen == JF_SCR_TRACKS, "album -> TRACKS");
+    jf_note_view(&app, 0, 2);
+    send(JF_EV_BACK, 0);
+    CHECK(app.screen == JF_SCR_ALBUMS && app.restore_seq == seq + 1 && app.restore_top == 5 && app.restore_cursor == 9,
+          "BACK to ALBUMS restores %d/%d (seq %u)", app.restore_top, app.restore_cursor, app.restore_seq);
+    send(JF_EV_BACK, 0);
+    CHECK(app.screen == JF_SCR_ARTISTS && app.restore_seq == seq + 2 && app.restore_top == 17 && app.restore_cursor == 21,
+          "BACK to ARTISTS restores %d/%d", app.restore_top, app.restore_cursor);
+    /* a song played from TRACKS: NOW PLAYING pushes TRACKS, BACK restores it */
+    in_tracks(40, 40);
+    jf_note_view(&app, 12, 15);
+    send(JF_EV_ACTIVATE, 15);
+    send(JF_EV_OPEN_NOWPLAYING, 0);
+    CHECK(app.screen == JF_SCR_NOWPLAYING, "now playing");
+    send(JF_EV_BACK, 0);
+    CHECK(app.screen == JF_SCR_TRACKS && app.restore_top == 12 && app.restore_cursor == 15,
+          "BACK from NOW PLAYING restores %d/%d", app.restore_top, app.restore_cursor);
+}
+
+
 int main(void)
 {
     test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue(); test_sink_channels();
     test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit(); test_categories();
     test_action_bar(); test_queue_insert(); test_mix(); test_mix_seed_and_ticks(); test_mix_flow(); test_mix_choice(); test_mix_stops();
     test_mix_cancel_and_errors(); test_mix_nowplaying(); test_save();
-    test_pause_stop_seek(); test_instant_confirm();
+    test_pause_stop_seek(); test_instant_confirm(); test_back_restores_view();
     printf("jf_core_test: %d checks, %d failures\n", checks, fails);
     return fails ? 1 : 0;
 }

@@ -193,7 +193,7 @@ typedef bool (*JfSessionFn)(char out[33]);
 /** How many channels the current sink can use (1 or 2); asked once per stream request. */
 typedef int (*JfSinkChannelsFn)(void);
 
-typedef struct { JfScreen screen; char id[96]; char title[96]; int sub; } JfNavEntry;
+typedef struct { JfScreen screen; char id[96]; char title[96]; int sub; int top, cursor; } JfNavEntry;
 typedef struct { char id[96]; char title[96]; int sub; } JfListCtx;
 
 typedef enum { JF_MIXOPT_GENRE = 0, JF_MIXOPT_ARTIST, JF_MIXOPT_DECADE } JfMixOptKind;
@@ -248,6 +248,8 @@ typedef struct {
     bool action_bar;         /* the ACTION BAR is up on list row `action_row` (a track): the UI draws it in the button row
                               * and owns focus there.  Dropped by any other user intent, a screen change or a re-aim */
     int action_row;
+    int restore_top, restore_cursor;  /* where the list scrolled to when the screen just returned to was left; valid when restore_seq changes */
+    unsigned restore_seq;    /* bumps on every pop: the UI puts the list view back once the rows are there */
     char queue_name[96];     /* the name SAVE AS PLAYLIST offers: set by whatever built the queue ("Queue: <first>", "Mix: <seed>") */
     JfMix mix;               /* MIX: the tick rows (JF_SCR_MIX) and the run's progress; ~45 KB */
     unsigned banner_seq;     /* bumps on every new banner, so the UI can time it */
@@ -269,6 +271,7 @@ typedef struct {
     int req_loaded[JF_LIST_COUNT];
     JfNavEntry nav[JF_NAV_MAX];
     int nav_n;
+    int view_top, view_cursor;   /* the list view of the screen showing, as last reported by jf_note_view() */
     JfCmd retry;
     unsigned auth_tag, stream_tag, save_tag;
     bool auth_pending, save_pending;
@@ -294,6 +297,10 @@ void jf_app_init(JfApp *app);
 
 /** Consume one event; `out` holds the commands to execute, in order (n = 0 if none). */
 void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out);
+
+/** The UI reports the list view of the screen showing (scroll top and cursor row) before it hands events over, so that a screen
+ *  pushed from here can be returned to as it was: the next BACK sets restore_top / restore_cursor and bumps restore_seq. */
+void jf_note_view(JfApp *app, int top, int cursor);
 
 /** user_mdb for a volume step: 0 -> -100000 (mute, whatever the track's norm), else (step-10)*3000. */
 int jf_volume_mdb(int step);

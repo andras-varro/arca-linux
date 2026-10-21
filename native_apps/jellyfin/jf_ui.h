@@ -105,6 +105,8 @@ typedef struct {
     int  rowtxt_i;
     bool dirty;
     unsigned seen_banner;
+    unsigned seen_restore;               /* the core's restore_seq as of the last frame */
+    bool restore_pend;                   /* a BACK came: put the list view back once the rows are loaded */
 } JfUi;
 
 void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm, const JfApp *app);
@@ -117,6 +119,9 @@ int  jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *
 
 void jf_ui_draw(JfUi *ui);
 void jf_ui_set_played(JfUi *ui, int played_ms);
+/** The list view (scroll top, cursor row) of the screen showing; false when the screen has none or has not been set up yet.
+ *  The loop hands it to jf_note_view() each frame, before the frame's events reach the core. */
+bool jf_ui_view(const JfUi *ui, int *top, int *cursor);
 void jf_ui_mark_dirty(JfUi *ui);
 /** True once when something wants a repaint (state change, button, bar tick). */
 bool jf_ui_take_dirty(JfUi *ui);

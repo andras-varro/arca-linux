@@ -237,6 +237,10 @@ int main(int argc, char *argv[])
         static JfEvent uev[4];
         int un = first ? 0 : jf_ui_input(&ui, &ts, &in, &ptr, now, uev, 4);
         first = false;
+        {   /* the list view as the finger left it, before this frame's events can open something */
+            int vt, vc;
+            if (jf_ui_view(&ui, &vt, &vc)) jf_note_view(&app, vt, vc);
+        }
         for (int i = 0; i < un; i++) push(&uev[i]);
 
         static JfResult res;
