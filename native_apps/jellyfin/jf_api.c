@@ -275,8 +275,9 @@ static void finish(JfApi *a, JfResult *out, int status, const char *herr, int fd
 
     if (a->log)
         logger_write(a->log, out->err == JF_ERR_NONE ? LOG_LEVEL_INFO : LOG_LEVEL_WARN, __FILE__, __LINE__,
-                     "jf_api: %s status=%d err=%d ms=%lld items=%d", kind_name(c->kind), status, (int)out->err,
-                     now_ms() - a->began_ms, (c->kind == JF_KIND_LIST && c->list) ? c->list->n : 0);
+                     "jf_api: %s status=%d err=%d ms=%lld items=%d%s%s", kind_name(c->kind), status, (int)out->err,
+                     now_ms() - a->began_ms, (c->kind == JF_KIND_LIST && c->list) ? c->list->n : 0,
+                     herr[0] ? " http: " : "", herr);
     http_end(&a->req);
     slot_clear(c);
     a->retried = false;

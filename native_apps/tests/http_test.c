@@ -722,17 +722,38 @@ static void test_head_limits(void)
     HttpHead h;
     HttpHeadResult r;
     size_t used;
-    /* a header line whose content is 255 bytes is fine, 256 is BAD */
-    for (int L = 247; L <= 248; L++) {
-        char b[512];
-        int k = snprintf(b, sizeof(b), "HTTP/1.0 200 OK\r\nX-Long: ");
-        memset(b + k, 'a', (size_t)L);
-        k += L;
-        memcpy(b + k, "\r\n\r\n", 4);
-        k += 4;
+    /* A header line past the 256-byte line buffer is skipped when its name is one the parser
+     * ignores (Cloudflare's Report-To runs ~290 bytes), and BAD when it is one it reads, or has
+     * no colon inside the buffer: those are never parsed from a prefix.  The Content-Length
+     * after the long line proves parsing went on. */
+    static const struct { const char *name; char fill; int len; bool done; } hl[] = {
+        { "X-Long",            'a', 200, true  },
+        { "X-Long",            'a', 400, true  },
+        { "Report-To",         'a', 400, true  },
+        { "Transfer-Encoding", 'a', 200, true  },
+        { "Transfer-Encoding", 'a', 400, false },
+        { "Content-Length",    '1', 400, false },
+    };
+    for (size_t t = 0; t < sizeof(hl) / sizeof(hl[0]); t++) {
+        char b[1024];
+        int k = snprintf(b, sizeof(b), "HTTP/1.0 200 OK\r\n%s: ", hl[t].name);
+        memset(b + k, hl[t].fill, (size_t)hl[t].len);
+        k += hl[t].len;
+        k += snprintf(b + k, sizeof(b) - (size_t)k, "\r\nContent-Length: 7\r\n\r\n");
         http_head_init(&h);
         r = http_head_push(&h, b, (size_t)k, &used);
-        CHECK(r == (L == 247 ? HTTP_HEAD_DONE : HTTP_HEAD_BAD));
+        CHECK(r == (hl[t].done ? HTTP_HEAD_DONE : HTTP_HEAD_BAD));
+        if (hl[t].done) CHECK(h.content_length == 7);
+    }
+    {
+        char b[1024];
+        int k = snprintf(b, sizeof(b), "HTTP/1.0 200 OK\r\n");
+        memset(b + k, 'n', 300);                         /* no colon inside the buffer */
+        k += 300;
+        k += snprintf(b + k, sizeof(b) - (size_t)k, ": v\r\n\r\n");
+        http_head_init(&h);
+        r = http_head_push(&h, b, (size_t)k, &used);
+        CHECK(r == HTTP_HEAD_BAD);
     }
     push_split("HTTP/1.0 200 OK\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\n", 9, &r, &h, &used);
     CHECK(r == HTTP_HEAD_BAD);

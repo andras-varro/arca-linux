@@ -176,6 +176,21 @@ HttpHeadResult http_head_push(HttpHead *h, const char *buf, size_t n, size_t *us
         if (c == '\n') {
             size_t ll = h->line_len;
             if (ll > 0 && h->line[ll - 1] == '\r') ll--;
+            if (h->overlong) {
+                /* Only a prefix was kept.  A header the parser ignores may be skipped
+                 * (Cloudflare's Report-To runs ~290 bytes); the status line and the two
+                 * headers it reads are never parsed from a prefix. */
+                const char *colon = h->have_status ? memchr(h->line, ':', ll) : NULL;
+                size_t nl = colon ? (size_t)(colon - h->line) : 0;
+                while (nl > 0 && (h->line[nl - 1] == ' ' || h->line[nl - 1] == '\t')) nl--;
+                if (!colon || ieq(h->line, nl, "content-length") || ieq(h->line, nl, "transfer-encoding")) {
+                    h->sticky = HTTP_HEAD_BAD;
+                    break;
+                }
+                h->overlong = false;
+                h->line_len = 0;
+                continue;
+            }
             if (ll == 0 && h->line_len <= 1) {
                 if (!h->have_status) { h->sticky = HTTP_HEAD_BAD; break; }
                 h->sticky = HTTP_HEAD_DONE;
@@ -184,8 +199,7 @@ HttpHeadResult http_head_push(HttpHead *h, const char *buf, size_t n, size_t *us
             if (head_line(h, h->line, ll) != 0) { h->sticky = HTTP_HEAD_BAD; break; }
             h->line_len = 0;
         } else if (h->line_len >= sizeof(h->line)) {
-            h->sticky = HTTP_HEAD_BAD;               /* a line the buffer cannot hold is not parsed from a prefix */
-            break;
+            h->overlong = true;                      /* judged at its end, from the kept prefix */
         } else {
             h->line[h->line_len++] = c;
         }

@@ -83,14 +83,15 @@ typedef struct {
     size_t total;           /**< head bytes consumed so far                              */
     size_t line_len;
     bool   have_status;
+    bool   overlong;        /**< the current line has outrun line[]; only its prefix is kept */
     int    sticky;          /**< the terminal result once reached, so later pushes are inert */
-    char   line[256];       /**< the current line; a longer line is BAD, never a prefix   */
+    char   line[256];       /**< the current line, or the prefix of a longer one          */
 } HttpHead;
 
 typedef enum {
     HTTP_HEAD_MORE = 0,     /**< need more bytes                                         */
     HTTP_HEAD_DONE = 1,     /**< the blank line was consumed                             */
-    HTTP_HEAD_BAD  = -1,    /**< malformed status line, Content-Length or an overlong line               */
+    HTTP_HEAD_BAD  = -1,    /**< malformed status line or Content-Length, or an overlong line the parser reads */
     HTTP_HEAD_TOO_BIG = -2  /**< more than HTTP_HEAD_MAX bytes without a blank line      */
 } HttpHeadResult;
 
