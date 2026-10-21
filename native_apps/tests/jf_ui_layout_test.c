@@ -8,8 +8,10 @@
  *   D  the drawn-only now-playing rects lie inside SCREEN_VISIBLE_*.
  *   F  the action bar, SAVE AS PLAYLIST and the now-playing MIX pair (all pressable, so also under A) do not
  *      overlap the list or each other, and the list ends above the bar.
+ *   I  mini player taps send their events; a queue that starts on an open list shortens it (mini_taps, mini_flip).
  */
 #include <stdio.h>
+#include <string.h>
 #include "jf_ui.h"
 
 static int fails;
@@ -105,12 +107,97 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     CHECK(disjoint(L.mixb[0], L.mixb[1]), "H: MIX START / CANCEL overlap");
 }
 
+/* I  mini player: a tap on each strip button sends its event (the press frame fires button_check_tap, the
+ *    release frame clears its latch), a release inside the title opens NOW PLAYING, a tap on the list above the
+ *    strip sends none of those, and a queue that starts on an open list shortens the list to make room */
+#define MINI_MAX 16
+
+static bool has_event(const JfEvent *ev, int n, JfEventType t)
+{
+    for (int i = 0; i < n; i++) if (ev[i].type == t) return true;
+    return false;
+}
+
+static int feed(JfUi *ui, int x, int y, bool pressed, bool held, bool released, uint32_t now, JfEvent *out, int max)
+{
+    TouchState ts = { x, y, pressed, released, held };
+    InputState in;
+    Pointer ptr;
+    memset(&in, 0, sizeof in);
+    memset(&ptr, 0, sizeof ptr);
+    return jf_ui_input(ui, &ts, &in, &ptr, now, out, max);
+}
+
+/* one tap: a press frame, then a release frame 100 ms later; returns the events of both */
+static int tap_at(JfUi *ui, int x, int y, uint32_t now, JfEvent *out)
+{
+    int n = feed(ui, x, y, true, true, false, now, out, MINI_MAX);
+    n += feed(ui, x, y, false, false, true, now + 100, out + n, MINI_MAX - n);
+    return n;
+}
+
+static void mini_taps(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    static const JfEventType want[JF_UI_MINI + 1] = { JF_EV_PAUSE, JF_EV_VOL_DOWN, JF_EV_VOL_UP, JF_EV_OPEN_NOWPLAYING };
+    static const char *name[JF_UI_MINI + 1] = { "PAUSE", "VOL -", "VOL +", "title" };
+
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_ALBUMS;
+    app.queue_n = 1;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);   /* settle: begin_screen, strip up */
+    CHECK(ui.mini_on, "I: strip is not up on a list screen with a queue");
+    for (int k = 0; k <= JF_UI_MINI; k++) {
+        UiRect r = k < JF_UI_MINI ? ui.L.mini_btn[k] : ui.L.mini_title;
+        int n = tap_at(&ui, r.x + r.w / 2, r.y + r.h / 2, 2000 + 1000u * (uint32_t)k, ev);
+        CHECK(has_event(ev, n, want[k]), "I: tap on %s sent no event of type %d (%d events)", name[k], (int)want[k], n);
+    }
+    /* negative control: the centre of the shortened list is a list tap, never a strip event */
+    UiRect lr = ui.lv.rect;
+    int n = tap_at(&ui, lr.x + lr.w / 2, lr.y + lr.h / 2, 9000, ev);
+    CHECK(!has_event(ev, n, JF_EV_PAUSE) && !has_event(ev, n, JF_EV_VOL_DOWN) && !has_event(ev, n, JF_EV_VOL_UP) &&
+          !has_event(ev, n, JF_EV_OPEN_NOWPLAYING), "I: a tap on the list sent a strip event (%d events)", n);
+    jf_ui_free(&ui);
+}
+
+/* the list (or root list) takes the strip's room the frame the queue starts, and gives it back when it empties */
+static void mini_flip(JfScreen s, const char *tag)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+
+    memset(&app, 0, sizeof app);
+    app.screen = s;
+    app.queue_n = 0;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    UiRect full = s == JF_SCR_ARTISTS ? ui.L.list_root : ui.L.list;
+    UiRect mini = s == JF_SCR_ARTISTS ? ui.L.list_root_mini : ui.L.list_mini;
+    CHECK(ui.lv.rect.y == full.y && ui.lv.rect.h == full.h, "I: %s: empty queue does not give the full list (h %d, want %d)", tag, ui.lv.rect.h, full.h);
+    app.queue_n = 1;
+    feed(&ui, 0, 0, false, false, false, 2000, ev, MINI_MAX);
+    CHECK(ui.lv.rect.y == mini.y && ui.lv.rect.h == mini.h, "I: %s: queue start did not shorten the list (y %d h %d, want y %d h %d)",
+          tag, ui.lv.rect.y, ui.lv.rect.h, mini.y, mini.h);
+    jf_ui_free(&ui);
+}
+
 int main(void)
 {
     run(0, 0, 0, 0);
     run(17, 17, 3, 3);       /* the measured unit */
     run(30, 30, 10, 10);
     run(48, 48, 48, 48);     /* the largest inset the library allows */
+    mini_taps();
+    mini_flip(JF_SCR_ALBUMS, "albums");
+    mini_flip(JF_SCR_ARTISTS, "artists");
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");
     return 0;

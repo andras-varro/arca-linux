@@ -410,6 +410,13 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     int n = 0;
 
     if (app->screen != ui->last_screen) begin_screen(ui);
+    /* a queue can start or empty on an open screen: the list makes room for the strip, or takes it back */
+    if (is_list_screen(app->screen) && mini_wanted(app) != ui->mini_on) {
+        ui->mini_on = mini_wanted(app);
+        ui->lv.rect = list_rect_for(ui, app->screen);
+        lv_sync(&ui->lv);
+        ui->dirty = true;
+    }
     if (app->banner_seq != ui->seen_banner) { ui->seen_banner = app->banner_seq; ui->dirty = true; }
 
     if (app->overlay) {
@@ -655,6 +662,14 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     } else if (has_row && !app->action_bar) {
         for (int i = 0; i < JF_UI_ROW3; i++)
             if (row3_on(app, i) && button_check_tap(&ui->row3[i], ts, now)) row3_act(ui, ptr, i, out, &n, max);
+    }
+    if (mini_wanted(app)) {
+        static const JfEventType mt[JF_UI_MINI] = { JF_EV_PAUSE, JF_EV_VOL_DOWN, JF_EV_VOL_UP };
+        for (int i = 0; i < JF_UI_MINI; i++)
+            if (button_check_tap(&ui->mini_b[i], ts, now)) emit(out, &n, max, mt[i]);
+        UiRect t = ui->L.mini_title;
+        if (ts && ts->released && ts->x >= t.x && ts->x < t.x + t.w && ts->y >= t.y && ts->y < t.y + t.h)
+            emit(out, &n, max, JF_EV_OPEN_NOWPLAYING);
     }
     return n;
 }
