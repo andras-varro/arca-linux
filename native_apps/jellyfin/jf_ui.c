@@ -8,6 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "icons.h"
 #include "jf_art.h"
 #include "keyboard.h"
 
@@ -24,6 +25,7 @@
 #define NP_MIN_W  72   /* narrowest now-playing button; 9 of them fit one row at 700 px or more */
 #define QB_MOVE_W  64   /* the queue screen's UP and DN */
 #define QB_SHUF_W 130   /* its SHUFFLE */
+#define NP_ICON    22   /* the now-playing glyphs: a square box in the button's middle */
 
 /* ── Layout (pure) ─────────────────────────────────────────────────────── */
 
@@ -41,15 +43,13 @@ void jf_ui_layout(JfLayout *L, const JfExtents *e)
     int top = y0 + BANNER_H + 2;
     int rowy = e->safe_b - JF_UI_BTN_H - 4;
     L->list = rect_of(sl, top, sw, rowy - 4 - top);
-    int ctop = top + JF_UI_CAT_H + 4;
-    L->list_root = rect_of(sl, ctop, sw, rowy - 4 - ctop);
-    L->cat_prev = rect_of(sl, top, JF_UI_CAT_W, JF_UI_CAT_H);
-    L->cat_next = rect_of(sl + sw - JF_UI_CAT_W, top, JF_UI_CAT_W, JF_UI_CAT_H);
-    L->cat_label = rect_of(sl + JF_UI_CAT_W + GAP, top, sw - 2 * (JF_UI_CAT_W + GAP), JF_UI_CAT_H);
 
     int w3 = (sw - 2 * GAP) / 3;
     for (int i = 0; i < JF_UI_ROW3; i++)
         L->row3[i] = rect_of(sl + i * (w3 + GAP), rowy, w3, JF_UI_BTN_H);
+    int w4 = (sw - 3 * GAP) / 4;
+    for (int i = 0; i < JF_UI_ROW4; i++)
+        L->row4[i] = rect_of(sl + i * (w4 + GAP), rowy, w4, JF_UI_BTN_H);
     int w5 = (sw - 4 * GAP) / 5;
     for (int i = 0; i < JF_UI_ABAR; i++)
         L->abar[i] = rect_of(sl + i * (w5 + GAP), rowy, w5, JF_UI_BTN_H);
@@ -85,8 +85,8 @@ void jf_ui_layout(JfLayout *L, const JfExtents *e)
 
     /* mini player: a strip right above the button row; the lists shrink by its height + a gap */
     int mini_y = rowy - 4 - JF_UI_MINI_H;
-    L->list_mini = L->list;      L->list_mini.h = mini_y - 4 - L->list.y;
-    L->list_root_mini = L->list_root; L->list_root_mini.h = mini_y - 4 - L->list_root.y;
+    L->list_mini = L->list;
+    L->list_mini.h = mini_y - 4 - L->list.y;
     L->mini = rect_of(sl, mini_y, sw, JF_UI_MINI_H);
     int wmb = 88;
     for (int i = 0; i < JF_UI_MINI; i++)
@@ -177,6 +177,15 @@ static void src_row(void *ctx, int index, LvRow *out)
 
 /* ── Setup ─────────────────────────────────────────────────────────────── */
 
+static int pick_count(void *ctx) { (void)ctx; return JF_CAT_COUNT; }
+
+static void pick_row(void *ctx, int index, LvRow *out)
+{
+    (void)ctx;
+    out->title = jf_cat_name((JfCat)index);
+    out->glyph = LV_GLYPH_BLANK;
+}
+
 static void style(Button *b, UiRect r, const char *text, int scale)
 {
     button_init_full(b, r.x, r.y, r.w, r.h, text, BTN_BG, COLOR_WHITE, BTN_HL, scale);
@@ -203,7 +212,7 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
     static const char *t3[JF_UI_ROW3] = { "SEARCH", "NOW PLAYING", "PLAY ALL" };
     for (int i = 0; i < JF_UI_ROW3; i++) style(&ui->row3[i], ui->L.row3[i], t3[i], 2);
     static const char *ta[JF_UI_ABAR] = { "PLAY", "PLAY NEXT", "ADD QUEUE", "MIX", "INSTANT MIX" };
-    static const char *tn[JF_UI_NP] = { "PREV", "PAUSE", "STOP", "NEXT", "QUEUE", "MIX", "I-MIX", "VOL+", "VOL-" };
+    static const char *tn[JF_UI_NP] = { "", "", "", "", "QUEUE", "MIX", "I-MIX", "VOL+", "VOL-" };
     static const char *tmini[JF_UI_MINI] = { "PAUSE", "VOL -", "VOL +" };
     for (int i = 0; i < JF_UI_MINI; i++) style(&ui->mini_b[i], ui->L.mini_btn[i], tmini[i], 2);
     for (int i = 0; i < JF_UI_ABAR; i++) style(&ui->abar[i], ui->L.abar[i], ta[i], 2);
@@ -217,8 +226,9 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
     for (int i = 0; i < JF_UI_FIELDS; i++) style(&ui->field[i], ui->L.field[i], "", 2);
     style(&ui->signin, ui->L.signin, "SIGN IN", 3);
     style(&ui->signexit, ui->L.signexit, "EXIT", 3);
-    style(&ui->cat_btn[0], ui->L.cat_prev, "<", 3);
-    style(&ui->cat_btn[1], ui->L.cat_next, ">", 3);
+    for (int i = 0; i < JF_UI_ROW4; i++) style(&ui->row4[i], ui->L.row4[i], "", 2);
+    LvSource ps = { pick_count, pick_row, ui };
+    lv_init(&ui->pick, ps, rect_of(0, 0, 10, 10), 40);
 
     ui->last_screen = (JfScreen)-1;
     touch_guard_init(&ui->guard);
@@ -230,6 +240,7 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
 void jf_ui_free(JfUi *ui)
 {
     lv_free(&ui->lv);
+    lv_free(&ui->pick);
     jf_wipe(ui->fields, sizeof ui->fields);
 }
 
@@ -324,9 +335,8 @@ static const char *mini_play_label(const JfApp *app)
 
 static UiRect list_rect_for(const JfUi *ui, JfScreen s)
 {
-    bool m = ui->mini_on;
-    if (s == JF_SCR_ARTISTS) return m ? ui->L.list_root_mini : ui->L.list_root;
-    return m ? ui->L.list_mini : ui->L.list;
+    (void)s;
+    return ui->mini_on ? ui->L.list_mini : ui->L.list;
 }
 
 static void begin_screen(JfUi *ui)
@@ -353,9 +363,15 @@ static void begin_screen(JfUi *ui)
     if (app->screen == JF_SCR_NOWPLAYING) { ui->zone = JF_ZONE_ROW; ui->focus = 0; }
 }
 
-/* Which row3 slots exist on this screen. */
+/* The root screen's button row is <previous category> SEARCH NOW PLAYING <next category>; below it, SEARCH, NOW PLAYING
+ * and (on track lists) PLAY ALL.  `i` below is the slot in whichever row the screen has. */
+static bool at_root(const JfApp *app) { return app->screen == JF_SCR_ARTISTS; }
+static int row_n(const JfApp *app) { return at_root(app) ? JF_UI_ROW4 : JF_UI_ROW3; }
+
+/* Which slots of the row exist on this screen. */
 static bool row3_on(const JfApp *app, int i)
 {
+    if (at_root(app)) return i != 2 || app->queue_n > 0;
     if (i == 0) return true;
     if (i == 1) return app->queue_n > 0;
     return app->screen == JF_SCR_TRACKS || app->screen == JF_SCR_SEARCH;
@@ -363,8 +379,9 @@ static bool row3_on(const JfApp *app, int i)
 
 static int row3_step(const JfApp *app, int cur, int dir)
 {
-    for (int k = 1; k <= JF_UI_ROW3; k++) {
-        int j = (cur + dir * k + 3 * JF_UI_ROW3) % JF_UI_ROW3;
+    int n = row_n(app);
+    for (int k = 1; k <= n; k++) {
+        int j = (cur + dir * k + 3 * n) % n;
         if (row3_on(app, j)) return j;
     }
     return cur;
@@ -372,6 +389,12 @@ static int row3_step(const JfApp *app, int cur, int dir)
 
 static void row3_act(JfUi *ui, Pointer *ptr, int i, JfEvent *out, int *n, int max)
 {
+    if (at_root(ui->app)) {
+        if (i == 1) do_search(ui, ptr, out, n, max);
+        else if (i == 2) emit(out, n, max, JF_EV_OPEN_NOWPLAYING);
+        else { int k = emit(out, n, max, JF_EV_CATEGORY); if (k >= 0) out[k].i = i == 0 ? -1 : 1; }
+        return;
+    }
     if (i == 0) do_search(ui, ptr, out, n, max);
     else if (i == 1) emit(out, n, max, JF_EV_OPEN_NOWPLAYING);
     else emit(out, n, max, JF_EV_PLAY_ALL);
@@ -394,7 +417,11 @@ static void queue_move(JfUi *ui, int delta, JfEvent *out, int *n, int max)
 static void queue_row_act(JfUi *ui, Pointer *ptr, int i, JfEvent *out, int *n, int max)
 {
     if (i == 0) do_save(ui, ptr, out, n, max);
-    else if (i == 1) emit(out, n, max, JF_EV_SHUFFLE);
+    else if (i == 1) {   /* the playing track is at 0 after a shuffle, and nothing playing leaves 0 first too: show it */
+        emit(out, n, max, JF_EV_SHUFFLE);
+        lv_move_to(&ui->lv, 0);
+        ui->dirty = true;
+    }
     else queue_move(ui, i == 2 ? -1 : 1, out, n, max);
 }
 
@@ -482,6 +509,79 @@ static void restore_view(JfUi *ui)
     ui->dirty = true;
 }
 
+/* ── The root header picker ────────────────────────────────────────────── */
+
+#define HEAD_ARROW   14   /* the drop-down glyph, a square box */
+#define HEAD_GAP      8
+#define PICK_W      260
+
+/* The root's title is "JELLYFIN · <CATEGORY>" followed by a drop-down arrow; the title and the arrow together are the
+ * pressable header.  Sets the bar's title (the one place it is spelled) and returns the pressable rect, clamped to SAFE. */
+static const char *root_title(JfUi *ui)
+{
+    snprintf(ui->head_title, sizeof ui->head_title, "JELLYFIN \302\267 %s", jf_cat_name(ui->app->cat));
+    return ui->head_title;
+}
+
+static UiRect head_rect(JfUi *ui)
+{
+    JfExtents e;
+    jf_ui_extents_live(&e);
+    ui->bar.title = root_title(ui);
+    top_bar_layout(&ui->bar);
+    const TopBarLayout *L = &ui->bar.L;
+    int x0 = L->title_x - HEAD_GAP, x1 = L->title_x + L->title_w + HEAD_GAP + HEAD_ARROW + HEAD_GAP;
+    int y0 = L->top > e.safe_t ? L->top : e.safe_t;
+    if (x0 < e.safe_l) x0 = e.safe_l;
+    if (x1 > e.safe_r) x1 = e.safe_r;
+    return rect_of(x0, y0, x1 - x0, L->bottom - y0);
+}
+
+static bool in_rect(UiRect r, int x, int y) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; }
+
+static void pick_open(JfUi *ui)
+{
+    JfExtents e;
+    jf_ui_extents_live(&e);
+    UiRect h = head_rect(ui);
+    int x = h.x;
+    if (x + PICK_W > e.safe_r) x = e.safe_r - PICK_W;
+    if (x < e.safe_l) x = e.safe_l;
+    ui->pick.rect = rect_of(x, h.y + h.h + 4, PICK_W, 40 * JF_CAT_COUNT + 2 * LV_BORDER);
+    ui->pick.active = true;
+    lv_sync(&ui->pick);
+    lv_reset(&ui->pick);
+    lv_move_to(&ui->pick, (int)ui->app->cat);
+    ui->pick_up = true;
+    ui->dirty = true;
+}
+
+static void pick_close(JfUi *ui, uint32_t now)
+{
+    ui->pick_up = false;
+    ui->dirty = true;
+    touch_guard_screen_changed(&ui->guard, now);   /* the finger that closed it must not press what is underneath */
+}
+
+/* The picker owns every input while it is up: Up / Down and a tap move, ENTER / A / Space / a tap on the cursor row pick;
+ * Back, Start, Shift and a tap outside close it. */
+static void pick_input(JfUi *ui, const TouchState *ts, const InputState *in, uint32_t now, JfEvent *out, int *n, int max)
+{
+    ui->dirty = true;
+    if (bp(in, BTN_ID_BACK) || bp(in, BTN_ID_PAUSE) || bp(in, BTN_ID_RUN) ||
+        (ts->pressed && !in_rect(ui->pick.rect, ts->x, ts->y))) {
+        pick_close(ui, now);
+        return;
+    }
+    lv_sync(&ui->pick);
+    LvEvent ev = lv_input(&ui->pick, ts, in, now);
+    bool pick = ev == LV_EV_TAP || ev == LV_EV_ACTIVATE || bp(in, BTN_ID_JUMP);
+    if (!pick || ui->pick.cursor < 0 || ui->pick.cursor >= JF_CAT_COUNT) return;
+    int k = emit(out, n, max, JF_EV_CATEGORY_SET);
+    if (k >= 0) out[k].i = ui->pick.cursor;
+    pick_close(ui, now);
+}
+
 int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *ptr,
                 uint32_t now, JfEvent *out, int max)
 {
@@ -541,6 +641,10 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         return n;
     }
     ui->cdlg_up = false;
+    if (ui->pick_up) {
+        if (app->screen != JF_SCR_ARTISTS) ui->pick_up = false;
+        else { pick_input(ui, ts, in, now, out, &n, max); return n; }
+    }
 
     bool pad_nav = bp(in, BTN_ID_UP) || bp(in, BTN_ID_DOWN) || bp(in, BTN_ID_LEFT) ||
                    bp(in, BTN_ID_RIGHT) || bp(in, BTN_ID_JUMP) || bp(in, BTN_ID_ACTION);
@@ -564,6 +668,16 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
 
     JfScreen sc = app->screen;
     bool act = bp(in, BTN_ID_ACTION) || bp(in, BTN_ID_JUMP);
+
+    if (sc == JF_SCR_ARTISTS && !app->action_bar) {
+        /* the header (title and arrow) opens the category picker on a tap; Shift / the pad's B opens it too */
+        if (ts->pressed && in_rect(head_rect(ui), ts->x, ts->y)) ui->head_press = true;
+        if (ts->released) {
+            if (ui->head_press && in_rect(head_rect(ui), ts->x, ts->y)) { pick_open(ui); ui->head_press = false; return n; }
+            ui->head_press = false;
+        }
+        if (bp(in, BTN_ID_RUN)) { pick_open(ui); return n; }
+    }
 
     if (sc == JF_SCR_SIGNIN) {
         UiRect rs[5] = { ui->L.field[0], ui->L.field[1], ui->L.field[2], ui->L.signin, ui->L.signexit };
@@ -698,8 +812,6 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
          * zones keep them for moving along their buttons. */
         int step = 0;
         if (ui->zone == JF_ZONE_LIST) step = bp(in, BTN_ID_RIGHT) - bp(in, BTN_ID_LEFT);
-        if (button_check_tap(&ui->cat_btn[0], ts, now)) step = -1;
-        if (button_check_tap(&ui->cat_btn[1], ts, now)) step = 1;
         if (step) { int k = emit(out, &n, max, JF_EV_CATEGORY); if (k >= 0) out[k].i = step; }
         if (app->cat != ui->last_cat) { ui->last_cat = app->cat; lv_reset(&ui->lv); ui->dirty = true; }
     }
@@ -716,7 +828,7 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         } else if (bp(in, BTN_ID_DOWN) && (count == 0 || ui->lv.cursor >= count - 1) && has_row) {
             ui->zone = JF_ZONE_ROW; ui->focus = 0; lin = NULL; ui->dirty = true;
         } else if (bp(in, BTN_ID_UP) && ui->lv.cursor <= 0) {
-            ui->zone = JF_ZONE_BAR; ui->bar_focus = ui->bar.has_back ? 0 : 1; lin = NULL; ui->dirty = true;
+            ui->zone = JF_ZONE_BAR; ui->bar_focus = sc == JF_SCR_ARTISTS ? 2 : ui->bar.has_back ? 0 : 1; lin = NULL; ui->dirty = true;
         }
     }
     ui->lv.active = ui->zone == JF_ZONE_LIST;
@@ -754,8 +866,10 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         if (bp(in, BTN_ID_UP) || bp(in, BTN_ID_DOWN)) ui->zone = JF_ZONE_LIST;
         else if (act) row3_act(ui, ptr, ui->focus, out, &n, max);
     } else if (ui->zone == JF_ZONE_BAR) {
-        if ((bp(in, BTN_ID_LEFT) || bp(in, BTN_ID_RIGHT)) && ui->bar.has_back) ui->bar_focus ^= 1;
+        if (sc == JF_SCR_ARTISTS) { if (bp(in, BTN_ID_LEFT) || bp(in, BTN_ID_RIGHT)) ui->bar_focus = ui->bar_focus == 2 ? 1 : 2; }
+        else if ((bp(in, BTN_ID_LEFT) || bp(in, BTN_ID_RIGHT)) && ui->bar.has_back) ui->bar_focus ^= 1;
         if (bp(in, BTN_ID_DOWN)) ui->zone = JF_ZONE_LIST;
+        else if (act && ui->bar_focus == 2) { pick_open(ui); return n; }
         else if (act) emit(out, &n, max, ui->bar_focus == 0 ? JF_EV_BACK : JF_EV_QUIT);
     }
     if (queue && has_row) {
@@ -763,8 +877,9 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         for (int i = 0; i < Q_BTNS; i++)
             if (button_check_tap(qb[i], ts, now)) queue_row_act(ui, ptr, i, out, &n, max);
     } else if (has_row && !app->action_bar) {
-        for (int i = 0; i < JF_UI_ROW3; i++)
-            if (row3_on(app, i) && button_check_tap(&ui->row3[i], ts, now)) row3_act(ui, ptr, i, out, &n, max);
+        Button *rb = at_root(app) ? ui->row4 : ui->row3;
+        for (int i = 0; i < row_n(app); i++)
+            if (row3_on(app, i) && button_check_tap(&rb[i], ts, now)) row3_act(ui, ptr, i, out, &n, max);
     }
     if (mini_wanted(app)) {
         static const JfEventType mt[JF_UI_MINI] = { JF_EV_PAUSE, JF_EV_VOL_DOWN, JF_EV_VOL_UP };
@@ -790,10 +905,11 @@ static void draw_banner(JfUi *ui)
     const JfApp *app = ui->app;
     UiRect b = ui->L.banner;
     if (app->banner[0]) fb_draw_text(ui->fb, b.x + 4, b.y + 2, app->banner, RING, 2);
-    else if (app->list && app->screen != JF_SCR_ARTISTS && app->list->total > 0) {
+    else if (app->list && app->list->total > 0) {
         /* the server's count, so a ranked first page is not read as the whole answer */
         char c[32];
-        const char *what = app->screen == JF_SCR_SEARCH ? "RESULTS" : app->screen == JF_SCR_ALBUMS ? "ALBUMS" : "TRACKS";
+        const char *what = app->screen == JF_SCR_ARTISTS ? jf_cat_name(app->cat) : app->screen == JF_SCR_SEARCH ? "RESULTS"
+                         : app->screen == JF_SCR_ALBUMS ? "ALBUMS" : "TRACKS";
         snprintf(c, sizeof c, "%d %s", app->list->total, what);
         fb_draw_text(ui->fb, b.x + 4, b.y + 2, c, DIM, 2);
     }
@@ -839,25 +955,24 @@ static void draw_row3(JfUi *ui)
         }
         return;
     }
+    if (at_root(ui->app)) {   /* <previous category> SEARCH NOW PLAYING <next category>, the outer two named for their targets */
+        JfCat c = ui->app->cat;
+        snprintf(ui->row4[0].text, sizeof ui->row4[0].text, "%s", jf_cat_name(jf_cat_step(c, -1)));
+        snprintf(ui->row4[1].text, sizeof ui->row4[1].text, "SEARCH");
+        snprintf(ui->row4[2].text, sizeof ui->row4[2].text, "NOW PLAYING");
+        snprintf(ui->row4[3].text, sizeof ui->row4[3].text, "%s", jf_cat_name(jf_cat_step(c, 1)));
+        for (int i = 0; i < JF_UI_ROW4; i++) {
+            if (!row3_on(ui->app, i)) continue;
+            button_draw(ui->fb, &ui->row4[i]);
+            if (ui->show_ring && ui->zone == JF_ZONE_ROW && ui->focus == i) ring(ui, ui->L.row4[i]);
+        }
+        return;
+    }
     for (int i = 0; i < JF_UI_ROW3; i++) {
         if (!row3_on(ui->app, i)) continue;
         button_draw(ui->fb, &ui->row3[i]);
         if (ui->show_ring && ui->zone == JF_ZONE_ROW && ui->focus == i) ring(ui, ui->L.row3[i]);
     }
-}
-
-/* The root strip: [<]  CATEGORY  count  [>]. */
-static void draw_category(JfUi *ui)
-{
-    const JfApp *app = ui->app;
-    char t[176];
-    if (app->list && app->list->total > 0) snprintf(t, sizeof t, "%s  %d", app->crumb, app->list->total);
-    else snprintf(t, sizeof t, "%s", app->crumb);
-    UiRect r = ui->L.cat_label;
-    int w = text_measure_width(t, 3);
-    fb_draw_text(ui->fb, r.x + (r.w - w) / 2, r.y + (r.h - 21) / 2, t, COLOR_WHITE, 3);
-    button_draw(ui->fb, &ui->cat_btn[0]);
-    button_draw(ui->fb, &ui->cat_btn[1]);
 }
 
 static void draw_nowplaying(JfUi *ui)
@@ -913,9 +1028,14 @@ static void draw_nowplaying(JfUi *ui)
     else snprintf(buf, sizeof buf, "VOLUME %d/%d", app->volume_step, JF_VOLUME_MAX);
     fb_draw_text(fb, p.x + p.w - text_measure_width(buf, 2), p.y + p.h + 8, buf, COLOR_WHITE, 2);
 
-    snprintf(ui->np[1].text, sizeof ui->np[1].text, "%s", mini_play_label(app));
     for (int i = 0; i < JF_UI_NP; i++) {
         button_draw(fb, &ui->np[i]);
+        if (i < 4) {   /* PREV, PLAY / PAUSE (the bars while it plays), STOP, NEXT carry a drawn glyph instead of text */
+            static const IconKind ik[4] = { ICON_PREV, ICON_PLAY, ICON_STOP, ICON_NEXT };
+            IconKind k = i == 1 && strcmp(mini_play_label(app), "PAUSE") == 0 ? ICON_PAUSE : ik[i];
+            UiRect r = ui->L.np[i];
+            icon_draw(fb, k, r.x + (r.w - NP_ICON) / 2, r.y + (r.h - NP_ICON) / 2, NP_ICON, COLOR_WHITE);
+        }
         if (ui->show_ring && ui->focus == i) ring(ui, ui->L.np[i]);
     }
 }
@@ -949,14 +1069,21 @@ void jf_ui_draw(JfUi *ui)
     case JF_SCR_ALBUMS: case JF_SCR_TRACKS: case JF_SCR_SEARCH: case JF_SCR_MIX:
         if (app->crumb[0]) title = app->crumb;
         break;
+    case JF_SCR_ARTISTS: title = root_title(ui); break;
     case JF_SCR_NOWPLAYING: title = "NOW PLAYING"; break;
     case JF_SCR_QUEUE: title = "QUEUE"; break;
     default: break;
     }
     ui->bar.title = title;
     top_bar_draw(fb, &ui->bar);
-    if (ui->show_ring && ui->zone == JF_ZONE_BAR && !app->overlay)
-        top_bar_draw_focus(fb, &ui->bar.L, ui->bar_focus == 0 ? TB_BACK : TB_EXIT);
+    if (app->screen == JF_SCR_ARTISTS) {   /* the drop-down arrow after the title: the header opens the picker */
+        const TopBarLayout *TL = &ui->bar.L;
+        icon_draw(fb, ICON_DROPDOWN, TL->title_x + TL->title_w + HEAD_GAP, TL->top + (TL->h - HEAD_ARROW) / 2, HEAD_ARROW, COLOR_WHITE);
+    }
+    if (ui->show_ring && ui->zone == JF_ZONE_BAR && !app->overlay) {
+        if (app->screen == JF_SCR_ARTISTS && ui->bar_focus == 2) ring(ui, head_rect(ui));
+        else top_bar_draw_focus(fb, &ui->bar.L, ui->bar_focus == 0 ? TB_BACK : TB_EXIT);
+    }
 
     draw_banner(ui);
     switch (app->screen) {
@@ -968,7 +1095,6 @@ void jf_ui_draw(JfUi *ui)
         break;
     case JF_SCR_ARTISTS:
         if (mini_wanted(app)) draw_mini(ui);
-        draw_category(ui);
         ui->lv.active = ui->zone == JF_ZONE_LIST;
         lv_sync(&ui->lv);
         lv_draw(fb, &ui->lv, app->busy ? "" : "NOTHING HERE");
@@ -1005,6 +1131,13 @@ void jf_ui_draw(JfUi *ui)
         lv_draw(fb, &ui->lv, app->busy ? "" : "NOTHING HERE");
         draw_row3(ui);
         break;
+    }
+    if (ui->pick_up && app->screen == JF_SCR_ARTISTS) {
+        UiRect p = ui->pick.rect;
+        fb_fill_rect(fb, p.x, p.y, p.w, p.h, PANEL);
+        ui->pick.active = true;
+        lv_sync(&ui->pick);
+        lv_draw(fb, &ui->pick, "");
     }
     if (app->confirm != JF_CONFIRM_NONE && ui->cdlg_up) modal_dialog_draw(&ui->cdlg, fb);
     if (app->overlay && ui->dlg_up) modal_dialog_draw(&ui->dlg, fb);

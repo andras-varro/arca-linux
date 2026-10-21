@@ -43,10 +43,10 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     for (int i = 0; i < JF_UI_MINI; i++) press[n++] = L.mini_btn[i];
     press[n++] = L.mini_title; press[n++] = L.seek;
     for (int i = 0; i < JF_UI_MIXBTN; i++) press[n++] = L.mixb[i];
-    press[n++] = L.list_mini; press[n++] = L.list_root_mini;
+    press[n++] = L.list_mini;
     press[n++] = L.save;
     press[n++] = L.qshuf; press[n++] = L.qup; press[n++] = L.qdn;
-    press[n++] = L.cat_prev; press[n++] = L.cat_next;
+
     for (int i = 0; i < n; i++)
         CHECK(inside(press[i], e.safe_l, e.safe_t, e.safe_r, e.safe_b),
               "A: inset %d/%d/%d/%d: button %d (%d,%d %dx%d) outside SAFE", inset_t, inset_b, inset_l, inset_r,
@@ -55,19 +55,19 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     CHECK(inside(L.list, e.safe_l, e.safe_t, e.safe_r, e.safe_b), "B: list outside SAFE (inset %d)", inset_t);
     CHECK(L.list.y > L.bar_bottom, "B: list starts under the bar rule");
     CHECK(L.list.h >= 2 * 40, "B: list shows at least two rows (inset %d): h %d", inset_t, L.list.h);
-    CHECK(inside(L.list_root, e.safe_l, e.safe_t, e.safe_r, e.safe_b), "E: root list outside SAFE (inset %d)", inset_t);
-    CHECK(L.list_root.h >= 2 * 40, "E: root list shows at least two rows (inset %d): h %d", inset_t, L.list_root.h);
-    CHECK(disjoint(L.cat_prev, L.list_root) && disjoint(L.cat_next, L.list_root) && disjoint(L.cat_label, L.list_root), "E: category strip overlaps the root list");
-    CHECK(disjoint(L.cat_prev, L.cat_label) && disjoint(L.cat_next, L.cat_label) && disjoint(L.cat_prev, L.cat_next), "E: category strip parts overlap");
-    CHECK(disjoint(L.cat_prev, L.banner) && disjoint(L.cat_label, L.banner), "E: category strip overlaps the banner");
-    for (int i = 0; i < JF_UI_ROW3; i++) CHECK(disjoint(L.row3[i], L.list_root), "E: row3[%d] overlaps the root list", i);
+    for (int i = 0; i < JF_UI_ROW4; i++) {
+        press[n++] = L.row4[i];
+        CHECK(disjoint(L.row4[i], L.list) && disjoint(L.row4[i], L.banner), "E: row4[%d] overlaps the list or banner (inset %d)", i, inset_t);
+        CHECK(L.row4[i].y == L.row3[0].y && L.row4[i].w >= 120, "E: row4[%d] left the button row or is narrower than a category name needs (w %d)", i, L.row4[i].w);
+        for (int j = i + 1; j < JF_UI_ROW4; j++) CHECK(disjoint(L.row4[i], L.row4[j]), "E: row4 %d/%d overlap", i, j);
+    }
     for (int i = 0; i < JF_UI_ROW3; i++) {
         CHECK(disjoint(L.row3[i], L.list), "C: row3[%d] overlaps the list", i);
         for (int j = i + 1; j < JF_UI_ROW3; j++) CHECK(disjoint(L.row3[i], L.row3[j]), "C: row3 %d/%d overlap", i, j);
     }
     /* F  the action bar and the queue's SAVE take the button row, under the list; the bar's buttons are disjoint */
     for (int i = 0; i < JF_UI_ABAR; i++) {
-        CHECK(disjoint(L.abar[i], L.list) && disjoint(L.abar[i], L.list_root), "F: abar[%d] overlaps a list (inset %d)", i, inset_t);
+        CHECK(disjoint(L.abar[i], L.list), "F: abar[%d] overlaps a list (inset %d)", i, inset_t);
         CHECK(L.abar[i].y == L.row3[0].y, "F: abar[%d] is not in the button row", i);
         for (int j = i + 1; j < JF_UI_ABAR; j++) CHECK(disjoint(L.abar[i], L.abar[j]), "F: abar %d/%d overlap", i, j);
     }
@@ -86,12 +86,12 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     CHECK(L.progress.y + L.progress.h + 30 <= L.np[0].y, "D: progress and its label leave the button row clear");
     /* G  mini player: the strip sits between the shortened lists and the button row, clear of SEARCH / the category
      * bar / every row; its buttons are disjoint; the lists keep two rows */
-    CHECK(disjoint(L.mini, L.list_mini) && disjoint(L.mini, L.list_root_mini), "G: mini overlaps a shortened list (inset %d)", inset_t);
-    CHECK(L.list_mini.h >= 2 * 40 && L.list_root_mini.h >= 2 * 40, "G: shortened list under two rows (inset %d)", inset_t);
-    CHECK(L.list_mini.y == L.list.y && L.list_root_mini.y == L.list_root.y, "G: shortened list moved its top");
+    CHECK(disjoint(L.mini, L.list_mini), "G: mini overlaps a shortened list (inset %d)", inset_t);
+    CHECK(L.list_mini.h >= 2 * 40, "G: shortened list under two rows (inset %d)", inset_t);
+    CHECK(L.list_mini.y == L.list.y, "G: shortened list moved its top");
     for (int i = 0; i < JF_UI_ROW3; i++) CHECK(disjoint(L.mini, L.row3[i]), "G: mini overlaps row3[%d] (inset %d)", i, inset_t);
     for (int i = 0; i < JF_UI_ABAR; i++) CHECK(disjoint(L.mini, L.abar[i]), "G: mini overlaps abar[%d]", i);
-    CHECK(disjoint(L.mini, L.save) && disjoint(L.mini, L.cat_prev) && disjoint(L.mini, L.cat_next) && disjoint(L.mini, L.banner), "G: mini overlaps save / category / banner");
+    CHECK(disjoint(L.mini, L.save) && disjoint(L.mini, L.banner), "G: mini overlaps save / category / banner");
     CHECK(disjoint(L.mini_title, L.mini_btn[0]), "G: mini title overlaps PLAY");
     for (int i = 0; i < JF_UI_MINI; i++) {
         CHECK(L.mini_btn[i].h >= 40 && L.mini_btn[i].w >= 60, "G: mini button %d too small", i);
@@ -163,6 +163,110 @@ static void mini_taps(void)
     jf_ui_free(&ui);
 }
 
+/* A frame whose only input is one pressed pad / keyboard button. */
+static int feed_btn(JfUi *ui, int id, uint32_t now, JfEvent *out, int max)
+{
+    TouchState ts = { 0, 0, false, false, false };
+    InputState in;
+    Pointer ptr;
+    memset(&in, 0, sizeof in);
+    memset(&ptr, 0, sizeof ptr);
+    in.buttons[id].pressed = true;
+    return jf_ui_input(ui, &ts, &in, &ptr, now, out, max);
+}
+
+/* The root: the header opens the category picker (touch and key), a row picks, outside closes; the bottom row names the
+ * neighbouring categories; below the root the row has no category buttons. */
+static void root_picker(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_ARTISTS;
+    app.cat = JF_CAT_ARTISTS;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    CHECK(!ui.pick_up, "R: picker up before anything was tapped");
+
+    ui.bar.title = "JELLYFIN";   /* head_rect() sets the real title itself */
+    UiRect h = { ui.bar.L.title_x, ui.bar.L.top, ui.bar.L.title_w, ui.bar.L.h };
+    int n = tap_at(&ui, h.x + h.w / 2, h.y + h.h / 2, 2000, ev);
+    CHECK(ui.pick_up && n == 0, "R: a tap on the header did not open the picker (up %d, %d events)", ui.pick_up, n);
+    UiRect pr = ui.pick.rect;
+    CHECK(pr.x >= SCREEN_SAFE_LEFT && pr.x + pr.w <= SCREEN_SAFE_RIGHT && pr.y + pr.h <= SCREEN_SAFE_BOTTOM,
+          "R: the picker is not inside SAFE");
+    n = tap_at(&ui, pr.x + pr.w / 2, pr.y + LV_BORDER + 40 * 3 + 20, 3000, ev);
+    int k = -1;
+    for (int i = 0; i < n; i++) if (ev[i].type == JF_EV_CATEGORY_SET) k = ev[i].i;
+    CHECK(k == JF_CAT_GENRES && !ui.pick_up, "R: tapping the 4th row sent category %d (want %d), picker up %d", k, JF_CAT_GENRES, ui.pick_up);
+
+    /* the key: opens at the current category, Down moves, ENTER picks */
+    feed_btn(&ui, BTN_ID_RUN, 4000, ev, MINI_MAX);
+    CHECK(ui.pick_up && ui.pick.cursor == (int)app.cat, "R: Shift did not open the picker on the current category");
+    feed_btn(&ui, BTN_ID_DOWN, 4100, ev, MINI_MAX);
+    n = feed_btn(&ui, BTN_ID_ACTION, 4200, ev, MINI_MAX);
+    CHECK(n == 1 && ev[0].type == JF_EV_CATEGORY_SET && ev[0].i == JF_CAT_PLAYLISTS && !ui.pick_up,
+          "R: Down + ENTER picked %d (want PLAYLISTS), %d events", n ? ev[0].i : -1, n);
+
+    /* close: Back, and a tap outside, send nothing */
+    feed_btn(&ui, BTN_ID_RUN, 5000, ev, MINI_MAX);
+    n = feed_btn(&ui, BTN_ID_BACK, 5100, ev, MINI_MAX);
+    CHECK(!ui.pick_up && n == 0, "R: Back did not close the picker quietly");
+    feed_btn(&ui, BTN_ID_RUN, 6000, ev, MINI_MAX);
+    n = feed(&ui, 5, 300, true, true, false, 6100, ev, MINI_MAX);
+    CHECK(!ui.pick_up && n == 0, "R: a tap outside did not close the picker quietly (%d events)", n);
+    feed(&ui, 5, 300, false, false, true, 6200, ev, MINI_MAX);   /* its release, so the next tap is a fresh one */
+    feed(&ui, 0, 0, false, false, false, 7000, ev, MINI_MAX);
+
+    /* the bottom row: outer buttons step the category, the middle ones are SEARCH and NOW PLAYING (the latter needs a queue) */
+    app.cat = JF_CAT_ALBUMS;
+    ui.last_cat = app.cat;
+    n = tap_at(&ui, ui.L.row4[0].x + 20, ui.L.row4[0].y + 20, 8000, ev);
+    CHECK(n == 1 && ev[0].type == JF_EV_CATEGORY && ev[0].i == -1, "R: the left button did not step back (%d events)", n);
+    n = tap_at(&ui, ui.L.row4[3].x + 20, ui.L.row4[3].y + 20, 9000, ev);
+    CHECK(n == 1 && ev[0].type == JF_EV_CATEGORY && ev[0].i == 1, "R: the right button did not step forward (%d events)", n);
+    n = tap_at(&ui, ui.L.row4[2].x + 20, ui.L.row4[2].y + 20, 10000, ev);
+    CHECK(!has_event(ev, n, JF_EV_OPEN_NOWPLAYING), "R: NOW PLAYING answered with no queue");
+    app.queue_n = 1;
+    n = tap_at(&ui, ui.L.row4[2].x + 20, ui.L.row4[2].y + 20, 11000, ev);
+    CHECK(has_event(ev, n, JF_EV_OPEN_NOWPLAYING), "R: NOW PLAYING did not open with a queue");
+    jf_ui_free(&ui);
+
+    /* below the root: no category button where the root has one (the left slot is SEARCH) */
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_ALBUMS;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    n = tap_at(&ui, ui.L.row4[3].x + 20, ui.L.row4[3].y + 20, 2000, ev);
+    CHECK(!has_event(ev, n, JF_EV_CATEGORY) && !has_event(ev, n, JF_EV_CATEGORY_SET), "R: a category button below the root");
+    jf_ui_free(&ui);
+}
+
+/* SHUFFLE on the queue puts the cursor on the first row, where the playing track now is */
+static void queue_shuffle_cursor(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_QUEUE;
+    app.queue_n = 20;
+    app.queue_cur = 12;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    lv_move_to(&ui.lv, 15);
+    CHECK(ui.lv.cursor == 15 && ui.lv.top > 0, "S: setup: cursor %d top %d", ui.lv.cursor, ui.lv.top);
+    int n = tap_at(&ui, ui.L.qshuf.x + 20, ui.L.qshuf.y + 20, 2000, ev);
+    CHECK(has_event(ev, n, JF_EV_SHUFFLE), "S: SHUFFLE sent no event");
+    CHECK(ui.lv.cursor == 0 && ui.lv.top == 0, "S: after SHUFFLE the cursor is %d and the top %d (want 0, 0)", ui.lv.cursor, ui.lv.top);
+    jf_ui_free(&ui);
+}
+
 /* the list (or root list) takes the strip's room the frame the queue starts, and gives it back when it empties */
 static void mini_flip(JfScreen s, const char *tag)
 {
@@ -177,8 +281,8 @@ static void mini_flip(JfScreen s, const char *tag)
     app.queue_n = 0;
     jf_ui_init(&ui, &fb, &touch, NULL, &app);
     feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
-    UiRect full = s == JF_SCR_ARTISTS ? ui.L.list_root : ui.L.list;
-    UiRect mini = s == JF_SCR_ARTISTS ? ui.L.list_root_mini : ui.L.list_mini;
+    UiRect full = ui.L.list;
+    UiRect mini = ui.L.list_mini;
     CHECK(ui.lv.rect.y == full.y && ui.lv.rect.h == full.h, "I: %s: empty queue does not give the full list (h %d, want %d)", tag, ui.lv.rect.h, full.h);
     app.queue_n = 1;
     feed(&ui, 0, 0, false, false, false, 2000, ev, MINI_MAX);
@@ -252,6 +356,8 @@ int main(void)
     mini_flip(JF_SCR_ALBUMS, "albums");
     mini_flip(JF_SCR_ARTISTS, "artists");
     mix_ticks();
+    root_picker();
+    queue_shuffle_cursor();
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");
     return 0;

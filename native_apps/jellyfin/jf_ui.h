@@ -23,6 +23,7 @@
 #include "jf_core.h"
 
 #define JF_UI_ROW3   3     /* browse screens: SEARCH, NOW PLAYING, PLAY ALL */
+#define JF_UI_ROW4   4     /* the root screen: previous category, SEARCH, NOW PLAYING, next category */
 #define JF_UI_ART   120    /* now playing: the cover square, the height of the info block */
 #define JF_UI_NP     9     /* now playing, one row (wraps in portrait): PREV, PLAY/PAUSE, STOP, NEXT, QUEUE, MIX, I-MIX, VOL +, VOL - */
 #define JF_UI_FIELDS 3     /* sign-in: SERVER, USER, PASSWORD */
@@ -31,8 +32,6 @@
 #define JF_UI_MINI_H 40    /* the strip above the button row */
 #define JF_UI_MIXBTN 2     /* MIX screen: START, CANCEL */
 #define JF_UI_BTN_H  44
-#define JF_UI_CAT_H  40     /* root category strip: arrows and name */
-#define JF_UI_CAT_W  72     /* one arrow */
 
 /* The screen the layout is taken against (SCREEN_* macros in the app). */
 typedef struct {
@@ -48,16 +47,14 @@ typedef struct {
     UiRect save;                    /* the queue screen's SAVE AS PLAYLIST, in the button row; pressable */
     UiRect qshuf, qup, qdn;         /* the queue screen's SHUFFLE, UP, DN (move the cursor row one place), right of SAVE; pressable */
     UiRect np[JF_UI_NP];            /* now playing buttons, in a row at the bottom (two rows when the width is too small); pressable */
-    UiRect list_mini, list_root_mini; /* list / root list while the mini player strip is up (shorter, same top) */
+    UiRect list_mini;               /* the list while the mini player strip is up (shorter, same top) */
     UiRect mini;                    /* mini player strip, drawn only (its parts are pressable) */
     UiRect mini_title;              /* tap: open NOW PLAYING; pressable */
     UiRect mini_btn[JF_UI_MINI];    /* PLAY/PAUSE, VOL -, VOL +; pressable */
     UiRect seek;                    /* now playing: the progress bar's touch area (taller than the bar); pressable */
     UiRect mixb[JF_UI_MIXBTN];      /* MIX screen: START, CANCEL in the button row; pressable (the tick rows are the list) */
-    UiRect list_root;               /* the browse list on the root screen: under the category strip */
-    UiRect cat_prev, cat_next;      /* root category arrows, pressable */
-    UiRect cat_label;               /* root category name and count, drawn only */
     UiRect row3[JF_UI_ROW3];        /* pressable */
+    UiRect row4[JF_UI_ROW4];        /* the root screen's button row; pressable */
     UiRect field[JF_UI_FIELDS];     /* sign-in rows, pressable */
     UiRect signin, signexit;        /* sign-in buttons, pressable */
     UiRect progress;                /* now playing bar, drawn only */
@@ -78,7 +75,7 @@ typedef struct {
     JfLayout L;
     TopBar bar;
     ListView lv;
-    Button row3[JF_UI_ROW3], np[JF_UI_NP], abar[JF_UI_ABAR], save, qshuf, qup, qdn, mini_b[JF_UI_MINI];
+    Button row3[JF_UI_ROW3], row4[JF_UI_ROW4], np[JF_UI_NP], abar[JF_UI_ABAR], save, qshuf, qup, qdn, mini_b[JF_UI_MINI];
     ModalDialog cdlg;                    /* the INSTANT MIX confirmation */
     bool cdlg_up;
     bool mini_on;                        /* the strip is up (and the list rect is the shorter one) */
@@ -92,7 +89,9 @@ typedef struct {
     unsigned dlg_buttons;
     JfScreen last_screen;
     JfCat last_cat;
-    Button cat_btn[2];
+    ListView pick;                       /* the root header's category picker */
+    bool pick_up, head_press;
+    char head_title[48];                 /* "JELLYFIN . CATEGORY", the root's bar title */
     bool lv_ready;
     char fields[JF_UI_FIELDS][64];       /* server, user, password (wiped after the POST) */
     int  focus;                          /* index in the zone (sign-in: 0..4) */
