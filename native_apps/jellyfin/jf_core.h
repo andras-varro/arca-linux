@@ -159,7 +159,7 @@ typedef struct {
 
 typedef enum {
     JF_CMD_NONE = 0,
-    JF_CMD_SET_SERVER,   /* jf_api_set_server(.host, .port) */
+    JF_CMD_SET_SERVER,   /* jf_api_set_server(.host, .port), jf_api_set_tls(.tls) and jf_art_set_tls(.tls) */
     JF_CMD_SET_AUTH,     /* jf_api_set_auth(device, app->login.device_id, app->login.token) */
     JF_CMD_REQUEST,      /* .kind AUTH: jf_api_enqueue_auth(.tag, .user, .password);
                           * .kind LIST: jf_api_enqueue_list(.tag, .path, .list)  (also the INSTANT MIX request)
@@ -187,6 +187,7 @@ typedef struct {
     char password[64];
     char host[64];
     int port;
+    bool tls;            /* SET_SERVER: the server is reached over TLS */
     int fd;
     int channels;        /* START_AUDIO: 1 or 2, what the URL asked the server for */
     int norm_mdb;

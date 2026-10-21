@@ -234,6 +234,7 @@ typedef struct {
      */
     AudioSampleVoice music;   /**< the bed: long, usually looping                 */
     AudioSampleVoice sfx;     /**< one-shot recorded effect, over the bed         */
+    const AudioFdIo *fd_io;   /**< how audio_music_start_fd() reads its fd; NULL = read()/close() (audio_set_fd_io) */
     bool     music_gain_set;        /**< audio_music_set_gain() has been called           */
     int      music_gain_total_mdb;  /**< its total after the cap, applied to every music start */
     /* ── the canned sounds' CONTENT: four clips, four voices ────────────────
@@ -684,6 +685,9 @@ bool audio_music_start(Audio *audio, const char *path, bool loop);
  * device L and R stay apart (`audio_cont_fill_mix`).
  */
 bool audio_music_start_fd(Audio *audio, int fd, int channels);
+/** Route later audio_music_start_fd() streams through `io` (a TLS socket's reader and
+ *  closer; NULL = plain read()/close(), the default).  Call after audio_init(). */
+void audio_set_fd_io(Audio *audio, const AudioFdIo *io);
 long audio_music_stream_buffered(const Audio *audio);
 long audio_music_stream_underruns(const Audio *audio);
 

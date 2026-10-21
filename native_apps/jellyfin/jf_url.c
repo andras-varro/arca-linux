@@ -30,12 +30,34 @@ int jf_url_encode(char *out, size_t cap, const char *s)
     return (int)n;
 }
 
-JfServerResult jf_parse_server(const char *in, char *host, size_t host_cap, int *port)
+/* A strict dotted quad: four decimal octets 0-255, digits only.  Anything else is a hostname. */
+static bool private_ipv4(const char *s, size_t n)
 {
-    if (!in || !host || host_cap == 0 || !port) return JF_SERVER_BAD;
+    int oct[4] = { 0, 0, 0, 0 };
+    int k = 0, v = 0, digits = 0;
+    for (size_t i = 0; i <= n; i++) {
+        if (i == n || s[i] == '.') {
+            if (digits == 0 || v > 255 || k == 4) return false;
+            oct[k++] = v;
+            v = 0;
+            digits = 0;
+            continue;
+        }
+        if (s[i] < '0' || s[i] > '9' || ++digits > 3) return false;
+        v = v * 10 + (s[i] - '0');
+    }
+    if (k != 4) return false;
+    return oct[0] == 10 || (oct[0] == 172 && oct[1] >= 16 && oct[1] <= 31) || (oct[0] == 192 && oct[1] == 168);
+}
+
+JfServerResult jf_parse_server(const char *in, char *host, size_t host_cap, int *port, bool *tls)
+{
+    if (!in || !host || host_cap == 0 || !port || !tls) return JF_SERVER_BAD;
     host[0] = '\0';
-    if (strncmp(in, "https://", 8) == 0) return JF_SERVER_HTTPS;
-    if (strncmp(in, "http://", 7) == 0) in += 7;
+    bool https = strncmp(in, "https://", 8) == 0;
+    bool http = !https && strncmp(in, "http://", 7) == 0;
+    if (https) in += 8;
+    else if (http) in += 7;
     size_t len = strlen(in);
     while (len > 0 && in[len - 1] == '/') len--;
     if (len == 0) return JF_SERVER_EMPTY;
@@ -49,11 +71,10 @@ JfServerResult jf_parse_server(const char *in, char *host, size_t host_cap, int 
                   c == '.' || c == '-' || c == '_';
         if (!ok) return JF_SERVER_BAD;
     }
-    int p = JF_DEFAULT_PORT;
+    int p = 0;
     if (colon) {
         size_t plen = len - hlen - 1;
         if (plen == 0 || plen > 5) return JF_SERVER_BAD;
-        p = 0;
         for (size_t i = 0; i < plen; i++) {
             char c = colon[1 + i];
             if (c < '0' || c > '9') return JF_SERVER_BAD;
@@ -61,11 +82,18 @@ JfServerResult jf_parse_server(const char *in, char *host, size_t host_cap, int 
         }
         if (p < 1 || p > 65535) return JF_SERVER_BAD;
     }
+    /* plain http is allowed only to a private address; the scheme wins when it is given */
+    bool priv = private_ipv4(in, hlen);
+    if (http && !priv) return JF_SERVER_INSECURE;
+    bool secure = https || (!http && !priv);
+    if (!colon) p = secure ? 443 : JF_DEFAULT_PORT;
     memcpy(host, in, hlen);
     host[hlen] = '\0';
     *port = p;
+    *tls = secure;
     return JF_SERVER_OK;
 }
+
 
 bool jf_id_valid(const char *id)
 {

@@ -26,15 +26,19 @@
 /** Percent-encode `s` (RFC 3986 unreserved stay) into `out`.  Length, or -1 if it does not fit. */
 int jf_url_encode(char *out, size_t cap, const char *s);
 
-typedef enum { JF_SERVER_OK = 0, JF_SERVER_EMPTY, JF_SERVER_HTTPS, JF_SERVER_BAD } JfServerResult;
+typedef enum { JF_SERVER_OK = 0, JF_SERVER_EMPTY, JF_SERVER_INSECURE, JF_SERVER_BAD } JfServerResult;
 
 /**
- * Parse "host", "host:port", "1.2.3.4:8096", with an optional "http://" and a
- * trailing "/".  The port defaults to JF_DEFAULT_PORT.  "https://" is refused
- * (there is no TLS here); a space, CR, LF or other character outside
- * [A-Za-z0-9._-] in the host, or a port outside 1..65535, is BAD.
+ * Parse "host", "host:port", "1.2.3.4:8096", with an optional "http://" or
+ * "https://" and a trailing "/".  On OK, `*tls` says whether the server is
+ * reached over TLS, and the port defaults to 443 for TLS and JF_DEFAULT_PORT
+ * for plain HTTP.  The scheme decides, else the host does: a private IPv4
+ * literal (10/8, 172.16/12, 192.168/16) is plain http, anything else https.
+ * "http://" to any other host is INSECURE (the caller asks for https).
+ * A space, CR, LF or other character outside [A-Za-z0-9._-] in the host, or a
+ * port outside 1..65535, is BAD.  `*port` and `*tls` are written only on OK.
  */
-JfServerResult jf_parse_server(const char *in, char *host, size_t host_cap, int *port);
+JfServerResult jf_parse_server(const char *in, char *host, size_t host_cap, int *port, bool *tls);
 
 bool jf_id_valid(const char *id);
 

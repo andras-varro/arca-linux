@@ -14,9 +14,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+
+#include <openssl/err.h>
+#include <openssl/ssl.h>
+#include <openssl/x509_vfy.h>
+#include <openssl/x509v3.h>
 
 /* ── pure: request builder ─────────────────────────────────────────────── */
 
@@ -47,7 +53,7 @@ static bool extras_framing_ok(const char *s)
 }
 
 int http_build_request(char *out, size_t cap, const char *method, const char *host,
-                       int port, const char *path, const char *extra_headers,
+                       int port, bool tls, const char *path, const char *extra_headers,
                        size_t body_len)
 {
     if (!out || cap == 0 || !clean_token(method) || !clean_token(host)
@@ -67,7 +73,7 @@ int http_build_request(char *out, size_t cap, const char *method, const char *ho
     if (n < 0 || (size_t)n >= cap) return -1;
     size_t len = (size_t)n;
 
-    if (port == 80) n = snprintf(out + len, cap - len, "Host: %s\r\n", host);
+    if (port == (tls ? 443 : 80)) n = snprintf(out + len, cap - len, "Host: %s\r\n", host);
     else            n = snprintf(out + len, cap - len, "Host: %s:%d\r\n", host, port);
     if (n < 0 || (size_t)n >= cap - len) return -1;
     len += (size_t)n;
@@ -191,7 +197,7 @@ HttpHeadResult http_head_push(HttpHead *h, const char *buf, size_t n, size_t *us
 
 /* ── the socket state machine ──────────────────────────────────────────── */
 
-enum { PH_IDLE = 0, PH_FAILED, PH_CONNECT, PH_SEND, PH_SENDBODY, PH_HEAD, PH_BODY, PH_DONE };
+enum { PH_IDLE = 0, PH_FAILED, PH_CONNECT, PH_TLS, PH_SEND, PH_SENDBODY, PH_HEAD, PH_BODY, PH_DONE };
 
 #define POLL_BUDGET 16        /* syscall-sized steps per http_poll() */
 #define BODY_CHUNK  8192
@@ -214,6 +220,7 @@ static const char *phase_name(int ph)
 {
     switch (ph) {
     case PH_CONNECT:  return "connect";
+    case PH_TLS:      return "TLS handshake";
     case PH_SEND:     return "send";
     case PH_SENDBODY: return "send body";
     case PH_HEAD:     return "reply head";
@@ -222,10 +229,185 @@ static const char *phase_name(int ph)
     }
 }
 
+/* ── TLS: one process-wide context, one SSL per request ────────────────── */
+
+#define TLS_CA_SYSTEM "/etc/ssl/certs/ca-certificates.crt"
+#define TLS_CA_DEPLOYED "/opt/arca/ca-certificates.crt"
+
+static SSL_CTX *g_ctx;
+static const char *g_ca_override;      /* test hook; NULL = the two default paths */
+
+void http_tls_set_ca_file(const char *path)
+{
+    if (g_ctx) { SSL_CTX_free(g_ctx); g_ctx = NULL; }
+    g_ca_override = path;
+}
+
+/* The shared context, built on first use.  NULL means no usable CA bundle. */
+static SSL_CTX *tls_ctx(void)
+{
+    if (g_ctx) return g_ctx;
+    SSL_CTX *c = SSL_CTX_new(TLS_client_method());
+    if (!c) return NULL;
+    SSL_CTX_set_min_proto_version(c, TLS1_2_VERSION);
+    SSL_CTX_set_verify(c, SSL_VERIFY_PEER, NULL);          /* never SSL_VERIFY_NONE */
+    SSL_CTX_set_mode(c, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+#ifdef SSL_OP_IGNORE_UNEXPECTED_EOF
+    SSL_CTX_set_options(c, SSL_OP_IGNORE_UNEXPECTED_EOF);  /* OpenSSL 3: a close without close_notify is EOF */
+#endif
+    const char *paths[2] = { g_ca_override ? g_ca_override : TLS_CA_SYSTEM,
+                             g_ca_override ? NULL : TLS_CA_DEPLOYED };
+    bool loaded = false;
+    for (int i = 0; i < 2 && !loaded; i++)
+        if (paths[i] && access(paths[i], R_OK) == 0
+            && SSL_CTX_load_verify_locations(c, paths[i], NULL) == 1)
+            loaded = true;
+    ERR_clear_error();
+    if (!loaded) { SSL_CTX_free(c); return NULL; }
+    g_ctx = c;
+    return g_ctx;
+}
+
+static void tls_free(HttpReq *r)
+{
+    if (r->ssl) { SSL_free((SSL *)r->ssl); r->ssl = NULL; }
+}
+
+/* Start TLS on the connected-or-connecting socket.  0 or -1 with `*why` set. */
+static int tls_start(HttpReq *r, const char *host, bool is_ip, const char **why)
+{
+    SSL_CTX *c = tls_ctx();
+    if (!c) { *why = "TLS: no CA bundle found"; return -1; }
+    SSL *s = SSL_new(c);
+    if (!s) { *why = "TLS: out of memory"; return -1; }
+    X509_VERIFY_PARAM *vp = SSL_get0_param(s);
+    X509_VERIFY_PARAM_set_hostflags(vp, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+    int ok;
+    if (is_ip) {
+        ok = X509_VERIFY_PARAM_set1_ip_asc(vp, host);
+    } else {
+        ok = SSL_set1_host(s, host);                       /* the name the certificate must carry */
+        if (ok) ok = (int)SSL_set_tlsext_host_name(s, host);   /* SNI: a tunnel routes on it */
+    }
+    if (!ok || !SSL_set_fd(s, r->fd)) { SSL_free(s); *why = "TLS: setup failed"; return -1; }
+    SSL_set_connect_state(s);
+    r->ssl = s;
+    return 0;
+}
+
+/* Why a handshake failed, in words the operator can act on. */
+static const char *tls_why(SSL *s)
+{
+    long vr = SSL_get_verify_result(s);
+    switch (vr) {
+    case X509_V_OK:
+        return "TLS: handshake failed";
+    case X509_V_ERR_HOSTNAME_MISMATCH:
+    case X509_V_ERR_IP_ADDRESS_MISMATCH:
+        return "TLS: host name mismatch";
+    case X509_V_ERR_CERT_HAS_EXPIRED:
+    case X509_V_ERR_CERT_NOT_YET_VALID:
+        return "TLS: certificate expired or not yet valid (clock?)";
+    default:
+        return "TLS: certificate not trusted";
+    }
+}
+
+/* recv()/send() shaped: n > 0 bytes, 0 end of stream, -1 with errno (EAGAIN = not now). */
+static ssize_t tls_read(SSL *s, void *buf, size_t n, bool peek)
+{
+    ERR_clear_error();
+    int k = peek ? SSL_peek(s, buf, (int)n) : SSL_read(s, buf, (int)n);
+    if (k > 0) return k;
+    int e = SSL_get_error(s, k);
+    if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) { errno = EAGAIN; return -1; }
+    if (e == SSL_ERROR_ZERO_RETURN) return 0;
+#ifdef SSL_R_UNEXPECTED_EOF_WHILE_READING
+    if (e == SSL_ERROR_SSL && ERR_GET_REASON(ERR_peek_error()) == SSL_R_UNEXPECTED_EOF_WHILE_READING)
+        return 0;
+#endif
+    if (e == SSL_ERROR_SYSCALL && k == 0 && ERR_peek_error() == 0) return 0;   /* 1.1.1: EOF, no close_notify */
+    errno = ECONNRESET;
+    return -1;
+}
+
+static ssize_t io_recv(HttpReq *r, void *buf, size_t n, bool peek)
+{
+    if (!r->tls) return recv(r->fd, buf, n, peek ? MSG_PEEK : 0);
+    return tls_read((SSL *)r->ssl, buf, n, peek);
+}
+
+static ssize_t io_send(HttpReq *r, const void *buf, size_t n)
+{
+    if (!r->tls) return send(r->fd, buf, n, MSG_NOSIGNAL);
+    SSL *s = (SSL *)r->ssl;
+    ERR_clear_error();
+    int k = SSL_write(s, buf, (int)n);
+    if (k > 0) return k;
+    int e = SSL_get_error(s, k);
+    if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) { errno = EAGAIN; return -1; }
+    errno = EPIPE;
+    return -1;
+}
+
+/* The TLS streams handed out by http_take_fd(): the fd stays the raw socket and this
+ * table says which fds read through SSL.  Keyed by fd AND socket inode so an fd that
+ * somebody close()d directly and the kernel reused is never mistaken for TLS. */
+#define TLS_STREAMS 4
+static struct { int fd; SSL *ssl; dev_t dev; ino_t ino; } g_streams[TLS_STREAMS];
+
+static bool stream_live(int i)
+{
+    struct stat st;
+    if (!g_streams[i].ssl) return false;
+    return fstat(g_streams[i].fd, &st) == 0 && st.st_dev == g_streams[i].dev
+           && st.st_ino == g_streams[i].ino;
+}
+
+static int stream_find(int fd)
+{
+    for (int i = 0; i < TLS_STREAMS; i++)
+        if (g_streams[i].ssl && g_streams[i].fd == fd && stream_live(i)) return i;
+    return -1;
+}
+
+static bool stream_register(int fd, SSL *s)
+{
+    struct stat st;
+    if (fstat(fd, &st) != 0) return false;
+    int slot = -1;
+    for (int i = 0; i < TLS_STREAMS; i++) {
+        if (g_streams[i].ssl && !stream_live(i)) {            /* orphaned by a bare close() */
+            SSL_free(g_streams[i].ssl);
+            g_streams[i].ssl = NULL;
+        }
+        if (!g_streams[i].ssl && slot < 0) slot = i;
+    }
+    if (slot < 0) return false;
+    g_streams[slot].fd = fd; g_streams[slot].ssl = s;
+    g_streams[slot].dev = st.st_dev; g_streams[slot].ino = st.st_ino;
+    return true;
+}
+
+ssize_t http_stream_read(int fd, void *buf, size_t n)
+{
+    int i = stream_find(fd);
+    if (i < 0) return read(fd, buf, n);
+    return tls_read(g_streams[i].ssl, buf, n, false);
+}
+
+void http_stream_close(int fd)
+{
+    int i = stream_find(fd);
+    if (i >= 0) { SSL_free(g_streams[i].ssl); g_streams[i].ssl = NULL; }
+    close(fd);
+}
+
 static HttpPoll fail(HttpReq *r, const char *what, int err)
 {
     if (err) snprintf(r->err, sizeof(r->err), "%s: %s", what, strerror(err));
     else     snprintf(r->err, sizeof(r->err), "%s", what);
+    tls_free(r);
     if (r->fd >= 0) { close(r->fd); r->fd = -1; }
     wipe(r->req, sizeof(r->req));
     r->phase = PH_FAILED;
@@ -239,14 +421,16 @@ void http_init(HttpReq *r)
     r->phase = PH_IDLE;
 }
 
-int http_begin(HttpReq *r, const char *host, int port, const char *method,
+int http_begin(HttpReq *r, const char *host, int port, bool tls, const char *method,
                const char *path, const char *extra_headers, const char *body,
                size_t body_len, HttpMode mode, char *buf, size_t buf_size)
 {
     /* A struct that still owns a socket (a begin without an end) must not leak it. */
     if (r->fd >= 0 && r->phase != PH_IDLE) close(r->fd);
+    tls_free(r);
     memset(r, 0, sizeof(*r));
     r->fd = -1;
+    r->tls = tls;
     r->timeout_ms = HTTP_DEFAULT_TIMEOUT_MS;
     r->total_timeout_ms = HTTP_DEFAULT_TOTAL_MS;
     r->mode = mode;
@@ -260,7 +444,7 @@ int http_begin(HttpReq *r, const char *host, int port, const char *method,
     r->body_out = body;
     r->body_out_len = body_len;
 
-    int rl = http_build_request(r->req, sizeof(r->req), method, host, port, path,
+    int rl = http_build_request(r->req, sizeof(r->req), method, host, port, tls, path,
                                 extra_headers, body_len);
     if (rl < 0) { fail(r, "bad or oversized request", 0); return -1; }
     r->head_len = (size_t)rl;
@@ -269,7 +453,8 @@ int http_begin(HttpReq *r, const char *host, int port, const char *method,
     memset(&sa, 0, sizeof(sa));
     sa.sin_family = AF_INET;
     sa.sin_port = htons((unsigned short)port);
-    if (inet_pton(AF_INET, host, &sa.sin_addr) != 1) {
+    bool is_ip = inet_pton(AF_INET, host, &sa.sin_addr) == 1;
+    if (!is_ip) {
         /* The one blocking call in this module — see http.h. */
         struct addrinfo hints, *res = NULL;
         memset(&hints, 0, sizeof(hints));
@@ -286,8 +471,12 @@ int http_begin(HttpReq *r, const char *host, int port, const char *method,
 
     r->fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if (r->fd < 0) { fail(r, "socket", errno); return -1; }
+    if (tls) {
+        const char *why = NULL;
+        if (tls_start(r, host, is_ip, &why) != 0) { fail(r, why, 0); return -1; }
+    }
     if (connect(r->fd, (struct sockaddr *)&sa, sizeof(sa)) == 0) {
-        r->phase = PH_SEND;
+        r->phase = tls ? PH_TLS : PH_SEND;
     } else if (errno == EINPROGRESS || errno == EINTR) {
         r->phase = PH_CONNECT;
     } else {
@@ -311,6 +500,7 @@ static bool body_append(HttpReq *r, const char *p, size_t n)
 static HttpPoll body_finish(HttpReq *r)
 {
     r->buf[r->buf_len] = 0;
+    tls_free(r);
     close(r->fd);
     r->fd = -1;
     r->phase = PH_DONE;
@@ -354,16 +544,25 @@ HttpPoll http_poll(HttpReq *r)
             socklen_t sl = sizeof(soerr);
             if (getsockopt(r->fd, SOL_SOCKET, SO_ERROR, &soerr, &sl) != 0) soerr = errno;
             if (soerr) return fail(r, "connect", soerr);
-            r->phase = PH_SEND;
+            r->phase = r->tls ? PH_TLS : PH_SEND;
             progress = true;
             continue;
+        }
+        case PH_TLS: {
+            SSL *s = (SSL *)r->ssl;
+            ERR_clear_error();
+            int rc = SSL_connect(s);
+            if (rc == 1) { r->phase = PH_SEND; progress = true; continue; }
+            int e = SSL_get_error(s, rc);
+            if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) goto idle;
+            return fail(r, tls_why(s), 0);
         }
         case PH_SEND:
         case PH_SENDBODY: {
             bool head = r->phase == PH_SEND;
             const char *p = head ? r->req + r->sent : r->body_out + r->body_sent;
             size_t left = head ? r->head_len - r->sent : r->body_out_len - r->body_sent;
-            ssize_t n = send(r->fd, p, left, MSG_NOSIGNAL);
+            ssize_t n = io_send(r, p, left);
             if (n < 0) {
                 if (errno == EINTR) continue;
                 if (errno == EAGAIN || errno == EWOULDBLOCK) goto idle;
@@ -387,7 +586,7 @@ HttpPoll http_poll(HttpReq *r)
             char tmp[1024];
             /* STREAM peeks, then consumes exactly the head: whatever follows stays
              * in the socket for the caller. */
-            ssize_t n = recv(r->fd, tmp, sizeof(tmp), r->mode == HTTP_STREAM ? MSG_PEEK : 0);
+            ssize_t n = io_recv(r, tmp, sizeof(tmp), r->mode == HTTP_STREAM);
             if (n < 0) {
                 if (errno == EINTR) continue;
                 if (errno == EAGAIN || errno == EWOULDBLOCK) goto idle;
@@ -398,7 +597,7 @@ HttpPoll http_poll(HttpReq *r)
             size_t used = 0;
             HttpHeadResult hr = http_head_push(&r->head, tmp, (size_t)n, &used);
             if (r->mode == HTTP_STREAM && used > 0) {
-                ssize_t c = recv(r->fd, tmp, used, 0);
+                ssize_t c = io_recv(r, tmp, used, false);
                 if (c < 0 || (size_t)c != used) return fail(r, "recv (consume head)", c < 0 ? errno : 0);
             }
             if (hr == HTTP_HEAD_BAD)     return fail(r, "malformed reply head", 0);
@@ -416,7 +615,7 @@ HttpPoll http_poll(HttpReq *r)
             if (space == 0) {
                 /* Full with no declared end: one more byte is an overflow, EOF is the end. */
                 char probe;
-                ssize_t n = recv(r->fd, &probe, 1, 0);
+                ssize_t n = io_recv(r, &probe, 1, false);
                 if (n > 0) return fail(r, "body larger than the buffer", 0);
                 if (n == 0) return body_finish(r);
                 if (errno == EINTR) continue;
@@ -425,7 +624,7 @@ HttpPoll http_poll(HttpReq *r)
             }
             size_t want = space < BODY_CHUNK ? space : BODY_CHUNK;
             if (cl >= 0 && (size_t)cl - r->buf_len < want) want = (size_t)cl - r->buf_len;
-            ssize_t n = recv(r->fd, r->buf + r->buf_len, want, 0);
+            ssize_t n = io_recv(r, r->buf + r->buf_len, want, false);
             if (n < 0) {
                 if (errno == EINTR) continue;
                 if (errno == EAGAIN || errno == EWOULDBLOCK) goto idle;
@@ -473,6 +672,12 @@ const char *http_error(const HttpReq *r){ return r->err; }
 int http_take_fd(HttpReq *r)
 {
     if (r->phase != PH_DONE || r->mode != HTTP_STREAM || r->fd < 0) return -1;
+    if (r->tls) {
+        /* The SSL object moves to the stream table; the caller reads through
+         * http_stream_read().  No free slot: refuse, http_end() cleans up. */
+        if (!stream_register(r->fd, (SSL *)r->ssl)) return -1;
+        r->ssl = NULL;
+    }
     int fd = r->fd;
     r->fd = -1;
     return fd;
@@ -480,6 +685,7 @@ int http_take_fd(HttpReq *r)
 
 void http_end(HttpReq *r)
 {
+    tls_free(r);
     if (r->fd >= 0 && r->phase != PH_IDLE) close(r->fd);
     r->fd = -1;
     wipe(r->req, sizeof(r->req));

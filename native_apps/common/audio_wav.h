@@ -37,6 +37,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/types.h>
 
 typedef struct {
     FILE *f;
@@ -118,8 +119,18 @@ typedef enum { AWS_PLAY, AWS_SILENCE, AWS_REBUFFER, AWS_END } AudioStreamAct;
  *  `playing` = output has started and has not underrun since. */
 AudioStreamAct audio_stream_decide(long buffered, bool eof, bool playing, long preroll);
 
+/** How bytes come off a stream fd when plain `read()`/`close()` are not enough (a TLS
+ *  socket: the bytes are inside the TLS layer, not the kernel).  Function pointers so
+ *  this module links no TLS library; NULL in the stream means plain `read()`/`close()`.
+ *  `read` follows read(2): >0 bytes, 0 end, -1 with errno (EAGAIN = nothing yet). */
+typedef struct {
+    ssize_t (*read)(int fd, void *buf, size_t n);
+    void    (*close)(int fd);        /**< release the fd and whatever sits on it */
+} AudioFdIo;
+
 typedef struct {
     int            fd;            /**< -1 when closed; owned once handed over */
+    const AudioFdIo *io;          /**< NULL = plain read()/close()            */
     unsigned char *ring;          /**< allocated once, kept across opens      */
     unsigned long  head, count;   /**< read index, bytes buffered             */
     AudioWavHdr    hdr;
@@ -138,6 +149,9 @@ typedef struct {
 /** Take `fd` (set O_NONBLOCK here), one initial non-blocking read. Returns false if
  *  the header has already arrived and is not the bus format. Closes nothing on false. */
 bool   audio_wav_stream_open(AudioWavStream *s, int fd, int expected_rate, int channels);
+/** Same, reading and closing through `io` (NULL = plain). */
+bool   audio_wav_stream_open_io(AudioWavStream *s, int fd, int expected_rate, int channels,
+                                const AudioFdIo *io);
 /** `AudioVoiceFill` over an `AudioWavStream *`.  See the rules above. */
 long   audio_wav_stream_fill(void *ctx, int16_t *dst, long frames);
 /** Bytes buffered; the header failed; closes the fd (ring kept). */

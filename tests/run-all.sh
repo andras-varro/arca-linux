@@ -111,7 +111,7 @@ SUITE_ROWS=(
 )
 
 # ── PHASE 2 table: the host C regressions ──────────────────────────────────
-# name|cflags|sources.  Copied from each file's own header build line and
+# name|cflags|sources[|libs].  Copied from each file's own header build line and
 # kept in step with it; the two include conventions (-I common and -I.) are
 # real differences, not drift.
 # All run from native_apps/, all write -o build/<name>, which check-arm-safe.sh
@@ -159,20 +159,21 @@ CTEST_ROWS=(
     "gradient_test|-I common|common/framebuffer.c common/font.c common/hardware.c common/config.c common/touch_input.c"
     "eq_panel_test|-I common|common/eq_panel.c common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c"
     "icons_test|-I common|common/icons.c common/framebuffer.c common/font.c common/hardware.c common/config.c common/touch_input.c"
-    "http_test|-I common -fsanitize=undefined|common/http.c"
+    "http_test|-I common -fsanitize=undefined|common/http.c|-lssl -lcrypto"
+    "http_tls_test|-I common -fsanitize=undefined|common/http.c|-lssl -lcrypto"
     "input_config_test|-I common|common/input_scan.c"
     "input_scan_test|-I common|common/input_scan.c"
     "input_slots_test|-I common|common/input_slots.c"
     "json_test|-I common -fsanitize=undefined|common/json.c"
-    "jf_api_test|-I common -I jellyfin -fsanitize=undefined|jellyfin/jf_api.c jellyfin/jf_model.c jellyfin/jf_url.c common/http.c common/json.c common/logger.c"
+    "jf_api_test|-I common -I jellyfin -fsanitize=undefined|jellyfin/jf_api.c jellyfin/jf_model.c jellyfin/jf_url.c common/http.c common/json.c common/logger.c|-lssl -lcrypto"
     "jf_core_test|-I common -I jellyfin -fsanitize=undefined|jellyfin/jf_core.c jellyfin/jf_model.c jellyfin/jf_url.c jellyfin/jf_login.c common/config.c common/json.c"
     "jf_queue_store_test|-I common -I jellyfin|jellyfin/jf_queue_store.c jellyfin/jf_url.c common/config.c"
     "jf_login_test|-I common -I jellyfin|jellyfin/jf_login.c jellyfin/jf_url.c common/config.c"
-    "jf_ui_layout_test|-I. -I common -I jellyfin|jellyfin/jf_ui.c common/eq_panel.c jellyfin/jf_art.c common/icons.c common/jf_img.c common/logger.c common/ui_focus.c jellyfin/jf_core.c jellyfin/jf_url.c jellyfin/jf_model.c jellyfin/jf_login.c common/json.c common/http.c common/list_view.c common/top_bar.c common/icon_grid.c common/ppm.c common/pointer.c common/status_line.c control_panel/cpu_load.c common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c"
+    "jf_ui_layout_test|-I. -I common -I jellyfin|jellyfin/jf_ui.c common/eq_panel.c jellyfin/jf_art.c common/icons.c common/jf_img.c common/logger.c common/ui_focus.c jellyfin/jf_core.c jellyfin/jf_url.c jellyfin/jf_model.c jellyfin/jf_login.c common/json.c common/http.c common/list_view.c common/top_bar.c common/icon_grid.c common/ppm.c common/pointer.c common/status_line.c control_panel/cpu_load.c common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c|-lssl -lcrypto"
     "jf_model_test|-I common -I jellyfin -fsanitize=undefined|jellyfin/jf_model.c common/json.c"
     "jf_genre_test|-I common -I jellyfin -fsanitize=undefined|jellyfin/jf_model.c common/json.c"
     "jf_url_test|-I common -I jellyfin|jellyfin/jf_url.c"
-    "jf_art_test|-I common -I jellyfin -I tests -fsanitize=undefined,address -fno-sanitize=shift|common/jf_img.c common/http.c jellyfin/jf_art.c jellyfin/jf_url.c common/logger.c"
+    "jf_art_test|-I common -I jellyfin -I tests -fsanitize=undefined,address -fno-sanitize=shift|common/jf_img.c common/http.c jellyfin/jf_art.c jellyfin/jf_url.c common/logger.c|-lssl -lcrypto"
     "icon_grid_focus_test|-I common|common/icon_grid.c common/ppm.c common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c"
     "icon_grid_nav_test|-I common|common/icon_grid.c common/ppm.c common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c"
     "icon_grid_nav_test|-I common|common/icon_grid.c common/ppm.c common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c"
@@ -532,16 +533,17 @@ phase_ctests() {
     local na
     na="$(dirname "$CTEST_DIR")"
     mkdir -p "$na/build"
-    local row name cflags srcs rc t0 t1 log
+    local row name cflags srcs libs rc t0 t1 log
     for row in "${CTEST_ROWS[@]}"; do
         name="${row%%|*}"
         cflags="$(printf '%s' "$row" | cut -d'|' -f2)"
         srcs="$(printf '%s' "$row" | cut -d'|' -f3)"
+        libs="$(printf '%s' "$row" | cut -d'|' -f4)"
         log="$LOGDIR/$name.log"
         t0=$(date +%s); rc=0
         # shellcheck disable=SC2086  # cflags and srcs are word lists by design
         ( cd "$na" && gcc -Wall -Wextra -Wno-unused-parameter $cflags \
-              -o "build/$name" "tests/$name.c" $srcs -lm ) >"$log" 2>&1 || rc=$?
+              -o "build/$name" "tests/$name.c" $srcs $libs -lm ) >"$log" 2>&1 || rc=$?
         if [ "$rc" -ne 0 ]; then
             t1=$(date +%s); fail_n=$((fail_n+1)); FAILED_LIST+=("$name (build)")
             bad "$(printf '%-32s %4ss  BUILD FAILED' "$name" "$((t1-t0))")"
@@ -550,7 +552,14 @@ phase_ctests() {
         fi
         rc=0
         run="$LOGDIR/$name.run"
-        ( cd "$na" && timeout 180 "./build/$name" ) >"$run" 2>&1 || rc=$?
+        # ASLR off: this WSL's gcc 9.4 ASAN runtime segfaults before main in about 1 run in 4
+        # (vm.mmap_rnd_bits=32), and its DEADLYSIGNAL handler then spins until the timeout, which
+        # reads as a hung test.  Measured 2026-10-21 on an empty main(): 31 of 140 runs; 0 of 40
+        # under setarch -R.  Nothing under test depends on address randomisation.
+        norand=()
+        command -v setarch >/dev/null 2>&1 && setarch "$(uname -m)" -R true 2>/dev/null \
+            && norand=(setarch "$(uname -m)" -R)
+        ( cd "$na" && timeout 180 "${norand[@]}" "./build/$name" ) >"$run" 2>&1 || rc=$?
         cat "$run" >>"$log"
         t1=$(date +%s)
         # A SKIP IS NOT A PASS here either.  Phase 1 has had this since a

@@ -4,7 +4,7 @@
  * loopback server).  Every JPEG is generated here with stb_image_write; no album art.
  *
  * Build: gcc -I common -I jellyfin -I tests tests/jf_art_test.c common/jf_img.c
- *        common/http.c jellyfin/jf_art.c jellyfin/jf_url.c -o jf_art_test
+ *        common/http.c jellyfin/jf_art.c jellyfin/jf_url.c -lssl -lcrypto -o jf_art_test
  */
 #define _GNU_SOURCE
 #include <arpa/inet.h>

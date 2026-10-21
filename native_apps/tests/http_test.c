@@ -8,7 +8,7 @@
  * takes more than a few ms is a render-loop stall and fails here.
  *
  *   gcc -Wall -Wextra -Wno-unused-parameter -I common -fsanitize=address,undefined \
- *       -o build/http_test tests/http_test.c common/http.c -lm && ./build/http_test
+ *       -o build/http_test tests/http_test.c common/http.c -lssl -lcrypto -lm && ./build/http_test
  *
  * SIGPIPE is deliberately NOT ignored in this process: the hang-up case sends a
  * large body to a peer that has gone, and the client's MSG_NOSIGNAL is the only
@@ -48,42 +48,42 @@ static long long now_us(void)
 static void test_builder(void)
 {
     char o[512];
-    int n = http_build_request(o, sizeof(o), "GET", "10.0.0.5", 8096, "/Users/Me",
+    int n = http_build_request(o, sizeof(o), "GET", "10.0.0.5", 8096, false, "/Users/Me",
                                "Authorization: MediaBrowser Token=\"T\"\r\n", 0);
     CHECK(n > 0 && (size_t)n == strlen(o));
     CHECK(strcmp(o, "GET /Users/Me HTTP/1.0\r\nHost: 10.0.0.5:8096\r\n"
                     "Authorization: MediaBrowser Token=\"T\"\r\n"
                     "Connection: close\r\n\r\n") == 0);
 
-    n = http_build_request(o, sizeof(o), "GET", "h", 80, "/", NULL, 0);
+    n = http_build_request(o, sizeof(o), "GET", "h", 80, false, "/", NULL, 0);
     CHECK(n > 0 && strcmp(o, "GET / HTTP/1.0\r\nHost: h\r\nConnection: close\r\n\r\n") == 0);
 
     /* a missing final CRLF is added; a body adds Content-Length */
-    n = http_build_request(o, sizeof(o), "POST", "h", 81, "/a", "X-A: 1", 7);
+    n = http_build_request(o, sizeof(o), "POST", "h", 81, false, "/a", "X-A: 1", 7);
     CHECK(n > 0 && strcmp(o, "POST /a HTTP/1.0\r\nHost: h:81\r\nX-A: 1\r\n"
                              "Content-Length: 7\r\nConnection: close\r\n\r\n") == 0);
     /* POST with no body still states its length */
-    n = http_build_request(o, sizeof(o), "POST", "h", 80, "/a", "", 0);
+    n = http_build_request(o, sizeof(o), "POST", "h", 80, false, "/a", "", 0);
     CHECK(n > 0 && strstr(o, "Content-Length: 0\r\n") != NULL);
     /* GET without a body does not */
-    n = http_build_request(o, sizeof(o), "GET", "h", 80, "/a", "", 0);
+    n = http_build_request(o, sizeof(o), "GET", "h", 80, false, "/a", "", 0);
     CHECK(n > 0 && strstr(o, "Content-Length") == NULL);
 
     /* framing guards */
-    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, "/a b", NULL, 0) < 0);
-    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, "/a\r\nX: y", NULL, 0) < 0);
-    CHECK(http_build_request(o, sizeof(o), "GET", "h\r\n", 80, "/", NULL, 0) < 0);
-    CHECK(http_build_request(o, sizeof(o), "GE T", "h", 80, "/", NULL, 0) < 0);
-    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, "a", NULL, 0) < 0);
-    CHECK(http_build_request(o, sizeof(o), "GET", "h", 0, "/", NULL, 0) < 0);
-    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, "/", "A: b\r\n\r\nGET /evil", 0) < 0);
-    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, "/", "\r\nA: b", 0) < 0);
-    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, NULL, NULL, 0) < 0);
+    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, false, "/a b", NULL, 0) < 0);
+    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, false, "/a\r\nX: y", NULL, 0) < 0);
+    CHECK(http_build_request(o, sizeof(o), "GET", "h\r\n", 80, false, "/", NULL, 0) < 0);
+    CHECK(http_build_request(o, sizeof(o), "GE T", "h", 80, false, "/", NULL, 0) < 0);
+    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, false, "a", NULL, 0) < 0);
+    CHECK(http_build_request(o, sizeof(o), "GET", "h", 0, false, "/", NULL, 0) < 0);
+    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, false, "/", "A: b\r\n\r\nGET /evil", 0) < 0);
+    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, false, "/", "\r\nA: b", 0) < 0);
+    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, false, NULL, NULL, 0) < 0);
 
     /* exact fit succeeds, one byte short fails */
-    n = http_build_request(o, sizeof(o), "GET", "h", 80, "/", NULL, 0);
-    CHECK(http_build_request(o, (size_t)n + 1, "GET", "h", 80, "/", NULL, 0) == n);
-    CHECK(http_build_request(o, (size_t)n, "GET", "h", 80, "/", NULL, 0) < 0);
+    n = http_build_request(o, sizeof(o), "GET", "h", 80, false, "/", NULL, 0);
+    CHECK(http_build_request(o, (size_t)n + 1, "GET", "h", 80, false, "/", NULL, 0) == n);
+    CHECK(http_build_request(o, (size_t)n, "GET", "h", 80, false, "/", NULL, 0) < 0);
 }
 
 /* ── layer 2: the parser ───────────────────────────────────────────────── */
@@ -379,7 +379,7 @@ static void test_buffer_ok(void)
     char buf[64];
     Srv s = srv_start(S_CL, 0);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "GET", "/x", SECRET, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
+    http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", SECRET, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
     CHECK(drive(&r, 3000) == HTTP_DONE);
     CHECK(http_status(&r) == 200 && http_body_len(&r) == 11);
     CHECK(strcmp(http_body(&r), "hello world") == 0);
@@ -392,7 +392,7 @@ static void test_buffer_ok(void)
     static char big[100001];
     s = srv_start(S_CLOSE, 90000);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, big, 90001);
+    http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, big, 90001);
     CHECK(drive(&r, 5000) == HTTP_DONE);
     CHECK(http_body_len(&r) == 90000 && big[90000] == 0);
     int ok = 1;
@@ -404,7 +404,7 @@ static void test_buffer_ok(void)
     /* one byte at a time */
     s = srv_start(S_DRIP, 0);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
+    http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
     CHECK(drive(&r, 5000) == HTTP_DONE);
     CHECK(http_body_len(&r) == 5 && strcmp(http_body(&r), "abcde") == 0);
     http_end(&r);
@@ -413,7 +413,7 @@ static void test_buffer_ok(void)
     /* a 404 is a reply, not an error: the caller reads the status */
     s = srv_start(S_404, 0);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
+    http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
     CHECK(drive(&r, 3000) == HTTP_DONE);
     CHECK(http_status(&r) == 404 && strcmp(http_body(&r), "nope") == 0);
     http_end(&r);
@@ -428,7 +428,7 @@ static void test_buffer_errors(void)
 
     s = srv_start(S_CHUNKED, 0);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "GET", "/x", SECRET, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
+    http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", SECRET, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
     CHECK(drive(&r, 3000) == HTTP_ERROR);
     CHECK(strstr(http_error(&r), "chunked") != NULL);
     http_end(&r);
@@ -437,7 +437,7 @@ static void test_buffer_errors(void)
     /* Content-Length over the buffer: refused at the head */
     s = srv_start(S_BIG_CL, 0);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
+    http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
     CHECK(drive(&r, 3000) == HTTP_ERROR);
     CHECK(strstr(http_error(&r), "larger") != NULL);
     http_end(&r);
@@ -446,19 +446,19 @@ static void test_buffer_errors(void)
     /* no Content-Length: capacity-1 bytes fit, one more does not */
     s = srv_start(S_BIG_CLOSE, 63);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
+    http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
     CHECK(drive(&r, 3000) == HTTP_DONE && http_body_len(&r) == 63);
     http_end(&r);
     srv_stop(&s);
     s = srv_start(S_BIG_CLOSE, 64);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
+    http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
     CHECK(drive(&r, 3000) == HTTP_ERROR);
     http_end(&r);
     srv_stop(&s);
     s = srv_start(S_BIG_CLOSE, 200);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
+    http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
     CHECK(drive(&r, 3000) == HTTP_ERROR);
     http_end(&r);
     srv_stop(&s);
@@ -466,7 +466,7 @@ static void test_buffer_errors(void)
     /* closed before the declared length */
     s = srv_start(S_SHORT, 0);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
+    http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
     CHECK(drive(&r, 3000) == HTTP_ERROR);
     CHECK(strstr(http_error(&r), "mid-body") != NULL);
     http_end(&r);
@@ -475,7 +475,7 @@ static void test_buffer_errors(void)
     /* accepts, then says nothing: the inactivity timeout, kept short here */
     s = srv_start(S_SILENT, 0);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "GET", "/x", SECRET, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
+    http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", SECRET, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
     r.timeout_ms = 250;
     long long t0 = now_us();
     CHECK(drive(&r, 3000) == HTTP_ERROR);
@@ -498,18 +498,18 @@ static void test_buffer_errors(void)
     getsockname(t, (struct sockaddr *)&a, &l);
     close(t);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", ntohs(a.sin_port), "GET", "/x", SECRET, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
+    http_begin(&r, "127.0.0.1", ntohs(a.sin_port), false, "GET", "/x", SECRET, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
     CHECK(drive(&r, 3000) == HTTP_ERROR);
     CHECK(strstr(http_error(&r), "SECRET") == NULL && http_error(&r)[0] != 0);
     http_end(&r);
 
     /* bad begin arguments fail the first poll, not the process */
     http_init(&r);
-    CHECK(http_begin(&r, "127.0.0.1", 80, "GET", "no-slash", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf)) < 0);
+    CHECK(http_begin(&r, "127.0.0.1", 80, false, "GET", "no-slash", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf)) < 0);
     CHECK(http_poll(&r) == HTTP_ERROR);
     http_end(&r);
     http_init(&r);
-    CHECK(http_begin(&r, "127.0.0.1", 80, "GET", "/", NULL, NULL, 0, HTTP_BUFFER, NULL, 0) < 0);
+    CHECK(http_begin(&r, "127.0.0.1", 80, false, "GET", "/", NULL, NULL, 0, HTTP_BUFFER, NULL, 0) < 0);
     CHECK(http_poll(&r) == HTTP_ERROR);
     http_end(&r);
     CHECK(http_poll(&r) == HTTP_ERROR);          /* ended: nothing to poll */
@@ -525,7 +525,7 @@ static void test_post_and_hangup(void)
     char port_s[32];
     Srv s = srv_start(S_ECHO, 0);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "POST", "/Users/AuthenticateByName",
+    http_begin(&r, "127.0.0.1", s.port, false, "POST", "/Users/AuthenticateByName",
                SECRET "Content-Type: application/json\r\n", "{\"a\":1}", 7, HTTP_BUFFER, buf, sizeof(buf));
     CHECK(drive(&r, 3000) == HTTP_DONE);
     snprintf(port_s, sizeof(port_s), "Host: 127.0.0.1:%d\r\n", s.port);
@@ -541,7 +541,7 @@ static void test_post_and_hangup(void)
     s = srv_start(S_HANGUP, 0);
     usleep(20000);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "POST", "/x", NULL, post_body, sizeof(post_body),
+    http_begin(&r, "127.0.0.1", s.port, false, "POST", "/x", NULL, post_body, sizeof(post_body),
                HTTP_BUFFER, buf, sizeof(buf));
     CHECK(drive(&r, 3000) == HTTP_ERROR);
     http_end(&r);
@@ -568,7 +568,7 @@ static void test_stream(void)
         HttpReq r;
         Srv s = srv_start(drip ? S_STREAM_DRIP : S_STREAM, 0);
         http_init(&r);
-        http_begin(&r, "127.0.0.1", s.port, "GET", "/Audio/x/stream", SECRET, NULL, 0, HTTP_STREAM, NULL, 0);
+        http_begin(&r, "127.0.0.1", s.port, false, "GET", "/Audio/x/stream", SECRET, NULL, 0, HTTP_STREAM, NULL, 0);
         CHECK(drive(&r, 3000) == HTTP_DONE);
         CHECK(http_status(&r) == 200);
         int fd = http_take_fd(&r);
@@ -588,7 +588,7 @@ static void test_stream(void)
     HttpReq r;
     Srv s = srv_start(S_404, 0);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "GET", "/x", NULL, NULL, 0, HTTP_STREAM, NULL, 0);
+    http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", NULL, NULL, 0, HTTP_STREAM, NULL, 0);
     CHECK(drive(&r, 3000) == HTTP_DONE && http_status(&r) == 404);
     int fd = http_take_fd(&r);
     unsigned char b[4];
@@ -599,7 +599,7 @@ static void test_stream(void)
     /* an un-taken STREAM fd is closed by http_end (no leak): the take then fails */
     s = srv_start(S_STREAM, 0);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "GET", "/x", NULL, NULL, 0, HTTP_STREAM, NULL, 0);
+    http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", NULL, NULL, 0, HTTP_STREAM, NULL, 0);
     CHECK(drive(&r, 3000) == HTTP_DONE);
     http_end(&r);
     CHECK(http_take_fd(&r) == -1);
@@ -661,9 +661,9 @@ static void test_ownership(void)
     HttpReq r;
     char buf[64];
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
+    http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
     int one = count_fds();
-    http_begin(&r, "127.0.0.1", s.port, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
+    http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
     CHECK(one > 0 && count_fds() == one);
     http_end(&r);
     CHECK(count_fds() == one - 1);
@@ -676,7 +676,7 @@ static void test_total_deadline(void)
     char buf[64];
     Srv s = srv_start(S_TRICKLE, 0);
     http_init(&r);
-    http_begin(&r, "127.0.0.1", s.port, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
+    http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
     r.timeout_ms = 1000;          /* every byte restarts this, so only the total can fire */
     r.total_timeout_ms = 1500;
     long long t0 = now_us();
@@ -695,7 +695,7 @@ static void test_timer_after_dns(void)
     char buf[64];
     Srv s = srv_start(S_SILENT, 0);
     http_init(&r);
-    http_begin(&r, "fake.test", s.port, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
+    http_begin(&r, "fake.test", s.port, false, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
     CHECK(now_us() / 1000 - r.last_ms < 200);   /* the stub spends 400 ms in DNS */
     http_end(&r);
     srv_stop(&s);
@@ -708,7 +708,7 @@ static void test_body_capped(void)
     for (int late = 0; late <= 1; late++) {
         Srv s = srv_start(late ? S_OVER_LATE : S_OVER, 0);
         http_init(&r);
-        http_begin(&r, "127.0.0.1", s.port, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
+        http_begin(&r, "127.0.0.1", s.port, false, "GET", "/x", NULL, NULL, 0, HTTP_BUFFER, buf, sizeof(buf));
         CHECK(drive(&r, 3000) == HTTP_DONE);
         CHECK(http_body_len(&r) == 5);
         CHECK(strcmp(http_body(&r), "12345") == 0);
@@ -743,13 +743,13 @@ static void test_head_limits(void)
 static void test_extras_framing(void)
 {
     char o[512];
-    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, "/", "X: a\rY: b\r\n", 0) < 0);
-    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, "/", "X: a\nY: b\r\n", 0) < 0);
-    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, "/", "X: a\rr\rY: b\r\n", 0) < 0);
-    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, "/", "X: a\r\n\r\n", 0) < 0);
-    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, "/", "\r\nX: a\r\n", 0) < 0);
-    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, "/", "\nX: a\r\n", 0) < 0);
-    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, "/", "X: a\r\nY: b\r\n", 0) > 0);
+    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, false, "/", "X: a\rY: b\r\n", 0) < 0);
+    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, false, "/", "X: a\nY: b\r\n", 0) < 0);
+    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, false, "/", "X: a\rr\rY: b\r\n", 0) < 0);
+    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, false, "/", "X: a\r\n\r\n", 0) < 0);
+    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, false, "/", "\r\nX: a\r\n", 0) < 0);
+    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, false, "/", "\nX: a\r\n", 0) < 0);
+    CHECK(http_build_request(o, sizeof(o), "GET", "h", 80, false, "/", "X: a\r\nY: b\r\n", 0) > 0);
 }
 
 int main(void)

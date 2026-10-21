@@ -42,6 +42,7 @@ static struct {
     /* identity (the token is a secret: never logged) */
     char     host[JF_HOST_MAX + 1];
     int      port;
+    bool     tls;
     char     device[64], device_id[64], token[128];
     bool     have_server;
 } G = { .cur = -1 };
@@ -114,6 +115,11 @@ bool jf_art_init(const char *cache_dir, int size)
     http_init(&G.req);
     G.up = true;
     return true;
+}
+
+void jf_art_set_tls(bool tls)
+{
+    G.tls = tls;
 }
 
 void jf_art_set_server(const char *host, int port, const char *device, const char *device_id, const char *token)
@@ -203,7 +209,7 @@ static void start_fetch(int i, long long now)
     http_init(&G.req);
     G.req.timeout_ms = 4000;
     G.req.total_timeout_ms = JF_ART_TOTAL_MS;
-    http_begin(&G.req, G.host, G.port, "GET", path, hdr, NULL, 0, HTTP_BUFFER, G.buf, JF_ART_MAX_BYTES);
+    http_begin(&G.req, G.host, G.port, G.tls, "GET", path, hdr, NULL, 0, HTTP_BUFFER, G.buf, JF_ART_MAX_BYTES);
     for (volatile char *p = hdr; p < hdr + sizeof hdr; p++) *p = 0;      /* the header holds the token */
     s->state = SL_LOADING;
     G.cur = i;

@@ -39,6 +39,8 @@ int jf_art_path(char *out, size_t cap, const char *album_id, const char *tag, in
 
 bool jf_art_init(const char *cache_dir, int size);
 void jf_art_set_server(const char *host, int port, const char *device, const char *device_id, const char *token);
+/** TLS for later fetches (default false); call before jf_art_set_server(). */
+void jf_art_set_tls(bool tls);
 void jf_art_request(const char *album_id, const char *tag);
 void jf_art_poll(long long now_ms);
 const LvIcon *jf_art_get(const char *album_id, const char *tag);

@@ -38,6 +38,7 @@ static JfUi  ui;
 static Audio audio;
 static bool  audio_ok;
 static bool  track_live;   /* a stream was started and its end is still to be reported */
+static const AudioFdIo stream_io = { http_stream_read, http_stream_close };
 static uint32_t track_t0;
 
 /* The gains the equaliser panel opens with: the live stream's when it is open, else the saved setting. */
@@ -99,8 +100,10 @@ static void execute(const JfCmds *cmds, uint32_t now)
         switch (c->type) {
         case JF_CMD_SET_SERVER:
             jf_api_set_server(&api, c->host, c->port);
+            jf_api_set_tls(&api, c->tls);
             snprintf(art_host, sizeof art_host, "%s", c->host);
             art_port = c->port;
+            jf_art_set_tls(c->tls);
             break;
         case JF_CMD_SET_AUTH:
             jf_api_set_auth(&api, "Arca", app.login.device_id, app.login.token);
@@ -156,12 +159,12 @@ static void execute(const JfCmds *cmds, uint32_t now)
                 track_t0 = now;
                 push_type(JF_EV_STREAM_STARTED, 0);
             } else {
-                close(c->fd);
+                http_stream_close(c->fd);
                 push_type(JF_EV_TRACK_ENDED, 0);
             }
             break;
         case JF_CMD_CLOSE_FD:
-            close(c->fd);
+            http_stream_close(c->fd);
             break;
         case JF_CMD_STOP:
             track_live = false;
@@ -237,6 +240,7 @@ int main(int argc, char *argv[])
     pointer_init(&ptr);
 
     audio_ok = audio_init(&audio) == 0;
+    audio_set_fd_io(&audio, &stream_io);   /* https streams read through the TLS layer */
     if (!audio_ok) fprintf(stderr, "jellyfin: no audio output\n");
 
     jf_app_init(&app);

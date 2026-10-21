@@ -146,19 +146,27 @@ static void test_start(void)
 static void test_signin(void)
 {
     jf_app_init(&app); app.session_fn = test_session;
-    send_signin("https://x", "bob", "pw");
-    CHECK(cm.n == 0 && strcmp(app.banner, "HTTP ONLY") == 0, "https refused");
+    send_signin("http://8.8.8.8", "bob", "pw");
+    CHECK(cm.n == 0 && strcmp(app.banner, "USE HTTPS://") == 0, "http to a public address refused");
+    send_signin("http://example.com", "bob", "pw");
+    CHECK(cm.n == 0 && strcmp(app.banner, "USE HTTPS://") == 0, "http to a hostname refused");
+    send_signin("https://nas.example.com:8443/", "", "pw");
+    CHECK(cm.n == 0 && strcmp(app.banner, "ENTER THE USER NAME") == 0, "https accepted (user checked next)");
+    send_signin("https://nas.example.com:8443/", "bob", "pw");
+    CHECK(cm.c[0].type == JF_CMD_SET_SERVER && cm.c[0].tls && cm.c[0].port == 8443 && strcmp(cm.c[0].host, "nas.example.com") == 0,
+          "https sign-in: SET_SERVER carries tls, port 8443");
+    CHECK(strcmp(app.login.server, "https://nas.example.com:8443/") == 0, "https server saved as typed");
     send_signin("", "bob", "pw");
     CHECK(cm.n == 0 && app.banner[0], "empty server refused");
     send_signin("host", "", "pw");
     CHECK(cm.n == 0 && app.banner[0], "empty user refused");
     send_signin("http://10.0.0.1/", "bob", "secret");
-    CHECK(cm.c[0].type == JF_CMD_SET_SERVER && cm.c[0].port == 8096 && strcmp(cm.c[0].host, "10.0.0.1") == 0, "SET_SERVER parsed");
+    CHECK(cm.c[0].type == JF_CMD_SET_SERVER && cm.c[0].port == 8096 && !cm.c[0].tls && strcmp(cm.c[0].host, "10.0.0.1") == 0, "SET_SERVER parsed, plain");
     CHECK(cm.n == 3 && cm.c[1].type == JF_CMD_SET_AUTH && cm.c[2].type == JF_CMD_REQUEST,
           "SIGNIN sets the identity before the AUTH request: an empty DeviceId is refused by the server");
     const JfCmd *r = find(JF_CMD_REQUEST);
     CHECK(r && r->kind == JF_KIND_AUTH && strcmp(r->user, "bob") == 0 && strcmp(r->password, "secret") == 0, "AUTH request carries credentials");
-    CHECK(app.busy && strcmp(app.login.server, "10.0.0.1:8096") == 0, "busy, server kept canonical");
+    CHECK(app.busy && strcmp(app.login.server, "http://10.0.0.1/") == 0, "busy, server kept as typed");
     unsigned tag = r->tag;
 
     JfResult res; memset(&res, 0, sizeof(res));

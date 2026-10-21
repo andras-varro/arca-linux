@@ -50,6 +50,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <sys/types.h>
 
 #define HTTP_HEAD_MAX        8192   /**< request head and reply head both fit this  */
 #define HTTP_DEFAULT_TIMEOUT_MS 5000
@@ -64,12 +65,12 @@
  * and `path` must start with '/'.
  *
  * Emits, in order: the request line (`HTTP/1.0`), `Host:` (with `:port` unless the
- * port is 80), `extra_headers` verbatim (zero or more lines; a missing final CRLF
+ * port is the scheme's default, 80 plain or 443 with `tls`), `extra_headers` verbatim (zero or more lines; a missing final CRLF
  * is added; NULL or "" for none), `Content-Length:` when `body_len > 0` or the
  * method is POST/PUT, `Connection: close`, and the blank line.
  */
 int http_build_request(char *out, size_t cap, const char *method, const char *host,
-                       int port, const char *path, const char *extra_headers,
+                       int port, bool tls, const char *path, const char *extra_headers,
                        size_t body_len);
 
 /* ── pure: the reply-head parser ───────────────────────────────────────── */
@@ -115,6 +116,8 @@ typedef struct {
 
     /* private — read through the accessors below */
     int      fd;
+    bool     tls;                   /**< this request runs over TLS                          */
+    void    *ssl;                    /**< the SSL object while TLS is live (opaque: no OpenSSL header here) */
     int      phase;
     HttpMode mode;
     HttpHead head;
@@ -138,9 +141,26 @@ typedef struct {
  * Always pair with `http_end()`.  Call `http_init()` once on a new struct before
  * the first `http_begin()`; a begin on a struct that still owns a socket closes it.
  */
-int http_begin(HttpReq *r, const char *host, int port, const char *method,
+int http_begin(HttpReq *r, const char *host, int port, bool tls, const char *method,
                const char *path, const char *extra_headers, const char *body,
                size_t body_len, HttpMode mode, char *buf, size_t buf_size);
+
+/**
+ * With `tls` the request is HTTPS: after the connect a non-blocking TLS handshake runs
+ * from http_poll() under the same timeouts.  ⚠️ **Verification is always on and cannot
+ * be turned off**: the chain must verify against the CA bundle, the certificate must
+ * match `host` (an IP literal is matched against IP SANs) and SNI is sent for a name.
+ * A refusal is an HTTP_ERROR whose http_error() starts "TLS:" and names the reason
+ * (not trusted / host name mismatch / expired / no CA bundle).  The bundle is
+ * /etc/ssl/certs/ca-certificates.crt, else /opt/arca/ca-certificates.crt; it is
+ * loaded once per process, on the first TLS begin (a blocking parse, like name resolution).
+ * HTTPS replies without Content-Length end at connection close; a close without
+ * close_notify after the head counts as that end (with a Content-Length a short body
+ * is still an error).
+ */
+
+/** Test hook: use `path` as the only CA bundle from now on (NULL = the defaults); drops the cached context. */
+void http_tls_set_ca_file(const char *path);
 
 /** Make a struct that holds no socket.  Call once before first use (not on one in use). */
 void        http_init(HttpReq *r);
@@ -158,6 +178,18 @@ size_t      http_body_len(const HttpReq *r);
  * first body byte).  Returns -1 in any other state.  `http_end()` will not close it.
  */
 int         http_take_fd(HttpReq *r);
+/**
+ * The reader and closer for an fd that http_take_fd() returned.  Plain request: exactly
+ * read(2) and close(2).  TLS request: SSL_read on the connection the fd belongs to (the
+ * fd stays the raw non-blocking socket, so poll() on it still means "bytes may be
+ * readable"), and the close frees the TLS state first.  Same signatures as the
+ * `AudioFdIo` members, so a TLS stream reaches `audio_wav.c` without that module
+ * (or ScummVM, which links it) knowing about TLS.  An fd that is not a live TLS
+ * stream falls through to read()/close(); the table is keyed by fd AND socket inode, so
+ * an fd closed behind its back and reused is never read as TLS.
+ */
+ssize_t     http_stream_read(int fd, void *buf, size_t n);
+void        http_stream_close(int fd);
 /** A short reason for the log after ERROR, "" otherwise.  Never contains headers. */
 const char *http_error(const HttpReq *r);
 /** Close whatever the request still owns and wipe the request head.  Idempotent. */

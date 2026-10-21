@@ -235,26 +235,66 @@ static void test_server(void)
 {
     char h[JF_HOST_MAX];
     int p;
+    bool t;
 
-#define SRV_OK(in, host, port) do { p = -1; \
-    CHECK(jf_parse_server(in, h, sizeof(h), &p) == JF_SERVER_OK, "\"%s\" refused", in); \
+/* `tls` starts opposite to the expectation, so a parser that never writes it fails. */
+#define SRV_OK(in, host, port, want_tls) do { p = -1; t = !(want_tls); \
+    CHECK(jf_parse_server(in, h, sizeof(h), &p, &t) == JF_SERVER_OK, "\"%s\" refused", in); \
     CHECK(strcmp(h, host) == 0, "\"%s\": host \"%s\"", in, h); \
-    CHECK(p == port, "\"%s\": port %d", in, p); } while (0)
-/* The port must stay untouched on failure: the caller keeps its previous setting. */
-#define SRV_NO(in, res) do { p = -1; \
-    CHECK(jf_parse_server(in, h, sizeof(h), &p) == (res), "\"%s\": wrong verdict", in); \
-    CHECK(p == -1, "\"%s\": port written on failure", in); } while (0)
+    CHECK(p == port, "\"%s\": port %d", in, p); \
+    CHECK(t == (want_tls), "\"%s\": tls %d", in, (int)t); } while (0)
+/* The port and tls must stay untouched on failure: the caller keeps its previous setting. */
+#define SRV_NO(in, res) do { p = -1; t = true; \
+    CHECK(jf_parse_server(in, h, sizeof(h), &p, &t) == (res), "\"%s\": wrong verdict", in); \
+    CHECK(p == -1, "\"%s\": port written on failure", in); \
+    CHECK(t, "\"%s\": tls written on failure", in); } while (0)
 
-    SRV_OK("1.2.3.4", "1.2.3.4", 8096);
-    SRV_OK("host:8096", "host", 8096);
-    SRV_OK("http://h/", "h", 8096);
-    SRV_OK("http://my-host_1.lan:80//", "my-host_1.lan", 80);
-    SRV_OK("h:1", "h", 1);
-    SRV_OK("h:65535", "h", 65535);
+    /* scheme given: https is TLS on 443; http is plain only to a private IPv4 literal */
+    SRV_OK("https://10.0.0.5", "10.0.0.5", 443, true);
+    SRV_OK("https://8.8.8.8", "8.8.8.8", 443, true);
+    SRV_OK("https://nas.example.com", "nas.example.com", 443, true);
+    SRV_OK("https://nas.example.com:8443/", "nas.example.com", 8443, true);
+    SRV_OK("http://192.168.1.5", "192.168.1.5", 8096, false);
+    SRV_OK("http://192.168.1.5:9000/", "192.168.1.5", 9000, false);
+    SRV_OK("http://10.0.0.1/", "10.0.0.1", 8096, false);
+    SRV_OK("http://172.16.0.1", "172.16.0.1", 8096, false);
+    SRV_OK("http://192.168.7.7/", "192.168.7.7", 8096, false);
+    SRV_NO("http://8.8.8.8", JF_SERVER_INSECURE);
+    SRV_NO("http://example.com", JF_SERVER_INSECURE);
+    SRV_NO("http://example.com:8096", JF_SERVER_INSECURE);
+    SRV_NO("http://172.15.0.1", JF_SERVER_INSECURE);
+    SRV_NO("http://172.32.0.1", JF_SERVER_INSECURE);
+    SRV_NO("http://192.169.0.1", JF_SERVER_INSECURE);
+    SRV_NO("http://11.0.0.1", JF_SERVER_INSECURE);
+    SRV_NO("http://192.168.1.5.evil.com", JF_SERVER_INSECURE);
+    SRV_NO("http://10.example.com", JF_SERVER_INSECURE);
+    SRV_NO("http://256.1.1.1", JF_SERVER_INSECURE);
+    SRV_NO("http://10.0.0", JF_SERVER_INSECURE);
 
-    SRV_NO("https://x", JF_SERVER_HTTPS);
+    /* no scheme: a private IPv4 literal is http on 8096; a hostname or public IP is https on 443 */
+    SRV_OK("10.0.0.1", "10.0.0.1", 8096, false);
+    SRV_OK("172.31.255.255", "172.31.255.255", 8096, false);
+    SRV_OK("10.255.255.255", "10.255.255.255", 8096, false);
+    SRV_OK("192.168.0.1:80", "192.168.0.1", 80, false);
+    SRV_OK("1.2.3.4", "1.2.3.4", 443, true);
+    SRV_OK("172.15.0.1", "172.15.0.1", 443, true);
+    SRV_OK("172.32.0.1", "172.32.0.1", 443, true);
+    SRV_OK("11.0.0.1", "11.0.0.1", 443, true);
+    SRV_OK("192.168.1.5.evil.com", "192.168.1.5.evil.com", 443, true);
+    SRV_OK("10.example.com", "10.example.com", 443, true);
+    SRV_OK("256.1.1.1", "256.1.1.1", 443, true);
+    SRV_OK("10.0.0", "10.0.0", 443, true);
+    SRV_OK("10.0.0.1.5", "10.0.0.1.5", 443, true);
+    SRV_OK("example.com", "example.com", 443, true);
+    SRV_OK("example.com:8443", "example.com", 8443, true);
+    SRV_OK("host:8096", "host", 8096, true);
+    SRV_OK("my-host_1.lan:80//", "my-host_1.lan", 80, true);
+    SRV_OK("h:1", "h", 1, true);
+    SRV_OK("h:65535", "h", 65535, true);
+
     SRV_NO("", JF_SERVER_EMPTY);
     SRV_NO("http://", JF_SERVER_EMPTY);
+    SRV_NO("https://", JF_SERVER_EMPTY);
     SRV_NO("a\rb", JF_SERVER_BAD);
     SRV_NO("a\nb", JF_SERVER_BAD);
     SRV_NO("a b", JF_SERVER_BAD);
@@ -266,11 +306,12 @@ static void test_server(void)
     SRV_NO("h:123456", JF_SERVER_BAD);
     SRV_NO(":80", JF_SERVER_BAD);
     SRV_NO("h:80:90", JF_SERVER_BAD);
+    SRV_NO("https://h:0", JF_SERVER_BAD);
 
     char small[4];
-    CHECK(jf_parse_server("abc", small, sizeof(small), &p) == JF_SERVER_OK, "host fitting cap refused");
-    CHECK(jf_parse_server("abcd", small, sizeof(small), &p) == JF_SERVER_BAD, "host longer than cap accepted");
-    CHECK(jf_parse_server("abcd:80", small, sizeof(small), &p) == JF_SERVER_BAD, "host+port longer than cap accepted");
+    CHECK(jf_parse_server("abc", small, sizeof(small), &p, &t) == JF_SERVER_OK, "host fitting cap refused");
+    CHECK(jf_parse_server("abcd", small, sizeof(small), &p, &t) == JF_SERVER_BAD, "host longer than cap accepted");
+    CHECK(jf_parse_server("abcd:80", small, sizeof(small), &p, &t) == JF_SERVER_BAD, "host+port longer than cap accepted");
 }
 
 static void test_header(void)

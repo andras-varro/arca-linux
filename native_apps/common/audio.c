@@ -1516,15 +1516,21 @@ bool audio_music_start_fd(Audio *audio, int fd, int channels)
 
     /* The refusal of a wrong format happens inside the stream (it names the rate
      * it was offered); no resampler, as for a file. */
-    if (!audio_wav_stream_open(&sv->stream, fd, audio->sample_rate, channels)) return false;
+    if (!audio_wav_stream_open_io(&sv->stream, fd, audio->sample_rate, channels, audio->fd_io)) return false;
     sv->streaming = true;
     sv->held      = false;
     if (!sample_arm(audio, sv, "music", "start", "(stream)")) {
         sv->stream.fd = -1;             /* the caller keeps its fd on a refusal */
+        sv->stream.io = NULL;
         sv->streaming = false;
         return false;
     }
     return true;
+}
+
+void audio_set_fd_io(Audio *audio, const AudioFdIo *io)
+{
+    if (audio) audio->fd_io = io;
 }
 
 long audio_music_stream_buffered(const Audio *audio)

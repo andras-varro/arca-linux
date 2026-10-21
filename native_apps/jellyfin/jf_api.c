@@ -96,6 +96,11 @@ void jf_api_set_server(JfApi *a, const char *host, int port)
     a->port = port;
 }
 
+void jf_api_set_tls(JfApi *a, bool tls)
+{
+    a->tls = tls;
+}
+
 void jf_api_set_auth(JfApi *a, const char *device, const char *device_id, const char *token)
 {
     copy_str(a->device, sizeof(a->device), device);
@@ -219,7 +224,7 @@ static void begin_current(JfApi *a)
     a->waiting = false;
     if (hl < 0) {
         /* the identity holds a character the header cannot carry: a begin that is refused */
-        http_begin(&a->req, a->host, a->port, "GET", "no-slash", NULL, NULL, 0, HTTP_BUFFER, a->body, JF_API_BODY_BYTES);
+        http_begin(&a->req, a->host, a->port, a->tls, "GET", "no-slash", NULL, NULL, 0, HTTP_BUFFER, a->body, JF_API_BODY_BYTES);
         wipe(hdr, sizeof(hdr));
         return;
     }
@@ -227,13 +232,13 @@ static void begin_current(JfApi *a)
     if (c->kind == JF_KIND_AUTH || c->kind == JF_KIND_SAVE)
         hl += snprintf(hdr + hl, sizeof(hdr) - (size_t)hl, "Content-Type: application/json\r\n");
     if (c->kind == JF_KIND_AUTH || c->kind == JF_KIND_SAVE)
-        http_begin(&a->req, a->host, a->port, "POST", c->path, hdr, c->body, c->body_len,
+        http_begin(&a->req, a->host, a->port, a->tls, "POST", c->path, hdr, c->body, c->body_len,
                    HTTP_BUFFER, a->body, JF_API_BODY_BYTES);
     else if (c->kind == JF_KIND_LIST)
-        http_begin(&a->req, a->host, a->port, "GET", c->path, hdr, NULL, 0,
+        http_begin(&a->req, a->host, a->port, a->tls, "GET", c->path, hdr, NULL, 0,
                    HTTP_BUFFER, a->body, JF_API_BODY_BYTES);
     else
-        http_begin(&a->req, a->host, a->port, "GET", c->path, hdr, NULL, 0, HTTP_STREAM, NULL, 0);
+        http_begin(&a->req, a->host, a->port, a->tls, "GET", c->path, hdr, NULL, 0, HTTP_STREAM, NULL, 0);
     wipe(hdr, sizeof(hdr));
     a->req.timeout_ms = a->idle_ms;
     a->req.total_timeout_ms = total;
@@ -259,7 +264,8 @@ static void finish(JfApi *a, JfResult *out, int status, const char *herr, int fd
                           out->token, sizeof(out->token), out->user_id, sizeof(out->user_id)) != JF_PARSE_OK)
             out->err = JF_ERR_BADREPLY;
     } else if (c->kind == JF_KIND_STREAM) {
-        if (out->err == JF_ERR_NONE) out->fd = fd;
+        if (out->err == JF_ERR_NONE && fd >= 0) out->fd = fd;
+        else if (out->err == JF_ERR_NONE) out->err = JF_ERR_BADREPLY;   /* a 200 with no fd to hand over: not a success */
         else if (fd >= 0) close(fd);
     }
     if (c->kind == JF_KIND_AUTH) {
@@ -302,7 +308,7 @@ bool jf_api_poll(JfApi *a, JfResult *out)
     if ((e == JF_ERR_UNREACHABLE || e == JF_ERR_SERVER) && !post && !a->retried) {
         if (hp == HTTP_DONE && a->cur.kind == JF_KIND_STREAM) {
             int f = http_take_fd(&a->req);
-            if (f >= 0) close(f);
+            if (f >= 0) http_stream_close(f);
         }
         http_end(&a->req);
         a->retried = true;

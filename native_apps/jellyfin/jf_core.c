@@ -873,10 +873,12 @@ static void on_start(JfApp *app, const JfLogin *lg, JfCmds *out)
     app->volume_step = app->login.volume_step = v < 0 ? 0 : v > JF_VOLUME_MAX ? JF_VOLUME_MAX : v;
     char host[JF_HOST_MAX];
     int port = 0;
-    if (lg->token[0] && lg->user_id[0] && jf_parse_server(lg->server, host, sizeof(host), &port) == JF_SERVER_OK) {
+    bool tls = false;
+    if (lg->token[0] && lg->user_id[0] && jf_parse_server(lg->server, host, sizeof(host), &port, &tls) == JF_SERVER_OK) {
         JfCmd *c = emit(out, JF_CMD_SET_SERVER);
         copy(c->host, sizeof(c->host), host);
         c->port = port;
+        c->tls = tls;
         emit(out, JF_CMD_SET_AUTH);
         app->screen = JF_SCR_ARTISTS;
         app->cat = JF_CAT_ARTISTS;
@@ -891,21 +893,21 @@ static void on_signin(JfApp *app, const JfEvent *ev, JfCmds *out)
     if (app->screen != JF_SCR_SIGNIN) return;
     char host[JF_HOST_MAX];
     int port = 0;
-    switch (jf_parse_server(ev->server, host, sizeof(host), &port)) {
+    bool tls = false;
+    switch (jf_parse_server(ev->server, host, sizeof(host), &port, &tls)) {
     case JF_SERVER_OK: break;
     case JF_SERVER_EMPTY: set_banner(app, "ENTER THE SERVER ADDRESS"); return;
-    case JF_SERVER_HTTPS: set_banner(app, "HTTP ONLY"); return;
+    case JF_SERVER_INSECURE: set_banner(app, "USE HTTPS://"); return;
     default: set_banner(app, "BAD SERVER ADDRESS"); return;
     }
     if (!ev->user[0]) { set_banner(app, "ENTER THE USER NAME"); return; }
-    char canon[JF_HOST_MAX + 8];
-    snprintf(canon, sizeof(canon), "%s:%d", host, port);
-    if (strlen(canon) >= sizeof(app->login.server)) { set_banner(app, "BAD SERVER ADDRESS"); return; }
-    memcpy(app->login.server, canon, strlen(canon) + 1);
+    /* the server as typed: its scheme is what the next start re-parses (on_start) */
+    copy(app->login.server, sizeof(app->login.server), ev->server);
     copy(app->login.user, sizeof(app->login.user), ev->user);
     JfCmd *s = emit(out, JF_CMD_SET_SERVER);
     copy(s->host, sizeof(s->host), host);
     s->port = port;
+    s->tls = tls;
     emit(out, JF_CMD_SET_AUTH);   /* the device identity: the server refuses an empty DeviceId */
     JfCmd *c = emit(out, JF_CMD_REQUEST);
     c->kind = JF_KIND_AUTH;

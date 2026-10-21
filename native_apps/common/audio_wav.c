@@ -190,7 +190,7 @@ static void stream_pull(AudioWavStream *s)
         ssize_t n;
         if (!s->hdr_done) {
             unsigned char tmp[512];
-            n = read(s->fd, tmp, sizeof(tmp));
+            n = s->io ? s->io->read(s->fd, tmp, sizeof(tmp)) : read(s->fd, tmp, sizeof(tmp));
             if (n > 0) { stream_header_bytes(s, tmp, (size_t)n); continue; }
         } else {
             unsigned long room = AUDIO_STREAM_RING_BYTES - s->count;
@@ -199,7 +199,7 @@ static void stream_pull(AudioWavStream *s)
             unsigned long run  = AUDIO_STREAM_RING_BYTES - tail;
             if (run > room) run = room;
             if (s->data_known && run > s->data_left) run = s->data_left;
-            n = read(s->fd, s->ring + tail, run);
+            n = s->io ? s->io->read(s->fd, s->ring + tail, run) : read(s->fd, s->ring + tail, run);
             if (n > 0) {
                 s->count += (unsigned long)n;
                 if (s->data_known) {
@@ -220,6 +220,12 @@ static void stream_pull(AudioWavStream *s)
 }
 
 bool audio_wav_stream_open(AudioWavStream *s, int fd, int expected_rate, int channels)
+{
+    return audio_wav_stream_open_io(s, fd, expected_rate, channels, NULL);
+}
+
+bool audio_wav_stream_open_io(AudioWavStream *s, int fd, int expected_rate, int channels,
+                              const AudioFdIo *io)
 {
     if (!s || fd < 0 || (channels != 1 && channels != 2)) return false;
     unsigned char *ring = s->ring;          /* allocated once, kept across opens */
@@ -249,6 +255,7 @@ bool audio_wav_stream_open(AudioWavStream *s, int fd, int expected_rate, int cha
         return false;
     }
     s->fd = fd;
+    s->io = io;
     stream_pull(s);
     if (s->failed) { s->fd = -1; return false; }    /* the caller keeps its fd */
     return true;
@@ -330,8 +337,9 @@ bool audio_wav_stream_failed(const AudioWavStream *s)   { return s && s->failed;
 void audio_wav_stream_close(AudioWavStream *s)
 {
     if (!s) return;
-    if (s->fd >= 0) close(s->fd);
+    if (s->fd >= 0) { if (s->io) s->io->close(s->fd); else close(s->fd); }
     s->fd = -1;
+    s->io = NULL;
     s->count = s->head = 0;
     s->eof = true;
 }
