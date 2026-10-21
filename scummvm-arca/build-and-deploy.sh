@@ -556,14 +556,14 @@ build_scummvm() {
     # shared object added to it later (font.o, 2026-10-21) is missing from an older config.mk
     # and the link fails on an undefined reference.  Any listed object absent: reconfigure.
     local obj
-    for obj in $(sed -n 's/^+[[:space:]]*append_var OBJS "\(.*\)"$/\1/p' "$SCRIPT_DIR/backend-files/configure.patch"); do
+    while IFS= read -r obj; do
         if ! grep -qF "$obj" config.mk; then
             log_warning "Stale config detected ($obj not in config.mk), reconfiguring..."
             configure_build
             cd "$SCUMMVM_DIR"
             break
         fi
-    done
+    done < <(sed -n 's/^+[[:space:]]*append_var OBJS "\(.*\)"$/\1/p' "$SCRIPT_DIR/backend-files/configure.patch")
     
     # Always clean stale .o files from native_apps/common/ before building.
     # These are compiled by ScummVM's make (via configure.patch OBJS) and must
