@@ -126,6 +126,7 @@ CTEST_ROWS=(
     "audio_out_test|-I common|common/audio_out.c common/audio_gen.c"
     "audio_sample_test|-I.|common/audio_wav.c common/audio_gen.c"
     "audio_stream_test|-I.|common/audio_wav.c common/audio_gen.c"
+    "audio_stereo_test|-I common|common/audio_gen.c"
     "audio_stream_fd_test|-I. -Wl,--wrap=audio_out_open_resolved|common/audio.c common/audio_gen.c common/audio_out.c common/audio_wav.c common/config.c"
     "audio_tone_test|-I.|common/audio.c common/audio_gen.c common/audio_out.c common/audio_wav.c common/config.c"
     "bt_ctl_test|-I.|control_panel/bt_ctl.c"

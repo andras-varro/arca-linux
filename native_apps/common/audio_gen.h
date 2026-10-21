@@ -384,6 +384,10 @@ typedef struct {
     long           buf_len;  /**< frames currently in `buf`                     */
     long           buf_pos;  /**< frames of `buf` already rendered              */
     bool           drained;  /**< the fill returned short: no more will come    */
+    int            channels; /**< 0/1 = mono, 2 = stereo (buf holds 2 int16 per
+                              *   frame, interleaved L,R).  Zero is mono so the
+                              *   `memset` in slot claim leaves every existing
+                              *   voice mono. */
 } AudioVoice;
 
 typedef struct {
@@ -508,6 +512,17 @@ int  audio_mix_add_sample(AudioMixer *m, AudioVoiceFill fill, void *ctx,
                           long total_frames, int peak);
 
 /**
+ * Add one SAMPLE voice of `channels` (1 or 2; anything else is a caller bug,
+ * refused without counting a drop).  A stereo voice's `fill` writes INTERLEAVED
+ * L,R pairs and its `buf` must hold `buf_frames * 2` int16; every count in the
+ * contract (`frames`, the return of `fill`, `total_frames`) stays in FRAMES.
+ * `audio_mix_add_sample()` is this with `channels` 1.
+ */
+int  audio_mix_add_sample_ch(AudioMixer *m, AudioVoiceFill fill, void *ctx,
+                             int16_t *buf, long buf_frames,
+                             long total_frames, int peak, int channels);
+
+/**
  * Ask ONE voice to stop at the end of its release, and free itself there.
  *
  * ⚠️ **Not the same thing as clearing `active`, and the difference is audible.**
@@ -610,6 +625,17 @@ long audio_mix_voice_pending(const AudioMixer *m, int slot, uint32_t gen);
  * survives the limiter because one voice cannot reach the knee.
  */
 long audio_mix_render(AudioMixer *m, int16_t *mono, long frames);
+
+/**
+ * The same bus rendered to INTERLEAVED stereo (`lr` holds `2 * frames` int16).
+ * A mono voice adds its value to both sides; a stereo voice adds L to the left
+ * and R to the right.  Each side has its own limiter; `clipped` and `limited`
+ * count a FRAME once however many sides hit.  With mono voices only, the output
+ * is byte-identical to `audio_interleave(audio_mix_render(...), 2)` and the
+ * counters match.  Returns `frames`, or 0 (and leaves `lr` alone) on a silent bus.
+ * The mono render folds a stereo voice to (L+R)>>1.
+ */
+long audio_mix_render_stereo(AudioMixer *m, int16_t *lr, long frames);
 
 /**
  * How many frames the pump should render this call.  Pure arithmetic; the

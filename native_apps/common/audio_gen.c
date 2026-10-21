@@ -315,6 +315,82 @@ int32_t audio_mix_limit_at(int32_t acc, int mode, int32_t knee)
     return (acc < 0) ? -v : v;
 }
 
+/* One voice, one frame: advance it and add its contribution.  The ONE copy of
+ * the per-voice step, shared by the mono and the stereo render so the two cannot
+ * drift.  Returns false when the voice contributed nothing this frame (waiting
+ * out its delay, or it ended/ran dry); otherwise *l and *r hold the voice's two
+ * channel values, with *r == *l for a mono voice.  Integer where it is integer
+ * and double where it was double: arithmetic is exactly the mono render's. */
+static bool voice_frame(AudioVoice *vo, int32_t *l, int32_t *r)
+{
+    if (vo->delay > 0) {        /* still waiting its turn */
+        vo->delay--;
+        return false;
+    }
+
+    /* The gain ramp: `peak` walks to `peak_goal` by at most `peak_step` per
+     * sample, so a live gain change is a ~20 ms slope and not a click.  One
+     * compare per voice per sample while settled; no divide. */
+    if (vo->peak != vo->peak_goal) {
+        int d = vo->peak_goal - vo->peak;
+        if (d > 0) vo->peak += (d > vo->peak_step) ? vo->peak_step : d;
+        else       vo->peak -= (-d > vo->peak_step) ? vo->peak_step : -d;
+    }
+
+    double env = audio_tone_env(vo->pos, vo->frames, vo->attack, vo->release);
+
+    if (vo->kind == AUDIO_VOICE_SAMPLE) {
+        /* Pull the next block only when the last one is spent, so `fill` — and
+         * the SD read behind it — is entered once per buffer rather than once
+         * per frame.  buf/buf_pos/buf_len are voice state like `pos` and
+         * `phase`, which is what keeps the incremental-render property: N then
+         * M frames pull the same bytes in the same order as one N+M render.
+         * All three count FRAMES; a stereo voice's buf holds two int16 each. */
+        if (vo->buf_pos >= vo->buf_len && !vo->drained) {
+            long got = vo->fill(vo->ctx, vo->buf, vo->buf_cap);
+            vo->buf_len = (got > 0) ? got : 0;
+            vo->buf_pos = 0;
+            if (vo->buf_len < vo->buf_cap) vo->drained = true;
+        }
+        if (vo->buf_pos >= vo->buf_len) {
+            /* The source ran dry early — end the voice here rather than
+             * padding with silence it never contained.  A short fill is
+             * legal, so this is a normal exit, not an error. */
+            vo->active = false;
+            return false;
+        }
+
+        /* Scaling is `audio_voice_scale()` (a shift, not a divide): Cortex-A8
+         * has no hardware divide, so a constant divide here would be an
+         * `__aeabi_idiv` call per sample per voice. */
+        if (vo->channels == 2) {
+            int16_t sl = vo->buf[2 * vo->buf_pos];
+            int16_t sr = vo->buf[2 * vo->buf_pos + 1];
+            vo->buf_pos++;
+            *l = (int32_t)((double)audio_voice_scale(sl, vo->peak) * env);
+            *r = (int32_t)((double)audio_voice_scale(sr, vo->peak) * env);
+        } else {
+            int16_t s = vo->buf[vo->buf_pos++];
+            *l = (int32_t)((double)audio_voice_scale(s, vo->peak) * env);
+            *r = *l;
+        }
+
+        if (++vo->pos >= vo->frames) vo->active = false;
+        return true;
+    }
+
+    *l = (int32_t)((double)vo->peak * env * sin(vo->phase));
+    *r = *l;
+
+    vo->phase += vo->phase_step;
+    if (vo->phase > 2.0 * M_PI) vo->phase -= 2.0 * M_PI;
+
+    /* The voice frees itself the instant its last sample is rendered,
+     * so the slot is reusable on this same call — not one pump later. */
+    if (++vo->pos >= vo->frames) vo->active = false;
+    return true;
+}
+
 long audio_mix_render(AudioMixer *m, int16_t *mono, long frames)
 {
     if (!m || !mono || frames <= 0) return 0;
@@ -327,63 +403,12 @@ long audio_mix_render(AudioMixer *m, int16_t *mono, long frames)
             AudioVoice *vo = &m->v[vi];
             if (!vo->active) continue;
 
-            if (vo->delay > 0) {        /* still waiting its turn */
-                vo->delay--;
-                continue;
-            }
+            int32_t l, r;
+            if (!voice_frame(vo, &l, &r)) continue;
 
-            /* The gain ramp: `peak` walks to `peak_goal` by at most `peak_step` per
-             * sample, so a live gain change is a ~20 ms slope and not a click.  One
-             * compare per voice per sample while settled; no divide. */
-            if (vo->peak != vo->peak_goal) {
-                int d = vo->peak_goal - vo->peak;
-                if (d > 0) vo->peak += (d > vo->peak_step) ? vo->peak_step : d;
-                else       vo->peak -= (-d > vo->peak_step) ? vo->peak_step : -d;
-            }
-
-            double env = audio_tone_env(vo->pos, vo->frames, vo->attack, vo->release);
-
-            if (vo->kind == AUDIO_VOICE_SAMPLE) {
-                /* Pull the next block only when the last one is spent, so `fill`
-                 * — and the SD read behind it — is entered once per buffer
-                 * rather than once per frame.  buf/buf_pos/buf_len are voice
-                 * state like `pos` and `phase`, which is what keeps the
-                 * incremental-render property: N then M frames pull the same
-                 * bytes in the same order as one N+M render. */
-                if (vo->buf_pos >= vo->buf_len && !vo->drained) {
-                    long got = vo->fill(vo->ctx, vo->buf, vo->buf_cap);
-                    vo->buf_len = (got > 0) ? got : 0;
-                    vo->buf_pos = 0;
-                    if (vo->buf_len < vo->buf_cap) vo->drained = true;
-                }
-                if (vo->buf_pos >= vo->buf_len) {
-                    /* The source ran dry early — end the voice here rather than
-                     * padding with silence it never contained.  A short fill is
-                     * legal, so this is a normal exit, not an error. */
-                    vo->active = false;
-                    continue;
-                }
-                int16_t s = vo->buf[vo->buf_pos++];
-
-                /* `>> 15`, not `/ AUDIO_FULL_SCALE`.  ⚠️ Cortex-A8 has no
-                 * hardware divide, so a constant divide here would be an
-                 * `__aeabi_idiv` call per sample per voice; the shift is exact
-                 * and the 1/32768-vs-1/32767 difference is a third of an LSB at
-                 * full scale.  Same reasoning as `audio_attenuate()`. */
-                acc += (int32_t)((double)audio_voice_scale(s, vo->peak) * env);
-
-                if (++vo->pos >= vo->frames) vo->active = false;
-                continue;
-            }
-
-            acc += (int32_t)((double)vo->peak * env * sin(vo->phase));
-
-            vo->phase += vo->phase_step;
-            if (vo->phase > 2.0 * M_PI) vo->phase -= 2.0 * M_PI;
-
-            /* The voice frees itself the instant its last sample is rendered,
-             * so the slot is reusable on this same call — not one pump later. */
-            if (++vo->pos >= vo->frames) vo->active = false;
+            /* A mono voice adds `l` exactly as before; a stereo voice folded to
+             * a mono bus adds (L+R)>>1, the same formula the file path uses. */
+            acc += (vo->channels == 2) ? ((l + r) >> 1) : l;
         }
 
         /* One limiter, after the whole sum, so slot order cannot change it.
@@ -403,6 +428,48 @@ long audio_mix_render(AudioMixer *m, int16_t *mono, long frames)
         if      (out >  32767) { out =  32767; m->clipped++; }
         else if (out < -32768) { out = -32768; m->clipped++; }
         mono[i] = (int16_t)out;
+    }
+
+    return frames;
+}
+
+/* One channel through the limiter and the int16 store.  Flags instead of counter
+ * bumps, so the stereo render can count a FRAME once however many channels hit. */
+static int16_t limit_store(const AudioMixer *m, int32_t acc, int *clip, int *lim)
+{
+    int32_t out = audio_mix_limit_at(acc, m->limit, m->knee);
+    if (out != acc) {
+        if (m->limit == AUDIO_MIX_HARD) *clip = 1;
+        else                            *lim  = 1;
+    }
+    if      (out >  32767) { out =  32767; *clip = 1; }
+    else if (out < -32768) { out = -32768; *clip = 1; }
+    return (int16_t)out;
+}
+
+long audio_mix_render_stereo(AudioMixer *m, int16_t *lr, long frames)
+{
+    if (!m || !lr || frames <= 0)  return 0;
+    if (audio_mix_pending(m) <= 0) return 0;
+
+    for (long i = 0; i < frames; i++) {
+        int32_t accl = 0, accr = 0;
+
+        for (int vi = 0; vi < AUDIO_MAX_VOICES; vi++) {
+            AudioVoice *vo = &m->v[vi];
+            if (!vo->active) continue;
+
+            int32_t l, r;
+            if (!voice_frame(vo, &l, &r)) continue;
+            accl += l;
+            accr += r;
+        }
+
+        int clip = 0, lim = 0;
+        lr[2 * i]     = limit_store(m, accl, &clip, &lim);
+        lr[2 * i + 1] = limit_store(m, accr, &clip, &lim);
+        if (clip) m->clipped++;
+        if (lim)  m->limited++;
     }
 
     return frames;
@@ -462,6 +529,15 @@ int audio_mix_add_sample(AudioMixer *m, AudioVoiceFill fill, void *ctx,
                          int16_t *buf, long buf_frames,
                          long total_frames, int peak)
 {
+    return audio_mix_add_sample_ch(m, fill, ctx, buf, buf_frames,
+                                   total_frames, peak, 1);
+}
+
+int audio_mix_add_sample_ch(AudioMixer *m, AudioVoiceFill fill, void *ctx,
+                            int16_t *buf, long buf_frames,
+                            long total_frames, int peak, int channels)
+{
+    if (channels != 1 && channels != 2) return -1;   /* caller bug, not a drop */
     if (!m || m->rate <= 0 || !fill)  return -1;
     if (!buf || buf_frames <= 0)      return -1;
     if (total_frames <= 0)            return -1;
@@ -472,6 +548,7 @@ int audio_mix_add_sample(AudioMixer *m, AudioVoiceFill fill, void *ctx,
     if (!vo) return -1;
 
     vo->kind    = AUDIO_VOICE_SAMPLE;
+    vo->channels = channels;
     vo->fill    = fill;
     vo->ctx     = ctx;
     vo->buf     = buf;
