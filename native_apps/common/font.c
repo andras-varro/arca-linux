@@ -16,6 +16,15 @@ const uint16_t *font_glyph(uint32_t cp)
     if (cp >= 0x20 && cp <= 0x7E)   return font_ascii[cp - 0x20];
     if (cp >= 0xA0 && cp <= 0xFF)   return font_l1[cp - 0xA0];
     if (cp >= 0x100 && cp <= 0x17F) return font_ea[cp - 0x100];
+    if (cp >= 0x370 && cp <= 0x4FF) {
+        unsigned lo = 0, hi = (unsigned)(sizeof font_ext / sizeof font_ext[0]);
+        while (lo < hi) {
+            unsigned mid = (lo + hi) >> 1;
+            if (font_ext[mid].cp == cp) return font_ext[mid].g;
+            if (font_ext[mid].cp < cp) lo = mid + 1; else hi = mid;
+        }
+        return font_fallback;
+    }
     if (cp >= 0x2013 && cp <= 0x20AC) {
         unsigned lo = 0, hi = (unsigned)(sizeof font_punct / sizeof font_punct[0]);
         while (lo < hi) {

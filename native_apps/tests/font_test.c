@@ -36,8 +36,11 @@ static int run_checks(lookup_fn lk, int verbose) {
     static const uint32_t punct[] = { 0x2018, 0x2019, 0x201A, 0x201C, 0x201D, 0x201E, 0x2013, 0x2014, 0x2022, 0x2026, 0x20AC };
     for (unsigned i = 0; i < sizeof punct / sizeof punct[0]; i++) EXPECT(lk(punct[i]) != fb, "U+%04X unmapped", punct[i]);
 
+    static const uint32_t ext[] = { 0x0416, 0x0410, 0x044F, 0x0401, 0x0451, 0x03A9, 0x03B1, 0x03C9, 0x03C2, 0x0386, 0x03CE, 0x0490, 0x04E9 };
+    for (unsigned i = 0; i < sizeof ext / sizeof ext[0]; i++) EXPECT(lk(ext[i]) != fb, "U+%04X unmapped", ext[i]);
+    EXPECT(memcmp(lk(0x0416), lk(0x0436), sizeof(uint16_t) * FONT_COLS) != 0, "Zhe upper and lower identical");
     static const uint32_t unmapped[] = { 0x00, 0x09, 0x0A, 0x1F, 0x7F, 0x80, 0x9F, 0x180, 0x2012, 0x2015, 0x20AD,
-                                         0x4E00, 0x1F600, 0xFFFD, 0x10FFFF };
+                                         0x4E00, 0x4E2D, 0x0378, 0x0380, 0x0460, 0x04FF, 0x0500, 0x1F600, 0xFFFD, 0x10FFFF };
     for (unsigned i = 0; i < sizeof unmapped / sizeof unmapped[0]; i++) EXPECT(lk(unmapped[i]) == fb, "U+%04X should be the fallback", unmapped[i]);
 
     /* descenders: rows 7-8 are bits 7-8 */
@@ -53,7 +56,7 @@ static int run_checks(lookup_fn lk, int verbose) {
     EXPECT(memcmp(lk('e'), lk(0xE9), sizeof(uint16_t) * FONT_COLS) != 0, "e and e-acute identical");
 
     /* every glyph within 9 rows; fallback is a visible box */
-    for (uint32_t cp = 0x20; cp <= 0x17F; cp++)
+    for (uint32_t cp = 0x20; cp <= 0x4FF; cp++)
         for (int c = 0; c < FONT_COLS; c++) EXPECT((lk(cp)[c] & ~0x1FFu) == 0, "U+%04X has a bit above row 8", cp);
     EXPECT(has_ink_in_rows(fb, 0x7F), "fallback box is blank");
 

@@ -1,4 +1,4 @@
-/* font.h -- the display font: 6x9 cell, Latin-1 + Latin Extended-A + punctuation.
+/* font.h -- the display font: 6x9 cell, Latin-1 + Latin Extended-A + Greek + Cyrillic + punctuation.
  *
  * A glyph is FONT_COLS uint16 columns; bit r of column c is ink at row r.  Row 0
  * is the top of the 9-row cell and the old 7-row "cap box" is rows 0-6; the
@@ -18,7 +18,8 @@
 #define FONT_ADVANCE 6
 
 /* Columns of the glyph for code point cp; never NULL.  Anything unmapped
- * (including controls, U+007F, U+0080-009F, U+FFFD, CJK, emoji) returns the
+ * (including controls, U+007F, U+0080-009F, U+FFFD, CJK, emoji, the few
+ * Greek/Cyrillic code points the 6x9 BDF lacks) returns the
  * pointer font_fallback_glyph() returns, a hollow box. */
 const uint16_t *font_glyph(uint32_t cp);
 

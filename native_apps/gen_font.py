@@ -7,7 +7,7 @@ Sources (one home each, see LICENSE.md for the provenance record):
   * U+0020-007E   the pre-existing 5x7 table, copied byte for byte (OLD_ASCII
                   below) so every ASCII pixel is unchanged, except g j p q y,
                   which get hand-drawn descenders (DESCENDERS below).
-  * U+00A0-00FF, U+0100-017F and the punctuation list: the misc-fixed 6x9
+  * U+00A0-00FF, U+0100-017F, Greek and Cyrillic (U+0370-04FF) and the punctuation list: the misc-fixed 6x9
                   ISO10646-1 BDF (Markus Kuhn's ucs-fonts package,
                   https://www.cl.cam.ac.uk/~mgk25/download/ucs-fonts.tar.gz,
                   file 6x9.bdf; its header says: COPYRIGHT "Public domain font.
@@ -218,6 +218,12 @@ def main():
     for cp in sorted(PUNCT):
         c = bdf_cols(g[cp])
         L.append('    {0x%04X, {%s}},' % (cp, ', '.join('0x%03X' % v for v in c)))
+    L.append('};')
+    L.append('')
+    ext = [cp for cp in range(0x370, 0x500) if cp in g]
+    L.append('static const struct { uint32_t cp; uint16_t g[FONT_COLS]; } font_ext[] = {  /* sorted: Greek U+0370..03FF, Cyrillic U+0400..04FF, those the BDF has */')
+    for cp in ext:
+        L.append('    {0x%04X, {%s}},' % (cp, ', '.join('0x%03X' % v for v in bdf_cols(g[cp]))))
     L.append('};')
     L.append('')
     L.append('static const uint16_t font_fallback[FONT_COLS] = {%s};' %
