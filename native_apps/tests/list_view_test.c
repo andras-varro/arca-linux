@@ -303,14 +303,15 @@ int main(void) {
     {
         int top_release = lv.top, changed = 0, i;
         uint32_t now = 10064;
-        for (i = 0; i < 100 && lv.fling_v != 0; i++) {
+        for (i = 0; i < 400 && lv.fling_v != 0; i++) {
             now += 16;
             if (lv_input(&lv, NULL, NULL, now) == LV_EV_CHANGED) changed++;
             lv_sync(&lv);                                          /* must not snap back */
             CHECK(lv.cursor >= lv.top && lv.cursor < lv.top + 10);
         }
-        CHECK(lv.fling_v == 0 && i < 100);                         /* it decays and stops */
+        CHECK(lv.fling_v == 0 && i < 400);                         /* it decays and stops */
         CHECK(changed > 5 && lv.top >= top_release + 10);
+        CHECK(lv.top - top_release >= 36);                         /* about v x LV_FLING_DECAY_MS: 45 rows here, 20 at the old 350 ms */
         CHECK(lv_input(&lv, NULL, NULL, now + 16) == LV_EV_NONE);  /* and then reports nothing */
         CHECK(!lv_needs_frames(&lv));                              /* the loop may idle again */
     }
@@ -384,7 +385,7 @@ int main(void) {
     t = T(100, 240, false, false, true); lv_input(&lv, &t, NULL, 15064);
     {
         uint32_t now = 15064;
-        for (int i = 0; i < 100 && lv.fling_v != 0; i++) { now += 16; lv_input(&lv, NULL, NULL, now); lv_sync(&lv); }
+        for (int i = 0; i < 400 && lv.fling_v != 0; i++) { now += 16; lv_input(&lv, NULL, NULL, now); lv_sync(&lv); }
         CHECK(lv.fling_v == 0 && lv.top == 20 && lv.cursor >= 20 && lv.cursor < 30);
     }
     lv_free(&lv);

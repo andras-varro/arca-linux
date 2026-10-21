@@ -119,9 +119,9 @@ int  lv_drag_move(LvDrag *d, int y, int row_h);
 #define LV_FLING_WINDOW_MS  100
 #define LV_FLING_MIN_MS      20    /* a shorter span is too noisy to read */
 #define LV_FLING_START   8000      /* below this a release is just a release */
-#define LV_FLING_STOP    2000      /* the fling ends once it slows to this */
+#define LV_FLING_STOP    3000      /* the fling ends once it slows to this */
 #define LV_FLING_MAX    60000
-#define LV_FLING_DECAY_MS  350     /* v loses dt/LV_FLING_DECAY_MS of itself per step */
+#define LV_FLING_DECAY_MS  800     /* v loses dt/LV_FLING_DECAY_MS of itself per step; travel is about v x this */
 #define LV_FLING_HOLD_MS   100     /* a finger still this long before lifting flings nothing */
 #define LV_FLING_STILL_PX    2     /* touch jitter that still counts as "not moving" */
 #define LV_SAMPLES 8
