@@ -1194,6 +1194,57 @@ static void zone_np_settings(void)
     jf_ui_free(&ui);
 }
 
+/* Z  sign-in on ui_zone: with the server or user empty SIGN IN (id 3) is absent, so Down / Right never land on it and EXIT (4) is
+ * reached; filled, Down reaches SIGN IN and ACTION sends SIGNIN; Up from the first field reaches the bar, whose ACTION quits;
+ * a touch hides the ring. */
+static void zone_signin(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_SIGNIN;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    uint32_t t = 2000;
+    bool saw3 = false, saw4 = false;
+    for (int k = 0; k < 8; k++) {
+        feed_btn(&ui, k % 2 ? BTN_ID_RIGHT : BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+        if (ui.zf.zone == 1 && ui.zf.id == 3) saw3 = true;
+        if (ui.zf.zone == 1 && ui.zf.id == 4) saw4 = true;
+    }
+    CHECK(!saw3, "Z: with the user empty the walk landed on the absent SIGN IN");
+    CHECK(saw4, "Z: with the user empty the walk never reached EXIT");
+    jf_ui_free(&ui);
+
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_SIGNIN;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    snprintf(ui.fields[0], sizeof ui.fields[0], "http://x");
+    snprintf(ui.fields[1], sizeof ui.fields[1], "u");
+    t = 2000;
+    for (int k = 0; k < 8 && !(ui.zf.zone == 1 && ui.zf.id == 3); k++) feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 1 && ui.zf.id == 3, "Z: Down never reached SIGN IN with the fields filled (zone %d id %d)", ui.zf.zone, ui.zf.id);
+    int k = 0;
+    if (ui.zf.zone == 1 && ui.zf.id == 3) {   /* only on SIGN IN: ACTION on a field opens the blocking keyboard */
+        k = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
+        CHECK(has_event(ev, k, JF_EV_SIGNIN), "Z: ACTION on SIGN IN sent no SIGNIN");
+    }
+    for (int j = 0; j < 4; j++) feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 0, "Z: Up from SIGN IN, past the fields, did not reach the bar (zone %d)", ui.zf.zone);
+    if (ui.zf.zone == 0) {
+        k = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
+        CHECK(has_event(ev, k, JF_EV_QUIT), "Z: ACTION on the bar's EXIT did not quit");
+    }
+    CHECK(ui.zf.shown, "Z: a pad press did not show the ring");
+    feed(&ui, 1, 240, true, true, false, t += 1000, ev, MINI_MAX);
+    CHECK(!ui.zf.shown, "Z: a touch on sign-in left the ring shown");
+    jf_ui_free(&ui);
+}
+
 int main(void)
 {
     add_to_playlist();
@@ -1220,6 +1271,7 @@ int main(void)
     stack_pad();
     zone_stack_browse();
     zone_np_settings();
+    zone_signin();
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");
     return 0;

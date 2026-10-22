@@ -1,0 +1,5 @@
+name=Jellyfin queue (saved play queue)
+paths=home/root/data/jellyfin/queue.txt
+unit=no
+secret=no
+reboot=no

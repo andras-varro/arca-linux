@@ -300,7 +300,7 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
     ui->last_screen = (JfScreen)-1;
     touch_guard_init(&ui->guard);
     ui->last_cat = app->cat;
-    ui->show_ring = true;
+    ui->zf.shown = true;
     ui->dirty = true;
 }
 
@@ -431,6 +431,22 @@ static void np_zones(JfUi *ui, UiZone z[UZ_ZONES])
     for (int i = 0; i < JF_UI_NP; i++) zone_add(&z[NPZ_ROW], ui->L.np[i], i);
 }
 
+/* SIGN IN is absent (not greyed) until the server and the user are filled. */
+static bool signin_can(const JfUi *ui) { return ui->fields[0][0] && ui->fields[1][0]; }
+
+/* Sign-in: the bar (EXIT only) over one spatial zone: the three fields (ids 0..2), SIGN IN (3, when present), EXIT (4). */
+enum { SIZ_BAR = 0, SIZ_BTN, SIZ_N };
+
+static void signin_zones(JfUi *ui, UiZone z[UZ_ZONES])
+{
+    memset(z, 0, UZ_ZONES * sizeof z[0]);
+    if (ui->bar.has_back) zone_add(&z[SIZ_BAR], top_bar_ring_rect(&ui->bar.L, TB_BACK), 0);
+    if (ui->bar.has_exit) zone_add(&z[SIZ_BAR], top_bar_ring_rect(&ui->bar.L, TB_EXIT), 1);
+    for (int i = 0; i < JF_UI_FIELDS; i++) zone_add(&z[SIZ_BTN], ui->L.field[i], i);
+    if (signin_can(ui)) zone_add(&z[SIZ_BTN], ui->L.signin, 3);
+    zone_add(&z[SIZ_BTN], ui->L.signexit, 4);
+}
+
 /* How the stack's list looks: active only while it holds focus, the yellow pad edge only after a key (a touch hides it). */
 static void stack_lv_look(JfUi *ui)
 {
@@ -517,8 +533,9 @@ static void begin_screen(JfUi *ui)
     ui->abar_up = false;
     ui->abar_tz = -1;
     ui->lv.ring_hidden = ui->lv.tap2_any = false;   /* the settings list keeps today's look; the zone screens set them every frame */
+    bool shown = ui->zf.shown;   /* the ring stays as the last screen left it: a touch hid it, a key shows it */
     uz_begin(&ui->zf, STACK_LIST);
-    ui->zf.shown = ui->show_ring;   /* now playing starts on its first button: NPZ_ROW is the same index as STACK_LIST */
+    ui->zf.shown = shown;   /* now playing and sign-in start on their first button: NPZ_ROW and SIZ_BTN are the same index as STACK_LIST */
     ui->dirty = true;
     ui->bar.has_back = app->screen != JF_SCR_ARTISTS && app->screen != JF_SCR_SIGNIN;
     ui->bar.has_exit = true;
@@ -847,6 +864,7 @@ static int screen_zones(JfUi *ui, UiZone z[UZ_ZONES])
     const JfApp *app = ui->app;
     if (app->screen == JF_SCR_SETTINGS) { settings_zones(ui, z); return STACK_ROW; }
     if (app->screen == JF_SCR_NOWPLAYING) { np_zones(ui, z); return NPZ_N; }
+    if (app->screen == JF_SCR_SIGNIN) { signin_zones(ui, z); return SIZ_N; }
     if (app->screen == JF_SCR_PLPICK || app->screen == JF_SCR_MIX) {
         stack_zones(ui, z, app->screen == JF_SCR_PLPICK ? jf_ui_plpick_add_shown(app) : !mix_locked(app));
         return STACK_N;
@@ -989,8 +1007,8 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
 
     bool pad_nav = bp(in, BTN_ID_UP) || bp(in, BTN_ID_DOWN) || bp(in, BTN_ID_LEFT) ||
                    bp(in, BTN_ID_RIGHT) || bp(in, BTN_ID_JUMP) || bp(in, BTN_ID_ACTION);
-    if (ts->pressed) ui->show_ring = false;
-    if (pad_nav) ui->show_ring = true;
+    if (ts->pressed) ui->zf.shown = false;
+    if (pad_nav) ui->zf.shown = true;
     if (ts->pressed || ts->released || pad_nav) ui->dirty = true;
 
     bool go_back = bp(in, BTN_ID_PAUSE) || bp(in, BTN_ID_BACK);
@@ -1008,7 +1026,6 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     }
 
     JfScreen sc = app->screen;
-    bool act = bp(in, BTN_ID_ACTION) || bp(in, BTN_ID_JUMP);
 
     if (sc == JF_SCR_QUEUE) {   /* the queue is now playing's other view: a tap on its title goes back to it */
         UiRect h = head_rect_of(ui, "QUEUE", false);
@@ -1030,22 +1047,17 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     }
 
     if (sc == JF_SCR_SIGNIN) {
-        UiRect rs[5] = { ui->L.field[0], ui->L.field[1], ui->L.field[2], ui->L.signin, ui->L.signexit };
-        UiDir dir = UI_DIR_DOWN;
-        bool mv = false;
-        if (bp(in, BTN_ID_UP))    { dir = UI_DIR_UP;    mv = true; }
-        if (bp(in, BTN_ID_DOWN))  { dir = UI_DIR_DOWN;  mv = true; }
-        if (bp(in, BTN_ID_LEFT))  { dir = UI_DIR_LEFT;  mv = true; }
-        if (bp(in, BTN_ID_RIGHT)) { dir = UI_DIR_RIGHT; mv = true; }
-        bool can_sign = ui->fields[0][0] && ui->fields[1][0];   /* absent, not greyed, until the server and user are filled */
-        if (!can_sign && ui->focus == 3) ui->focus = 4;
-        if (mv) ui->focus = ui_focus_move(rs, 5, ui->focus, dir);
-        if (mv && !can_sign && ui->focus == 3) ui->focus = (dir == UI_DIR_UP || dir == UI_DIR_LEFT) ? 2 : 4;
+        bool can_sign = signin_can(ui);
+        UiZone z[UZ_ZONES];
+        signin_zones(ui, z);
+        UzOut zo;
+        uz_input(&ui->zf, z, SIZ_N, in, ts->pressed, &zo);
+        if (zo.moved) ui->dirty = true;
         int pick = -1;
         for (int i = 0; i < JF_UI_FIELDS; i++) if (button_check_tap(&ui->field[i], ts, now)) pick = i;
         if (can_sign && button_check_tap(&ui->signin, ts, now)) pick = 3;
         if (button_check_tap(&ui->signexit, ts, now)) pick = 4;
-        if (act && pick < 0) pick = ui->focus;
+        if (pick < 0 && zo.activate >= 0) pick = ui->zf.zone == SIZ_BAR ? 4 : zo.activate;   /* the bar's only button is EXIT */
         if (go_back) emit(out, &n, max, JF_EV_QUIT);
         if (pick >= 0 && pick < JF_UI_FIELDS) edit_field(ui, ptr, pick);
         else if (pick == 3 && can_sign) {
@@ -1391,13 +1403,8 @@ static void draw_signin(JfUi *ui)
         snprintf(ui->field[i].text, sizeof ui->field[i].text, "%s: %s", label[i], v);
         button_draw(ui->fb, &ui->field[i]);
     }
-    bool can_sign = ui->fields[0][0] && ui->fields[1][0];   /* SIGN IN is absent until the server and user are filled */
-    if (can_sign) button_draw(ui->fb, &ui->signin);
+    if (signin_can(ui)) button_draw(ui->fb, &ui->signin);
     button_draw(ui->fb, &ui->signexit);
-    if (ui->show_ring) {
-        UiRect rs[5] = { ui->L.field[0], ui->L.field[1], ui->L.field[2], ui->L.signin, ui->L.signexit };
-        if (ui->focus >= 0 && ui->focus < 5 && (ui->focus != 3 || can_sign)) ring(ui, rs[ui->focus]);
-    }
 }
 
 static void draw_row3(JfUi *ui)
@@ -1563,8 +1570,7 @@ void jf_ui_draw(JfUi *ui)
         const TopBarLayout *TL = &ui->bar.L;
         icon_draw(fb, ICON_DROPDOWN, TL->title_x + TL->title_w + HEAD_GAP, TL->top + (TL->h - HEAD_ARROW) / 2, HEAD_ARROW, COLOR_WHITE);
     }
-    bool stack = app->screen != JF_SCR_SIGNIN;   /* the ui_zone screens; sign-in keeps its own five-rect walk */
-    if (stack && ui->zf.shown && ui->zf.zone == STACK_BAR && !app->overlay) {
+    if (ui->zf.shown && ui->zf.zone == STACK_BAR && !app->overlay) {
         int bf = ui->zf.id;
         if (app->screen == JF_SCR_ARTISTS && bf == 2) ring(ui, head_rect(ui));
         else top_bar_draw_focus(fb, &ui->bar.L, bf == 0 ? TB_BACK : TB_EXIT);
@@ -1624,7 +1630,7 @@ void jf_ui_draw(JfUi *ui)
         draw_row3(ui);
         break;
     }
-    if (stack && ui->zf.zone != BZ_BAR) {   /* the focused button of the zone stack (the bar's focus is drawn above) */
+    if (ui->zf.zone != BZ_BAR) {   /* the focused button of the zone stack (the bar's focus is drawn above) */
         UiZone z[UZ_ZONES];
         UiRect rr;
         int nz = screen_zones(ui, z);
