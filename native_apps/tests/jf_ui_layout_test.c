@@ -9,7 +9,7 @@
  *   F  the action bar, SAVE AS PLAYLIST and the now-playing MIX pair (all pressable, so also under A) do not
  *      overlap the list or each other, and the list ends above the bar.
  *   I  mini player taps send their events; a queue that starts on an open list shortens it (mini_taps, mini_flip).
- *   R  the queue view of now playing: 12 buttons in one row (wrapping when narrower than 738 px), the transport sends now playing's events, CLR, EQ, the title returns (queue_row, queue_widths).
+ *   R  the queue view of now playing: 11 buttons in one row (wrapping when narrower than 676 px), the transport sends now playing's events, CLR, EQ, the title returns (queue_row, queue_widths).
  *   Q  the EQ door: the NOW PLAYING button and Shift open the panel, Back cancels, DONE saves (eq_door).
   *   M  MIX tick rows carry no bracket text or checkbox glyph; ticks draw as the ListView mark (mix_ticks).
  *   S  SETTINGS: the root row is SEARCH, NOW PLAYING, SETTINGS; settings and library rows hit-test and pad-navigate to their events (settings_ui).
@@ -368,7 +368,7 @@ static void queue_shuffle_cursor(void)
 }
 
 /* R  the queue view of now playing: its transport buttons send the events now playing's do, CLR asks to clear, the title
- * returns to now playing, EQ opens the panel, and the pad walks all twelve. */
+ * returns to now playing, EQ opens the panel, and the pad walks all eleven. */
 static JfEventType first_event(JfUi *ui, int x, int y, uint32_t now)
 {
     JfEvent ev[MINI_MAX];
@@ -406,15 +406,15 @@ static void queue_row(void)
     feed_btn(&ui, BTN_ID_BACK, t + 3000, ev, MINI_MAX);
     CHECK(!ui.eq_up, "R: Back did not close the panel");
     t += 8000;
-    CHECK(first_event(&ui, ui.L.qrow[10].x + 20, ui.L.qrow[10].y + 20, t) == JF_EV_VOL_UP, "R: VOL+ sent the wrong event"); t += 1000;
-    CHECK(first_event(&ui, ui.L.qrow[11].x + 20, ui.L.qrow[11].y + 20, t) == JF_EV_VOL_DOWN, "R: VOL- sent the wrong event"); t += 1000;
+    CHECK(first_event(&ui, ui.L.qrow[9].x + 20, ui.L.qrow[9].y + 20, t) == JF_EV_VOL_UP, "R: VOL+ sent the wrong event"); t += 1000;
+    CHECK(first_event(&ui, ui.L.qrow[10].x + 20, ui.L.qrow[10].y + 20, t) == JF_EV_VOL_DOWN, "R: VOL- sent the wrong event"); t += 1000;
     CHECK(first_event(&ui, ui.L.qrow[5].x + 20, ui.L.qrow[5].y + 20, t) == JF_EV_QUEUE_CLEAR, "R: CLR did not send QUEUE_CLEAR"); t += 1000;
     CHECK(first_event(&ui, ui.L.qrow[6].x + 20, ui.L.qrow[6].y + 20, t) == JF_EV_SHUFFLE, "R: RND did not send SHUFFLE"); t += 1000;
     /* the title: a tap on it goes back; a tap elsewhere in the bar's middle row of the list does not */
     TopBarLayout *TL = &ui.bar.L;
     CHECK(first_event(&ui, TL->title_x + TL->title_w / 2, TL->top + TL->h / 2, t) == JF_EV_BACK, "R: a tap on the QUEUE title did not send BACK");
     t += 1000;
-    /* the pad: Right walks the twelve and wraps; ACTION on the last is VOL- */
+    /* the pad: Right walks the eleven and wraps; ACTION on the last is VOL- */
     feed(&ui, 0, 0, false, false, false, t, ev, MINI_MAX);
     ui.zone = JF_ZONE_ROW;
     ui.focus = 0;
@@ -428,14 +428,83 @@ static void queue_row(void)
     jf_ui_free(&np);
 }
 
+/* Q  the queue row has REMOVE where UP and DN were: eleven buttons, EQ at 8, the labels in order */
+static void qrow_shape(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_QUEUE;
+    app.queue_n = 5;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    CHECK(JF_UI_QROW == 11, "Q: the queue row has %d buttons, want 11 (UP and DN are gone)", JF_UI_QROW);
+    CHECK(JF_UI_QROW_EQ == 8, "Q: EQ is at index %d, want 8", JF_UI_QROW_EQ);
+    static const char *want[11] = { "", "", "", "", "SAVE", "CLR", "RND", "REMOVE", "EQ", "VOL+", "VOL-" };
+    int m = JF_UI_QROW < 11 ? JF_UI_QROW : 11;
+    for (int i = 0; i < m; i++)
+        CHECK(strcmp(ui.qrow[i].text, want[i]) == 0, "Q: queue button %d reads '%s', want '%s'", i, ui.qrow[i].text, want[i]);
+    jf_ui_free(&ui);
+}
+
+/* Q  touch on queue rows: the first tap only moves the selection, a tap on the selected row plays it, REMOVE sends the
+ *    cursor row and pulls the cursor off a vanished last row, and a held-and-dragged row reorders without playing */
+static int row_y(const JfUi *ui, int r) { return ui->L.list.y + LV_BORDER + 40 * r + 20; }
+
+static void queue_touch(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_QUEUE;
+    app.queue_n = 6;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    int x = ui.L.list.x + 30;
+    uint32_t t = 3000;
+    int n = tap_at(&ui, x, row_y(&ui, 2), t, ev);
+    CHECK(ui.lv.cursor == 2, "Q: first tap left the cursor on row %d, want 2", ui.lv.cursor);
+    CHECK(!has_event(ev, n, JF_EV_QUEUE_JUMP), "Q: the first tap on an unselected row played it");
+    n = tap_at(&ui, x, row_y(&ui, 2), t += 1000, ev);
+    CHECK(has_event(ev, n, JF_EV_QUEUE_JUMP) && ev[0].i == 2, "Q: a tap on the selected row did not play row 2");
+    n = tap_at(&ui, x, row_y(&ui, 4), t += 1000, ev);
+    CHECK(ui.lv.cursor == 4 && !has_event(ev, n, JF_EV_QUEUE_JUMP), "Q: tapping another row played it or missed it (cursor %d)", ui.lv.cursor);
+    /* REMOVE: the cursor row goes, and a cursor on the last row steps up */
+    UiRect rm = ui.L.qrow[7];
+    n = tap_at(&ui, rm.x + 20, rm.y + 20, t += 1000, ev);
+    CHECK(n == 1 && ev[0].type == JF_EV_QUEUE_REMOVE && ev[0].i == 4, "Q: REMOVE sent %d events, first type %d i %d (want one QUEUE_REMOVE of row 4)", n, n ? (int)ev[0].type : -1, n ? ev[0].i : -1);
+    lv_move_to(&ui.lv, 5);
+    n = tap_at(&ui, rm.x + 20, rm.y + 20, t += 1000, ev);
+    CHECK(has_event(ev, n, JF_EV_QUEUE_REMOVE) && ev[0].i == 5 && ui.lv.cursor == 4, "Q: REMOVE of the last row left the cursor on %d (want 4)", ui.lv.cursor);
+    lv_move_to(&ui.lv, 1);
+    n = tap_at(&ui, rm.x + 20, rm.y + 20, t += 1000, ev);
+    CHECK(has_event(ev, n, JF_EV_QUEUE_REMOVE) && ev[0].i == 1 && ui.lv.cursor == 1, "Q: REMOVE of a middle row moved the cursor to %d (want 1)", ui.lv.cursor);
+    /* a drag from row 1 to row 3 reorders and is not a tap on the selected row */
+    lv_move_to(&ui.lv, 1);
+    t += 3000;
+    feed(&ui, x, row_y(&ui, 1), true, true, false, t, ev, MINI_MAX);
+    feed(&ui, x, row_y(&ui, 1), false, true, false, t + LV_PICK_MS + 50, ev, MINI_MAX);
+    feed(&ui, x, row_y(&ui, 3), false, true, false, t + LV_PICK_MS + 150, ev, MINI_MAX);
+    n = feed(&ui, x, row_y(&ui, 3), false, false, true, t + LV_PICK_MS + 250, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_QUEUE_MOVE), "Q: the drag sent no QUEUE_MOVE");
+    CHECK(!has_event(ev, n, JF_EV_QUEUE_JUMP), "Q: the drag counted as a tap on the selected row");
+    jf_ui_free(&ui);
+}
+
 /* the numbers the operator asked for, at the measured unit and a narrower one */
 static void queue_widths(void)
 {
     JfExtents u = { 0, 0, 800, 480, 17, 17, 797, 463 };      /* the measured unit: 780 px of safe width */
     JfExtents z = { 0, 0, 800, 480, 0, 0, 800, 480 };
     JfExtents nar = { 0, 0, 800, 480, 30, 17, 770, 463 };    /* 740 px: still one row at 56 */
-    JfExtents tight = { 0, 0, 800, 480, 31, 17, 769, 463 };  /* 738 px: the last width of one row */
-    JfExtents wrap = { 0, 0, 800, 480, 32, 17, 768, 463 };   /* 736 px: wraps */
+    JfExtents tight = { 0, 0, 800, 480, 62, 17, 738, 463 };  /* 676 px: the last width of one row */
+    JfExtents wrap = { 0, 0, 800, 480, 63, 17, 738, 463 };   /* 675 px: wraps */
     const JfExtents *es[5] = { &u, &z, &nar, &tight, &wrap };
     const int want_rows[5] = { 1, 1, 1, 1, 2 };
     for (int k = 0; k < 5; k++) {
@@ -588,6 +657,8 @@ int main(void)
     settings_ui();
     queue_shuffle_cursor();
     queue_row();
+    qrow_shape();
+    queue_touch();
     queue_widths();
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");

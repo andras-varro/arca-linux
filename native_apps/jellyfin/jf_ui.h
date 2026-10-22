@@ -27,8 +27,8 @@
 #define JF_UI_ART   120    /* now playing: the cover square, the height of the info block */
 #define JF_UI_NP     10    /* now playing, one row (wraps in portrait): PREV, PLAY/PAUSE, STOP, NEXT, QUEUE, MIX, I-MIX, EQ, VOL +, VOL - */
 #define JF_UI_NP_EQ  7     /* the EQ button's index in that row */
-#define JF_UI_QROW  12     /* the queue view of now playing: PREV, PLAY/PAUSE, STOP, NEXT, SAVE, CLR, RND, UP, DN, EQ, VOL +, VOL - */
-#define JF_UI_QROW_EQ 9    /* the EQ button's index in that row */
+#define JF_UI_QROW  11     /* the queue view of now playing: PREV, PLAY/PAUSE, STOP, NEXT, SAVE, CLR, RND, REMOVE, EQ, VOL +, VOL - */
+#define JF_UI_QROW_EQ 8    /* the EQ button's index in that row */
 #define JF_UI_FIELDS 3     /* sign-in: SERVER, USER, PASSWORD */
 #define JF_UI_ABAR   5     /* action bar: PLAY, PLAY NEXT, ADD QUEUE, MIX, INSTANT MIX */
 #define JF_UI_MINI   3     /* mini player: PLAY/PAUSE, VOL -, VOL + */

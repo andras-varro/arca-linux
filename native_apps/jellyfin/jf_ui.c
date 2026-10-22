@@ -23,7 +23,7 @@
 #define GAP        6
 #define FIELD_H   52
 #define NP_MIN_W  72   /* narrowest now-playing button; 10 of them fit one row at 774 px or more */
-#define QR_MIN_W  56   /* narrowest queue-view button; 12 of them fit one row at 738 px or more (59 px each on the unit's 780) */
+#define QR_MIN_W  56   /* narrowest queue-view button; 11 of them fit one row at 676 px or more (65 px each on the unit's 780) */
 #define NP_ICON    22   /* the now-playing glyphs: a square box in the button's middle */
 
 /* ── Layout (pure) ─────────────────────────────────────────────────────── */
@@ -263,7 +263,7 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
     for (int i = 0; i < JF_UI_MINI; i++) style(&ui->mini_b[i], ui->L.mini_btn[i], tmini[i], 2);
     for (int i = 0; i < JF_UI_ABAR; i++) style(&ui->abar[i], ui->L.abar[i], ta[i], 2);
     for (int i = 0; i < JF_UI_NP; i++) style(&ui->np[i], ui->L.np[i], tn[i], 2);
-    static const char *tq[JF_UI_QROW] = { "", "", "", "", "SAVE", "CLR", "RND", "UP", "DN", "EQ", "VOL+", "VOL-" };
+    static const char *tq[JF_UI_QROW] = { "", "", "", "", "SAVE", "CLR", "RND", "REMOVE", "EQ", "VOL+", "VOL-" };
     for (int i = 0; i < JF_UI_QROW; i++) style(&ui->qrow[i], ui->L.qrow[i], tq[i], 2);
     style(&ui->mixb[0], ui->L.mixb[0], "START", 2);
     style(&ui->mixb[1], ui->L.mixb[1], "CANCEL", 2);
@@ -458,7 +458,8 @@ static void row3_act(JfUi *ui, Pointer *ptr, int i, JfEvent *out, int *n, int ma
 }
 
 /* The queue screen's button row: 0..3 the transport (as on now playing), 4 SAVE (as playlist), 5 CLR (clear, after a confirm),
- * 6 RND (shuffle), 7 UP, 8 DN (move the cursor row one place; the cursor follows it), 9 EQ, 10 VOL +, 11 VOL -. */
+ * 6 RND (shuffle), 7 REMOVE (the cursor row, no confirm), 8 EQ, 9 VOL +, 10 VOL -.  Moving a row is Shift + Up / Down
+ * and the drag, both through queue_move. */
 #define Q_BTNS JF_UI_QROW
 static void queue_move(JfUi *ui, int delta, JfEvent *out, int *n, int max)
 {
@@ -491,9 +492,17 @@ static void queue_row_act(JfUi *ui, Pointer *ptr, int i, uint32_t now, JfEvent *
         lv_move_to(&ui->lv, 0);
         ui->dirty = true;
     }
-    else if (i == 7 || i == 8) queue_move(ui, i == 7 ? -1 : 1, out, n, max);
+    else if (i == 7) {   /* the cursor row leaves the queue; with the last row gone the cursor steps up onto the new last one */
+        int c = ui->lv.cursor;
+        if (c < 0 || c >= ui->app->queue_n) return;
+        int k = emit(out, n, max, JF_EV_QUEUE_REMOVE);
+        if (k < 0) return;
+        out[k].i = c;
+        if (c >= ui->app->queue_n - 1 && c > 0) lv_move_to(&ui->lv, c - 1);
+        ui->dirty = true;
+    }
     else if (i == JF_UI_QROW_EQ) eq_open(ui, now);
-    else emit(out, n, max, i == 10 ? JF_EV_VOL_UP : JF_EV_VOL_DOWN);
+    else emit(out, n, max, i == 9 ? JF_EV_VOL_UP : JF_EV_VOL_DOWN);
 }
 
 static void abar_act(int i, int row, JfEvent *out, int *n, int max);
@@ -1027,6 +1036,12 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     bool pick = ev == LV_EV_TAP || ev == LV_EV_ACTIVATE;
     if (ui->zone == JF_ZONE_LIST && lin && bp(lin, BTN_ID_JUMP)) pick = true;
     if (ui->zone == JF_ZONE_ABAR) pick = ev == LV_EV_TAP;   /* the pad does not select a row under the bar */
+    if (queue && ev == LV_EV_TAP) {
+        /* a first touch on a queue row only selects it; it must also hand the list the focus, since an inactive list never
+         * reports the second tap on the cursor row as an activation, and that second tap is what plays it */
+        pick = false;
+        if (ui->zone != JF_ZONE_LIST && ui->zone != JF_ZONE_ABAR) ui->zone = JF_ZONE_LIST;
+    }
     if (pick && ui->lv.cursor >= 0 && ui->lv.cursor < count) {
         int k = emit(out, &n, max, queue ? JF_EV_QUEUE_JUMP : JF_EV_SELECT);
         if (k >= 0) out[k].i = ui->lv.cursor;
