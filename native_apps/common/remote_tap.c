@@ -31,13 +31,13 @@ bool remote_tap_parse(const char *line, RemoteTapCmd *c) {
     memset(c, 0, sizeof(*c));
     while (*line == ' ' || *line == '\t') line++;
 
-    const char *verb[] = { "tap", "hold", "swipe" };
-    const RemoteTapKind kind[] = { RTAP_CMD_TAP, RTAP_CMD_HOLD, RTAP_CMD_SWIPE };
-    const int need[] = { 2, 3, 4 };      /* mandatory numbers */
-    const int allow[] = { 2, 3, 5 };     /* swipe takes an optional time */
+    const char *verb[] = { "tap", "hold", "swipe", "drag" };
+    const RemoteTapKind kind[] = { RTAP_CMD_TAP, RTAP_CMD_HOLD, RTAP_CMD_SWIPE, RTAP_CMD_DRAG };
+    const int need[] = { 2, 3, 4, 5 };   /* mandatory numbers */
+    const int allow[] = { 2, 3, 5, 6 };  /* swipe and drag take an optional travel time */
     int k = -1;
     const char *rest = line;
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         size_t n = strlen(verb[i]);
         if (strncmp(line, verb[i], n) == 0 &&
             (line[n] == ' ' || line[n] == '\t')) {
@@ -48,11 +48,11 @@ bool remote_tap_parse(const char *line, RemoteTapCmd *c) {
     }
     if (k < 0) return false;
 
-    int v[5];
+    int v[6];
     int n = read_ints(rest, v, allow[k]);
     if (n < need[k]) return false;
 
-    for (int i = 0; i < (k == 1 ? 2 : need[k]); i++)
+    for (int i = 0; i < (k <= 1 ? 2 : 4); i++)
         if (v[i] > RTAP_MAX_COORD) return false;
 
     c->kind = kind[k];
@@ -62,10 +62,19 @@ bool remote_tap_parse(const char *line, RemoteTapCmd *c) {
         c->ms = RTAP_TAP_MS;
     } else if (k == 1) {
         c->ms = v[2];
-    } else {
+    } else if (k == 2) {
         c->x2 = v[2];
         c->y2 = v[3];
         c->ms = (n == 5) ? v[4] : RTAP_SWIPE_MS;
+    } else {
+        c->x2 = v[2];
+        c->y2 = v[3];
+        c->hold_ms = v[4];
+        c->ms = (n == 6) ? v[5] : RTAP_SWIPE_MS;
+        if (c->hold_ms < 1 || c->hold_ms > RTAP_MAX_MS) {
+            memset(c, 0, sizeof(*c));
+            return false;
+        }
     }
     if (c->ms < 1 || c->ms > RTAP_MAX_MS) {
         memset(c, 0, sizeof(*c));

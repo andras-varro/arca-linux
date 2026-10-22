@@ -25,12 +25,13 @@ static inline void remote_tap_set(Config *cfg, bool on) {
 
 /* ---- command line, pure -------------------------------------------------- */
 
-typedef enum { RTAP_CMD_NONE = 0, RTAP_CMD_TAP, RTAP_CMD_HOLD, RTAP_CMD_SWIPE } RemoteTapKind;
+typedef enum { RTAP_CMD_NONE = 0, RTAP_CMD_TAP, RTAP_CMD_HOLD, RTAP_CMD_SWIPE, RTAP_CMD_DRAG } RemoteTapKind;
 
 typedef struct {
     RemoteTapKind kind;
     int x1, y1, x2, y2;   /* LOGICAL screen pixels (what a screenshot shows) */
-    int ms;               /* hold: press length; swipe: travel time */
+    int ms;               /* hold: press length; swipe, drag: travel time */
+    int hold_ms;          /* drag: still press before the travel (a hold-then-move, e.g. queue reorder) */
 } RemoteTapCmd;
 
 #define RTAP_TAP_MS    80
@@ -38,10 +39,10 @@ typedef struct {
 #define RTAP_MAX_MS    10000
 #define RTAP_MAX_COORD 4000
 
-/* Parse "tap X Y", "hold X Y MS", "swipe X1 Y1 X2 Y2 [MS]" (one line, a
+/* Parse "tap X Y", "hold X Y MS", "swipe X1 Y1 X2 Y2 [MS]", "drag X1 Y1 X2 Y2 HOLD [MS]" (one line, a
  * trailing newline allowed). Returns true and fills *c, or false for anything
  * else: unknown verb, missing/extra/non-numeric fields, a coordinate outside
- * 0..RTAP_MAX_COORD, a duration outside 1..RTAP_MAX_MS. */
+ * 0..RTAP_MAX_COORD, a duration (HOLD included) outside 1..RTAP_MAX_MS. */
 bool remote_tap_parse(const char *line, RemoteTapCmd *c);
 
 /* Number of intermediate pointer positions for a swipe of `ms`: one per

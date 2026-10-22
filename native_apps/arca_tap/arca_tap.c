@@ -1,11 +1,12 @@
 /*
- * arca_tap — tap, hold and swipe the touch panel from a script.
+ * arca_tap — tap, hold, swipe and drag the touch panel from a script.
  *
  *   arca_tap start            create the virtual touchscreen, point
  *                             /dev/input/touchscreen0 at it, restart the app
  *   arca_tap tap X Y          X Y are LOGICAL screen pixels (a screenshot's)
  *   arca_tap hold X Y MS
  *   arca_tap swipe X1 Y1 X2 Y2 [MS]
+ *   arca_tap drag X1 Y1 X2 Y2 HOLD [MS]   press, stay still HOLD ms, then travel
  *   arca_tap status | stop
  *
  * Why a daemon and a re-pointed link: every app opens exactly ONE touch node,
@@ -229,13 +230,14 @@ static void run_cmd(int fd, const Geo *g, const RemoteTapCmd *c) {
         fprintf(stderr, "arca_tap: (%d,%d) is off the panel\n", c->x1, c->y1);
         return;
     }
-    if (c->kind == RTAP_CMD_SWIPE && to_raw(g, c->x2, c->y2, &rx2, &ry2, NULL) != 0) {
+    if ((c->kind == RTAP_CMD_SWIPE || c->kind == RTAP_CMD_DRAG) && to_raw(g, c->x2, c->y2, &rx2, &ry2, NULL) != 0) {
         fprintf(stderr, "arca_tap: (%d,%d) is off the panel\n", c->x2, c->y2);
         return;
     }
-    if (c->kind == RTAP_CMD_SWIPE) {
+    if (c->kind == RTAP_CMD_SWIPE || c->kind == RTAP_CMD_DRAG) {
         int n = remote_tap_swipe_steps(c->ms);
         press(fd, rx, ry);
+        if (c->kind == RTAP_CMD_DRAG) usleep((useconds_t)c->hold_ms * 1000);   /* still, so the app sees a hold */
         for (int i = 1; i <= n; i++) {
             int lx = remote_tap_lerp(c->x1, c->x2, i, n);
             int ly = remote_tap_lerp(c->y1, c->y2, i, n);
@@ -429,7 +431,7 @@ static int cmd_send(int argc, char **argv) {
         n += snprintf(line + n, sizeof(line) - (size_t)n, "%s%s", i > 1 ? " " : "", argv[i]);
     RemoteTapCmd c;
     if (n >= (int)sizeof(line) - 2 || !remote_tap_parse(line, &c))
-        return fail("usage: tap X Y | hold X Y MS | swipe X1 Y1 X2 Y2 [MS]  (logical pixels)");
+        return fail("usage: tap X Y | hold X Y MS | swipe X1 Y1 X2 Y2 [MS] | drag X1 Y1 X2 Y2 HOLD [MS]  (logical pixels)");
     if (!enabled_now()) return fail("REMOTE TAP is off: switch it on in Control Panel > Input");
     if (!read_pid()) return fail("not running: arca_tap start");
     Geo g;
@@ -457,7 +459,7 @@ static bool running_from_copy(void) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 2) return fail("usage: arca_tap start | stop | status | tap X Y | hold X Y MS | swipe X1 Y1 X2 Y2 [MS]");
+    if (argc < 2) return fail("usage: arca_tap start | stop | status | tap X Y | hold X Y MS | swipe X1 Y1 X2 Y2 [MS] | drag X1 Y1 X2 Y2 HOLD [MS]");
     const char *v = argv[1];
     if (strcmp(v, "daemon") == 0) return daemon_main();
     if ((strcmp(v, "start") == 0 || strcmp(v, "stop") == 0) && !running_from_copy()) {

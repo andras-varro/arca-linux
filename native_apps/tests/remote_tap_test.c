@@ -45,6 +45,13 @@ int main(void) {
     CHECK(remote_tap_parse("hold 1 2 500\n", &c) && c.kind == RTAP_CMD_HOLD && c.ms == 500, "hold");
     CHECK(remote_tap_parse("swipe 1 2 3 4", &c) && c.ms == RTAP_SWIPE_MS && c.x2 == 3, "swipe default ms");
     CHECK(remote_tap_parse("swipe 1 2 3 4 90", &c) && c.ms == 90, "swipe ms");
+    CHECK(remote_tap_parse("drag 1 2 3 4 700", &c) && c.kind == RTAP_CMD_DRAG && c.x2 == 3 && c.y2 == 4 &&
+          c.hold_ms == 700 && c.ms == RTAP_SWIPE_MS, "drag default ms");
+    CHECK(remote_tap_parse("drag 1 2 3 4 700 900", &c) && c.hold_ms == 700 && c.ms == 900, "drag ms");
+    CHECK(!remote_tap_parse("drag 1 2 3 4", &c), "drag missing hold");
+    CHECK(!remote_tap_parse("drag 1 2 3 4 0", &c), "drag zero hold");
+    CHECK(!remote_tap_parse("drag 1 2 3 4 20000", &c), "drag hold too long");
+    CHECK(!remote_tap_parse("drag 1 2 5000 4 700", &c), "drag end off range");
     CHECK(!remote_tap_parse("tap 400", &c), "tap missing y");
     CHECK(!remote_tap_parse("tap 1 2 3", &c), "tap extra field");
     CHECK(!remote_tap_parse("tap -1 2", &c), "negative");
