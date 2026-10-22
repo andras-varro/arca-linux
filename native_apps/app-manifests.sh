@@ -46,7 +46,7 @@ platformer|Office Runner|/opt/games/platformer|/opt/arca/icons/platformer.ppm|fb
 theremin|Tap-a-Theremin|/opt/games/theremin|/opt/arca/icons/theremin.ppm|fb,touch
 terminal|Terminal|/opt/games/terminal|/opt/arca/icons/terminal.ppm|fb,touch
 file_manager|Files|/opt/games/file_manager|/opt/arca/icons/file_manager.ppm|fb,touch
-jellyfin|Jellyfin|/opt/games/jellyfin|/opt/arca/icons/jellyfin.ppm|fb,touch
+ludfin|Ludfin|/opt/games/ludfin|/opt/arca/icons/ludfin.ppm|fb,touch
 control_panel|Control Panel|/opt/games/control_panel|/opt/arca/icons/control_panel.ppm|
 '
 
@@ -57,7 +57,7 @@ control_panel|Control Panel|/opt/games/control_panel|/opt/arca/icons/control_pan
 # device_tools is the old name of control_panel (binary, manifest, icon).
 # audio_mix_test lost its tile, not its binary: MIX BUS TEST on control_panel's
 # Audio page launches it.
-ARCA_APP_MANIFESTS_RETIRED='hardware_test hardware_config calibrate usb_test hardware_diag audio_touch_test device_tools audio_mix_test'
+ARCA_APP_MANIFESTS_RETIRED='hardware_test hardware_config calibrate usb_test hardware_diag audio_touch_test device_tools audio_mix_test jellyfin'
 
 # ---------------------------------------------------------------------------
 # arca_write_app_manifests DIR

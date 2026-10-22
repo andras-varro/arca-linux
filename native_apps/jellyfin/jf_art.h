@@ -26,13 +26,14 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "jf_app.h"
 #include "list_view.h"
 
 #define JF_ART_MAX_BYTES  (256 * 1024)   /**< largest reply accepted                 */
 #define JF_ART_TOTAL_MS   8000           /**< whole-request deadline                 */
 #define JF_ART_RETRY_MS   60000          /**< a failed entry is retried after this   */
 #define JF_ART_MEM_SLOTS  6              /**< decoded tiles held in memory           */
-#define JF_ART_CACHE_DIR  "/home/root/data/jellyfin/art"
+#define JF_ART_CACHE_DIR  JF_DATA_DIR "/art"
 
 /** The request path (pure): "/Items/<id>/Images/Primary?maxWidth=N&maxHeight=N&quality=90[&tag=T]".  Length or -1 (bad id/tag/size, no room). */
 int jf_art_path(char *out, size_t cap, const char *album_id, const char *tag, int size);

@@ -1,5 +1,5 @@
 /*
- * jf_core.h — the Jellyfin client's state machine.  PURE: no socket, no file,
+ * jf_core.h — the Ludfin client's state machine.  PURE: no socket, no file,
  * no clock, no framebuffer, no jf_api call.  jf_step() takes one event, changes
  * the JfApp, and writes up to JF_CMDS_MAX commands that the main loop executes.
  * The only outside input is the session-id source (JfApp.session_fn), so a test

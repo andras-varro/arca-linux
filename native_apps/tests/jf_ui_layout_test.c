@@ -221,7 +221,7 @@ static void root_picker(void)
     feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
     CHECK(!ui.pick.up, "R: picker up before anything was tapped");
 
-    ui.bar.title = "JELLYFIN";   /* head_rect() sets the real title itself */
+    ui.bar.title = "LUDFIN";   /* head_rect() sets the real title itself */
     UiRect h = { ui.bar.L.title_x, ui.bar.L.top, ui.bar.L.title_w, ui.bar.L.h };
     int n = tap_at(&ui, h.x + h.w / 2, h.y + h.h / 2, 2000, ev);
     CHECK(ui.pick.up && n == 0, "R: a tap on the header did not open the picker (up %d, %d events)", ui.pick.up, n);

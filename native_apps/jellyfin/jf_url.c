@@ -1,4 +1,5 @@
 #include "jf_url.h"
+#include "jf_app.h"
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -250,11 +251,11 @@ int jf_auth_header(char *out, size_t cap, const char *device, const char *device
     if (token && *token) {
         if (!header_safe(token)) return -1;
         return fin(snprintf(out, cap,
-                            "Authorization: MediaBrowser Client=\"Arca\", Device=\"%s\", DeviceId=\"%s\", "
+                            "Authorization: MediaBrowser Client=\"" JF_APP_NAME "\", Device=\"%s\", DeviceId=\"%s\", "
                             "Version=\"1\", Token=\"%s\"\r\n", device, device_id, token), cap);
     }
     return fin(snprintf(out, cap,
-                        "Authorization: MediaBrowser Client=\"Arca\", Device=\"%s\", DeviceId=\"%s\", "
+                        "Authorization: MediaBrowser Client=\"" JF_APP_NAME "\", Device=\"%s\", DeviceId=\"%s\", "
                         "Version=\"1\"\r\n", device, device_id), cap);
 }
 

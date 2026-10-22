@@ -1,5 +1,5 @@
 /*
- * jf_ui — the Jellyfin client's screens: draw from JfApp, map touch / keyboard /
+ * jf_ui — the Ludfin client's screens: draw from JfApp, map touch / keyboard /
  * pad to user-intent events.  No policy: every decision is jf_core's.
  * Screens: sign-in, root / browse lists, queue, now playing, the MIX tick screen (JF_SCR_MIX), PLPICK and SETTINGS.
  *
@@ -117,7 +117,7 @@ typedef struct {
     JfSettingsPage last_page;            /* the settings page the list was last built for */
     TopPick pick;                        /* the root header's category picker (common/top_pick.h) */
     bool head_press;                     /* a press began on the queue's title */
-    char head_title[48];                 /* "JELLYFIN . CATEGORY", the root's bar title */
+    char head_title[48];                 /* "LUDFIN . CATEGORY", the root's bar title */
     bool lv_ready;
     char fields[JF_UI_FIELDS][64];       /* server, user, password (wiped after the POST) */
     int  played_ms;                      /* the loop's wall-clock count for the track */

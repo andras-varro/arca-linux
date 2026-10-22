@@ -3,8 +3,8 @@
  * Any component adds a log to the Control Panel's Log page by installing one
  * item file; the Control Panel is not edited.  Format, key=value lines:
  *
- *     name=JELLYFIN                 source name in the Log page header, upper-cased, cut to LOGSRC_NAME_MAX
- *     path=/var/log/arca/jellyfin.log   absolute path of a plain text log file
+ *     name=LUDFIN                    source name in the Log page header, upper-cased, cut to LOGSRC_NAME_MAX
+ *     path=/var/log/arca/ludfin.log   absolute path of a plain text log file
  *
  * Unknown keys and '#' lines are ignored; an item without a name or without an
  * absolute path is skipped.  Pure text handling plus one directory scan, so a

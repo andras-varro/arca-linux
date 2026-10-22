@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Draw jellyfin.ppm, the Jellyfin tile's 96x96 icon: a dark rounded square with a
+"""Draw ludfin.ppm, the Ludfin tile's 96x96 icon: a dark rounded square with a
 violet-to-blue play triangle in a ring.  Run from native_apps/jellyfin/ with Pillow
 (WSL has it):
 
@@ -29,7 +29,7 @@ def main():
     d.ellipse((c - r, c - r, c + r, c + r), outline=RING, width=5 * SS)
     d.polygon(((c - 9 * SS, c - 15 * SS), (c - 9 * SS, c + 15 * SS), (c + 16 * SS, c)), fill=PLAY)
     img = img.resize((SIZE, SIZE), Image.LANCZOS)
-    img.save("jellyfin.ppm", format="PPM")
+    img.save("ludfin.ppm", format="PPM")
 
 
 if __name__ == "__main__":

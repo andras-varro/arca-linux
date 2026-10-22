@@ -1,0 +1,5 @@
+name=Ludfin login (server, user, token)
+paths=opt/ludfin/ludfin.conf
+unit=no
+secret=yes
+reboot=no

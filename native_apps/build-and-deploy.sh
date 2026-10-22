@@ -170,8 +170,8 @@ fi
 VTERM_CFLAGS=("-I$VTERM_PREFIX/usr/include")
 VTERM_LIBS=("-L$VTERM_PREFIX/usr/lib" -lvterm)
 
-# OpenSSL, for common/http.c (TLS) and so for the jellyfin binary only: its -I/-L/-l
-# ride on the http compile and the jellyfin link below, never in CC or AUDIO_*.
+# OpenSSL, for common/http.c (TLS) and so for the ludfin binary only: its -I/-L/-l
+# ride on the http compile and the ludfin link below, never in CC or AUDIO_*.
 # Dynamic, against copies of the root filesystem's own libssl.so.3/libcrypto.so.3
 # (build-openssl-deps.sh); the device's /usr/lib copies are the runtime, nothing is
 # deployed.  ⚠️ The artifacts are tested, not a flag.
@@ -358,10 +358,10 @@ $CC "${WARN[@]}" -O2 -I. "${VTERM_CFLAGS[@]}" terminal/terminal.c terminal/term_
 step "34/35" "file_manager"
 $CC "${WARN[@]}" -O2 -I. file_manager/file_manager.c file_manager/fm_core.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" build/list_view.o build/top_bar.o build/icon_grid.o build/ppm.o build/pointer.o build/ui_flow.o build/ui_focus.o control_panel/cpu_load.c common/status_line.c common/usb_watch.c -o build/file_manager -lm "${AUDIO_LIBS[@]}"
 
-# jellyfin: music client.  jf_core/jf_api/jf_model/jf_url/jf_login are screen-free (host tests);
+# ludfin: music client (jellyfin/ sources).  jf_core/jf_api/jf_model/jf_url/jf_login are screen-free (host tests);
 # jf_ui.c draws, jellyfin.c is the loop.  http.o and json.o come from the common block above.
-step "35/35" "jellyfin"
-$CC "${WARN[@]}" -O2 -I. -Icommon -Ijellyfin jellyfin/jellyfin.c common/eq_panel.c jellyfin/jf_ui.c jellyfin/jf_core.c jellyfin/jf_api.c jellyfin/jf_model.c jellyfin/jf_url.c jellyfin/jf_login.c jellyfin/jf_queue_store.c jellyfin/jf_art.c common/icons.c common/jf_img.c build/http.o build/json.o build/list_view.o build/ui_zone.o build/top_bar.o build/top_pick.o build/icon_grid.o build/ppm.o build/pointer.o build/ui_flow.o build/ui_focus.o control_panel/cpu_load.c common/status_line.c common/logger.c build/product.o "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/jellyfin -lm "${SSL_LIBS[@]}" "${AUDIO_LIBS[@]}"
+step "35/35" "ludfin"
+$CC "${WARN[@]}" -O2 -I. -Icommon -Ijellyfin jellyfin/jellyfin.c common/eq_panel.c jellyfin/jf_ui.c jellyfin/jf_core.c jellyfin/jf_api.c jellyfin/jf_model.c jellyfin/jf_url.c jellyfin/jf_login.c jellyfin/jf_queue_store.c jellyfin/jf_art.c common/icons.c common/jf_img.c build/http.o build/json.o build/list_view.o build/ui_zone.o build/top_bar.o build/top_pick.o build/icon_grid.o build/ppm.o build/pointer.o build/ui_flow.o build/ui_focus.o control_panel/cpu_load.c common/status_line.c common/logger.c build/product.o "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/ludfin -lm "${SSL_LIBS[@]}" "${AUDIO_LIBS[@]}"
 
 # Collect icon files from source dirs → build/icons/.  control_panel/icons/ holds
 # the control panel's home-grid icons (gen_cp_icons.py); control_panel reads them
@@ -405,7 +405,7 @@ echo "  Wrote $(find build/soundsets -maxdepth 1 -type f -name '*.sound' 2>/dev/
 # --bundle would recreate it again.
 GAMES_BINARIES=(snake tetris pong brick_breaker samegame frogger platformer
                 theremin audio_mix_test control_panel arcamond
-                touch_raw terminal file_manager arca_tap jellyfin)
+                touch_raw terminal file_manager arca_tap ludfin)
 
 echo ""
 echo "Build sizes:"
@@ -725,6 +725,7 @@ shift "$nexe"
 # launcher prototype, two icons no manifest names, and the control panel's old
 # name device_tools (manifest via ARCA_APP_MANIFESTS_RETIRED), and the icon of
 # audio_mix_test's retired tile (the binary stays: the Audio page runs it).
+# jellyfin is the old name of ludfin (binary and icon here, manifest via ARCA_APP_MANIFESTS_RETIRED).
 # The .hidden and .noargs marker files go by glob: nothing reads them, so
 # nothing writes them.
 # touch_inject is the leftover binary of a deleted evdev-write injector, which
@@ -747,7 +748,9 @@ rm -f /opt/games/*.hidden /opt/games/*.noargs \
       /opt/arca/icons/audio_touch_test.ppm \
       /opt/games/device_tools \
       /opt/arca/icons/device_tools.ppm \
-      /opt/arca/icons/audio_mix_test.ppm
+      /opt/arca/icons/audio_mix_test.ppm \
+      /opt/games/jellyfin \
+      /opt/arca/icons/jellyfin.ppm
 REMOTE
 ok "Permissions set"
 

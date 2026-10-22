@@ -49,7 +49,7 @@ CPU_WINDOW_SECS="${CPU_WINDOW_SECS:-10}"
 # app differ by up to 7 ticks: app_launcher 23-30, control_panel 23-28), except the two
 # busy loops, which get +10% (a 25% margin would pass 100% of the core).
 # A budget is a tripwire for a regression, not a target: raise one only with a new
-# measurement beside it. jellyfin's budget (30) sits far below its bad builds (102
+# measurement beside it. ludfin's budget (30) sits far below its bad builds (102
 # ticks with the 1 Hz full-frame header redraw; 69-74 before the DSP-skip and
 # header-only-repaint fixes) — measured here on its first screen, no music.
 cpu_budget() {
@@ -58,7 +58,7 @@ cpu_budget() {
         control_panel)  echo 40 ;;   # 28 24 23
         file_manager)   echo 55 ;;   # 38 38 35
         terminal)       echo 10 ;;   #  4  4  4
-        jellyfin)       echo 30 ;;   # 19 20 19  (ctxsw ~305)
+        ludfin)         echo 30 ;;   # 19 20 19  (ctxsw ~305)
         snake)          echo 80 ;;   # 56 55 58
         tetris)         echo 75 ;;   # 52 54 53
         pong)           echo 80 ;;   # 57 59 59

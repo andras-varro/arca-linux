@@ -121,7 +121,7 @@ static void test_load_edges(void)
 {
     JfLogin l;
     char missing[200];
-    snprintf(missing, sizeof missing, "%s/none/jellyfin.conf", dir);
+    snprintf(missing, sizeof missing, "%s/none/ludfin.conf", dir);
     memset(&l, 0xAA, sizeof l);
     CHECK(jf_login_load(&l, missing) == -1, "missing file -> -1");
     CHECK(!l.server[0] && !l.user[0] && !l.token[0] && !l.user_id[0] && l.volume_step == 10, "defaults filled");
@@ -234,7 +234,7 @@ int main(void)
 {
     snprintf(dir, sizeof dir, "/tmp/jf_login_test_XXXXXX");
     if (!mkdtemp(dir)) { perror("mkdtemp"); return 2; }
-    snprintf(path, sizeof path, "%s/a/b/jellyfin.conf", dir);
+    snprintf(path, sizeof path, "%s/a/b/ludfin.conf", dir);
     snprintf(spath, sizeof spath, "%s/a/b/settings.conf", dir);
 
     test_roundtrip();

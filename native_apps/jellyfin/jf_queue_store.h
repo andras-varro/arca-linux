@@ -16,9 +16,10 @@
 #define ARCA_JF_QUEUE_STORE_H
 
 #include <stddef.h>
+#include "jf_app.h"
 #include "jf_model.h"
 
-#define JF_QUEUE_PATH "/home/root/data/jellyfin/queue.txt"
+#define JF_QUEUE_PATH JF_DATA_DIR "/queue.txt"
 
 /** The file text for items[0..n): malloc'd and NUL-terminated (free it), *len = its length; NULL when out of memory.
  *  `cur` and `pos_ms` are clamped into range (cur to [0, n-1] or 0, pos to >= 0). */

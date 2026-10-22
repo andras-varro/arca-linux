@@ -1,5 +1,5 @@
 /*
- * jellyfin.c — Jellyfin music client: wiring only.
+ * jellyfin.c — Ludfin music client (Jellyfin server): wiring only.
  * Input -> JfEvent -> jf_step -> execute JfCmds (jf_api / audio / jf_login) -> draw.
  * All policy is in jf_core.c, all screens in jf_ui.c.  Leaving the app stops the music.
  */
@@ -20,6 +20,7 @@
 #include "audio.h"
 #include "audio_out.h"
 #include "logger.h"
+#include "jf_app.h"
 #include "jf_art.h"
 #include "jf_ui.h"
 #include "jf_queue_store.h"
@@ -123,8 +124,8 @@ static void execute(const JfCmds *cmds, uint32_t now)
             jf_art_set_tls(c->tls);
             break;
         case JF_CMD_SET_AUTH:
-            jf_api_set_auth(&api, "Arca", app.login.device_id, app.login.token);
-            jf_art_set_server(art_host, art_port, "Arca", app.login.device_id, app.login.token);
+            jf_api_set_auth(&api, JF_APP_NAME, app.login.device_id, app.login.token);
+            jf_art_set_server(art_host, art_port, JF_APP_NAME, app.login.device_id, app.login.token);
             break;
         case JF_CMD_REQUEST:
             if (c->kind == JF_KIND_AUTH) {
@@ -237,9 +238,9 @@ int main(int argc, char *argv[])
     const char *fb_device = (argc > 1) ? argv[1] : "/dev/fb0";
     const char *touch_device = (argc > 2) ? argv[2] : "/dev/input/touchscreen0";
 
-    int lock_fd = acquire_instance_lock("jellyfin");
+    int lock_fd = acquire_instance_lock(JF_APP_BIN);
     if (lock_fd < 0) {
-        fprintf(stderr, "jellyfin: another instance is already running\n");
+        fprintf(stderr, JF_APP_BIN ": another instance is already running\n");
         return 1;
     }
     signal(SIGINT, signal_handler);
@@ -252,7 +253,7 @@ int main(int argc, char *argv[])
     fb_set_bpp(fb_device, 32);
     Framebuffer fb;
     if (fb_init(&fb, fb_device) < 0) {
-        fprintf(stderr, "jellyfin: cannot open framebuffer %s\n", fb_device);
+        fprintf(stderr, JF_APP_BIN ": cannot open framebuffer %s\n", fb_device);
         return 1;
     }
     fb_clear(&fb, COLOR_BLACK);
@@ -260,7 +261,7 @@ int main(int argc, char *argv[])
     fb_swap(&fb);
     TouchInput touch;
     if (touch_init(&touch, touch_device) < 0) {
-        fprintf(stderr, "jellyfin: cannot open touch %s\n", touch_device);
+        fprintf(stderr, JF_APP_BIN ": cannot open touch %s\n", touch_device);
         fb_close(&fb);
         return 1;
     }
@@ -273,7 +274,7 @@ int main(int argc, char *argv[])
 
     audio_ok = audio_init(&audio) == 0;
     audio_set_fd_io(&audio, &stream_io);   /* https streams read through the TLS layer */
-    if (!audio_ok) fprintf(stderr, "jellyfin: no audio output\n");
+    if (!audio_ok) fprintf(stderr, JF_APP_BIN ": no audio output\n");
 
     jf_app_init(&app);
     jf_seed(&app, (uint32_t)time(NULL) * 2654435761u);
@@ -286,11 +287,11 @@ int main(int argc, char *argv[])
     }
     app.sink_channels_fn = sink_channels;
     if (jf_api_init(&api) != 0) {
-        fprintf(stderr, "jellyfin: out of memory\n");
+        fprintf(stderr, JF_APP_BIN ": out of memory\n");
         fb_close(&fb);
         return 1;
     }
-    logger_init(&logger, "jellyfin", LOG_LEVEL_INFO, false);
+    logger_init(&logger, JF_APP_BIN, LOG_LEVEL_INFO, false);
     api.log = &logger;
     jf_ui_init(&ui, &fb, &touch, &gp, &app);
     ui.eq_gains_fn = eq_now;

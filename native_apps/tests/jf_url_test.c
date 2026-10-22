@@ -318,7 +318,7 @@ static void test_header(void)
 {
     char b[256], want[256];
     int n;
-    const char *base = "Authorization: MediaBrowser Client=\"Arca\", Device=\"RW\", DeviceId=\"d1\", Version=\"1\"";
+    const char *base = "Authorization: MediaBrowser Client=\"Ludfin\", Device=\"RW\", DeviceId=\"d1\", Version=\"1\"";
 
     n = jf_auth_header(b, sizeof(b), "RW", "d1", NULL);
     CHECK(n > 0 && strstr(b, "Token=") == NULL, "NULL token left a Token: %s", b);

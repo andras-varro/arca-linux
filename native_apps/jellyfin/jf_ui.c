@@ -1,5 +1,5 @@
 /*
- * jf_ui.c — the Jellyfin screens.  Draw and focus only; jf_core decides.
+ * jf_ui.c — the Ludfin screens.  Draw and focus only; jf_core decides.
  * See jf_ui.h.
  */
 #include "jf_ui.h"
@@ -255,7 +255,7 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
     jf_ui_layout(&ui->L, &e);
 
     top_bar_init(&ui->bar, true, true);
-    ui->bar.title = "JELLYFIN";
+    ui->bar.title = JF_APP_TITLE;
     ui->bar.title_color = COLOR_WHITE;
     ui->bar.title_cut = true;
     top_bar_layout(&ui->bar);
@@ -761,7 +761,7 @@ static void overlay_input(JfUi *ui, const TouchState *ts, const InputState *in, 
         int cnt = 0;
         if (app->overlay_buttons & JF_BTN_RETRY) cnt++;
         cnt++;   /* CLOSE is always there */
-        modal_dialog_init(&ui->dlg, "JELLYFIN", app->overlay_text, cnt);
+        modal_dialog_init(&ui->dlg, JF_APP_TITLE, app->overlay_text, cnt);
         int k = 0;
         if (app->overlay_buttons & JF_BTN_RETRY)
             modal_dialog_set_button(&ui->dlg, k++, "RETRY", BTN_BG, COLOR_WHITE);
@@ -820,11 +820,11 @@ static void restore_view(JfUi *ui)
 
 /* ── The root header picker ────────────────────────────────────────────── */
 
-/* The root's title is "JELLYFIN · <CATEGORY>" followed by a drop-down arrow; the title and the arrow together are the
+/* The root's title is "LUDFIN · <CATEGORY>" followed by a drop-down arrow; the title and the arrow together are the
  * pressable header.  Sets the bar's title (the one place it is spelled) and returns the pressable rect, clamped to SAFE. */
 static const char *root_title(JfUi *ui)
 {
-    snprintf(ui->head_title, sizeof ui->head_title, "JELLYFIN \302\267 %s", jf_cat_name(ui->app->cat));
+    snprintf(ui->head_title, sizeof ui->head_title, JF_APP_TITLE " \302\267 %s", jf_cat_name(ui->app->cat));
     return ui->head_title;
 }
 
@@ -1544,7 +1544,7 @@ void jf_ui_draw(JfUi *ui)
         return;
     }
 
-    const char *title = "JELLYFIN";
+    const char *title = JF_APP_TITLE;
     switch (app->screen) {
     case JF_SCR_ALBUMS: case JF_SCR_TRACKS: case JF_SCR_SEARCH: case JF_SCR_MIX:
         if (app->crumb[0]) title = app->crumb;
