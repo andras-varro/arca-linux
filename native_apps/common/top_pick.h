@@ -23,6 +23,7 @@
 
 #define TP_ARROW  14    /* the drop-down glyph, a square box */
 #define TP_GAP     8    /* between the title, the arrow and the edge of the header target */
+#define TP_EXTRA  (TP_GAP + TP_ARROW + TP_GAP)   /* TopBar.title_extra: the arrow plus a gap each side, so it clears the info text */
 #define TP_W     260    /* the popup's width (narrower when the screen is) */
 #define TP_ROW_H  40
 

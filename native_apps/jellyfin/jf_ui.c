@@ -806,7 +806,7 @@ static UiRect head_rect_of(JfUi *ui, const char *title, bool arrow)
     JfExtents e;
     jf_ui_extents_live(&e);
     ui->bar.title = title;
-    ui->bar.title_extra = arrow ? TP_GAP + TP_ARROW : 0;
+    ui->bar.title_extra = arrow ? TP_EXTRA : 0;
     top_bar_layout(&ui->bar);
     const TopBarLayout *L = &ui->bar.L;
     TpExt te = { e.safe_l, e.safe_t, e.safe_r, e.safe_b };
@@ -1030,7 +1030,6 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         if (can_sign && button_check_tap(&ui->signin, ts, now)) pick = 3;
         if (button_check_tap(&ui->signexit, ts, now)) pick = 4;
         if (pick < 0 && zo.activate >= 0) pick = ui->zf.zone == SIZ_BAR ? 4 : zo.activate;   /* the bar's only button is EXIT */
-        if (go_back) emit(out, &n, max, JF_EV_QUIT);
         if (pick >= 0 && pick < JF_UI_FIELDS) edit_field(ui, ptr, pick);
         else if (pick == 3 && can_sign) {
             int k = emit(out, &n, max, JF_EV_SIGNIN);
@@ -1046,8 +1045,8 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
 
     if (sc == JF_SCR_NOWPLAYING) {
         /* The ten buttons in their order (PREV, PLAY/PAUSE, STOP, NEXT, QUEUE, MIX, I-MIX, EQ, VOL +, VOL -) are one ui_zone
-         * button zone under the top bar.  Left / Right are the volume (on the bar they walk it); Up / Down move spatially
-         * across the portrait rows, and in the one-row landscape layout walk the buttons in order (Up from the first
+         * button zone under the top bar.  Left / Right are the volume (on the bar they walk it); Up / Down move
+         * and walk the buttons in order, wrapping, in every layout (Up from the first
          * reaches the bar, Down from the bar returns to the first).  Shift / the pad's B opens the equaliser.  Start / Esc
          * and Space pause, Select / Backspace go back (the bar has BACK too). */
         if (bp(in, BTN_ID_BACK)) emit(out, &n, max, JF_EV_BACK);
@@ -1060,9 +1059,7 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         InputState zin = *in;
         if (!on_bar) zin.buttons[BTN_ID_LEFT].pressed = zin.buttons[BTN_ID_RIGHT].pressed = false;
         zin.buttons[BTN_ID_JUMP].pressed = false;
-        bool one_row = true;
-        for (int i = 1; i < z[NPZ_ROW].n; i++) if (z[NPZ_ROW].r[i].y != z[NPZ_ROW].r[0].y) one_row = false;
-        if (one_row && ui->zf.zone == NPZ_ROW && ui->zf.id >= 0 && (bp(in, BTN_ID_DOWN) || (bp(in, BTN_ID_UP) && ui->zf.id > 0))) {
+        if (ui->zf.zone == NPZ_ROW && ui->zf.id >= 0 && (bp(in, BTN_ID_DOWN) || (bp(in, BTN_ID_UP) && ui->zf.id > 0))) {
             int step = bp(in, BTN_ID_DOWN) ? 1 : JF_UI_NP - 1;
             uz_focus(&ui->zf, z, NPZ_N, NPZ_ROW, (ui->zf.id + step) % JF_UI_NP);
             zin.buttons[BTN_ID_UP].pressed = zin.buttons[BTN_ID_DOWN].pressed = false;
@@ -1245,7 +1242,7 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     bool key_jump = lin && bp(lin, BTN_ID_JUMP);
     JfEventType pe = JF_EV_NONE;
     if (queue) { if (ev == LV_EV_ACTIVATE || key_jump) pe = JF_EV_QUEUE_JUMP; }
-    else if (ev == LV_EV_ACTIVATE && !by_key) pe = JF_EV_ACTIVATE;
+    else if (ev == LV_EV_ACTIVATE && (!by_key || (app->action_bar && app->action_row == ui->lv.cursor))) pe = JF_EV_ACTIVATE;
     else if (ev == LV_EV_TAP || ev == LV_EV_ACTIVATE || key_jump) pe = JF_EV_SELECT;
     if (pe != JF_EV_NONE && ui->lv.cursor >= 0 && ui->lv.cursor < count) {
         int k = emit(out, &n, max, pe);
@@ -1537,7 +1534,7 @@ void jf_ui_draw(JfUi *ui)
     default: break;
     }
     ui->bar.title = title;
-    ui->bar.title_extra = app->screen == JF_SCR_ARTISTS ? TP_GAP + TP_ARROW : 0;
+    ui->bar.title_extra = app->screen == JF_SCR_ARTISTS ? TP_EXTRA : 0;
     top_bar_draw(fb, &ui->bar);
     if (app->screen == JF_SCR_ARTISTS)   /* the drop-down arrow after the title: the header opens the picker */
         tp_draw_arrow(fb, ui->bar.L.title_x, ui->bar.L.title_w, ui->bar.L.top, ui->bar.L.h);

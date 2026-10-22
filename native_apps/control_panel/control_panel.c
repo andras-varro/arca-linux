@@ -294,7 +294,7 @@ static TopPick *page_header(AppState *state, UiRect *head) {
     bar.title_color = COLOR_WHITE;
     bar.title_scale = 3;
     bar.title_cut = false;
-    bar.title_extra = TP_GAP + TP_ARROW;
+    bar.title_extra = TP_EXTRA;
     top_bar_layout(&bar);
     TpExt te = pick_ext();
     *head = tp_head_rect(bar.L.title_x, bar.L.title_w, bar.L.top, bar.L.bottom, &te, true);

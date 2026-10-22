@@ -1245,6 +1245,75 @@ static void zone_signin(void)
     jf_ui_free(&ui);
 }
 
+/* P  pad / keyboard reach: the portrait now-playing rows are walked in order by Up / Down (Left / Right stay the volume) and
+ * Up from the first still reaches the bar; BACK and Start on the sign-in screen do not quit it; ACTION on the row whose
+ * action bar is already up (the touch second tap) sends ACTIVATE. */
+static void pad_reach(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    static JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    uint32_t t = 2000;
+    int n;
+
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_NOWPLAYING;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    JfExtents pe = { 0, 0, 480, 800, 17, 17, 480 - 17, 800 - 17 };
+    jf_ui_layout(&ui.L, &pe);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);   /* bar -> a button (spatially) */
+    CHECK(ui.zf.zone == 1, "P: portrait Down from the bar left zone %d, want the buttons", ui.zf.zone);
+    for (int k = 0; k < JF_UI_NP && ui.zf.id > 0; k++) feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 1 && ui.zf.id == 0, "P: portrait Ups did not walk back to button 0 (zone %d id %d)", ui.zf.zone, ui.zf.id);
+    for (int i = 1; i <= JF_UI_NP; i++) {
+        n = feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+        CHECK(ui.zf.zone == 1 && ui.zf.id == i % JF_UI_NP, "P: portrait Down step %d reached id %d, want %d", i, ui.zf.id, i % JF_UI_NP);
+        CHECK(!has_event(ev, n, JF_EV_VOL_UP) && !has_event(ev, n, JF_EV_VOL_DOWN), "P: portrait Down sent a volume event");
+    }
+    for (int i = JF_UI_NP - 1; i >= 1; i--) {   /* now on 0 (wrapped): Up walks 0 -> bar is not the wrap, so go down first */
+        feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+        CHECK(ui.zf.id == JF_UI_NP - i, "P: portrait Down to %d gave id %d", JF_UI_NP - i, ui.zf.id);
+    }
+    for (int i = JF_UI_NP - 1; i >= 1; i--) {
+        feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
+        CHECK(ui.zf.zone == 1 && ui.zf.id == i - 1, "P: portrait Up from %d reached id %d", i, ui.zf.id);
+    }
+    feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 0, "P: portrait Up from the first button did not reach the bar (zone %d)", ui.zf.zone);
+    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+    int before = ui.zf.id;
+    n = feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_VOL_UP) && ui.zf.id == before, "P: portrait Right was not the volume (id %d -> %d)", before, ui.zf.id);
+    jf_ui_free(&ui);
+
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_SIGNIN;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    n = feed_btn(&ui, BTN_ID_BACK, t += 1000, ev, MINI_MAX);
+    CHECK(!has_event(ev, n, JF_EV_QUIT), "P: BACK on sign-in quit the app");
+    n = feed_btn(&ui, BTN_ID_PAUSE, t += 1000, ev, MINI_MAX);
+    CHECK(!has_event(ev, n, JF_EV_QUIT), "P: Start on sign-in quit the app");
+    jf_ui_free(&ui);
+
+    tk_setup(&app, JF_SCR_TRACKS, false);
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    ui.zf.shown = false;        /* the last input was a touch */
+    app.action_bar = true;      /* raised by a touch: the pad focus stays in the list */
+    app.action_row = ui.lv.cursor;
+    feed(&ui, 0, 0, false, false, false, t += 1000, ev, MINI_MAX);
+    if (ui.zf.zone == 1) {
+        n = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
+        CHECK(has_event(ev, n, JF_EV_ACTIVATE) && !has_event(ev, n, JF_EV_SELECT),
+              "P: ACTION on the row whose bar is up sent %d events, first type %d, want ACTIVATE", n, n ? (int)ev[0].type : -1);
+    } else CHECK(0, "P: pad focus was not in the list (zone %d)", ui.zf.zone);
+    jf_ui_free(&ui);
+}
+
 int main(void)
 {
     add_to_playlist();
@@ -1272,6 +1341,7 @@ int main(void)
     zone_stack_browse();
     zone_np_settings();
     zone_signin();
+    pad_reach();
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");
     return 0;
