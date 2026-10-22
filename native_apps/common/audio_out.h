@@ -221,6 +221,11 @@ typedef struct {
     EnhParams   enh_p;
     EnhState    enh_s;
 
+    /* Consecutive all-zero frames fed through attenuate(), and whether the DSP is
+     * currently skipped for them (state reset on entry).  See attenuate(). */
+    long        silent_frames;
+    bool        dsp_idle;
+
     AudioOutFill fill;
     void        *fill_ctx;
     const char  *fill_owner;

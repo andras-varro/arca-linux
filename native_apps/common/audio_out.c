@@ -4,6 +4,7 @@
 #include "config.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -164,15 +165,56 @@ static void derive_geometry(AudioOut *out, const AudioOutSpace *sp)
                              sp->ring_frames);
 }
 
+/** True when every sample is zero.  An OR-reduction rather than a flag from the
+ *  fill: the fill is one opaque callback shared with ScummVM, and the sum over
+ *  ~12k int16 costs a fraction of one biquad stage, so no new contract is needed. */
+static bool all_silent(const int16_t *buf, long samples)
+{
+    int16_t acc = 0;
+    for (long i = 0; i < samples; i++) acc |= buf[i];
+    return acc == 0;
+}
+
 /** The device attenuation stage — see audio_attenuate() in audio_gen.c, which is
- *  the one implementation of it and the reason a shift rather than a multiply. */
+ *  the one implementation of it and the reason a shift rather than a multiply.
+ *
+ *  ⚠️ The stream is never idle (an idle one underruns), so a silent app still
+ *  feeds it a lead of zeros every frame, and the equaliser and enhancer over
+ *  those zeros was ~11 % CPU on a stopped player.  Zeros in give zeros out once
+ *  the filters have rung down, so after SILENT_HANG_MS of consecutive all-zero
+ *  buffers the DSP is skipped.  300 ms is many time constants of the slowest
+ *  stage (the low shelf and the bass section settle in tens of ms), and the state
+ *  is RESET on entering the skip, so what the first sound afterwards meets is a
+ *  fresh filter and never a stale tail.  The master shift of zeros is zeros, so
+ *  the output is unchanged by the skip. */
+#define SILENT_HANG_MS 300
+
 static void attenuate(AudioOut *out, int16_t *buf, long samples)
 {
+    long frames = (out->channels > 0) ? samples / out->channels : 0;
+
+    if (all_silent(buf, samples)) {
+        /* Tested BEFORE adding this buffer, so at least SILENT_HANG_MS of zeros
+         * have gone through the filters by the time one is skipped. */
+        if (out->silent_frames >= audio_frames_for_ms(out->rate, SILENT_HANG_MS)) {
+            if (!out->dsp_idle) {
+                eq_state_reset(&out->eq_s);
+                enh_state_reset(&out->enh_s);
+                out->dsp_idle = true;
+            }
+            return;     /* the buffer is already zeros, and so is the shifted one */
+        }
+        if (out->silent_frames < LONG_MAX - frames) out->silent_frames += frames;
+    } else {
+        out->silent_frames = 0;
+        out->dsp_idle      = false;
+    }
+
     /* The equaliser first, then the enhancer, on the full-scale data; the master shift after. */
     if (out->eq_p.n > 0 && out->channels > 0)
-        eq_process(&out->eq_s, &out->eq_p, buf, samples / out->channels, out->channels);
+        eq_process(&out->eq_s, &out->eq_p, buf, frames, out->channels);
     if (out->enh_p.active && out->channels > 0)
-        enh_process(&out->enh_s, &out->enh_p, buf, samples / out->channels, out->channels);
+        enh_process(&out->enh_s, &out->enh_p, buf, frames, out->channels);
     audio_attenuate(buf, samples, out->shift);
 }
 

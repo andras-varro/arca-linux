@@ -1506,6 +1506,81 @@ int main(void)
               "S5 CONTROL: unpinned any-sink, already pinned, onboard, and inside the rate "
               "limit all stay quiet");
     }
+    printf("\n=== T. silence skips the DSP (after a hangover) ===\n");
+    {
+        const int gains[EQ_BANDS] = { 6, 6, 6, 6, 6 };
+        const AudioEnh en = { 1, 60, 50, 60, 50, 60, 50 };
+        const long hang = audio_frames_for_ms(RATE, 300);
+
+        fake_reset(&f);
+        memset(&fc, 0, sizeof(fc));
+        check(audio_out_open(&out, &FAKE_DEV, &f, RATE, 2) == 0, "T0 opens");
+        audio_out_set_eq(&out, gains);
+        audio_out_set_enh(&out, &en);
+        audio_out_set_fill(&out, fill_const, &fc, "t");
+        const long lead = audio_out_lead(&out);
+
+        /* Prime the filters with sound, then go silent. */
+        fc.value = 8000; fc.produce = -1;
+        for (int i = 0; i < 3; i++) audio_out_service(&out);
+        fc.value = 0;
+
+        /* A sentinel in the history shows whether a DSP call touched it: the
+         * filters rewrite their history on every call, a skip leaves it alone. */
+        int ran = 0, skipped_at = -1;
+        bool zeros = true;
+        long frames_dsp = 0;
+        for (int i = 1; i <= 12; i++) {
+            out.eq_s.h[0][0].y1 = 12345;
+            long before = f.len;
+            audio_out_service(&out);
+            bool dsp_ran = (out.eq_s.h[0][0].y1 != 12345);
+            if (dsp_ran) { ran++; frames_dsp += lead; }
+            else if (skipped_at < 0) skipped_at = i;
+            /* The hangover legitimately carries the filters' ring-down of the
+             * sound before it; only a skipped fill has to be exactly zeros. */
+            if (!dsp_ran && !all_zero(f.got, before, f.len)) zeros = false;
+        }
+        check(zeros, "T1 the output of every skipped fill is all zeros");
+        check(ran >= 1 && frames_dsp >= hang,
+              "T2 during the hangover the DSP still runs: at least 300 ms of zeros "
+              "went through it");
+        check(skipped_at > 0 && skipped_at == ran + 1,
+              "T3 after the hangover the DSP is NOT called on silent fills");
+        {
+            long before = f.len;
+            out.eq_s.h[0][0].y1 = 12345;
+            audio_out_service(&out);
+            check(out.eq_s.h[0][0].y1 == 12345 && all_zero(f.got, before, f.len),
+                  "T3b and it stays skipped on the next silent fill");
+        }
+
+        /* Sound resumes: the DSP runs again, from a fresh state. */
+        fc.value = 8000;
+        long before = f.len;
+        audio_out_service(&out);
+        long n = f.len - before;
+        check(out.eq_s.h[0][0].y1 != 12345 && n > 0 && !all_zero(f.got, before, f.len),
+              "T4 a non-silent fill after a skip is processed by the DSP");
+
+        /* The reference: the same loud buffer through a fresh EQ and enhancer. */
+        {
+            static int16_t ref[1 << 15];
+            long frames = n / f.fb;
+            for (long i = 0; i < frames * 2; i++) ref[i] = 8000;
+            EqState es; EnhState hs;
+            eq_state_reset(&es); enh_state_reset(&hs);
+            eq_process(&es, &out.eq_p, ref, frames, 2);
+            enh_process(&hs, &out.enh_p, ref, frames, 2);
+            audio_attenuate(ref, frames * 2, out.shift);
+            check(frames > 0 && frames * 2 <= (long)(sizeof(ref) / sizeof(ref[0])) &&
+                  memcmp(ref, f.got + before, (size_t)n) == 0,
+                  "T5 and its output equals a fresh-state DSP's — no stale tail from "
+                  "before the skip");
+        }
+        audio_out_close(&out);
+    }
+
 
     printf("\n%s  %d checks, %d failure(s)\n",
            failures ? "FAILED" : "PASSED", checks, failures);
