@@ -1,7 +1,7 @@
 /*
  * jf_ui — the Jellyfin client's screens: draw from JfApp, map touch / keyboard /
  * pad to user-intent events.  No policy: every decision is jf_core's.
- * Screens: sign-in, root / browse lists, queue, now playing, and the MIX tick screen (JF_SCR_MIX).
+ * Screens: sign-in, root / browse lists, queue, now playing, the MIX tick screen (JF_SCR_MIX), PLPICK and SETTINGS.
  *
  * jf_ui_layout() is the one place the rectangles are computed; it is pure (the
  * screen extents are an argument), so tests/jf_ui_layout_test.c calls the very
@@ -84,8 +84,6 @@ bool jf_ui_head_count(const JfApp *app, char *buf, size_t cap);
 /** The delete-playlist question: "DELETE <name>?", the name cut to 25 glyphs so the line is the dialog's full 33-glyph width. */
 void jf_ui_delete_msg(const JfApp *app, char *buf, size_t cap);
 
-/* ABAR: the action bar owns focus while the core says it is up (Left / Right move, ENTER acts, Up / Down dismiss it). */
-typedef enum { JF_ZONE_LIST = 0, JF_ZONE_ROW, JF_ZONE_BAR, JF_ZONE_ABAR } JfZone;
 
 typedef struct {
     Framebuffer *fb;
@@ -104,7 +102,7 @@ typedef struct {
     int  seek_ms;                        /* its target */
     Button mixb[JF_UI_MIXBTN];
     Button plb[JF_UI_MIXBTN];            /* PLPICK screen: ADD, CLOSE on the same rects as mixb (absent ADD is not drawn or pressed) */
-    UiZoneFocus zf;                      /* every list-over-buttons screen: focus over its zones (STACK_* for PLPICK and MIX, BZ_* for browse and queue) */
+    UiZoneFocus zf;                      /* every list-over-buttons screen: focus over its zones (STACK_* for PLPICK, MIX and SETTINGS, BZ_* for browse and queue, NPZ_* for now playing) */
     bool abar_up;                        /* the core's action_bar as of the last frame: a rising edge moves focus onto it */
     int  abar_tz;                        /* the zone the action bar occupied when it rose (the strip for the playlist menu, else the button row) */
     Button field[JF_UI_FIELDS], signin, signexit;
@@ -119,10 +117,8 @@ typedef struct {
     char head_title[48];                 /* "JELLYFIN . CATEGORY", the root's bar title */
     bool lv_ready;
     char fields[JF_UI_FIELDS][64];       /* server, user, password (wiped after the POST) */
-    int  focus;                          /* index in the zone (sign-in: 0..4) */
-    JfZone zone;
-    bool show_ring;                      /* a key / pad press shows it, a touch hides it */
-    int  bar_focus;                      /* 0 back, 1 exit */
+    int  focus;                          /* sign-in only: the focused rect, 0..4 (every other screen is a ui_zone, zf) */
+    bool show_ring;                      /* a key / pad press shows it, a touch hides it: sign-in's ring, and the seed of zf.shown on a new screen */
     int  played_ms;                      /* the loop's wall-clock count for the track */
     bool exit_press, back_press;
     char rowtxt[32][48];                 /* detail strings of the rows being drawn */

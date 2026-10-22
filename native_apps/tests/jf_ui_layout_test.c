@@ -1139,6 +1139,61 @@ static void zone_stack_browse(void)
     jf_ui_free(&ui);
 }
 
+/* Y  now playing and settings on ui_zone: Up from the button row reaches the bar (ACTION there is BACK), Down returns, Left / Right
+ * stay the volume and never move focus, a touch hides the ring; settings: Up at row 0 -> bar, Right BACK -> EXIT, Down -> list
+ * with the cursor unmoved.  The portrait two-row walk is spatial inside ui_zone (ui_zone_test); the layout here is landscape. */
+static void zone_np_settings(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_NOWPLAYING;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    uint32_t t = 2000;
+    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 1 && ui.zf.id == 2, "Y: two Downs on now playing left zone %d id %d, want the buttons, 2", ui.zf.zone, ui.zf.id);
+    int k = feed_btn(&ui, BTN_ID_LEFT, t += 1000, ev, MINI_MAX);
+    CHECK(has_event(ev, k, JF_EV_VOL_DOWN) && ui.zf.id == 2, "Y: Left was not the volume or moved focus (id %d)", ui.zf.id);
+    k = feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
+    CHECK(has_event(ev, k, JF_EV_VOL_UP) && ui.zf.id == 2, "Y: Right was not the volume or moved focus (id %d)", ui.zf.id);
+    feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
+    feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 1 && ui.zf.id == 0, "Y: Up twice from button 2 gave zone %d id %d, want button 0", ui.zf.zone, ui.zf.id);
+    feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 0, "Y: Up from the first button did not reach the bar (zone %d)", ui.zf.zone);
+    k = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
+    CHECK(has_event(ev, k, JF_EV_BACK), "Y: ACTION on the bar's BACK did not send BACK");
+    k = feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 0 && ui.zf.id == 1 && !has_event(ev, k, JF_EV_VOL_UP),
+          "Y: Right on the bar was not BACK -> EXIT (zone %d id %d, or it sent VOL+)", ui.zf.zone, ui.zf.id);
+    k = feed_btn(&ui, BTN_ID_LEFT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.id == 0 && !has_event(ev, k, JF_EV_VOL_DOWN), "Y: Left on the bar was not EXIT -> BACK (id %d)", ui.zf.id);
+    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 1 && ui.zf.id == 0, "Y: Down from the bar gave zone %d id %d, want button 0", ui.zf.zone, ui.zf.id);
+    feed(&ui, ui.L.np[0].x + 20, ui.L.np[0].y + 20, true, true, false, t += 1000, ev, MINI_MAX);
+    CHECK(!ui.zf.shown, "Y: a touch on now playing left the ring shown");
+    jf_ui_free(&ui);
+
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_SETTINGS;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    t = 2000;
+    feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 0 && ui.zf.id == 0, "Y: settings Up at row 0 gave zone %d id %d, want the bar's BACK", ui.zf.zone, ui.zf.id);
+    feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 0 && ui.zf.id == 1, "Y: settings Right on the bar gave id %d, want EXIT (1)", ui.zf.id);
+    int cur = ui.lv.cursor;
+    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 1 && ui.lv.cursor == cur, "Y: settings Down from the bar gave zone %d, cursor %d -> %d", ui.zf.zone, cur, ui.lv.cursor);
+    jf_ui_free(&ui);
+}
+
 int main(void)
 {
     add_to_playlist();
@@ -1164,6 +1219,7 @@ int main(void)
     folder_ui();
     stack_pad();
     zone_stack_browse();
+    zone_np_settings();
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");
     return 0;
