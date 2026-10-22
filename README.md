@@ -2,8 +2,7 @@
 
 Ludbox Linux turns a Steelcase RoomWizard wall display into a small games and apps box:
 seven touch games, a touch instrument, a terminal, a classic-adventure engine (ScummVM),
-a remote-desktop viewer and a settings app. It runs from its own microSD card, so the
-display's original software stays untouched on the card it came with.
+a remote-desktop viewer and a settings app. It runs from its own microSD card (section 1).
 
 Everything runs on the display's own 600 MHz processor with no graphics chip, so expect
 simple games, not modern ones. No Wi-Fi is fitted; the unit uses its Ethernet cable,
@@ -65,6 +64,7 @@ controller needs a **powered** hub.
 |---|---|
 | Snake, Tetris, Pong, Brick Breaker, SameGame, Frogger, Office Runner | Games. They take touch, keyboard and pad. Scores are kept. |
 | Tap-a-Theremin | A touch instrument: slide a finger to change the pitch. |
+| Ludfin | A music player for your own Jellyfin server: browse albums, artists, playlists, genres and songs, search, keep a queue, save playlists. Sign in on the app's own screen (server address, user, password; the unit keeps a token, not the password). Music stops when you leave the app. Keys: Tab or pad RB next pane, Shift+Tab or LB previous; arrows only inside a pane; Enter, Space or A activates; Esc, Backspace or B goes back; on NOW PLAYING Left and Right seek 10 s; Shift+Up and Shift+Down reorder the queue; PgUp and PgDn page lists. |
 | Terminal | A text login on the unit's screen. Root needs a password first (section 5). |
 | Control Panel | Settings and tests for the unit itself (section 4). |
 | VNC Client | Shows another computer's screen (section 4). |

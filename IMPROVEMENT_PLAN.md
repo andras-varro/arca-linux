@@ -301,52 +301,26 @@ follow its shape. Navigation stays as it is: the pages' `*_page_focusables` rect
 from, or a draw callback owned by the widget. **Done when** buttons, toggles, sliders, launcher tiles, dialog buttons and the bar draw
 focus through one mechanism, and the Control Panel's generic ring is gone.
 
-### F152. A Jellyfin music client — open, operator wish 2026-10-16, raised to the top 2026-10-19, not designed
+### F152. Ludfin (the Jellyfin music client): remaining features — open, operator requests 2026-10-22
 
-A plain foreground app that browses and searches a local Jellyfin server and plays a track; leaving the app stops the
-music (operator ruling 2026-10-19: background play needs task switching and a task manager, which nothing has).
-**Where the sound goes is not the app's business:** `audio_init()` picks the sink, headset > any BT sink > USB DAC >
-onboard (`audio_out_device_for()`, `common/audio_out.h:492`), so the app plays through `common/audio.c` like every
-other. It plays mono (the bus is mono); stereo is F154.
+The app plays, searches, queues and saves playlists, and plays stereo through a USB or Bluetooth sink. Open, each agreed
+with the operator but not built: (1) the duplicate dialog on a multi-track add to a playlist gets **SKIP EXISTING** beside
+ADD ANYWAY and CANCEL, shown only when some but not all tracks are already in it (the core needs a per-id duplicate flag,
+not a count); (2) a **3-way tap-action setting** (REPLACE QUEUE / ADD AND PLAY / ADD ONLY), one setting because two
+booleans have a meaningless combination; (3) **ADD ALL TO PLAYLIST** on search results, over the track set PLAY ALL plays;
+(4) a **genre** lists tracks whose own genre matches (probe `/Items?GenreIds=<id>&IncludeItemTypes=Audio&Recursive=true`
+first), with PLAY ALL and ADD ALL TO PLAYLIST, where today it lists albums; (5) **more NOW PLAYING metadata** (artist,
+album artist unless equal or Various Artists, conductor, performers with roles, work, year, up to five genres) by a
+range-read of the file's tags on track change, behind an opt-in per-server setting, default off, with failsafes: a server
+that answers 200 instead of 206 is cut off at the cap, remembered, switched off for and logged once. **Done when** each
+is on the panel.
 
-**Measured 2026-10-19:** the server (Jellyfin 12.1.0; mp3 and flac, some wmav2 and mp2) transcodes any track to the bus
-format faster than realtime with `/Audio/<id>/stream?static=false&container=wav&audioCodec=pcm_s16le&audioSampleRate=44100&audioChannels=1&playSessionId=<new>`,
-so the device carries no decoder. ⚠️ Without a fresh `playSessionId` the server reused the previous job and sent 48 kHz
-stereo. The RIFF size field reads `0xFFFFFFFF` and a `LIST` chunk precedes `data`. Receiving costs under 5% of the
-core on `.73`: 100 s of 48 kHz stereo (19.2 MB) arrived in 8.2 s for 4.9 CPU-s (`wget | head | wc`, an upper bound),
-and the mono stream is half the bytes.
+### F156. Log page: a Follow setting — open, operator request 2026-10-22, not designed
 
-**Built:** `audio_music_start_fd()` (`common/audio.h`) plays a WAV from a non-blocking fd through a ring buffer, with a
-1 s pre-roll, silence plus re-buffer on an underrun and a fade at each edge (rules in `common/audio_wav.c`), and the
-throwaway `stream_play <host> <port> <path> [seconds]` drives it. **Measured on `.115`, 2026-10-19,** forcing
-`audio_device` in `/opt/games/arca_config.conf`: a server track played 30 s on the BT headset (`bluealsa`, A2DP), the
-USB card (`plughw:1,0`) and onboard (`plughw:0,0`), each 0 underruns, `stream_play` ~3% CPU and `bluealsa` below
-`top`'s resolution; the operator heard all three with no clicks, onboard **very faint**, quieter than game music on the same speaker. The
-source is quiet: the first 30 s of that track as served measure peak -10.5 dBFS, RMS -37.3 dBFS mono (stereo -6.4 /
--36.9), about 20 dB under a game asset (`sounds/fx_burst.wav`, RMS -15.9). Every item carries `NormalizationGain` (dB; 200
-random tracks: median -5, max +17.9, a quarter positive), so applying it evens tracks out but turns most *down*: the faint
-speaker needs its own level decision (proposed, not ruled: apply the gain, boosts capped at +12 dB, onboard loudness via the
-bus volume). Whole-system CPU on the panel's monitor during playback: ~15%. A 48 kHz stereo stream is refused. **Built:**
-`common/http.c` (polled non-blocking HTTP/1.0 and HTTPS, buffer or stream mode, token only in a header) and `common/json.c`; the API
-wants the `Authorization: MediaBrowser Token=` header (`api_key=` got 401 on `/Users/Me`). `stream_play` on `http.c`, `.115`,
-BT, 2026-10-19: 40 s of a studio track, 0 underruns, whole-system CPU 8-10%, the operator heard good quality at the right
-volume. **Missing:** `list_view` and
-`keyboard_enter()` exist, a thumbnail cache does not; album art needs a PNG decoder (`format=Bmp` answers JPEG, `format=Png`
-is honoured). **Order:** (1) the app's own sign-in screen (server, user, password exchanged for a token; operator ruling
-2026-10-19: in the app, not the Control Panel), the unit keeping a token and never the password, no credential in the repo
-or an image, plus an `arca-backup` item for that login shaped like the VNC one and **unchecked by default** (plain text);
-(2) the app: Artists → Albums → Tracks in `list_view`, search through `keyboard_enter()`, now playing with a volume
-control (operator, same day) applied with the track gain in one place, a queue,
-pad and keyboard as well as touch, and `stream_play` deleted. **Done when** the app plays a searched track at the panel.
-
-### F154. Stereo music through the mono mix bus — open, operator request 2026-10-19, feasibility not assessed
-
-Music plays mono because the bus is: every voice is single-channel at 44100 Hz and `audio_interleave()`
-(`common/audio_gen.h:262`) copies it into both channels of the stereo-only `hw:0,0` (`native_apps/CLAUDE.md` →
-*Audio: the generator is separate from the device*). The device is already opened stereo, so the question is the bus,
-not the hardware: a stereo music source mixed beside the mono voices (effects summed into both channels), or a stereo
-bus. The onboard speaker sums L + R, so only BT and USB gain. **Done when** feasibility is answered: which shape, and
-the CPU of a stereo stream measured on `.188`; then decide with the operator.
+The Control Panel's Log page (`control_panel/log_page.c`) shows the selected log read-only. Add a **Follow** setting, true or
+false, for the selected log: on, the view keeps showing the newest lines as the file grows; off, it stays where the reader
+left it. Open design questions: whether the setting is per log or one for the page, and whether it persists across visits.
+**Done when** the page follows a growing log with the setting on and holds still with it off, at the panel.
 
 ### F106. Support BeagleBone Black boards — open, operator idea 2026-10-01, future
 
