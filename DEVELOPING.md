@@ -95,7 +95,7 @@ than that a test failed. One suite needs root and reports itself SKIPPED without
 is never counted as a pass. Authoring rules: `tests/CLAUDE.md`.
 
 The device half: `native_apps/smoke-first-screen.sh <ip> [binary ...]` (`--list`, `--out DIR`) stops the app loop, launches each native app, and gives its first frame one verdict (pass / did-not-start / started-died / black-screen / could-not-tell).
-`native_apps/files-hotplug-check.sh <ip> [--out DIR]` is the unattended Files check: it opens Files through `arca_tap`, pulls and re-plugs the stick by sysfs, and passes only if the right pane changed on the pull and gained its USB row on the plug (exit 0 / 1 / 2).
+`native_apps/files-hotplug-check.sh <ip> [--out DIR]` is the unattended Files check: it opens Files through `arca_tap`, pulls and re-plugs the stick by sysfs, and passes only if the right pane changed on the pull and gained its USB row on the plug (exit 0 / 1 / 2). `native_apps/build-openssl-deps.sh` stages the OpenSSL headers and link libraries (`build-and-deploy.sh` runs it when absent); `native_apps/refresh-ca-bundle.sh` rewrites `native_apps/data/ca-certificates.crt` from the WSL Ubuntu Mozilla bundle; why and the limits: `native_apps/CLAUDE.md`, `http.c` row.
 
 ```bash
 ./tests/run-all.sh                  # everything

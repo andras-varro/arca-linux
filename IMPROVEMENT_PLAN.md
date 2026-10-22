@@ -327,7 +327,7 @@ source is quiet: the first 30 s of that track as served measure peak -10.5 dBFS,
 random tracks: median -5, max +17.9, a quarter positive), so applying it evens tracks out but turns most *down*: the faint
 speaker needs its own level decision (proposed, not ruled: apply the gain, boosts capped at +12 dB, onboard loudness via the
 bus volume). Whole-system CPU on the panel's monitor during playback: ~15%. A 48 kHz stereo stream is refused. **Built:**
-`common/http.c` (polled non-blocking HTTP/1.0, buffer or stream mode, token only in a header) and `common/json.c`; the API
+`common/http.c` (polled non-blocking HTTP/1.0 and HTTPS, buffer or stream mode, token only in a header) and `common/json.c`; the API
 wants the `Authorization: MediaBrowser Token=` header (`api_key=` got 401 on `/Users/Me`). `stream_play` on `http.c`, `.115`,
 BT, 2026-10-19: 40 s of a studio track, 0 underruns, whole-system CPU 8-10%, the operator heard good quality at the right
 volume. **Missing:** `list_view` and
