@@ -6,7 +6,7 @@
  * can make it deterministic.
  *
  * How the main loop drives it:
- *   1. jf_app_init() once (JfApp is ~0.8 MB: make it static), then jf_login_load()
+ *   1. jf_app_init() once (JfApp is ~2.4 MB (sizeof, measured with the artist and inline-search stores; ~2.0 MB before them): make it static), then jf_login_load()
  *      into a JfLogin and send JF_EV_START with it.
  *   2. Every frame: turn input into user-intent events, jf_api_poll() results into
  *      JF_EV_RESULT, audio facts into JF_EV_STREAM_STARTED / JF_EV_TRACK_ENDED.
@@ -43,7 +43,7 @@
 #define JF_CAP_ARTISTS  1600
 #define JF_CAP_ALBUMS    300
 #define JF_CAP_TRACKS    300
-#define JF_CAP_SEARCH    200
+#define JF_CAP_SEARCH    400      /* 200 hits plus one inlined artist (JF_CAP_ARTINL fits the splice) */
 #define JF_CAP_MIX       200      /* an instant mix: JF_MIX_LIMIT items fit */
 #define JF_CAP_SEED        2
 #define JF_CAP_GENRES    100      /* JF_MIX_GENRE_PAGE */
@@ -53,6 +53,11 @@
 #define JF_CAP_PLCHK      50      /* one page of a playlist's track ids in the duplicate scan (the scan clears it between pages) */
 #define JF_PAGE_PLPICK    50
 #define JF_PAGE_PLCHK     50
+#define JF_PAGE_ARTALL    40      /* PLAY ALL on an artist folder: JF_CAP_ARTALL = JF_QUEUE_MAX tracks in 5 pages */
+#define JF_PAGE_ARTINL    40
+#define JF_CAP_ARTALL    200
+#define JF_CAP_ARTINL    300      /* an artist inlined in a search: albums, then the tracks the filter keeps */
+#define JF_ART_PAGES_MAX  20      /* tracks pages one artist folder asks for: a prolific artist whose tracks all sit on filtered albums must end */
 #define JF_DUP_PAGES_MAX  40      /* pages the duplicate scan reads (2000 entries) before it gives up and asks */
 #define JF_ADD_BATCH      10      /* ids per add request: they ride in the query and 10 fit the path */
 
@@ -86,6 +91,8 @@ typedef enum { JF_LIST_ARTISTS = 0, JF_LIST_ALBUMS, JF_LIST_TRACKS, JF_LIST_SEAR
                JF_LIST_LIBS,      /* no screen of its own: the music libraries (Views reply), items are JF_ITEM_LIBRARY; JfApp.lib_n = items stored */
                JF_LIST_PLPICK,    /* the playlists of the ADD TO PLAYLIST picker (screen JF_SCR_PLPICK); not library-scoped */
                JF_LIST_PLCHK,     /* no screen: pages of the chosen playlist's track ids, scanned for duplicates and cleared between pages */
+               JF_LIST_ARTALL,    /* no screen: PLAY ALL of an artist folder, the artist's tracks in album order (store JF_CAP_ARTALL) */
+               JF_LIST_ARTINL,    /* no screen: a searched artist's albums then tracks (the artist-folder phases), spliced into the search list when done */
                JF_LIST_COUNT } JfListId;
 
 /* The root browse category (JF_SCR_ARTISTS shows it), in the order JF_EV_CATEGORY cycles. */
@@ -341,6 +348,11 @@ typedef struct {
     JfList lists[JF_LIST_COUNT];
     JfListCtx ctx[JF_LIST_COUNT];
     int req_loaded[JF_LIST_COUNT];
+    int req_n[JF_LIST_COUNT];            /* rows in the list when its request went out: the tail past it is the page to filter */
+    struct { int phase, albums_n, pages; } art[2];   /* artist folder (lists[JF_LIST_ALBUMS], sub PLAIN) and inline artist (JF_LIST_ARTINL): phase 0 albums, 1 tracks, 2 done; rows [0,albums_n) are the albums; tracks pages asked for */
+    bool inl_on;                         /* an artist is being fetched for the search list */
+    int inl_pos;                         /* the search row it was removed from */
+    JfItem inl_item;                     /* that row, put back if the fetch is superseded */
     JfNavEntry nav[JF_NAV_MAX];
     int nav_n;
     int view_top, view_cursor;   /* the list view of the screen showing, as last reported by jf_note_view() */
@@ -376,6 +388,8 @@ typedef struct {
     JfItem store_libs[JF_CAP_LIBS];
     JfItem store_plpick[JF_CAP_PLPICK];
     JfItem store_plchk[JF_CAP_PLCHK];
+    JfItem store_artall[JF_CAP_ARTALL];
+    JfItem store_artinl[JF_CAP_ARTINL];
     char id_server[64], id_user[64];   /* the server and user the saved queue and art belong to (set at start, kept by a sign-in) */
 } JfApp;
 

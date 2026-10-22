@@ -218,7 +218,7 @@ static void test_nav_paging(void)
     send(JF_EV_ACTIVATE, 1);
     const JfCmd *r = find(JF_CMD_REQUEST);
     char want[JF_PATH_MAX];
-    jf_path_albums(want, sizeof(want), UID, app.lists[JF_LIST_ARTISTS].items[1].id, 0, JF_PAGE_ALBUMS);
+    jf_path_artist_albums(want, sizeof(want), UID, app.lists[JF_LIST_ARTISTS].items[1].id, 0, JF_PAGE_ALBUMS);
     CHECK(app.screen == JF_SCR_ALBUMS && r && strcmp(r->path, want) == 0, "artist -> ALBUMS request");
     CHECK(strcmp(app.crumb, app.lists[JF_LIST_ARTISTS].items[1].name) == 0, "crumb = artist name");
     JfCmd a = *r; reply_list(&a, JF_ITEM_ALBUM, 2, 2);
@@ -279,7 +279,7 @@ static void test_stale(void)
     CHECK(al->pending, "stale reply dropped: still waiting for the current one");
     reply_raw(&first, JF_ERR_SERVER);
     CHECK(!app.overlay && al->pending, "stale error dropped: no overlay");
-    reply_list(&second, JF_ITEM_ALBUM, 2, 2);
+    reply_list(&second, JF_ITEM_ALBUM, 2, 5);   /* more albums than this page: the artist folder waits for the scroll */
     CHECK(!al->pending && al->n == 2, "current reply accepted");
     reply_raw(&second, JF_ERR_SERVER);
     CHECK(!app.overlay, "a repeated reply for a settled request is dropped");
@@ -351,7 +351,7 @@ static void test_queue(void)
     CHECK(app.queue_n == 5 && has(JF_CMD_PLAY_STREAM), "PLAY ALL on TRACKS");
     send(JF_EV_BACK, 0);
     send(JF_EV_PLAY_ALL, 0);
-    CHECK(cm.n == 0, "PLAY ALL ignored on ALBUMS");
+    CHECK(cm.n == 1 && cm.c[0].list == &app.lists[JF_LIST_ARTALL], "PLAY ALL on an artist folder fetches its whole discography");
 }
 
 static void test_failures(void)
@@ -532,7 +532,7 @@ static void test_quit(void)
     jf_app_init(&app);
     send(JF_EV_BACK, 0);
     CHECK(has(JF_CMD_EXIT), "BACK on SIGNIN leaves");
-    CHECK(sizeof(JfApp) < 2000000, "JfApp stays small enough to be static (%zu)", sizeof(JfApp));
+    CHECK(sizeof(JfApp) < 3000000, "JfApp stays small enough to be static (%zu)", sizeof(JfApp));
 }
 
 /* The neighbour labels of the root's bottom row, and picking a category outright (the header picker). */
@@ -2244,6 +2244,201 @@ static void test_pick(void)
     CHECK(max_cmds <= 2, "no step of the add flow emitted more than 2 commands (max %d)", max_cmds);
 }
 
+
+/* ── artist folder and inline search ───────────────────────────────────── */
+
+/* append `count` tracks, as a parse would, with the album artist and album id the filter reads */
+static void fill_trk(JfList *l, int count, int total, const char *album_artist, const char *album_id)
+{
+    int from = l->n;
+    fill(l, JF_ITEM_TRACK, count, total);
+    for (int k = from; k < l->n; k++) {
+        snprintf(l->items[k].album_artist, sizeof(l->items[k].album_artist), "%s", album_artist);
+        snprintf(l->items[k].album_id, sizeof(l->items[k].album_id), "%s", album_id);
+    }
+}
+static void reply_trk(const JfCmd *c, int count, int total, const char *album_artist, const char *album_id)
+{
+    JfCmd cp = *c;
+    fill_trk(cp.list, count, total, album_artist, album_id);
+    reply_raw(&cp, JF_ERR_NONE);
+}
+/* sign in, open the first artist, load its 2 albums (the one list request left is the tracks phase, page 0) */
+static void artist_folder(void)
+{
+    signed_in(); artists_loaded(3, 3);
+    send(JF_EV_ACTIVATE, 0);
+    JfCmd a = *list_req(); reply_list(&a, JF_ITEM_ALBUM, 2, 2);
+}
+static const char *art_name(void) { return app.lists[JF_LIST_ARTISTS].items[0].name; }
+static const char *alb0(void) { return app.lists[JF_LIST_ALBUMS].items[0].id; }
+#define OTHER_ALB "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+static void test_artist(void)
+{
+    char want[JF_PATH_MAX];
+    signed_in(); artists_loaded(3, 3);
+    max_cmds = 0;
+    send(JF_EV_ACTIVATE, 0);
+    jf_path_artist_albums(want, sizeof(want), UID, app.lists[JF_LIST_ARTISTS].items[0].id, 0, JF_PAGE_ALBUMS);
+    CHECK(list_req() && strcmp(list_req()->path, want) == 0, "artist_albums_then_tracks_same_list: phase 0 asks for the artist's own albums");
+    { JfCmd a = *list_req(); reply_list(&a, JF_ITEM_ALBUM, 2, 2); }
+    jf_path_artist_tracks(want, sizeof(want), UID, app.lists[JF_LIST_ARTISTS].items[0].id, 0, JF_PAGE_ALBUMS);
+    CHECK(list_req() && list_req()->list == &app.lists[JF_LIST_ALBUMS] && strcmp(list_req()->path, want) == 0,
+          "the page after the last album is the tracks page 0 of the same list");
+    CHECK(app.lists[JF_LIST_ALBUMS].n == 2 && app.lists[JF_LIST_ALBUMS].loaded == 0 && app.busy, "albums kept, counters reset, busy");
+    { JfCmd t = *list_req(); reply_trk(&t, 3, 3, "Someone Else", "ffffffffffffffffffffffffffffffff"); }
+    CHECK(app.lists[JF_LIST_ALBUMS].n == 5 && app.lists[JF_LIST_ALBUMS].items[0].type == JF_ITEM_ALBUM &&
+          app.lists[JF_LIST_ALBUMS].items[2].type == JF_ITEM_TRACK && !app.busy && cm.n == 0, "tracks follow the albums in one list");
+
+    /* artist_tracks_filter_drops_own_album */
+    artist_folder();
+    { JfCmd t = *list_req(); JfList *l = t.list;
+      fill_trk(l, 1, 4, "Other", alb0());             /* a track of the artist's own album */
+      fill_trk(l, 1, 4, art_name(), "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");   /* album artist is the artist */
+      fill_trk(l, 2, 4, "Other", "dddddddddddddddddddddddddddddddd");
+      reply_raw(&t, JF_ERR_NONE); }
+    CHECK(app.lists[JF_LIST_ALBUMS].n == 4 && app.lists[JF_LIST_ALBUMS].loaded == 4, "own-album tracks dropped (n %d, loaded %d)", app.lists[JF_LIST_ALBUMS].n, app.lists[JF_LIST_ALBUMS].loaded);
+
+    /* artist_tracks_filter_case_insensitive */
+    artist_folder();
+    { char up[96]; snprintf(up, sizeof up, "%s", art_name()); for (char *p = up; *p; p++) if (*p >= 'a' && *p <= 'z') *p -= 32;
+      JfCmd t = *list_req(); fill_trk(t.list, 2, 2, up, "cccccccccccccccccccccccccccccccc"); reply_raw(&t, JF_ERR_NONE); }
+    CHECK(app.lists[JF_LIST_ALBUMS].n == 2, "album artist in another case is still the artist (n %d)", app.lists[JF_LIST_ALBUMS].n);
+
+    /* artist_filtered_empty_page_requests_next */
+    artist_folder();
+    { JfCmd t = *list_req(); fill_trk(t.list, 2, 6, "Other", alb0()); reply_raw(&t, JF_ERR_NONE); }
+    jf_path_artist_tracks(want, sizeof(want), UID, app.ctx[JF_LIST_ALBUMS].id, 2, JF_PAGE_ALBUMS);
+    CHECK(list_req() && strcmp(list_req()->path, want) == 0, "a page that filters to nothing asks for the next one at its loaded count");
+
+    /* artist_phase2_cap_20_pages */
+    artist_folder();
+    int reqs = 0;
+    for (int k = 0; k < 40 && list_req(); k++) {
+        JfCmd t = *list_req(); fill_trk(t.list, 2, 1000, "Other", alb0()); reply_raw(&t, JF_ERR_NONE); reqs++;
+    }
+    CHECK(reqs == 20 && !list_req() && !app.busy, "a prolific artist's filtered-away pages stop at 20 (%d)", reqs);
+    send(JF_EV_NEED_MORE, 0);
+    CHECK(cm.n == 0, "and NEED_MORE asks for no 21st");
+
+    /* artist_need_more_in_phase2 */
+    artist_folder();
+    { JfCmd t = *list_req(); reply_trk(&t, 3, 10, "Other", OTHER_ALB); }
+    CHECK(cm.n == 0 && !app.busy, "a page that kept rows waits for the scroll");
+    send(JF_EV_NEED_MORE, 0);
+    jf_path_artist_tracks(want, sizeof(want), UID, app.ctx[JF_LIST_ALBUMS].id, 3, JF_PAGE_ALBUMS);
+    CHECK(list_req() && strcmp(list_req()->path, want) == 0, "NEED_MORE asks for the next tracks page");
+
+    /* artist_play_all_fetches_pages_then_queues */
+    artist_folder();
+    { JfCmd t = *list_req(); reply_trk(&t, 3, 3, "Other", OTHER_ALB); }
+    send(JF_EV_PLAY_ALL, 0);
+    jf_path_artist_all(want, sizeof(want), UID, app.ctx[JF_LIST_ALBUMS].id, 0, 40);
+    CHECK(list_req() && list_req()->list == &app.lists[JF_LIST_ARTALL] && strcmp(list_req()->path, want) == 0 && app.busy, "PLAY ALL asks for the whole artist, 40 a page");
+    { JfCmd t = *list_req(); reply_trk(&t, 40, 70, "Other", "a"); }
+    CHECK(list_req() && list_req()->list == &app.lists[JF_LIST_ARTALL] && !has(JF_CMD_PLAY_STREAM), "page 2 fetched before anything plays");
+    { JfCmd t = *list_req(); reply_trk(&t, 30, 70, "Other", "a"); }
+    CHECK(app.queue_n == 70 && has(JF_CMD_PLAY_STREAM) && app.banner[0] == '\0', "70 queued and playing, no banner");
+
+    /* artist_play_all_caps_200_banner */
+    artist_folder();
+    { JfCmd t = *list_req(); reply_trk(&t, 3, 3, "Other", OTHER_ALB); }
+    send(JF_EV_PLAY_ALL, 0);
+    for (int k = 0; k < 10 && list_req(); k++) { JfCmd t = *list_req(); reply_trk(&t, 40, 250, "Other", "a"); }
+    CHECK(app.queue_n == JF_QUEUE_MAX && has(JF_CMD_PLAY_STREAM) && strcmp(app.banner, "FIRST 200 QUEUED") == 0,
+          "250 tracks: the first 200 queue with the banner (queue %d, banner '%s')", app.queue_n, app.banner);
+
+    /* artist_track_row_raises_action_bar */
+    artist_folder();
+    { JfCmd t = *list_req(); reply_trk(&t, 3, 3, "Other", OTHER_ALB); }
+    send(JF_EV_SELECT, 3);
+    CHECK(app.action_bar && app.action_row == 3, "a track row on the artist folder raises the bar");
+    send(JF_EV_PICK_OPEN, 3);
+    CHECK(app.screen == JF_SCR_PLPICK && app.pick_n == 1 && strcmp(app.pick_ids[0], app.lists[JF_LIST_ALBUMS].items[3].id) == 0, "its + PLAYLIST adds that track");
+    send(JF_EV_BACK, 0);
+    send(JF_EV_ADD_QUEUE, 3);
+    CHECK(app.queue_n >= 1, "and ADD QUEUE queues it");
+
+    /* artist_folder_refuses_pick_all */
+    artist_folder();
+    { JfCmd t = *list_req(); reply_trk(&t, 3, 3, "Other", OTHER_ALB); }
+    send(JF_EV_PICK_OPEN, -1);
+    CHECK(app.screen == JF_SCR_ALBUMS && cm.n == 0 && app.pick_n == 0, "no + PLAYLIST for all on the artist folder");
+
+    /* artist_lists_library_scoped */
+    signed_in(); artists_loaded(3, 3);
+    snprintf(app.login.library, sizeof(app.login.library), "%s", UID);
+    send(JF_EV_ACTIVATE, 0);
+    CHECK(list_req() && strstr(list_req()->path, "&ParentId=" UID), "phase 0 is library-scoped");
+    { JfCmd a = *list_req(); reply_list(&a, JF_ITEM_ALBUM, 1, 1); }
+    CHECK(list_req() && strstr(list_req()->path, "&ParentId=" UID), "phase 1 is library-scoped");
+    { JfCmd t = *list_req(); reply_trk(&t, 1, 1, "Other", OTHER_ALB); }
+    send(JF_EV_PLAY_ALL, 0);
+    CHECK(list_req() && list_req()->list == &app.lists[JF_LIST_ARTALL] && strstr(list_req()->path, "&ParentId=" UID), "PLAY ALL's list is library-scoped");
+
+    CHECK(max_cmds <= 2, "no step of the artist flow emitted more than 2 commands (max %d)", max_cmds);
+}
+
+/* a search whose page 1 holds [track, `artists` artist rows named artist_name, track] */
+static void search_page1(const char *term, int artists, const char *artist_name)
+{
+    signed_in(); artists_loaded(3, 3);
+    send_text(JF_EV_SEARCH, term);
+    JfCmd sr = *list_req();
+    JfList *sl = &app.lists[JF_LIST_SEARCH];
+    fill(sl, JF_ITEM_TRACK, 1, 9);
+    for (int k = 0; k < artists; k++) {
+        fill(sl, JF_ITEM_ARTIST, 1, 9);
+        snprintf(sl->items[sl->n - 1].name, sizeof(sl->items[0].name), "%s", artist_name);
+    }
+    fill(sl, JF_ITEM_TRACK, 1, 9);
+    reply_raw(&sr, JF_ERR_NONE);
+}
+
+static void test_search_inline(void)
+{
+    /* search_single_exact_artist_inlines */
+    max_cmds = 0;
+    search_page1("miles davis", 1, "Miles Davis");
+    JfList *sl = &app.lists[JF_LIST_SEARCH];
+    CHECK(list_req() && list_req()->list == &app.lists[JF_LIST_ARTINL] && sl->n == 2 && app.busy, "the artist row leaves, its albums are asked for (n %d)", sl->n);
+    if (!list_req()) return;   /* nothing to answer: the check above is the verdict, not a crash */
+    char tr_after[33]; snprintf(tr_after, sizeof tr_after, "%s", sl->items[1].id);
+    { JfCmd a = *list_req(); reply_list(&a, JF_ITEM_ALBUM, 2, 2); }
+    CHECK(list_req() && list_req()->list == &app.lists[JF_LIST_ARTINL] && strstr(list_req()->path, "IncludeItemTypes=Audio"), "then its tracks");
+    { JfCmd t = *list_req(); reply_trk(&t, 2, 2, "Other", OTHER_ALB); }
+    CHECK(sl->n == 6 && sl->items[0].type == JF_ITEM_TRACK && sl->items[1].type == JF_ITEM_ALBUM && sl->items[2].type == JF_ITEM_ALBUM &&
+          sl->items[3].type == JF_ITEM_TRACK && sl->items[4].type == JF_ITEM_TRACK && strcmp(sl->items[5].id, tr_after) == 0 && !app.busy && cm.n == 0,
+          "its rows are spliced in where it was (n %d)", sl->n);
+
+    /* search_inline_case_insensitive */
+    search_page1("  MILES davis ", 1, "Miles Davis");
+    CHECK(list_req() && list_req()->list == &app.lists[JF_LIST_ARTINL], "the term matches whatever its case or padding");
+
+    /* search_two_artists_unchanged */
+    search_page1("miles davis", 2, "Miles Davis");
+    CHECK(app.lists[JF_LIST_SEARCH].n == 4 && !list_req(), "two artists: no inline, both rows stay");
+
+    /* search_one_artist_name_differs_unchanged */
+    search_page1("miles", 1, "Miles Davis");
+    CHECK(app.lists[JF_LIST_SEARCH].n == 3 && !list_req(), "a partial name: the row stays");
+
+    /* search_inline_abandoned_on_new_search */
+    search_page1("miles davis", 1, "Miles Davis");
+    JfCmd stale = *list_req();
+    send_text(JF_EV_SEARCH, "coltrane");
+    bool asked = list_req() && list_req()->list == &app.lists[JF_LIST_SEARCH];
+    fill(stale.list, JF_ITEM_ALBUM, 1, 1);
+    reply_raw(&stale, JF_ERR_NONE);
+    CHECK(app.lists[JF_LIST_SEARCH].n == 0 && asked,
+          "a new search drops the inline fetch; its late reply splices nothing");
+    search_page1("miles davis", 1, "Miles Davis");
+    send(JF_EV_BACK, 0);
+    CHECK(!app.lists[JF_LIST_ARTINL].pending && !app.busy, "BACK abandons it too");
+
+    CHECK(max_cmds <= 2, "no step of the search flow emitted more than 2 commands (max %d)", max_cmds);
+}
 int main(void)
 {
     test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue(); test_sink_channels();
@@ -2252,7 +2447,7 @@ int main(void)
     test_mix_cancel_and_errors(); test_mix_nowplaying(); test_save();
     test_queue_clear(); test_queue_restore();
     test_pause_stop_seek(); test_instant_confirm(); test_back_restores_view(); test_prev(); test_queue_edit(); test_queue_remove();
-    test_playlist_delete(); test_playlist_policy(); test_pick();
+    test_playlist_delete(); test_playlist_policy(); test_pick(); test_artist(); test_search_inline();
     printf("jf_core_test: %d checks, %d failures\n", checks, fails);
     return fails ? 1 : 0;
 }

@@ -9,7 +9,8 @@
 #include <string.h>
 
 static const int PAGE[JF_LIST_COUNT] = { JF_PAGE_ARTISTS, JF_PAGE_ALBUMS, JF_PAGE_TRACKS, JF_PAGE_SEARCH, JF_MIX_LIMIT,
-                                         1, JF_MIX_GENRE_PAGE, JF_MIX_PAGE, JF_CAP_LIBS, JF_PAGE_PLPICK, JF_PAGE_PLCHK };
+                                         1, JF_MIX_GENRE_PAGE, JF_MIX_PAGE, JF_CAP_LIBS, JF_PAGE_PLPICK, JF_PAGE_PLCHK,
+                                         JF_PAGE_ARTALL, JF_PAGE_ARTINL };
 
 /* ── small helpers ─────────────────────────────────────────────────────── */
 
@@ -96,8 +97,13 @@ static int build_path_raw(const JfApp *app, int lid, int start, char *out, size_
         default:               return jf_path_artists(out, cap, uid, start, lim);
         }
     case JF_LIST_ALBUMS:
-        return sub == JF_SUB_GENRE ? jf_path_genre_albums(out, cap, uid, id, start, lim)
-                                   : jf_path_albums(out, cap, uid, id, start, lim);
+        if (sub == JF_SUB_GENRE) return jf_path_genre_albums(out, cap, uid, id, start, lim);
+        return app->art[0].phase == 1 ? jf_path_artist_tracks(out, cap, uid, id, start, lim)
+                                      : jf_path_artist_albums(out, cap, uid, id, start, lim);
+    case JF_LIST_ARTINL:
+        return app->art[1].phase == 1 ? jf_path_artist_tracks(out, cap, uid, id, start, lim)
+                                      : jf_path_artist_albums(out, cap, uid, id, start, lim);
+    case JF_LIST_ARTALL:  return jf_path_artist_all(out, cap, uid, id, start, lim);
     case JF_LIST_TRACKS:
         return sub == JF_SUB_PLAYLIST ? jf_path_playlist_items(out, cap, uid, id, start, lim)
                                       : jf_path_tracks(out, cap, uid, id, start, lim);
@@ -125,14 +131,36 @@ static int build_path(const JfApp *app, int lid, int start, char *out, size_t ca
     int n = build_path_raw(app, lid, start, out, cap);
     if (n < 0) return n;
     bool scoped = lid == JF_LIST_ALBUMS || lid == JF_LIST_SEARCH || lid == JF_LIST_GENRES || lid == JF_LIST_POOL ||
+                  lid == JF_LIST_ARTALL || lid == JF_LIST_ARTINL ||
                   (lid == JF_LIST_ARTISTS && app->cat != JF_CAT_PLAYLISTS);
     return scoped ? jf_path_scope(out, cap, app->login.library) : n;
+}
+
+/* Give up the artist being fetched for the search list.  `restore` puts the removed search row back: a request for any other
+ * list supersedes the fetch while the search screen stays up, and a row that is neither replaced nor restored would be lost;
+ * a new search or BACK discards the whole list, so it does not. */
+static void inl_abort(JfApp *app, bool restore)
+{
+    if (!app->inl_on) return;
+    app->inl_on = false;
+    JfList *a = &app->lists[JF_LIST_ARTINL];
+    a->pending = false;
+    a->generation++;
+    jf_list_clear(a);
+    JfList *s = &app->lists[JF_LIST_SEARCH];
+    int p = app->inl_pos;
+    if (restore && s->n < s->cap && p <= s->n) {
+        memmove(&s->items[p + 1], &s->items[p], (size_t)(s->n - p) * sizeof(JfItem));
+        s->items[p] = app->inl_item;
+        s->n++;
+    }
 }
 
 /* Request the page that starts at `start`.  A new LIST supersedes every other
  * queued or in-flight LIST in jf_api, so the other lists stop being pending. */
 static bool request_page(JfApp *app, int lid, int start, JfCmds *out)
 {
+    if (lid != JF_LIST_ARTINL) inl_abort(app, true);
     JfCmd *c = emit(out, JF_CMD_REQUEST);
     c->kind = JF_KIND_LIST;
     c->list = &app->lists[lid];
@@ -145,6 +173,7 @@ static bool request_page(JfApp *app, int lid, int start, JfCmds *out)
     for (int k = 0; k < JF_LIST_COUNT; k++) app->lists[k].pending = false;
     app->lists[lid].pending = true;
     app->req_loaded[lid] = app->lists[lid].loaded;
+    app->req_n[lid] = app->lists[lid].n;
     app->retry = *c;
     return true;
 }
@@ -153,6 +182,9 @@ static bool request_page(JfApp *app, int lid, int start, JfCmds *out)
 static void retarget(JfApp *app, int lid, const char *id, const char *title, int sub, JfCmds *out)
 {
     JfList *l = &app->lists[lid];
+    if (lid == JF_LIST_SEARCH) inl_abort(app, false);   /* the rows it would join are going */
+    if (lid == JF_LIST_ALBUMS) memset(&app->art[0], 0, sizeof(app->art[0]));
+    if (lid == JF_LIST_ARTINL) memset(&app->art[1], 0, sizeof(app->art[1]));
     app->ctx[lid].sub = sub;
     copy(app->ctx[lid].id, sizeof(app->ctx[lid].id), id);
     copy(app->ctx[lid].title, sizeof(app->ctx[lid].title), title);
@@ -196,6 +228,7 @@ static void enter(JfApp *app, JfScreen scr, const char *id, const char *title, i
 static void pop(JfApp *app, JfCmds *out)
 {
     JfNavEntry e = app->nav[--app->nav_n];
+    inl_abort(app, false);
     app->pick_wait = false;
     app->play_wait = false;
     app->screen = e.screen;
@@ -1140,6 +1173,104 @@ static void on_auth(JfApp *app, const JfResult *r, JfCmds *out)
     retarget(app, JF_LIST_ARTISTS, "", CAT_NAME[app->cat], JF_SUB_PLAIN, out);
 }
 
+/* ── artist folder and the artist inlined in a search ──────────────────── */
+
+/* ASCII only: the names compared are a folder's title and a tag, and a locale-aware compare could differ between units. */
+static bool eq_ci(const char *a, size_t an, const char *b)
+{
+    if (an != strlen(b)) return false;
+    for (size_t k = 0; k < an; k++) {
+        char x = a[k], y = b[k];
+        if (x >= 'A' && x <= 'Z') x = (char)(x + 32);
+        if (y >= 'A' && y <= 'Z') y = (char)(y + 32);
+        if (x != y) return false;
+    }
+    return true;
+}
+
+/* The inline fetch is done: its rows replace the artist row's place in the search list. */
+static void inl_finish(JfApp *app)
+{
+    JfList *a = &app->lists[JF_LIST_ARTINL], *s = &app->lists[JF_LIST_SEARCH];
+    int p = app->inl_pos, take = a->n < s->cap - s->n ? a->n : s->cap - s->n;
+    app->inl_on = false;
+    if (take < a->n) s->full = true;
+    memmove(&s->items[p + take], &s->items[p], (size_t)(s->n - p) * sizeof(JfItem));
+    memcpy(&s->items[p], a->items, (size_t)take * sizeof(JfItem));
+    s->n += take;
+    jf_list_clear(a);
+}
+
+/* A page of an artist's albums (phase 0) or of the tracks that carry the artist (phase 1) is in.  Phase 1 keeps the
+ * albums and drops what phase 0 already shows: a track on one of the artist's own albums, or whose album artist is the
+ * artist (compared by name, since the album ids of phase 0 are all it has).  loaded counts server items, n the rows. */
+static void art_reply(JfApp *app, int lid, JfCmds *out)
+{
+    JfList *l = &app->lists[lid];
+    bool inl = lid == JF_LIST_ARTINL;
+    __typeof__(app->art[0]) *art = &app->art[inl];
+    int kept = 0;
+    if (art->phase == 1) {
+        const char *name = app->ctx[lid].title;
+        int w = app->req_n[lid];
+        for (int k = w; k < l->n; k++) {
+            const JfItem *it = &l->items[k];
+            bool drop = eq_ci(it->album_artist, strlen(it->album_artist), name);
+            for (int a = 0; !drop && a < art->albums_n; a++) drop = strcmp(it->album_id, l->items[a].id) == 0;
+            if (drop) continue;
+            if (w != k) l->items[w] = l->items[k];
+            w++;
+        }
+        kept = w - app->req_n[lid];
+        l->n = w;
+        art->pages++;
+    }
+    if (art->phase == 0 && (l->loaded >= l->total || l->full)) {
+        art->phase = 1;
+        art->albums_n = l->n;
+        art->pages = 0;
+        l->loaded = l->total = 0;
+        if (!request_page(app, lid, 0, out)) art->phase = 2;
+    } else if (art->phase == 0) {
+        if (inl) request_page(app, lid, l->loaded, out);   /* the folder waits for the scroll */
+        return;
+    } else if (art->phase == 1) {
+        bool more = l->loaded < l->total && !l->full;
+        if (!more || art->pages >= JF_ART_PAGES_MAX) {
+            art->phase = 2;
+            l->total = l->loaded;      /* the cap ends the list for NEED_MORE too */
+        } else if (inl || kept == 0) {
+            request_page(app, lid, l->loaded, out);   /* a page that filtered to nothing leaves nothing to scroll to */
+        }
+    }
+    if (inl && art->phase == 2) inl_finish(app);
+}
+
+/* Page 1 of a search is in: when it holds exactly one artist and the term is that artist's name, show the artist's
+ * folder rows in its place instead of one row to open. */
+static void search_reply(JfApp *app, JfCmds *out)
+{
+    JfList *l = &app->lists[JF_LIST_SEARCH];
+    if (app->req_loaded[JF_LIST_SEARCH] != 0) return;
+    int hit = -1, artists = 0;
+    for (int k = 0; k < l->n; k++) if (l->items[k].type == JF_ITEM_ARTIST) { artists++; hit = k; }
+    if (artists != 1) return;
+    const char *t = app->ctx[JF_LIST_SEARCH].id;
+    size_t tl = strlen(t);
+    while (tl > 0 && t[tl - 1] == ' ') tl--;
+    while (tl > 0 && *t == ' ') { t++; tl--; }
+    if (!eq_ci(t, tl, l->items[hit].name)) return;
+    char id[sizeof(l->items[0].id)], name[sizeof(l->items[0].name)];
+    copy(id, sizeof id, l->items[hit].id);
+    copy(name, sizeof name, l->items[hit].name);
+    app->inl_item = l->items[hit];
+    app->inl_pos = hit;
+    memmove(&l->items[hit], &l->items[hit + 1], (size_t)(l->n - hit - 1) * sizeof(JfItem));
+    l->n--;
+    app->inl_on = true;
+    retarget(app, JF_LIST_ARTINL, id, name, JF_SUB_PLAIN, out);
+}
+
 static void on_list(JfApp *app, const JfResult *r, JfCmds *out)
 {
     int lid = -1;
@@ -1171,6 +1302,16 @@ static void on_list(JfApp *app, const JfResult *r, JfCmds *out)
     if (lid == JF_LIST_SEED) { on_seed_reply(app); return; }
     if (lid == JF_LIST_GENRES) { on_genres_reply(app, out); return; }
     if (lid == JF_LIST_POOL) { on_pool_reply(app, out); return; }
+    if (lid == JF_LIST_ARTALL) {
+        if (!app->play_wait) return;
+        if (l->loaded < l->total && l->n < l->cap && !l->full) { request_page(app, lid, l->loaded, out); return; }
+        app->play_wait = false;
+        start_queue(app, lid, 0, out);
+        if (l->total > JF_QUEUE_MAX && app->queue_n > 0) set_banner(app, "FIRST 200 QUEUED");   /* the rest of a long discography is not coming */
+        return;
+    }
+    if (lid == JF_LIST_ARTINL || (lid == JF_LIST_ALBUMS && app->ctx[lid].sub == JF_SUB_PLAIN)) { art_reply(app, lid, out); return; }
+    if (lid == JF_LIST_SEARCH) { search_reply(app, out); return; }
     if (app->pick_wait && lid == JF_LIST_TRACKS) { pick_all(app, out); return; }
     if (app->play_wait && lid == JF_LIST_TRACKS) {
         if (l->loaded < l->total && !l->full) request_page(app, lid, l->loaded, out);
@@ -1371,6 +1512,12 @@ static void on_select(JfApp *app, int i, JfCmds *out)
 static void on_play_all(JfApp *app, JfCmds *out)
 {
     int lid = cur_list(app);
+    if (lid == JF_LIST_ALBUMS && app->ctx[lid].sub == JF_SUB_PLAIN && have_token(app)) {   /* the artist folder: its whole discography, not just the rows loaded */
+        retarget(app, JF_LIST_ARTALL, app->ctx[lid].id, app->ctx[lid].title, JF_SUB_PLAIN, out);
+        app->play_wait = true;
+        app->play_wait_from = 0;
+        return;
+    }
     if (lid != JF_LIST_TRACKS && lid != JF_LIST_SEARCH) return;
     const JfList *l = &app->lists[lid];
     for (int k = 0; k < l->n; k++)
@@ -1655,6 +1802,7 @@ static void on_need_more(JfApp *app, JfCmds *out)
     int lid = cur_list(app);
     if (lid < 0 || !have_token(app) || app->mix.phase == JF_MIX_SEED) return;   /* a page request would supersede the seed fetch */
     const JfList *l = &app->lists[lid];
+    if (lid == JF_LIST_SEARCH && app->inl_on && app->lists[JF_LIST_ARTINL].pending) return;   /* the next page would supersede the artist fetch */
     if (l->loaded >= l->total || l->pending || l->full) return;
     request_page(app, lid, l->loaded, out);
 }
@@ -1683,6 +1831,8 @@ void jf_app_init(JfApp *app)
     jf_list_init(&app->lists[JF_LIST_LIBS], app->store_libs, JF_CAP_LIBS);
     jf_list_init(&app->lists[JF_LIST_PLPICK], app->store_plpick, JF_CAP_PLPICK);
     jf_list_init(&app->lists[JF_LIST_PLCHK], app->store_plchk, JF_CAP_PLCHK);
+    jf_list_init(&app->lists[JF_LIST_ARTALL], app->store_artall, JF_CAP_ARTALL);
+    jf_list_init(&app->lists[JF_LIST_ARTINL], app->store_artinl, JF_CAP_ARTINL);
     app->pick_sel = -1;
     app->cat = JF_CAT_ARTISTS;
     app->session_fn = jf_session_id;
