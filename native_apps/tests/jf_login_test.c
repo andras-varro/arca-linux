@@ -1,4 +1,4 @@
-/* Host regression for jellyfin/jf_login.c: the saved login file.
+/* Host regression for jellyfin/jf_login.c: the saved login file and the settings file.
  *
  *   cd native_apps && gcc -Wall -Wextra -I common -I jellyfin -o build/jf_login_test \
  *       tests/jf_login_test.c jellyfin/jf_login.c jellyfin/jf_url.c common/config.c \
@@ -26,6 +26,7 @@ static int checks, fails;
 
 static char dir[64];
 static char path[160];
+static char spath[160];
 
 static char *slurp(const char *p)
 {
@@ -70,8 +71,8 @@ static void test_roundtrip(void)
     CHECK(mode_of(path) == 0600, "mode after save %o", mode_of(path));
     CHECK(jf_login_load(&b, path) == 0, "load");
     CHECK(!strcmp(a.server, b.server) && !strcmp(a.user, b.user) && !strcmp(a.user_id, b.user_id)
-          && !strcmp(a.token, b.token) && !strcmp(a.device_id, b.device_id) && a.volume_step == b.volume_step,
-          "round trip equal: '%s' '%s' '%s' '%s' '%s' %d", b.server, b.user, b.user_id, b.token, b.device_id, b.volume_step);
+          && !strcmp(a.token, b.token) && !strcmp(a.device_id, b.device_id),
+          "round trip equal: '%s' '%s' '%s' '%s' '%s'", b.server, b.user, b.user_id, b.token, b.device_id);
     char *t = slurp(path);
     CHECK(!strstr(t, "password") && !strstr(t, "Password") && !strstr(t, "pw"), "no password key in the file");
     CHECK(strstr(t, "token=" TOK) && strstr(t, "user_id=" UID_), "token and id are in the file");
@@ -113,7 +114,7 @@ static void test_clear(void)
     CHECK(!strstr(t, "password"), "no password after clear");
     CHECK(jf_login_load(&b, path) == 0, "load after clear");
     CHECK(!strcmp(b.server, "192.0.2.10:8096") && !strcmp(b.user, "user1") && !strcmp(b.device_id, "arca-test")
-          && b.volume_step == 7 && !b.token[0] && !b.user_id[0], "server/user/device_id/volume kept");
+          && !b.token[0] && !b.user_id[0], "server/user/device_id kept");
 }
 
 static void test_load_edges(void)
@@ -129,21 +130,15 @@ static void test_load_edges(void)
 
     put(path, "server=h\nvolume_step=99\nuser_id=nothex\ntoken=" TOK "\n");
     CHECK(jf_login_load(&l, path) == 0, "load odd file");
-    CHECK(l.volume_step == 14, "volume 99 clamps to %d", l.volume_step);
+    CHECK(l.volume_step == 10 && !l.library[0], "a settings key in the login file is ignored, volume %d", l.volume_step);
     CHECK(l.user_id[0] == '\0', "invalid user_id dropped");
     CHECK(!strcmp(l.token, TOK) && !strncmp(l.device_id, "arca-", 5), "token kept, device_id defaulted");
-    put(path, "volume_step=-4\nuser_id=" UID_ "0\n");
+    put(path, "user_id=" UID_ "0\n");
     jf_login_load(&l, path);
-    CHECK(l.volume_step == 0 && l.user_id[0] == '\0', "negative volume -> 0, 33-char id dropped");
-    put(path, "volume_step=junk\nuser_id=" UID_ "\ndevice_id=mine\n");
+    CHECK(l.user_id[0] == '\0', "33-char id dropped");
+    put(path, "user_id=" UID_ "\ndevice_id=mine\n");
     jf_login_load(&l, path);
-    CHECK(l.volume_step == 10 && !strcmp(l.user_id, UID_) && !strcmp(l.device_id, "mine"), "junk volume -> default, good id and stored device_id kept");
-
-    /* save clamps too, so the file never holds an out-of-range step */
-    fill(&l);
-    l.volume_step = 40;
-    jf_login_save(&l, path);
-    CHECK(strstr(slurp(path), "volume_step=14"), "save clamps volume");
+    CHECK(!strcmp(l.user_id, UID_) && !strcmp(l.device_id, "mine"), "good id and stored device_id kept");
 
     /* empty token / user_id are omitted, not written empty */
     fill(&l);
@@ -174,8 +169,8 @@ static void test_wipe(void)
 }
 
 #define LIB1 "00000000000000000000000000000a01"
-/* The library choice survives a save/load (a fresh-config save with a fixed key list would drop it), a sign-out forgets it
- * and keeps server and user, and a load drops a library that is not 32 hex.  Sabotage: no config_set of "library" in save. */
+/* The library choice and the volume live in the settings file, not the login file.  They survive a save/load,
+ * a sign-out forgets the library and keeps server and user, and a load drops a library that is not 32 hex. */
 static void test_library(void)
 {
     JfLogin a, b;
@@ -185,21 +180,54 @@ static void test_library(void)
     snprintf(a.user_id, sizeof a.user_id, LIB1);
     snprintf(a.library, sizeof a.library, LIB1); snprintf(a.library_name, sizeof a.library_name, "Classical");
     a.volume_step = 5;
-    CHECK(jf_login_save(&a, path) == 0, "save");
-    jf_login_load(&b, path);
-    CHECK(!strcmp(b.library, LIB1) && !strcmp(b.library_name, "Classical"), "library round trip: '%s' '%s'", b.library, b.library_name);
+    CHECK(jf_login_save(&a, path) == 0 && jf_settings_save(&a, spath) == 0, "save");
+    jf_login_load(&b, path); jf_settings_load(&b, spath);
+    CHECK(!strcmp(b.library, LIB1) && !strcmp(b.library_name, "Classical") && b.volume_step == 5,
+          "library round trip: '%s' '%s' %d", b.library, b.library_name, b.volume_step);
     a.volume_step = 6;
-    jf_login_save(&a, path); jf_login_load(&b, path);
-    CHECK(!strcmp(b.library, LIB1), "a save after a volume change keeps the library");
+    jf_settings_save(&a, spath); jf_settings_load(&b, spath);
+    CHECK(!strcmp(b.library, LIB1) && b.volume_step == 6, "a settings save after a volume change keeps the library");
     CHECK(jf_login_signout(&a, path) == 0, "signout");
+    CHECK(jf_settings_save(&a, spath) == 0, "signout settings save");
     CHECK(!a.library[0] && !a.library_name[0] && !a.token[0], "signout empties library and token in memory");
-    jf_login_load(&b, path);
+    jf_login_load(&b, path); jf_settings_load(&b, spath);
     CHECK(!b.library[0] && !b.library_name[0] && !b.token[0] && !strcmp(b.server, "10.0.0.1:8096") && !strcmp(b.user, "bob"),
-          "signout file: no library/token, server and user kept");
-    FILE *f = fopen(path, "w");
-    fputs("server=h\nuser=u\nlibrary=notahexid\nlibrary_name=X\n", f); fclose(f);
-    jf_login_load(&b, path);
+          "signout files: no library/token, server and user kept");
+    FILE *f = fopen(spath, "w");
+    fputs("library=notahexid\nlibrary_name=X\n", f); fclose(f);
+    jf_settings_load(&b, spath);
     CHECK(!b.library[0] && !b.library_name[0], "an invalid library id is dropped on load");
+}
+
+/* The split itself: the login file never names a settings key, the settings file never names a token, and an
+ * old login file that still carries them is ignored for them. */
+static void test_settings_split(void)
+{
+    JfLogin a, b;
+    fill(&a);
+    snprintf(a.library, sizeof a.library, LIB1); snprintf(a.library_name, sizeof a.library_name, "Classical");
+    remove(spath);
+    CHECK(jf_login_save(&a, path) == 0 && jf_settings_save(&a, spath) == 0, "save both files");
+    char *lt = slurp(path);
+    CHECK(!strstr(lt, "library") && !strstr(lt, "volume_step"), "login file names no settings key");
+    CHECK(strstr(lt, "token=" TOK), "login file keeps the token");
+    char *st = slurp(spath);
+    CHECK(strstr(st, "library=" LIB1) && strstr(st, "library_name=Classical") && strstr(st, "volume_step=7"),
+          "settings file holds library, name and volume");
+    CHECK(!strstr(st, TOK) && !strstr(st, "token") && !strstr(st, "user_id"), "settings file holds no token or user id");
+    CHECK(jf_settings_load(&b, spath) == 0 && !strcmp(b.library, LIB1) && b.volume_step == 7, "settings load");
+
+    a.volume_step = 40;
+    jf_settings_save(&a, spath);
+    CHECK(strstr(slurp(spath), "volume_step=14"), "settings save clamps volume");
+
+    /* an old login file that still carries the settings keys: ignored; no settings file: defaults, -1 */
+    put(path, "server=h\nuser=u\nlibrary=" LIB1 "\nlibrary_name=Old\nvolume_step=3\ntoken=" TOK "\n");
+    remove(spath);
+    CHECK(jf_login_load(&b, path) == 0 && !b.library[0] && b.volume_step == 10 && !strcmp(b.token, TOK),
+          "old login keys ignored by the login load");
+    CHECK(jf_settings_load(&b, spath) == -1 && !b.library[0] && !b.library_name[0] && b.volume_step == 10,
+          "missing settings file -> -1 with defaults");
 }
 
 int main(void)
@@ -207,12 +235,14 @@ int main(void)
     snprintf(dir, sizeof dir, "/tmp/jf_login_test_XXXXXX");
     if (!mkdtemp(dir)) { perror("mkdtemp"); return 2; }
     snprintf(path, sizeof path, "%s/a/b/jellyfin.conf", dir);
+    snprintf(spath, sizeof spath, "%s/a/b/settings.conf", dir);
 
     test_roundtrip();
     test_clear();
     test_load_edges();
     test_wipe();
     test_library();
+    test_settings_split();
 
     char cmd[200];
     snprintf(cmd, sizeof cmd, "rm -rf '%s'", dir);

@@ -1,6 +1,8 @@
 /*
  * jf_login.h — the Jellyfin client's saved login: server, user, the access token
- * and the per-unit device id, in one 0600 file.
+ * and the per-unit device id, in one 0600 file.  The non-secret settings (the
+ * chosen library and the volume step) live in their own file, JF_SETTINGS_PATH,
+ * so the backup rules can take them without the token.
  *
  * ⚠️ There is no password field and no "password" key, on purpose: the password
  * is typed once, sent once, and wiped (jf_wipe).  What stays on the unit is the
@@ -17,6 +19,7 @@
 #include <stddef.h>
 
 #define JF_CONF_PATH     "/opt/jellyfin/jellyfin.conf"
+#define JF_SETTINGS_PATH "/home/root/data/jellyfin/settings.conf"
 #define JF_VOLUME_MAX    14   /**< volume_step runs 0..JF_VOLUME_MAX */
 #define JF_VOLUME_DEFAULT 10
 
@@ -34,13 +37,25 @@ typedef struct {
 /**
  * Fill `l` from `path`.  A missing file returns -1 but `l` still holds defaults
  * (empty strings, volume_step 10).  device_id is never empty afterwards:
- * "arca-<hostname>", or "arca-unit".  A user_id that is not 32 hex is dropped and
- * volume_step is clamped to 0..JF_VOLUME_MAX.
+ * "arca-<hostname>", or "arca-unit".  A user_id that is not 32 hex is dropped.
+ * The settings keys (library, library_name, volume_step) are not read here; a
+ * jellyfin.conf that still carries them is ignored for them.
  */
 int jf_login_load(JfLogin *l, const char *path);
 
 /** Write `l` (0600, atomic).  Empty token / user_id are left out.  0 or -1. */
 int jf_login_save(const JfLogin *l, const char *path);
+
+/**
+ * Fill l->library, l->library_name and l->volume_step from the settings file at
+ * `path`.  Call after jf_login_load.  A missing file returns -1 with the defaults
+ * (no library, volume_step 10).  An invalid library id is dropped and volume_step
+ * is clamped to 0..JF_VOLUME_MAX.
+ */
+int jf_settings_load(JfLogin *l, const char *path);
+
+/** Write l->library, l->library_name and l->volume_step to `path`.  0 or -1. */
+int jf_settings_save(const JfLogin *l, const char *path);
 
 /** Forget the session: wipe token and user_id in `l` and rewrite the file without them. */
 int jf_login_clear(JfLogin *l, const char *path);

@@ -203,6 +203,7 @@ static void execute(const JfCmds *cmds, uint32_t now)
             break;
         case JF_CMD_SAVE_LOGIN:
             jf_login_save(&app.login, JF_CONF_PATH);
+            jf_settings_save(&app.login, JF_SETTINGS_PATH);
             break;
         case JF_CMD_CLEAR_LOGIN:
             jf_login_clear(&app.login, JF_CONF_PATH);
@@ -301,6 +302,7 @@ int main(int argc, char *argv[])
         memset(e, 0, sizeof *e);
         e->type = JF_EV_START;
         jf_login_load(&e->login, JF_CONF_PATH);
+        jf_settings_load(&e->login, JF_SETTINGS_PATH);
         evq_n = 1;
     }
 

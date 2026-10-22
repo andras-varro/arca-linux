@@ -1,0 +1,5 @@
+name=Jellyfin settings (library, volume step)
+paths=home/root/data/jellyfin/settings.conf
+unit=no
+secret=no
+reboot=no

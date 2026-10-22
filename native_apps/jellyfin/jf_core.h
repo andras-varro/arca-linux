@@ -6,7 +6,7 @@
  * can make it deterministic.
  *
  * How the main loop drives it:
- *   1. jf_app_init() once (JfApp is ~2.4 MB (sizeof, measured with the artist and inline-search stores; ~2.0 MB before them): make it static), then jf_login_load()
+ *   1. jf_app_init() once (JfApp is ~2.4 MB (sizeof, measured with the artist and inline-search stores; ~2.0 MB before them): make it static), then jf_login_load() and jf_settings_load()
  *      into a JfLogin and send JF_EV_START with it.
  *   2. Every frame: turn input into user-intent events, jf_api_poll() results into
  *      JF_EV_RESULT, audio facts into JF_EV_STREAM_STARTED / JF_EV_TRACK_ENDED.
@@ -221,7 +221,7 @@ typedef enum {
     JF_CMD_CLOSE_FD,     /* close(.fd): a stream result the core does not want */
     JF_CMD_STOP,         /* stop the music voice */
     JF_CMD_SET_GAIN,     /* audio_music_set_gain(.norm_mdb, .user_mdb) */
-    JF_CMD_SAVE_LOGIN,   /* jf_login_save(&app->login) */
+    JF_CMD_SAVE_LOGIN,   /* jf_login_save(&app->login) and jf_settings_save(&app->login) */
     JF_CMD_CLEAR_LOGIN,  /* jf_login_clear(&app->login); the core already emptied the token */
     JF_CMD_PURGE_LOCAL,  /* delete the saved queue file and the art cache (disk and memory tiles): the queue belonged to another server or user, or the user signed out */
     JF_CMD_EXIT
