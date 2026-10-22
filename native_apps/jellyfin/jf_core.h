@@ -179,7 +179,11 @@ typedef enum {
     JF_CMD_REQUEST,      /* .kind AUTH: jf_api_enqueue_auth(.tag, .user, .password);
                           * .kind LIST: jf_api_enqueue_list(.tag, .path, .list)  (also the INSTANT MIX request)
                           * .kind SAVE: jf_api_enqueue_save(.tag, .name, app->login.user_id, ids, .n) with ids = the
-                          *   ids of app->queue[0..n); POST, never retried (no app->retry) */
+                          *   ids of app->queue[0..n) (.ids_src JF_IDS_QUEUE) or app->pick_ids[0..n) (JF_IDS_PICK);
+                          *   POST, never retried (no app->retry)
+                          * .kind WRITE: jf_api_enqueue_write(.tag, .method, .path): DELETE, or POST with an empty body;
+                          *   never retried, the result is the status
+                          * .kind USER: jf_api_enqueue_user(.tag, .path): GET of one user object, its Policy in the result */
     JF_CMD_CANCEL,       /* jf_api_cancel_kind(.kind) */
     JF_CMD_PLAY_STREAM,  /* jf_api_enqueue_stream(.tag, .path); .norm_mdb/.user_mdb repeat the gain */
     JF_CMD_START_AUDIO,  /* audio_music_start_fd(.fd), then audio_music_set_gain(.norm_mdb, .user_mdb);
