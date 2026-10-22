@@ -1328,6 +1328,37 @@ static void pad_reach(void)
     jf_ui_free(&ui);
 }
 
+/* P  NOW PLAYING: PgDn / PgUp send JF_EV_SEEK with the absolute target (the played position +/- 10 s, clamped at 0)
+ *    and no volume event; the position is the one the seek bar draws (jf_ui_set_played) */
+static void pg_seek(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_NOWPLAYING;
+    app.queue_n = 1;
+    app.queue[0].runtime_s = 300;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+
+    jf_ui_set_played(&ui, 60000);
+    int n = feed_btn(&ui, BTN_ID_PGDN, 2000, ev, MINI_MAX);
+    CHECK(n == 1 && ev[0].type == JF_EV_SEEK && ev[0].i == 70000, "P: PgDn at 60 s sent %d events, first %d/%d, want SEEK 70000", n, n ? (int)ev[0].type : -1, n ? ev[0].i : -1);
+    CHECK(!has_event(ev, n, JF_EV_VOL_UP) && !has_event(ev, n, JF_EV_VOL_DOWN), "P: PgDn sent a volume event");
+
+    n = feed_btn(&ui, BTN_ID_PGUP, 3000, ev, MINI_MAX);
+    CHECK(n == 1 && ev[0].type == JF_EV_SEEK && ev[0].i == 50000, "P: PgUp at 60 s sent %d events, first %d/%d, want SEEK 50000", n, n ? (int)ev[0].type : -1, n ? ev[0].i : -1);
+    CHECK(!has_event(ev, n, JF_EV_VOL_UP) && !has_event(ev, n, JF_EV_VOL_DOWN), "P: PgUp sent a volume event");
+
+    jf_ui_set_played(&ui, 3000);
+    n = feed_btn(&ui, BTN_ID_PGUP, 4000, ev, MINI_MAX);
+    CHECK(n == 1 && ev[0].type == JF_EV_SEEK && ev[0].i == 0, "P: PgUp at 3 s sent %d events, first %d/%d, want SEEK 0", n, n ? (int)ev[0].type : -1, n ? ev[0].i : -1);
+    jf_ui_free(&ui);
+}
+
 int main(void)
 {
     add_to_playlist();
@@ -1356,6 +1387,7 @@ int main(void)
     zone_np_settings();
     zone_signin();
     pad_reach();
+    pg_seek();
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");
     return 0;

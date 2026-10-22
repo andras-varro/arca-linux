@@ -1111,6 +1111,13 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
                 ui->seeking = false;
             } else if (!ts->held && !ts->pressed) ui->seeking = false;
         }
+        /* Page Up / Page Down: 10 s back / forward from the position the seek bar draws (played_ms); the same
+         * absolute JF_EV_SEEK as the bar, so the core clamps the top and a clamp here keeps the bottom at 0 */
+        if (bp(in, BTN_ID_PGUP) || bp(in, BTN_ID_PGDN)) {
+            int target = ui->played_ms + (bp(in, BTN_ID_PGDN) ? 10000 : -10000);
+            int k = emit(out, &n, max, JF_EV_SEEK);
+            if (k >= 0) out[k].i = target < 0 ? 0 : target;
+        }
         return n;
     }
 
