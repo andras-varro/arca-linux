@@ -21,6 +21,7 @@ static int checks, fails;
 static JfApp app;
 static JfCmds cm;
 static unsigned serial, sess_n;
+static int max_cmds;     /* the most commands one step emitted since the test that cares reset it */
 
 static bool test_session(char out[33]) { snprintf(out, 33, "%032u", ++sess_n); return true; }
 
@@ -28,6 +29,7 @@ static void step_ev(const JfEvent *ev)
 {
     jf_step(&app, ev, &cm);
     CHECK(!cm.overflow, "command overflow on event %d", ev->type);
+    if (ev->type != JF_EV_START && cm.n > max_cmds) max_cmds = cm.n;   /* START is the session set-up, not a step of a flow under test */
 }
 static void send(JfEventType t, int i)
 {
@@ -1954,6 +1956,294 @@ static void test_playlist_policy(void)
     CHECK(!app.policy_known && !app.policy.is_admin && !app.delete_denied && !jf_can_delete(&app), "sign-out clears the policy and the refusal");
 }
 
+/* ── ADD TO PLAYLIST ───────────────────────────────────────────────────── */
+
+/* PICK_OPEN -1 on the tracks screen, the picker list answered with `pls` playlists */
+static void picker_open(int tracks, int total, int pls)
+{
+    in_tracks(tracks, total);
+    send(JF_EV_PICK_OPEN, -1);
+    JfCmd c = *find(JF_CMD_REQUEST);
+    reply_list(&c, JF_ITEM_PLAYLIST, pls, pls);
+}
+/* the LIST request the last step emitted */
+static const JfCmd *list_req(void)
+{
+    const JfCmd *r = NULL;
+    for (int k = 0; k < cm.n; k++) if (cm.c[k].type == JF_CMD_REQUEST && cm.c[k].kind == JF_KIND_LIST) r = &cm.c[k];
+    return r;
+}
+/* a duplicate-scan page: the given ids first, then `filler` unrelated tracks; the playlist holds `total` */
+static void reply_ids(const JfCmd *c, const char *const *ids, int nid, int filler, int total)
+{
+    JfCmd cp = *c;
+    JfList *l = cp.list;
+    for (int k = 0; k < nid && l->n < l->cap; k++) {
+        JfItem *it = &l->items[l->n++];
+        memset(it, 0, sizeof *it);
+        snprintf(it->id, sizeof it->id, "%s", ids[k]);
+        it->type = JF_ITEM_TRACK;
+        l->loaded++;
+    }
+    fill(l, JF_ITEM_TRACK, filler, total);
+    reply_raw(&cp, JF_ERR_NONE);
+}
+static void scan_clean(void)   /* the playlist holds nothing that is being added */
+{
+    const JfCmd *r = list_req();
+    if (r) { JfCmd c = *r; reply_list(&c, JF_ITEM_TRACK, 0, 0); }
+}
+/* the path an add of pick_ids[from .. from+n) to picker row `sel` must carry */
+static void add_path(char *out, int from, int n, int sel)
+{
+    const char *ids[JF_SAVE_IDS_MAX];
+    for (int k = 0; k < n; k++) ids[k] = app.pick_ids[from + k];
+    jf_path_playlist_add(out, JF_PATH_MAX, UID, app.lists[JF_LIST_PLPICK].items[sel].id, ids, n);
+}
+
+static void test_pick(void)
+{
+    char want[JF_PATH_MAX];
+    max_cmds = 0;
+
+    /* pick_open_from_track_bar */
+    in_tracks(5, 5);
+    send(JF_EV_SELECT, 2);
+    send(JF_EV_PICK_OPEN, 2);
+    jf_path_playlists(want, sizeof want, UID, 0, JF_PAGE_PLPICK);
+    const JfCmd *r = list_req();
+    CHECK(app.screen == JF_SCR_PLPICK && app.pick_n == 1 && strcmp(app.pick_ids[0], app.lists[JF_LIST_TRACKS].items[2].id) == 0 &&
+          app.pick_sel == -1 && cm.n == 1 && r && r->list == &app.lists[JF_LIST_PLPICK] && strcmp(r->path, want) == 0 && !app.action_bar,
+          "PICK_OPEN on a bar row opens the picker with that one id and asks for the playlists (screen %d, n %d, cmds %d)", app.screen, app.pick_n, cm.n);
+
+    /* pick_open_from_tracks_screen_collects_ids */
+    in_tracks(7, 7);
+    send(JF_EV_PICK_OPEN, -1);
+    bool same = app.pick_n == 7;
+    for (int k = 0; k < 7 && same; k++) same = strcmp(app.pick_ids[k], app.lists[JF_LIST_TRACKS].items[k].id) == 0;
+    CHECK(app.screen == JF_SCR_PLPICK && same && !app.banner[0], "PICK_OPEN -1 collects every track id of the list, in order (n %d)", app.pick_n);
+
+    /* pick_open_caps_100_banner */
+    in_tracks(120, 120);
+    send(JF_EV_PICK_OPEN, -1);
+    CHECK(app.screen == JF_SCR_PLPICK && app.pick_n == JF_SAVE_IDS_MAX && strncmp(app.banner, "FIRST 100", 9) == 0 &&
+          strcmp(app.pick_ids[99], app.lists[JF_LIST_TRACKS].items[99].id) == 0, "120 tracks: the first 100 ids and a banner (n %d, \"%s\")", app.pick_n, app.banner);
+    in_tracks(100, 100);
+    send(JF_EV_PICK_OPEN, -1);
+    CHECK(app.pick_n == 100 && !app.banner[0], "exactly 100 is not cut: no banner");
+    in_tracks(100, 300);      /* 100 loaded, more on the server: no fetch is needed to know the cut */
+    send(JF_EV_PICK_OPEN, -1);
+    CHECK(app.screen == JF_SCR_PLPICK && app.pick_n == 100 && strncmp(app.banner, "FIRST 100", 9) == 0 && !app.pick_wait,
+          "100 loaded of 300: opens at once, cut and said");
+
+    /* pick_open_waits_for_unloaded_pages */
+    in_tracks(25, 60);
+    send(JF_EV_PICK_OPEN, -1);
+    r = list_req();
+    CHECK(app.screen == JF_SCR_TRACKS && app.pick_wait && r && r->list == &app.lists[JF_LIST_TRACKS] && cm.n == 1 && app.pick_n == 0,
+          "unloaded pages: stays on the tracks, asks for the next page (screen %d, wait %d)", app.screen, app.pick_wait);
+    JfCmd t2 = *r; reply_list(&t2, JF_ITEM_TRACK, 25, 60);
+    CHECK(app.screen == JF_SCR_TRACKS && app.pick_wait && list_req() && cm.n == 1, "page two: still waiting, asks for page three");
+    JfCmd t3 = *list_req(); reply_list(&t3, JF_ITEM_TRACK, 10, 60);
+    CHECK(app.screen == JF_SCR_PLPICK && !app.pick_wait && app.pick_n == 60 && list_req() && list_req()->list == &app.lists[JF_LIST_PLPICK],
+          "the last page opens the picker with all 60 ids (screen %d, n %d)", app.screen, app.pick_n);
+    in_tracks(25, 60);                      /* BACK while waiting cancels the wait */
+    send(JF_EV_PICK_OPEN, -1);
+    send(JF_EV_BACK, 0);
+    CHECK(!app.pick_wait && app.screen == JF_SCR_ALBUMS, "BACK during the wait drops it");
+
+    /* pick_select_does_not_open */
+    picker_open(5, 5, 3);
+    int nav = app.nav_n;
+    send(JF_EV_PICK_SELECT, 1);
+    CHECK(app.pick_sel == 1 && app.screen == JF_SCR_PLPICK && app.nav_n == nav && cm.n == 0, "PICK_SELECT marks the row and opens nothing");
+    send(JF_EV_PICK_SELECT, 9);
+    CHECK(app.pick_sel == 1, "a row past the list leaves the selection alone");
+
+    /* pick_select_no_playlist_menu */
+    send(JF_EV_SELECT, 2);
+    CHECK(!app.action_bar && app.screen == JF_SCR_PLPICK && cm.n == 0, "a plain SELECT on a picker row neither raises the playlist menu nor opens it");
+    send(JF_EV_ACTIVATE, 2);
+    CHECK(app.screen == JF_SCR_PLPICK && cm.n == 0, "ACTIVATE on a picker row opens nothing either");
+
+    /* pick_add_without_selection_noop */
+    picker_open(5, 5, 3);
+    send(JF_EV_PICK_ADD, 0);
+    CHECK(cm.n == 0 && app.confirm == JF_CONFIRM_NONE && !app.dup_scan && !app.add_pending, "ADD without a selection does nothing");
+
+    /* pick_add_post_path_exact (+ pick_dup_none_adds_directly) */
+    picker_open(3, 3, 3);
+    send(JF_EV_PICK_SELECT, 1);
+    send(JF_EV_PICK_ADD, 0);
+    jf_path_playlist_ids(want, sizeof want, UID, app.lists[JF_LIST_PLPICK].items[1].id, 0, JF_PAGE_PLCHK);
+    r = list_req();
+    CHECK(cm.n == 1 && r && r->list == &app.lists[JF_LIST_PLCHK] && strcmp(r->path, want) == 0 && !the_write(),
+          "ADD scans the playlist first: one id-page request, no write yet (cmds %d)", cm.n);
+    scan_clean();
+    add_path(want, 0, 3, 1);
+    const JfCmd *w = the_write();
+    CHECK(w && cm.n == 1 && strcmp(w->method, "POST") == 0 && strcmp(w->path, want) == 0 && w->tag != 0 && app.confirm == JF_CONFIRM_NONE,
+          "no duplicate: the first batch goes at once, POST /Playlists/<pl>/Items?ids=..&userId=.. (cmds %d)", cm.n);
+
+    /* pick_add_ok_banner_stays_open */
+    send_write_result(wtag(), JF_ERR_NONE, 204);
+    snprintf(want, sizeof want, "ADDED TO %s", app.lists[JF_LIST_PLPICK].items[1].name);
+    CHECK(strcmp(app.banner, want) == 0 && app.screen == JF_SCR_PLPICK && app.pick_sel == 1 && !app.overlay && cm.n == 0 && !app.add_pending,
+          "the last batch: banner \"%s\", picker open, selection kept (got \"%s\")", want, app.banner);
+    send(JF_EV_PICK_ADD, 0);                               /* the same playlist again: a new scan */
+    CHECK(list_req() && list_req()->list == &app.lists[JF_LIST_PLCHK], "ADD again starts a new scan");
+
+    /* pick_add_23_ids_three_sequential_writes */
+    picker_open(23, 23, 2);
+    send(JF_EV_PICK_SELECT, 0);
+    send(JF_EV_PICK_ADD, 0);
+    scan_clean();
+    int sizes[3] = { 10, 10, 3 };
+    for (int b = 0; b < 3; b++) {
+        w = the_write();
+        add_path(want, b * 10, sizes[b], 0);
+        CHECK(w && cm.n == 1 && strcmp(w->path, want) == 0, "batch %d: one POST with ids %d..%d (cmds %d)", b, b * 10, b * 10 + sizes[b] - 1, cm.n);
+        if (b < 2) CHECK(app.add_pending && !app.banner[0], "batch %d: not done, no banner yet", b);
+        send_write_result(wtag(), JF_ERR_NONE, 204);
+        if (b < 2) CHECK(the_write() != NULL, "batch %d acknowledged: the next one follows", b);
+    }
+    CHECK(!the_write() && strncmp(app.banner, "ADDED TO", 8) == 0, "after the third batch: no more writes, banner");
+
+    /* pick_add_fail_overlay */
+    picker_open(23, 23, 2);
+    send(JF_EV_PICK_SELECT, 0); send(JF_EV_PICK_ADD, 0); scan_clean();
+    send_write_result(wtag(), JF_ERR_SERVER, 500);
+    CHECK(app.overlay && app.overlay_buttons == JF_BTN_CLOSE && !the_write() && !app.add_pending && app.screen == JF_SCR_PLPICK,
+          "a failed batch: the overlay with CLOSE only (RETRY would re-add), the rest not sent");
+    send(JF_EV_CLOSE_ERROR, 0);
+    send(JF_EV_PICK_ADD, 0);
+    CHECK(list_req() != NULL, "after CLOSE the add can be tried again");
+
+    /* pick_add_401_session_expired */
+    picker_open(3, 3, 2);
+    send(JF_EV_PICK_SELECT, 0); send(JF_EV_PICK_ADD, 0); scan_clean();
+    send_write_result(wtag(), JF_ERR_UNAUTH, 401);
+    CHECK(app.screen == JF_SCR_SIGNIN && !app.login.token[0] && has(JF_CMD_CLEAR_LOGIN) && !app.add_pending && strncmp(app.banner, "SESSION EXPIRED", 15) == 0,
+          "401 on an add is a lost session: sign-in, token gone");
+
+    /* pick_dup_single_asks */
+    in_tracks(4, 4);
+    send(JF_EV_SELECT, 1); send(JF_EV_PICK_OPEN, 1);
+    { JfCmd c = *list_req(); reply_list(&c, JF_ITEM_PLAYLIST, 2, 2); }
+    send(JF_EV_PICK_SELECT, 1); send(JF_EV_PICK_ADD, 0);
+    const char *one[1] = { app.pick_ids[0] };
+    { JfCmd c = *list_req(); reply_ids(&c, one, 1, 4, 400); }          /* total says 400, but one id stops at the first hit */
+    CHECK(app.confirm == JF_CONFIRM_ADD_DUP && app.dup_hits == 1 && !app.dup_unknown && cm.n == 0 && !the_write() && !list_req() &&
+          strcmp(app.add_name, app.lists[JF_LIST_PLPICK].items[1].name) == 0,
+          "one id already there: asks, names the playlist, reads no further pages (hits %d, cmds %d)", app.dup_hits, cm.n);
+
+    /* pick_dup_scan_pages_until_total, pick_dup_confirm_adds_all */
+    picker_open(3, 3, 2);
+    const char *ids3[3] = { app.pick_ids[0], app.pick_ids[1], app.pick_ids[2] };
+    send(JF_EV_PICK_SELECT, 1); send(JF_EV_PICK_ADD, 0);
+    { JfCmd c = *list_req(); reply_ids(&c, NULL, 0, 50, 120); }
+    jf_path_playlist_ids(want, sizeof want, UID, app.lists[JF_LIST_PLPICK].items[1].id, 50, JF_PAGE_PLCHK);
+    CHECK(cm.n == 1 && list_req() && strcmp(list_req()->path, want) == 0 && app.confirm == JF_CONFIRM_NONE, "page 1 had none: page 2 starts at 50");
+    { const char *h[2] = { ids3[0], ids3[2] }; JfCmd c = *list_req(); reply_ids(&c, h, 2, 48, 120); }
+    jf_path_playlist_ids(want, sizeof want, UID, app.lists[JF_LIST_PLPICK].items[1].id, 100, JF_PAGE_PLCHK);
+    CHECK(cm.n == 1 && list_req() && strcmp(list_req()->path, want) == 0, "page 2 found two: page 3 starts at 100 (more than one id keeps reading)");
+    { const char *h[1] = { ids3[0] }; JfCmd c = *list_req(); reply_ids(&c, h, 1, 19, 120); }   /* the same id again does not count twice */
+    CHECK(app.confirm == JF_CONFIRM_ADD_DUP && app.dup_hits == 2 && !app.dup_unknown && cm.n == 0, "the last page: 2 of 3 already there (hits %d)", app.dup_hits);
+    send(JF_EV_CONFIRM, 0);
+    add_path(want, 0, 3, 1);
+    w = the_write();
+    CHECK(w && cm.n == 1 && strcmp(w->path, want) == 0 && app.confirm == JF_CONFIRM_NONE, "ADD ANYWAY sends all three ids");
+    picker_open(3, 3, 2);                                     /* CANCEL */
+    send(JF_EV_PICK_SELECT, 0); send(JF_EV_PICK_ADD, 0);
+    { const char *h[1] = { app.pick_ids[1] }; JfCmd c = *list_req(); reply_ids(&c, h, 1, 0, 1); }
+    send(JF_EV_DISMISS, 0);
+    send(JF_EV_CONFIRM, 0);
+    CHECK(app.confirm == JF_CONFIRM_NONE && !the_write() && cm.n == 0, "CANCEL sends nothing, and a later CONFIRM finds nothing to confirm");
+
+    /* pick_dup_cap_asks_could_not_check */
+    picker_open(3, 3, 2);
+    send(JF_EV_PICK_SELECT, 0); send(JF_EV_PICK_ADD, 0);
+    int pages = 0;
+    while (list_req() && pages < 60) { JfCmd c = *list_req(); pages++; reply_ids(&c, NULL, 0, 50, 5000); }
+    CHECK(pages == JF_DUP_PAGES_MAX && app.confirm == JF_CONFIRM_ADD_DUP && app.dup_unknown && app.dup_hits == 0 && !the_write(),
+          "an endless playlist: %d pages, then \"could not check\" instead of a silent pass (unknown %d)", pages, app.dup_unknown);
+    picker_open(3, 3, 2);                                     /* a failed page asks the same */
+    send(JF_EV_PICK_SELECT, 0); send(JF_EV_PICK_ADD, 0);
+    { JfCmd c = *list_req(); reply_raw(&c, JF_ERR_SERVER); }
+    CHECK(app.confirm == JF_CONFIRM_ADD_DUP && app.dup_unknown && !app.overlay && !the_write(), "a failed scan page: could-not-check, no overlay");
+
+    /* pick_new_posts_create_with_pick_ids */
+    picker_open(6, 6, 3);
+    send_text(JF_EV_PICK_NEW, "");
+    CHECK(cm.n == 0, "an empty name sends nothing");
+    send_text(JF_EV_PICK_NEW, "Road trip");
+    const JfCmd *s = find(JF_CMD_REQUEST);
+    CHECK(cm.n == 1 && s && s->kind == JF_KIND_SAVE && strcmp(s->name, "Road trip") == 0 && s->n == 6 && s->ids_src == JF_IDS_PICK && s->tag != 0 && !list_req(),
+          "NEW: one SAVE of the 6 picked ids, no duplicate scan");
+    save_result(s ? s->tag : 0, JF_ERR_NONE, 200);
+    r = list_req();
+    jf_path_playlists(want, sizeof want, UID, 0, JF_PAGE_PLPICK);
+    CHECK(strcmp(app.banner, "ADDED TO Road trip") == 0 && r && r->list == &app.lists[JF_LIST_PLPICK] && strcmp(r->path, want) == 0 && app.pick_sel == -1 && cm.n == 1,
+          "created: banner, and the picker list is asked again (\"%s\")", app.banner);
+    { JfCmd c = *r; fill(c.list, JF_ITEM_PLAYLIST, 4, 4); snprintf(c.list->items[2].name, 96, "Road trip"); reply_raw(&c, JF_ERR_NONE); }
+    CHECK(app.pick_sel == 2 && app.screen == JF_SCR_PLPICK, "the new row is selected by name (sel %d)", app.pick_sel);
+    picker_open(6, 6, 3);
+    send_text(JF_EV_PICK_NEW, "x");
+    save_result(find(JF_CMD_REQUEST)->tag, JF_ERR_SERVER, 500);
+    CHECK(app.overlay && app.overlay_buttons == JF_BTN_CLOSE, "a failed create: the overlay, CLOSE only");
+
+    /* pick_close_pops_to_scroll */
+    in_tracks(25, 25);
+    jf_note_view(&app, 12, 14);
+    unsigned seq = app.restore_seq;
+    send(JF_EV_PICK_OPEN, -1);
+    { JfCmd c = *list_req(); reply_list(&c, JF_ITEM_PLAYLIST, 2, 2); }
+    send(JF_EV_PICK_CLOSE, 0);
+    CHECK(app.screen == JF_SCR_TRACKS && app.restore_top == 12 && app.restore_cursor == 14 && app.restore_seq != seq && cm.n == 0,
+          "CLOSE returns to the track list at its scroll, no refetch (screen %d, top %d, cursor %d)", app.screen, app.restore_top, app.restore_cursor);
+    send(JF_EV_PICK_OPEN, -1);
+    send(JF_EV_BACK, 0);
+    CHECK(app.screen == JF_SCR_TRACKS, "BACK does the same");
+    picker_open(3, 3, 2);                                   /* closing in the middle of the scan abandons it */
+    send(JF_EV_PICK_SELECT, 0); send(JF_EV_PICK_ADD, 0);
+    JfCmd stale = *list_req();
+    send(JF_EV_PICK_CLOSE, 0);
+    reply_ids(&stale, NULL, 0, 0, 0);
+    CHECK(!the_write() && app.confirm == JF_CONFIRM_NONE && !app.dup_scan, "a scan page that arrives after CLOSE adds nothing");
+
+    /* pick_write_tags_distinct: an add and a delete never take each other's result */
+    in_playlists(3);
+    send(JF_EV_SELECT, 2); send(JF_EV_PLAYLIST_DELETE, 2); send(JF_EV_CONFIRM, 0);
+    unsigned dtag = wtag();
+    send(JF_EV_ACTIVATE, 0);
+    { JfCmd c = *list_req(); reply_list(&c, JF_ITEM_TRACK, 3, 3); }
+    send(JF_EV_PICK_OPEN, -1);
+    { JfCmd c = *list_req(); reply_list(&c, JF_ITEM_PLAYLIST, 2, 2); }
+    send(JF_EV_PICK_SELECT, 1); send(JF_EV_PICK_ADD, 0); scan_clean();
+    unsigned atag = wtag();
+    CHECK(atag != 0 && atag != dtag, "add tag %u differs from the pending delete's %u", atag, dtag);
+    send_write_result(dtag, JF_ERR_NONE, 204);
+    CHECK(app.add_pending && strncmp(app.banner, "DELETED", 7) == 0 && !the_write(), "the delete's result does not finish the add");
+    send(JF_EV_PICK_OPEN, 0);
+    CHECK(app.add_pending && app.screen == JF_SCR_PLPICK, "PICK_OPEN while an add is in flight is ignored");
+    send_write_result(atag, JF_ERR_NONE, 204);
+    CHECK(strncmp(app.banner, "ADDED TO", 8) == 0 && !app.add_pending, "the add's own result finishes it");
+
+    /* pick_not_offered_on_artist_folder */
+    signed_in(); artists_loaded(3, 3);
+    send(JF_EV_PICK_OPEN, -1);
+    CHECK(app.screen == JF_SCR_ARTISTS && cm.n == 0, "not at the root");
+    send(JF_EV_ACTIVATE, 0);
+    { JfCmd c = *find(JF_CMD_REQUEST); reply_list(&c, JF_ITEM_ALBUM, 2, 2); }
+    send(JF_EV_PICK_OPEN, -1);
+    CHECK(app.screen == JF_SCR_ALBUMS && cm.n == 0 && app.pick_n == 0, "not on an artist's albums (hundreds of tracks against the 100 cap)");
+    send(JF_EV_PICK_OPEN, 0);
+    CHECK(app.screen == JF_SCR_ALBUMS && cm.n == 0, "an album row is no track");
+
+    /* pick_cmds_le_2 */
+    CHECK(max_cmds <= 2, "no step of the add flow emitted more than 2 commands (max %d)", max_cmds);
+}
+
 int main(void)
 {
     test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue(); test_sink_channels();
@@ -1962,7 +2252,7 @@ int main(void)
     test_mix_cancel_and_errors(); test_mix_nowplaying(); test_save();
     test_queue_clear(); test_queue_restore();
     test_pause_stop_seek(); test_instant_confirm(); test_back_restores_view(); test_prev(); test_queue_edit(); test_queue_remove();
-    test_playlist_delete(); test_playlist_policy();
+    test_playlist_delete(); test_playlist_policy(); test_pick();
     printf("jf_core_test: %d checks, %d failures\n", checks, fails);
     return fails ? 1 : 0;
 }

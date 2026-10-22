@@ -49,6 +49,12 @@
 #define JF_CAP_GENRES    100      /* JF_MIX_GENRE_PAGE */
 #define JF_CAP_POOL       40      /* JF_MIX_PAGE */
 #define JF_CAP_LIBS       16      /* music libraries of one server */
+#define JF_CAP_PLPICK    100      /* the playlists the add-to-playlist picker lists */
+#define JF_CAP_PLCHK      50      /* one page of a playlist's track ids in the duplicate scan (the scan clears it between pages) */
+#define JF_PAGE_PLPICK    50
+#define JF_PAGE_PLCHK     50
+#define JF_DUP_PAGES_MAX  40      /* pages the duplicate scan reads (2000 entries) before it gives up and asks */
+#define JF_ADD_BATCH      10      /* ids per add request: they ride in the query and 10 fit the path */
 
 /* MIX.  A page of 50 Audio items with Fields=Genres is ~66 KB and ~4700 tokens (measured), too near the old 5000-token
  * budget, so 40 (measured up to 5259 tokens and 83670 bytes: JF_TOKENS_PAGE is 8000 and JF_API_BODY_BYTES 160 KB for it); a genre-index page of 100 with SongCount is ~38 KB and ~3700 tokens. */
@@ -69,7 +75,8 @@
 typedef enum { JF_SCR_SIGNIN = 0, JF_SCR_ARTISTS, JF_SCR_ALBUMS, JF_SCR_TRACKS,
                JF_SCR_SEARCH, JF_SCR_NOWPLAYING, JF_SCR_QUEUE,
                JF_SCR_MIX,      /* the tick screen of MIX: JfApp.mix.opt */
-               JF_SCR_SETTINGS  /* the settings view: rows from jf_settings_rows(), JfApp.settings_page */ } JfScreen;
+               JF_SCR_SETTINGS, /* the settings view: rows from jf_settings_rows(), JfApp.settings_page */
+               JF_SCR_PLPICK    /* ADD TO PLAYLIST: the playlist list (JF_LIST_PLPICK), pick_sel marks the chosen row */ } JfScreen;
 
 typedef enum { JF_LIST_ARTISTS = 0, JF_LIST_ALBUMS, JF_LIST_TRACKS, JF_LIST_SEARCH,
                JF_LIST_MIX,       /* no screen of its own: the reply of an INSTANT MIX request */
@@ -77,6 +84,8 @@ typedef enum { JF_LIST_ARTISTS = 0, JF_LIST_ALBUMS, JF_LIST_TRACKS, JF_LIST_SEAR
                JF_LIST_GENRES,    /* no screen: one page of the genre index, folded into the ticked keys and cleared */
                JF_LIST_POOL,      /* no screen: one page of candidate tracks for a MIX */
                JF_LIST_LIBS,      /* no screen of its own: the music libraries (Views reply), items are JF_ITEM_LIBRARY; JfApp.lib_n = items stored */
+               JF_LIST_PLPICK,    /* the playlists of the ADD TO PLAYLIST picker (screen JF_SCR_PLPICK); not library-scoped */
+               JF_LIST_PLCHK,     /* no screen: pages of the chosen playlist's track ids, scanned for duplicates and cleared between pages */
                JF_LIST_COUNT } JfListId;
 
 /* The root browse category (JF_SCR_ARTISTS shows it), in the order JF_EV_CATEGORY cycles. */
@@ -96,7 +105,8 @@ typedef enum { JF_SUB_PLAIN = 0, JF_SUB_GENRE, JF_SUB_PLAYLIST } JfSub;
 typedef enum { JF_PLAY_IDLE = 0, JF_PLAY_FETCHING, JF_PLAY_PLAYING, JF_PLAY_END, JF_PLAY_PAUSED, JF_PLAY_STOPPED } JfPlayState;
 
 typedef enum { JF_CONFIRM_NONE = 0, JF_CONFIRM_INSTANT_MIX, JF_CONFIRM_CLEAR_QUEUE, JF_CONFIRM_SIGN_OUT,
-               JF_CONFIRM_DELETE_PLAYLIST   /* confirm_seed = the playlist row; CONFIRM sends the DELETE */ } JfConfirm;
+               JF_CONFIRM_DELETE_PLAYLIST,  /* confirm_seed = the playlist row; CONFIRM sends the DELETE */
+               JF_CONFIRM_ADD_DUP           /* the add would duplicate (dup_hits of pick_n already in add_name) or could not be checked (dup_unknown); CONFIRM adds all */ } JfConfirm;
 
 /* The settings view is a table of rows (the extension point: a new setting is one JfSettingId and one line in
  * jf_settings_rows()).  Page MAIN lists the rows; page LIBRARY lists ALL LIBRARIES then each lists[JF_LIST_LIBS] item. */
@@ -125,6 +135,16 @@ typedef enum {
     JF_EV_DISMISS,       /* drop the action bar */
     JF_EV_PLAYLIST_DELETE,/* .i: list row of a playlist (the Playlists view, from its action bar): asks first (confirm = DELETE_PLAYLIST, confirm_seed = the row, so the
                           * UI names it); the CONFIRM sends one WRITE DELETE and the result shows a banner.  Ignored while a delete is pending */
+    JF_EV_PICK_OPEN,     /* ADD TO PLAYLIST.  .i = list row of a track (the action bar's sixth button), or -1 = every track of the TRACKS screen's list
+                          * (an album or a playlist; never an artist's albums).  Collects the ids into pick_ids / pick_n (the first JF_SAVE_IDS_MAX, banner
+                          * "FIRST 100 TRACKS ONLY" when cut; unloaded pages are fetched first, pick_wait) and opens JF_SCR_PLPICK with pick_sel = -1.
+                          * Ignored while an add is in flight */
+    JF_EV_PICK_SELECT,   /* .i = list row of JF_LIST_PLPICK (the UI shows "+ NEW PLAYLIST" at row 0 and maps k+1 -> k): sets pick_sel; opens nothing */
+    JF_EV_PICK_NEW,      /* .term = the new playlist's name (never empty): one SAVE with the pick_ids, banner "ADDED TO <name>", the picker list reloads
+                          * and pick_sel lands on the new row by name */
+    JF_EV_PICK_ADD,      /* add pick_ids to the playlist at pick_sel.  A duplicate scan comes first (confirm = JF_CONFIRM_ADD_DUP when it finds any, or cannot
+                          * tell); then batches of JF_ADD_BATCH ids, one WRITE POST each; the picker stays open */
+    JF_EV_PICK_CLOSE,    /* = BACK from the picker */
     JF_EV_BACK,
     JF_EV_PLAY_ALL,
     JF_EV_NEXT,
@@ -299,6 +319,11 @@ typedef struct {
     int queue_cur;           /* index of the track playing / last played; valid when queue_n > 0 */
     char pick_ids[JF_SAVE_IDS_MAX][33];   /* ADD TO PLAYLIST: the ids being added (a track, or a list's first JF_SAVE_IDS_MAX) */
     int pick_n;
+    int pick_sel;            /* JF_SCR_PLPICK: list row of JF_LIST_PLPICK chosen by PICK_SELECT (-1 = none; ADD is then absent); reset by every reload of that list */
+    char add_name[96];       /* the playlist an add goes to (copied when PICK_ADD starts): the dialog and the banner name it */
+    int dup_hits;            /* JF_CONFIRM_ADD_DUP: how many of the pick_n ids the playlist already holds */
+    bool dup_unknown;        /* JF_CONFIRM_ADD_DUP: the scan could not tell (page cap or a failed page): the UI asks "COULD NOT CHECK DUPLICATES - ADD?" */
+    bool pick_wait;          /* PICK_OPEN -1 is fetching the rest of the TRACKS list before it opens the picker */
     int volume_step;         /* 0..JF_VOLUME_MAX; 0 = mute (also in .login.volume_step) */
     int start_ms;            /* where the live stream started (0, or a seek / resume offset): shown elapsed = start_ms + time since START_AUDIO */
     int pos_ms;              /* PAUSED: the held position */
@@ -326,6 +351,14 @@ typedef struct {
     unsigned delete_tag, user_tag;
     char del_name[96];                   /* the playlist being deleted, for the banner */
     char save_name[96];
+    bool add_pending, save_pick;         /* an add batch is in flight / the SAVE in flight creates a playlist from pick_ids */
+    unsigned add_tag, wr_tag;            /* wr_tag numbers every WRITE (add and delete), so a result belongs to exactly one of them */
+    int add_sent, add_batch;             /* ids acknowledged so far / ids in the batch in flight */
+    char add_pl[33];                     /* id of the playlist being added to */
+    bool dup_scan;                       /* the PLCHK pages are being read */
+    int dup_next, dup_pages;             /* StartIndex of the next page / pages read */
+    bool pick_dup[JF_SAVE_IDS_MAX];      /* pick_ids[k] was found in the playlist */
+    char pick_find[96];                  /* a created playlist's name: select its row when the reloaded list shows it */
     bool play_wait;
     int play_wait_from;
     int fail_streak;
@@ -341,6 +374,8 @@ typedef struct {
     JfItem store_genres[JF_CAP_GENRES];
     JfItem store_pool[JF_CAP_POOL];
     JfItem store_libs[JF_CAP_LIBS];
+    JfItem store_plpick[JF_CAP_PLPICK];
+    JfItem store_plchk[JF_CAP_PLCHK];
     char id_server[64], id_user[64];   /* the server and user the saved queue and art belong to (set at start, kept by a sign-in) */
 } JfApp;
 

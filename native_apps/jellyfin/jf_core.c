@@ -9,7 +9,7 @@
 #include <string.h>
 
 static const int PAGE[JF_LIST_COUNT] = { JF_PAGE_ARTISTS, JF_PAGE_ALBUMS, JF_PAGE_TRACKS, JF_PAGE_SEARCH, JF_MIX_LIMIT,
-                                         1, JF_MIX_GENRE_PAGE, JF_MIX_PAGE, JF_CAP_LIBS };
+                                         1, JF_MIX_GENRE_PAGE, JF_MIX_PAGE, JF_CAP_LIBS, JF_PAGE_PLPICK, JF_PAGE_PLCHK };
 
 /* ── small helpers ─────────────────────────────────────────────────────── */
 
@@ -61,6 +61,7 @@ static int list_of_screen(JfScreen s)
     case JF_SCR_ALBUMS:  return JF_LIST_ALBUMS;
     case JF_SCR_TRACKS:  return JF_LIST_TRACKS;
     case JF_SCR_SEARCH:  return JF_LIST_SEARCH;
+    case JF_SCR_PLPICK:  return JF_LIST_PLPICK;
     default:             return -1;
     }
 }
@@ -103,6 +104,8 @@ static int build_path_raw(const JfApp *app, int lid, int start, char *out, size_
     case JF_LIST_MIX:     return jf_path_instant_mix(out, cap, uid, id, JF_MIX_LIMIT);
     case JF_LIST_SEED:    return jf_path_item_by_id(out, cap, uid, id);
     case JF_LIST_LIBS:    return jf_path_views(out, cap, uid);
+    case JF_LIST_PLPICK:  return jf_path_playlists(out, cap, uid, start, lim);
+    case JF_LIST_PLCHK:   return jf_path_playlist_ids(out, cap, uid, id, start, lim);
     case JF_LIST_GENRES:  return jf_path_genre_index(out, cap, uid, start, lim);
     case JF_LIST_POOL: {
         const JfMix *m = &app->mix;
@@ -158,6 +161,8 @@ static void retarget(JfApp *app, int lid, const char *id, const char *title, int
     l->generation++;
     app->play_wait = false;
     app->action_bar = false;      /* the rows under it are gone */
+    app->pick_wait = false;
+    if (lid == JF_LIST_PLPICK) app->pick_sel = -1;   /* the rows are new: an index into the old ones means nothing */
     request_page(app, lid, 0, out);
 }
 
@@ -191,6 +196,7 @@ static void enter(JfApp *app, JfScreen scr, const char *id, const char *title, i
 static void pop(JfApp *app, JfCmds *out)
 {
     JfNavEntry e = app->nav[--app->nav_n];
+    app->pick_wait = false;
     app->play_wait = false;
     app->screen = e.screen;
     app->restore_top = app->view_top = e.top;
@@ -233,8 +239,9 @@ static void refresh(JfApp *app)
     case JF_SCR_QUEUE:      copy(app->crumb, sizeof(app->crumb), "QUEUE"); break;
     case JF_SCR_MIX:        snprintf(app->crumb, sizeof(app->crumb), "MIX: %.100s", app->mix.seed.name); break;
     case JF_SCR_SETTINGS:   copy(app->crumb, sizeof(app->crumb), "SETTINGS"); break;
+    case JF_SCR_PLPICK:     copy(app->crumb, sizeof(app->crumb), "ADD TO PLAYLIST"); break;
     }
-    bool any = app->auth_pending || app->save_pending || app->play_wait || app->play_state == JF_PLAY_FETCHING;
+    bool any = app->auth_pending || app->save_pending || app->add_pending || app->play_wait || app->play_state == JF_PLAY_FETCHING;
     for (int k = 0; k < JF_LIST_COUNT; k++) any = any || app->lists[k].pending;
     app->busy = any;
 }
@@ -537,6 +544,8 @@ static void on_playlist_delete(JfApp *app, int i)
     app->confirm = JF_CONFIRM_DELETE_PLAYLIST;
 }
 
+static void add_start(JfApp *app, JfCmds *out);
+
 static void on_confirm(JfApp *app, JfCmds *out)
 {
     if (app->confirm == JF_CONFIRM_DELETE_PLAYLIST) {
@@ -544,12 +553,17 @@ static void on_confirm(JfApp *app, JfCmds *out)
         if (app->delete_pending || !have_token(app)) return;
         JfCmd *c = emit(out, JF_CMD_REQUEST);
         c->kind = JF_KIND_WRITE;
-        c->tag = ++app->delete_tag;
+        c->tag = app->delete_tag = ++app->wr_tag;
         copy(c->method, sizeof(c->method), "DELETE");
         if (jf_path_playlist_delete(c->path, sizeof(c->path), app->confirm_seed.id) < 0) { out->n--; return; }
         copy(app->del_name, sizeof(app->del_name), app->confirm_seed.name);
         app->delete_pending = true;
         app->retry = *c;
+        return;
+    }
+    if (app->confirm == JF_CONFIRM_ADD_DUP) {
+        app->confirm = JF_CONFIRM_NONE;
+        if (have_token(app) && !app->add_pending) add_start(app, out);
         return;
     }
     if (app->confirm == JF_CONFIRM_CLEAR_QUEUE) {
@@ -872,6 +886,7 @@ static void on_save(JfApp *app, const char *name, JfCmds *out)
     c->n = app->queue_n < JF_SAVE_IDS_MAX ? app->queue_n : JF_SAVE_IDS_MAX;
     copy(app->save_name, sizeof(app->save_name), name);
     app->save_pending = true;
+    app->save_pick = false;
 }
 
 /* ── session loss and error text ───────────────────────────────────────── */
@@ -879,6 +894,7 @@ static void on_save(JfApp *app, const char *name, JfCmds *out)
 static void session_expired(JfApp *app, JfCmds *out)
 {
     app->save_pending = false;
+    app->add_pending = app->dup_scan = app->pick_wait = false;
     app->delete_pending = false;     /* the policy belongs to the user who is gone; the next sign-in answers it again */
     app->user_pending = false;
     app->policy_known = app->delete_denied = false;
@@ -914,6 +930,189 @@ static const char *err_text(char *buf, size_t cap, JfErr e, int status)
     if (status <= 0 || status == 200) return t;
     snprintf(buf, cap, "%s (HTTP %d)", t, status);
     return buf;
+}
+
+/* ── ADD TO PLAYLIST ───────────────────────────────────────────────────── */
+
+static int track_rows(const JfList *l)
+{
+    int n = 0;
+    for (int k = 0; k < l->n; k++) if (l->items[k].type == JF_ITEM_TRACK) n++;
+    return n;
+}
+
+static void pick_enter(JfApp *app, JfCmds *out)
+{
+    app->pick_wait = false;
+    enter(app, JF_SCR_PLPICK, "", "ADD TO PLAYLIST", JF_SUB_PLAIN, out);
+}
+
+/* PICK_OPEN -1: every track of the TRACKS list, or its first JF_SAVE_IDS_MAX.  Like PLAY ALL it needs the rows, so missing pages
+ * are fetched first (on_list calls this again after each one); it stops fetching once 100 tracks are in, since no more can be used. */
+static void pick_all(JfApp *app, JfCmds *out)
+{
+    JfList *l = &app->lists[JF_LIST_TRACKS];
+    int tn = track_rows(l);
+    if (tn < JF_SAVE_IDS_MAX && l->loaded < l->total && !l->full) {
+        app->pick_wait = true;
+        if (!l->pending) request_page(app, JF_LIST_TRACKS, l->loaded, out);
+        return;
+    }
+    app->pick_wait = false;
+    if (tn == 0) return;
+    int n = 0;
+    for (int k = 0; k < l->n && n < JF_SAVE_IDS_MAX; k++)
+        if (l->items[k].type == JF_ITEM_TRACK) copy(app->pick_ids[n++], sizeof(app->pick_ids[0]), l->items[k].id);
+    app->pick_n = n;
+    bool cut = tn > JF_SAVE_IDS_MAX || (tn == JF_SAVE_IDS_MAX && l->loaded < l->total);
+    pick_enter(app, out);
+    if (cut) set_banner(app, "FIRST 100 TRACKS ONLY");   /* after the request: the banner is the user's only hint that the rest is not coming */
+}
+
+/* The sixth button of a track's action bar (.i = its row), or "+ PLAYLIST" for a whole album / playlist (.i = -1, the TRACKS screen
+ * only: an artist's folder holds hundreds of tracks against the 100-id cap).  Ids are copied, so the list may move on. */
+static void on_pick_open(JfApp *app, int i, JfCmds *out)
+{
+    if (!have_token(app) || app->add_pending || app->dup_scan || app->save_pending) return;   /* pick_ids is in use */
+    if (i < 0) {
+        if (app->screen == JF_SCR_TRACKS) pick_all(app, out);
+        return;
+    }
+    int lid = cur_list(app);
+    if (lid < 0 || lid == JF_LIST_PLPICK || i >= app->lists[lid].n || app->lists[lid].items[i].type != JF_ITEM_TRACK) return;
+    copy(app->pick_ids[0], sizeof(app->pick_ids[0]), app->lists[lid].items[i].id);
+    app->pick_n = 1;
+    pick_enter(app, out);
+}
+
+static void on_pick_select(JfApp *app, int i)
+{
+    const JfList *l = &app->lists[JF_LIST_PLPICK];
+    if (app->screen != JF_SCR_PLPICK || i < 0 || i >= l->n || l->items[i].type != JF_ITEM_PLAYLIST) return;
+    app->pick_sel = i;
+}
+
+/* One batch of the add: up to JF_ADD_BATCH ids in the query of one POST (a path holds no more).  Never in app->retry: the overlay
+ * offers CLOSE only, because a re-sent POST would add the ids a second time. */
+static void add_send(JfApp *app, JfCmds *out)
+{
+    int k = app->pick_n - app->add_sent;
+    if (k > JF_ADD_BATCH) k = JF_ADD_BATCH;
+    const char *ids[JF_ADD_BATCH];
+    for (int j = 0; j < k; j++) ids[j] = app->pick_ids[app->add_sent + j];
+    JfCmd *c = emit(out, JF_CMD_REQUEST);
+    c->kind = JF_KIND_WRITE;
+    c->tag = ++app->wr_tag;
+    copy(c->method, sizeof(c->method), "POST");
+    if (jf_path_playlist_add(c->path, sizeof(c->path), app->login.user_id, app->add_pl, ids, k) < 0) {
+        out->n--;
+        set_banner(app, "BAD REQUEST");
+        return;
+    }
+    app->add_tag = c->tag;
+    app->add_batch = k;
+    app->add_pending = true;
+}
+
+static void add_start(JfApp *app, JfCmds *out)
+{
+    app->add_sent = 0;
+    add_send(app, out);
+}
+
+/* The scan is over: ask when it found duplicates or could not tell, else add. */
+static void dup_finish(JfApp *app, bool unknown, JfCmds *out)
+{
+    app->dup_scan = false;
+    app->dup_unknown = unknown;
+    if (unknown || app->dup_hits > 0) { app->confirm = JF_CONFIRM_ADD_DUP; return; }
+    add_start(app, out);
+}
+
+/* One page of the playlist's ids.  The list holds one page at a time (cleared before the next request) and dup_next is the StartIndex.
+ * One id stops at its first hit; more read to the end or until every id has been seen. */
+static void on_dup_reply(JfApp *app, JfCmds *out)
+{
+    if (!app->dup_scan) return;
+    JfList *l = &app->lists[JF_LIST_PLCHK];
+    for (int k = 0; k < l->n; k++)
+        for (int j = 0; j < app->pick_n; j++)
+            if (!app->pick_dup[j] && strcmp(l->items[k].id, app->pick_ids[j]) == 0) { app->pick_dup[j] = true; app->dup_hits++; }
+    app->dup_next += l->n;
+    app->dup_pages++;
+    bool more = app->dup_hits < app->pick_n && l->n > 0 && app->dup_next < l->total;
+    if (!more) { dup_finish(app, false, out); return; }
+    if (app->dup_pages >= JF_DUP_PAGES_MAX) { dup_finish(app, true, out); return; }   /* an answer of "no duplicates" we did not earn */
+    jf_list_clear(l);
+    request_page(app, JF_LIST_PLCHK, app->dup_next, out);
+    if (!l->pending) dup_finish(app, true, out);
+}
+
+static void dup_cancel(JfApp *app)
+{
+    if (!app->dup_scan) return;
+    JfList *l = &app->lists[JF_LIST_PLCHK];
+    app->dup_scan = false;
+    l->pending = false;
+    l->generation++;     /* a page already on its way is stale */
+}
+
+static void on_pick_add(JfApp *app, JfCmds *out)
+{
+    const JfList *l = &app->lists[JF_LIST_PLPICK];
+    if (app->screen != JF_SCR_PLPICK || !have_token(app) || app->add_pending || app->dup_scan || app->save_pending || app->pick_n <= 0) return;
+    if (app->pick_sel < 0 || app->pick_sel >= l->n || l->items[app->pick_sel].type != JF_ITEM_PLAYLIST) return;
+    copy(app->add_pl, sizeof(app->add_pl), l->items[app->pick_sel].id);
+    copy(app->add_name, sizeof(app->add_name), l->items[app->pick_sel].name);
+    memset(app->pick_dup, 0, sizeof(app->pick_dup));
+    app->dup_hits = app->dup_next = app->dup_pages = 0;
+    app->dup_unknown = false;
+    app->dup_scan = true;
+    retarget(app, JF_LIST_PLCHK, app->add_pl, app->add_name, JF_SUB_PLAIN, out);
+    if (!app->lists[JF_LIST_PLCHK].pending) app->dup_scan = false;
+}
+
+/* "+ NEW PLAYLIST": one SAVE with the picked ids (jellyfin.c builds them from pick_ids for JF_IDS_PICK).  A new playlist cannot hold a duplicate. */
+static void on_pick_new(JfApp *app, const char *name, JfCmds *out)
+{
+    if (!name[0] || app->screen != JF_SCR_PLPICK || app->pick_n <= 0 || !have_token(app) ||
+        app->save_pending || app->add_pending || app->dup_scan) return;
+    JfCmd *c = emit(out, JF_CMD_REQUEST);
+    c->kind = JF_KIND_SAVE;
+    c->tag = ++app->save_tag;
+    copy(c->name, sizeof(c->name), name);
+    c->n = app->pick_n;
+    c->ids_src = JF_IDS_PICK;
+    copy(app->save_name, sizeof(app->save_name), name);
+    app->save_pending = true;
+    app->save_pick = true;
+}
+
+/* The reloaded picker list has arrived: put the selection on the playlist just created. */
+static void pick_find_apply(JfApp *app)
+{
+    const JfList *l = &app->lists[JF_LIST_PLPICK];
+    if (!app->pick_find[0]) return;
+    for (int k = 0; k < l->n; k++)
+        if (l->items[k].type == JF_ITEM_PLAYLIST && strcmp(l->items[k].name, app->pick_find) == 0) { app->pick_sel = k; app->pick_find[0] = '\0'; return; }
+    if (l->loaded >= l->total || l->full) app->pick_find[0] = '\0';
+}
+
+/* A batch's answer.  401 is a lost session here (unlike a DELETE, which can be a refused right): the token is what the add used. */
+static void on_add_result(JfApp *app, const JfResult *r, JfCmds *out)
+{
+    app->add_pending = false;
+    if (r->err == JF_ERR_UNAUTH) { session_expired(app, out); return; }
+    if (r->err != JF_ERR_NONE) {
+        char t[48];
+        set_overlay(app, err_text(t, sizeof t, r->err, r->status), JF_BTN_CLOSE);
+        return;
+    }
+    app->add_sent += app->add_batch;
+    if (app->add_sent < app->pick_n) { add_send(app, out); return; }
+    char b[48];
+    snprintf(b, sizeof b, "ADDED TO %.38s", app->add_name);
+    set_banner(app, b);
 }
 
 /* ── results ───────────────────────────────────────────────────────────── */
@@ -953,6 +1152,8 @@ static void on_list(JfApp *app, const JfResult *r, JfCmds *out)
     JfErr e = r->err;
     if (e == JF_ERR_NONE && r->parse != JF_PARSE_OK) e = JF_ERR_BADREPLY;
     if (e != JF_ERR_NONE) {
+        if (lid == JF_LIST_PLCHK) { dup_finish(app, true, out); return; }   /* cannot tell: ask rather than overlay */
+        app->pick_wait = false;
         bool mixl = lid == JF_LIST_SEED || lid == JF_LIST_GENRES || lid == JF_LIST_POOL;
         if (mixl) app->mix.phase = app->mix.phase == JF_MIX_SEED ? JF_MIX_OFF : JF_MIX_TICKS;   /* CLOSE only: a retry would not know the phase */
         bool again = !mixl && (e == JF_ERR_UNREACHABLE || e == JF_ERR_SERVER);
@@ -964,10 +1165,13 @@ static void on_list(JfApp *app, const JfResult *r, JfCmds *out)
     /* A page that consumed nothing while the server claims more would be asked for forever. */
     if (l->loaded <= app->req_loaded[lid]) l->total = l->loaded;
     if (lid == JF_LIST_LIBS) { on_libs_reply(app, out); return; }
+    if (lid == JF_LIST_PLCHK) { on_dup_reply(app, out); return; }
+    if (lid == JF_LIST_PLPICK) { pick_find_apply(app); return; }
     if (lid == JF_LIST_MIX) { on_mix_reply(app, out); return; }
     if (lid == JF_LIST_SEED) { on_seed_reply(app); return; }
     if (lid == JF_LIST_GENRES) { on_genres_reply(app, out); return; }
     if (lid == JF_LIST_POOL) { on_pool_reply(app, out); return; }
+    if (app->pick_wait && lid == JF_LIST_TRACKS) { pick_all(app, out); return; }
     if (app->play_wait && lid == JF_LIST_TRACKS) {
         if (l->loaded < l->total && !l->full) request_page(app, lid, l->loaded, out);
         else { app->play_wait = false; start_queue(app, lid, app->play_wait_from, out); }
@@ -1005,6 +1209,14 @@ static void on_save_result(JfApp *app, const JfResult *r, JfCmds *out)
         set_overlay(app, err_text(t, sizeof t, r->err, r->status), JF_BTN_CLOSE);
         return;
     }
+    if (app->save_pick) {            /* a playlist made from the picked ids: show the picker with it selected */
+        char b[48];
+        snprintf(b, sizeof b, "ADDED TO %.38s", app->save_name);
+        copy(app->pick_find, sizeof(app->pick_find), app->save_name);
+        if (app->screen == JF_SCR_PLPICK) retarget(app, JF_LIST_PLPICK, "", "ADD TO PLAYLIST", JF_SUB_PLAIN, out);
+        set_banner(app, b);
+        return;
+    }
     char b[48];
     snprintf(b, sizeof b, "SAVED: %.40s", app->save_name);
     set_banner(app, b);
@@ -1035,6 +1247,7 @@ static void request_user(JfApp *app, JfCmds *out)
  * failure is the overlay, and RETRY re-sends (a DELETE of a gone item is harmless). */
 static void on_write_result(JfApp *app, const JfResult *r, JfCmds *out)
 {
+    if (app->add_pending && r->tag == app->add_tag) { on_add_result(app, r, out); return; }
     if (!app->delete_pending || r->tag != app->delete_tag) return;
     app->delete_pending = false;
     if (r->err == JF_ERR_UNAUTH || r->err == JF_ERR_FORBIDDEN) {
@@ -1128,6 +1341,7 @@ static void on_signin(JfApp *app, const JfEvent *ev, JfCmds *out)
 static void on_activate(JfApp *app, int i, JfCmds *out)
 {
     int lid = cur_list(app);
+    if (lid == JF_LIST_PLPICK) return;     /* the picker selects with PICK_SELECT: a playlist row there must not open */
     if (lid < 0 || i < 0 || i >= app->lists[lid].n) return;
     const JfItem *it = &app->lists[lid].items[i];
     switch (it->type) {
@@ -1145,6 +1359,7 @@ static void on_activate(JfApp *app, int i, JfCmds *out)
 static void on_select(JfApp *app, int i, JfCmds *out)
 {
     int lid = cur_list(app);
+    if (lid == JF_LIST_PLPICK) return;     /* the picker has its own events; a playlist row there is not the Playlists view's menu */
     if (lid < 0 || i < 0 || i >= app->lists[lid].n) return;
     /* A playlist of the Playlists view gets a menu (OPEN / DELETE / CANCEL) in the track bar's mechanism; elsewhere it opens. */
     bool menu = app->lists[lid].items[i].type == JF_ITEM_PLAYLIST && app->screen == JF_SCR_ARTISTS && app->cat == JF_CAT_PLAYLISTS;
@@ -1403,6 +1618,7 @@ static void on_back(JfApp *app, JfCmds *out)
         mix_stop_requests(app, out);
         return;
     }
+    if (app->screen == JF_SCR_PLPICK) dup_cancel(app);
     if (app->screen == JF_SCR_MIX) app->mix.phase = JF_MIX_OFF;
     pop(app, out);
 }
@@ -1465,6 +1681,9 @@ void jf_app_init(JfApp *app)
     jf_list_init(&app->lists[JF_LIST_GENRES], app->store_genres, JF_CAP_GENRES);
     jf_list_init(&app->lists[JF_LIST_POOL], app->store_pool, JF_CAP_POOL);
     jf_list_init(&app->lists[JF_LIST_LIBS], app->store_libs, JF_CAP_LIBS);
+    jf_list_init(&app->lists[JF_LIST_PLPICK], app->store_plpick, JF_CAP_PLPICK);
+    jf_list_init(&app->lists[JF_LIST_PLCHK], app->store_plchk, JF_CAP_PLCHK);
+    app->pick_sel = -1;
     app->cat = JF_CAT_ARTISTS;
     app->session_fn = jf_session_id;
     app->volume_step = JF_VOLUME_DEFAULT;
@@ -1539,6 +1758,11 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
     case JF_EV_CONFIRM:  on_confirm(app, out); break;
     case JF_EV_DISMISS:  break;
     case JF_EV_PLAYLIST_DELETE: on_playlist_delete(app, ev->i); break;
+    case JF_EV_PICK_OPEN:   on_pick_open(app, ev->i, out); break;
+    case JF_EV_PICK_SELECT: on_pick_select(app, ev->i); break;
+    case JF_EV_PICK_NEW:    on_pick_new(app, ev->term, out); break;
+    case JF_EV_PICK_ADD:    on_pick_add(app, out); break;
+    case JF_EV_PICK_CLOSE:  if (app->screen == JF_SCR_PLPICK) on_back(app, out); break;
     case JF_EV_BACK:     if (!bar_was && !confirm_was) on_back(app, out); break;
     case JF_EV_PLAY_ALL: on_play_all(app, out); break;
     case JF_EV_NEXT:     on_next(app, out); break;
