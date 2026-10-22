@@ -211,6 +211,10 @@ void lv_init(ListView *lv, LvSource src, UiRect rect, int row_h) {
     lv_sync(lv);
 }
 
+bool lv_row_edge_lit(const ListView *lv, int index) {
+    return index == lv->cursor && lv->active && !lv->ring_hidden;
+}
+
 void lv_free(ListView *lv) {
     free(lv->marks);
     lv->marks = NULL;
@@ -401,7 +405,7 @@ static LvEvent touch_input_frame(ListView *lv, const TouchState *ts, uint32_t no
             if (idx >= 0) {
                 bool again = (idx == lv->cursor && !lv->cursor_dragged);
                 lv_move_to(lv, idx);
-                ev = (again && lv->active) ? LV_EV_ACTIVATE : LV_EV_TAP;
+                ev = (again && (lv->active || lv->tap2_any)) ? LV_EV_ACTIVATE : LV_EV_TAP;
             }
         }
         lv->drag.active = lv->drag.dragging = false;
@@ -495,7 +499,7 @@ static void draw_row(Framebuffer *fb, const ListView *lv, int index, int x, int 
     bool cur = (index == lv->cursor);
     bool marked = lv_is_marked(lv, index);
     uint32_t fill = !cur ? LV_COLOR_ROW : lv->active ? LV_COLOR_CUR : LV_COLOR_CUR_OFF;
-    uint32_t edge = (cur && lv->active) ? BTN_COLOR_HIGHLIGHT : LV_COLOR_ROW_BD;
+    uint32_t edge = lv_row_edge_lit(lv, index) ? BTN_COLOR_HIGHLIGHT : LV_COLOR_ROW_BD;
     uint32_t ink = (r.flags & LV_ROW_DIM) ? LV_COLOR_DIM : marked ? LV_COLOR_MARK : COLOR_WHITE;
     fb_fill_rect(fb, x, y, w, h, fill);
     fb_draw_rect(fb, x, y, w, h, edge);

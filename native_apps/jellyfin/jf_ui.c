@@ -289,6 +289,8 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
         style(&ui->qrow[i], ui->L.qrow[i], tq[i], 6 * (int)strlen(tq[i]) * 2 <= ui->L.qrow[i].w - 12 ? 2 : 1);
     style(&ui->mixb[0], ui->L.mixb[0], "START", 2);
     style(&ui->mixb[1], ui->L.mixb[1], "CANCEL", 2);
+    style(&ui->plb[0], ui->L.mixb[0], "ADD", 2);
+    style(&ui->plb[1], ui->L.mixb[1], "CLOSE", 2);
     for (int i = 0; i < JF_UI_FIELDS; i++) style(&ui->field[i], ui->L.field[i], "", 2);
     style(&ui->signin, ui->L.signin, "SIGN IN", 3);
     style(&ui->signexit, ui->L.signexit, "EXIT", 3);
@@ -387,6 +389,36 @@ static void do_save(JfUi *ui, Pointer *ptr, JfEvent *out, int *n, int max)
 
 static bool bp(const InputState *in, int id) { return in && in->buttons[id].pressed; }
 
+/* The list-over-buttons screens (PLPICK, MIX) as a ui_zone stack, top to bottom: the top bar (BACK 0, EXIT 1), the
+ * list, the button row (the screen's first button 0, its second 1).  The first button is absent when it cannot act. */
+enum { STACK_BAR = 0, STACK_LIST, STACK_ROW, STACK_N };
+
+static bool mix_locked(const JfApp *app) { return app->mix.phase == JF_MIX_INDEX || app->mix.phase == JF_MIX_POOL; }
+
+static void zone_add(UiZone *z, UiRect r, int id)
+{
+    z->r[z->n] = r;
+    z->id[z->n] = id;
+    z->n++;
+}
+
+static void stack_zones(JfUi *ui, UiZone z[UZ_ZONES], bool first_on)
+{
+    memset(z, 0, UZ_ZONES * sizeof z[0]);
+    if (ui->bar.has_back) zone_add(&z[STACK_BAR], top_bar_ring_rect(&ui->bar.L, TB_BACK), 0);
+    if (ui->bar.has_exit) zone_add(&z[STACK_BAR], top_bar_ring_rect(&ui->bar.L, TB_EXIT), 1);
+    z[STACK_LIST].lv = &ui->lv;
+    for (int i = first_on ? 0 : 1; i < JF_UI_MIXBTN; i++) zone_add(&z[STACK_ROW], ui->L.mixb[i], i);
+}
+
+/* How the stack's list looks: active only while it holds focus, the yellow pad edge only after a key (a touch hides it). */
+static void stack_lv_look(JfUi *ui)
+{
+    ui->lv.active = ui->zf.zone == STACK_LIST;
+    ui->lv.ring_hidden = !ui->zf.shown;
+    ui->lv.tap2_any = true;
+}
+
 /* The playlist action menu: the core raised the action bar on a playlist row (the track bar is the five-button one). */
 static bool pmenu_up(const JfApp *app)
 {
@@ -464,6 +496,9 @@ static void begin_screen(JfUi *ui)
     const JfApp *app = ui->app;
     ui->last_screen = app->screen;
     ui->abar_up = false;
+    ui->lv.ring_hidden = ui->lv.tap2_any = false;   /* only the stack screens set them, every frame */
+    uz_begin(&ui->zf, STACK_LIST);
+    ui->zf.shown = ui->show_ring;
     ui->zone = JF_ZONE_LIST;
     ui->focus = 0;
     ui->dirty = true;
@@ -948,16 +983,18 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         if (bp(in, BTN_ID_DOWN))  { dir = UI_DIR_DOWN;  mv = true; }
         if (bp(in, BTN_ID_LEFT))  { dir = UI_DIR_LEFT;  mv = true; }
         if (bp(in, BTN_ID_RIGHT)) { dir = UI_DIR_RIGHT; mv = true; }
+        bool can_sign = ui->fields[0][0] && ui->fields[1][0];   /* absent, not greyed, until the server and user are filled */
+        if (!can_sign && ui->focus == 3) ui->focus = 4;
         if (mv) ui->focus = ui_focus_move(rs, 5, ui->focus, dir);
-        ui->signin.disabled = !ui->fields[0][0] || !ui->fields[1][0];
+        if (mv && !can_sign && ui->focus == 3) ui->focus = (dir == UI_DIR_UP || dir == UI_DIR_LEFT) ? 2 : 4;
         int pick = -1;
         for (int i = 0; i < JF_UI_FIELDS; i++) if (button_check_tap(&ui->field[i], ts, now)) pick = i;
-        if (button_check_tap(&ui->signin, ts, now)) pick = 3;
+        if (can_sign && button_check_tap(&ui->signin, ts, now)) pick = 3;
         if (button_check_tap(&ui->signexit, ts, now)) pick = 4;
         if (act && pick < 0) pick = ui->focus;
         if (go_back) emit(out, &n, max, JF_EV_QUIT);
         if (pick >= 0 && pick < JF_UI_FIELDS) edit_field(ui, ptr, pick);
-        else if (pick == 3 && !ui->signin.disabled) {
+        else if (pick == 3 && can_sign) {
             int k = emit(out, &n, max, JF_EV_SIGNIN);
             if (k >= 0) {
                 snprintf(out[k].server, sizeof out[k].server, "%s", ui->fields[0]);
@@ -1004,89 +1041,44 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         return n;
     }
 
-    if (sc == JF_SCR_PLPICK) {
-        /* Row 0 is + NEW PLAYLIST (the keyboard names it); the other rows only select.  ADD (absent until something is
-         * chosen) and CLOSE are the MIX screen's two button slots. */
-        bool add = jf_ui_plpick_add_shown(app);
-        int cnt = src_count(ui);
-        snprintf(ui->mixb[0].text, sizeof ui->mixb[0].text, "%s", add ? "ADD" : "");
-        snprintf(ui->mixb[1].text, sizeof ui->mixb[1].text, "CLOSE");
-        if (go_back) emit(out, &n, max, JF_EV_PICK_CLOSE);
-        const InputState *lin = NULL;
-        if (ui->zone == JF_ZONE_LIST) {
-            lin = in;
-            if (bp(in, BTN_ID_DOWN) && ui->lv.cursor >= cnt - 1) {
-                ui->zone = JF_ZONE_ROW; ui->focus = add ? 0 : 1; lin = NULL; ui->dirty = true;
-            } else if (bp(in, BTN_ID_UP) && ui->lv.cursor <= 0) {
-                ui->zone = JF_ZONE_BAR; ui->bar_focus = ui->bar.has_back ? 0 : 1; lin = NULL; ui->dirty = true;
-            }
-        }
-        ui->lv.active = ui->zone == JF_ZONE_LIST;
+    if (sc == JF_SCR_PLPICK || sc == JF_SCR_MIX) {
+        /* Two screens, one shape: the list over a button row, under the top bar.  PLPICK: row 0 is + NEW PLAYLIST (the
+         * keyboard names it), the other rows only select; ADD (absent until something is chosen) and CLOSE.  MIX: the
+         * tick rows; START (absent while the run is going and the rows are locked) and CANCEL, which the core turns
+         * into "stop the run".  ui_zone makes one focus move per frame, so Down at the last row lands on the button
+         * row and stays there. */
+        bool pl = sc == JF_SCR_PLPICK;
+        bool locked = !pl && mix_locked(app);
+        bool first_on = pl ? jf_ui_plpick_add_shown(app) : !locked;
+        int cnt = pl ? src_count(ui) : app->mix.opt_n;
+        if (go_back) emit(out, &n, max, pl ? JF_EV_PICK_CLOSE : JF_EV_BACK);
+        UiZone z[UZ_ZONES];
+        stack_zones(ui, z, first_on);
         lv_sync(&ui->lv);
         mix_sync_marks(ui);
-        LvEvent ev = lv_input(&ui->lv, ts, lin, now);
+        UzOut zo;
+        uz_input(&ui->zf, z, 3, in, ts->pressed, &zo);
+        if (zo.moved) ui->dirty = true;
+        stack_lv_look(ui);
+        LvEvent ev = lv_input(&ui->lv, ts, zo.list_in, now);
         if (ev != LV_EV_NONE) ui->dirty = true;
         bool pick = ev == LV_EV_TAP || ev == LV_EV_ACTIVATE;
-        if (ui->zone == JF_ZONE_LIST && lin && bp(lin, BTN_ID_JUMP)) pick = true;
-        if (pick && ui->lv.cursor == 0) do_pick_new(ui, ptr, out, &n, max);
-        else if (pick && ui->lv.cursor > 0 && ui->lv.cursor < cnt) {
+        if (zo.list_in && bp(zo.list_in, BTN_ID_JUMP)) pick = true;
+        if (pl && pick && ui->lv.cursor == 0) do_pick_new(ui, ptr, out, &n, max);
+        else if (pl && pick && ui->lv.cursor > 0 && ui->lv.cursor < cnt) {
             int k = emit(out, &n, max, JF_EV_PICK_SELECT);
             if (k >= 0) out[k].i = ui->lv.cursor - 1;
-        }
-        if (ui->zone == JF_ZONE_ROW) {
-            if (!add) ui->focus = 1;
-            else if (bp(in, BTN_ID_LEFT) || bp(in, BTN_ID_RIGHT)) ui->focus ^= 1;
-            if (bp(in, BTN_ID_UP) || bp(in, BTN_ID_DOWN)) ui->zone = JF_ZONE_LIST;
-            else if (act) emit(out, &n, max, ui->focus == 0 ? JF_EV_PICK_ADD : JF_EV_PICK_CLOSE);
-        } else if (ui->zone == JF_ZONE_BAR) {
-            if ((bp(in, BTN_ID_LEFT) || bp(in, BTN_ID_RIGHT)) && ui->bar.has_back) ui->bar_focus ^= 1;
-            if (bp(in, BTN_ID_DOWN)) ui->zone = JF_ZONE_LIST;
-            else if (act) emit(out, &n, max, ui->bar_focus == 0 ? JF_EV_PICK_CLOSE : JF_EV_QUIT);
-        }
-        if (add && button_check_tap(&ui->mixb[0], ts, now)) emit(out, &n, max, JF_EV_PICK_ADD);
-        if (button_check_tap(&ui->mixb[1], ts, now)) emit(out, &n, max, JF_EV_PICK_CLOSE);
-        return n;
-    }
-
-    if (sc == JF_SCR_MIX) {
-        /* Tick rows are the list; START / CANCEL are the button row (focus 0 / 1).  While the run is going the
-         * rows are locked and START is off; CANCEL (BACK) is what the core turns into "stop the run". */
-        bool locked = app->mix.phase == JF_MIX_INDEX || app->mix.phase == JF_MIX_POOL;
-        int cnt = app->mix.opt_n;
-        if (go_back) emit(out, &n, max, JF_EV_BACK);
-        ui->mixb[0].disabled = locked;
-        const InputState *lin = NULL;
-        if (ui->zone == JF_ZONE_LIST) {
-            lin = in;
-            if (bp(in, BTN_ID_DOWN) && (cnt == 0 || ui->lv.cursor >= cnt - 1)) {
-                ui->zone = JF_ZONE_ROW; ui->focus = locked ? 1 : 0; lin = NULL; ui->dirty = true;
-            } else if (bp(in, BTN_ID_UP) && ui->lv.cursor <= 0) {
-                ui->zone = JF_ZONE_BAR; ui->bar_focus = ui->bar.has_back ? 0 : 1; lin = NULL; ui->dirty = true;
-            }
-        }
-        ui->lv.active = ui->zone == JF_ZONE_LIST;
-        lv_sync(&ui->lv);
-        mix_sync_marks(ui);
-        LvEvent ev = lv_input(&ui->lv, ts, lin, now);
-        if (ev != LV_EV_NONE) ui->dirty = true;
-        bool pick = ev == LV_EV_TAP || ev == LV_EV_ACTIVATE;
-        if (ui->zone == JF_ZONE_LIST && lin && bp(lin, BTN_ID_JUMP)) pick = true;
-        if (pick && !locked && ui->lv.cursor >= 0 && ui->lv.cursor < cnt) {
+        } else if (!pl && pick && !locked && ui->lv.cursor >= 0 && ui->lv.cursor < cnt) {
             int k = emit(out, &n, max, JF_EV_MIX_TOGGLE);
             if (k >= 0) out[k].i = ui->lv.cursor;
         }
-        if (ui->zone == JF_ZONE_ROW) {
-            if (locked) ui->focus = 1;
-            else if (bp(in, BTN_ID_LEFT) || bp(in, BTN_ID_RIGHT)) ui->focus ^= 1;
-            if (bp(in, BTN_ID_UP) || bp(in, BTN_ID_DOWN)) ui->zone = JF_ZONE_LIST;
-            else if (act) emit(out, &n, max, ui->focus == 0 ? JF_EV_MIX_START : JF_EV_BACK);
-        } else if (ui->zone == JF_ZONE_BAR) {
-            if ((bp(in, BTN_ID_LEFT) || bp(in, BTN_ID_RIGHT)) && ui->bar.has_back) ui->bar_focus ^= 1;
-            if (bp(in, BTN_ID_DOWN)) ui->zone = JF_ZONE_LIST;
-            else if (act) emit(out, &n, max, ui->bar_focus == 0 ? JF_EV_BACK : JF_EV_QUIT);
-        }
-        if (!locked && button_check_tap(&ui->mixb[0], ts, now)) emit(out, &n, max, JF_EV_MIX_START);
-        if (button_check_tap(&ui->mixb[1], ts, now)) emit(out, &n, max, JF_EV_BACK);
+        JfEventType first_ev = pl ? JF_EV_PICK_ADD : JF_EV_MIX_START;
+        JfEventType close_ev = pl ? JF_EV_PICK_CLOSE : JF_EV_BACK;
+        if (zo.activate >= 0 && ui->zf.zone == STACK_BAR) emit(out, &n, max, zo.activate == 0 ? close_ev : JF_EV_QUIT);
+        else if (zo.activate >= 0) emit(out, &n, max, zo.activate == 0 ? first_ev : close_ev);
+        Button *b = pl ? ui->plb : ui->mixb;
+        if (first_on && button_check_tap(&b[0], ts, now)) emit(out, &n, max, first_ev);
+        if (button_check_tap(&b[1], ts, now)) emit(out, &n, max, close_ev);
         return n;
     }
 
@@ -1332,12 +1324,12 @@ static void draw_signin(JfUi *ui)
         snprintf(ui->field[i].text, sizeof ui->field[i].text, "%s: %s", label[i], v);
         button_draw(ui->fb, &ui->field[i]);
     }
-    ui->signin.disabled = !ui->fields[0][0] || !ui->fields[1][0];
-    button_draw(ui->fb, &ui->signin);
+    bool can_sign = ui->fields[0][0] && ui->fields[1][0];   /* SIGN IN is absent until the server and user are filled */
+    if (can_sign) button_draw(ui->fb, &ui->signin);
     button_draw(ui->fb, &ui->signexit);
     if (ui->show_ring) {
         UiRect rs[5] = { ui->L.field[0], ui->L.field[1], ui->L.field[2], ui->L.signin, ui->L.signexit };
-        if (ui->focus >= 0 && ui->focus < 5) ring(ui, rs[ui->focus]);
+        if (ui->focus >= 0 && ui->focus < 5 && (ui->focus != 3 || can_sign)) ring(ui, rs[ui->focus]);
     }
 }
 
@@ -1509,9 +1501,11 @@ void jf_ui_draw(JfUi *ui)
         const TopBarLayout *TL = &ui->bar.L;
         icon_draw(fb, ICON_DROPDOWN, TL->title_x + TL->title_w + HEAD_GAP, TL->top + (TL->h - HEAD_ARROW) / 2, HEAD_ARROW, COLOR_WHITE);
     }
-    if (ui->show_ring && ui->zone == JF_ZONE_BAR && !app->overlay) {
-        if (app->screen == JF_SCR_ARTISTS && ui->bar_focus == 2) ring(ui, head_rect(ui));
-        else top_bar_draw_focus(fb, &ui->bar.L, ui->bar_focus == 0 ? TB_BACK : TB_EXIT);
+    bool stack = app->screen == JF_SCR_PLPICK || app->screen == JF_SCR_MIX;
+    if ((stack ? (ui->zf.shown && ui->zf.zone == STACK_BAR) : (ui->show_ring && ui->zone == JF_ZONE_BAR)) && !app->overlay) {
+        int bf = stack ? ui->zf.id : ui->bar_focus;
+        if (app->screen == JF_SCR_ARTISTS && bf == 2) ring(ui, head_rect(ui));
+        else top_bar_draw_focus(fb, &ui->bar.L, bf == 0 ? TB_BACK : TB_EXIT);
     }
 
     draw_banner(ui);
@@ -1550,28 +1544,21 @@ void jf_ui_draw(JfUi *ui)
         lv_draw(fb, &ui->lv, "NOTHING HERE");
         break;
     case JF_SCR_PLPICK:
-        ui->lv.active = ui->zone == JF_ZONE_LIST;
+    case JF_SCR_MIX: {
+        bool pl = app->screen == JF_SCR_PLPICK;
+        bool first_on = pl ? jf_ui_plpick_add_shown(app) : !mix_locked(app);
+        stack_lv_look(ui);
         lv_sync(&ui->lv);
         mix_sync_marks(ui);
-        lv_draw(fb, &ui->lv, "");
-        snprintf(ui->mixb[0].text, sizeof ui->mixb[0].text, "%s", jf_ui_plpick_add_shown(app) ? "ADD" : "");
-        snprintf(ui->mixb[1].text, sizeof ui->mixb[1].text, "CLOSE");
-        for (int i = jf_ui_plpick_add_shown(app) ? 0 : 1; i < JF_UI_MIXBTN; i++) {
-            button_draw(fb, &ui->mixb[i]);
-            if (ui->show_ring && ui->zone == JF_ZONE_ROW && ui->focus == i) ring(ui, ui->L.mixb[i]);
-        }
+        lv_draw(fb, &ui->lv, pl ? "" : "NOTHING TO TICK");
+        Button *b = pl ? ui->plb : ui->mixb;
+        UiZone z[UZ_ZONES];
+        UiRect rr;
+        stack_zones(ui, z, first_on);
+        for (int i = first_on ? 0 : 1; i < JF_UI_MIXBTN; i++) button_draw(fb, &b[i]);
+        if (ui->zf.zone == STACK_ROW && uz_ring(&ui->zf, z, STACK_N, &rr)) ring(ui, rr);
         break;
-    case JF_SCR_MIX:
-        ui->lv.active = ui->zone == JF_ZONE_LIST;
-        lv_sync(&ui->lv);
-        mix_sync_marks(ui);
-        lv_draw(fb, &ui->lv, "NOTHING TO TICK");
-        ui->mixb[0].disabled = app->mix.phase == JF_MIX_INDEX || app->mix.phase == JF_MIX_POOL;
-        for (int i = 0; i < JF_UI_MIXBTN; i++) {
-            button_draw(fb, &ui->mixb[i]);
-            if (ui->show_ring && ui->zone == JF_ZONE_ROW && ui->focus == i) ring(ui, ui->L.mixb[i]);
-        }
-        break;
+    }
     default:
         if (mini_wanted(app)) draw_strip(ui);
         ui->lv.active = ui->zone == JF_ZONE_LIST;

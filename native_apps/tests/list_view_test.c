@@ -433,6 +433,51 @@ int main(void) {
         lv_free(&r);
     }
 
+    /* 9. tap2_any and ring_hidden (the touch/pad split).  Defaults keep today's behaviour. */
+    {
+        ListView q;
+        make(&q, 25, 402, 40);
+        TouchState a;
+        /* default, inactive: tap then tap is TAP, TAP (not ACTIVATE) */
+        q.active = false;
+        a = T(100, 21 + 40 * 3 + 5, true, true, false); lv_input(&q, &a, NULL, 0);
+        a = T(100, 21 + 40 * 3 + 5, false, false, true);
+        CHECK(lv_input(&q, &a, NULL, 10) == LV_EV_TAP && q.cursor == 3);
+        a = T(100, 21 + 40 * 3 + 5, true, true, false); lv_input(&q, &a, NULL, 20);
+        a = T(100, 21 + 40 * 3 + 5, false, false, true);
+        CHECK(lv_input(&q, &a, NULL, 30) == LV_EV_TAP);
+        /* tap2_any: the second tap on the cursor row activates on an inactive list; the first still only taps */
+        q.tap2_any = true;
+        a = T(100, 21 + 40 * 5 + 5, true, true, false); lv_input(&q, &a, NULL, 40);
+        a = T(100, 21 + 40 * 5 + 5, false, false, true);
+        CHECK(lv_input(&q, &a, NULL, 50) == LV_EV_TAP && q.cursor == 5);
+        a = T(100, 21 + 40 * 5 + 5, true, true, false); lv_input(&q, &a, NULL, 60);
+        a = T(100, 21 + 40 * 5 + 5, false, false, true);
+        CHECK(lv_input(&q, &a, NULL, 70) == LV_EV_ACTIVATE);
+        /* a tap on another row is still a plain TAP */
+        a = T(100, 21 + 40 * 2 + 5, true, true, false); lv_input(&q, &a, NULL, 80);
+        a = T(100, 21 + 40 * 2 + 5, false, false, true);
+        CHECK(lv_input(&q, &a, NULL, 90) == LV_EV_TAP && q.cursor == 2);
+        /* tap2_any gives an inactive list no key handling */
+        InputState in; memset(&in, 0, sizeof(in));
+        in.buttons[BTN_ID_DOWN].pressed = true;
+        CHECK(lv_input(&q, NULL, &in, 100) == LV_EV_NONE && q.cursor == 2);
+
+        /* the yellow edge: cursor row of an active list, unless ring_hidden */
+        q.active = false;
+        CHECK(!lv_row_edge_lit(&q, 2));
+        q.active = true;
+        CHECK(lv_row_edge_lit(&q, 2));
+        CHECK(!lv_row_edge_lit(&q, 3));
+        q.ring_hidden = true;
+        CHECK(!lv_row_edge_lit(&q, 2));
+        /* ring_hidden hides the edge only: keys and the second tap still work */
+        a = T(100, 21 + 40 * 2 + 5, true, true, false); lv_input(&q, &a, NULL, 110);
+        a = T(100, 21 + 40 * 2 + 5, false, false, true);
+        CHECK(lv_input(&q, &a, NULL, 120) == LV_EV_ACTIVATE);
+        CHECK(lv_input(&q, NULL, &in, 130) == LV_EV_CHANGED && q.cursor == 3);
+        lv_free(&q);
+    }
 
     printf("%d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;

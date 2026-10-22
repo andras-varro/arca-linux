@@ -1,0 +1,67 @@
+/*
+ * ui_zone — pad / keyboard focus over a vertical stack of zones: lists and rows of buttons.
+ *
+ * A screen that is a list over a row of buttons (and under a top bar) used to read the frame's Up/Down in several
+ * independent blocks, one per zone, so one press could leave the list and be taken again by the button row in the
+ * same call.  Here one uz_input() call reads the direction ONCE and makes at most one focus move.
+ *
+ * The caller rebuilds the UiZone array every frame from what is PRESENT: an absent button is not listed, so it can
+ * be neither focused nor counted.  Focus is held by the caller's button id, not by position, so a button that
+ * appears or vanishes under the focus re-picks the nearest present one (ui_focus_nearest).
+ *
+ * The ListView keeps owning its cursor and marks; this file only reads ListView.count for the list's edges.  The
+ * caller keeps the actions (id -> event) and the screen-specific keys (a Left/Right category switch, a volume key).
+ * Pure: no framebuffer, so tests/ui_zone_test.c drives it.
+ */
+#ifndef UI_ZONE_H
+#define UI_ZONE_H
+
+#include <stdbool.h>
+#include "ui_focus.h"    /* UiRect, UiDir */
+#include "gamepad.h"     /* InputState, BTN_ID_* */
+#include "list_view.h"   /* ListView */
+
+#define UZ_ZONES    5
+#define UZ_BUTTONS 12
+
+#define UZ_TRAP 0x1      /* Up/Down that finds no neighbour inside this zone is reported (out.left), not moved: the action bar = dismiss */
+
+/* One zone of the screen, top to bottom.  A zone with lv == NULL and n == 0 is absent and skipped. */
+typedef struct {
+    ListView *lv;               /* a list zone, or NULL for a button zone */
+    int       n;                /* present buttons */
+    UiRect    r[UZ_BUTTONS];    /* their rects (any layout: one row, wrapped rows; movement inside is spatial) */
+    int       id[UZ_BUTTONS];   /* the caller's id for each, stable across frames (e.g. the slot index) */
+    unsigned  flags;            /* UZ_* */
+} UiZone;
+
+typedef struct {
+    int    zone;       /* index of the focused zone */
+    int    id;         /* focused button's id in a button zone, -1 in a list zone or until first resolved */
+    UiRect last;       /* its rect, to re-pick with ui_focus_nearest when the id vanished (w == 0: none yet) */
+    bool   shown;      /* pad/keyboard used since the last touch: the ring and the list's yellow edge are drawn */
+} UiZoneFocus;
+
+typedef struct {
+    bool              moved;     /* zone, button or shown changed: redraw */
+    int               activate;  /* id of the button ACTION/JUMP fired on, else -1 */
+    int               left;      /* index of a UZ_TRAP zone just left by Up/Down, else -1 */
+    const InputState *list_in;   /* hand to lv_input(): `in` when the focused list takes this frame's keys, else NULL */
+} UzOut;
+
+/* Screen opened: focus `zone` (its first button, or the list); ring hidden until a key is used. */
+void uz_begin(UiZoneFocus *f, int zone);
+/* Put focus on (zone, id) - the action bar's rising edge.  Leaves `shown` alone. */
+void uz_focus(UiZoneFocus *f, const UiZone *z, int nz, int zone, int id);
+/* One frame.  At most ONE focus move per frame.  Rules:
+ *  - a pressed direction or ACTION/JUMP sets f->shown; ts_pressed clears it and changes nothing else;
+ *  - list zone: Up at cursor <= 0 goes to the nearest present zone above; Down at cursor >= count-1 (or count 0)
+ *    to the one below; otherwise list_in = in (Left/Right are NOT consumed: the caller may use them);
+ *  - button zone: Left/Right = ui_focus_move inside the zone (wraps); Up/Down = ui_focus_step inside the zone
+ *    (wrapped rows), else the adjacent zone (a UZ_TRAP zone reports out.left instead); ACTION/JUMP = activate;
+ *  - the focused id gone this frame: ui_focus_nearest(last); the zone empty: the nearest list zone, else the nearest. */
+void uz_input(UiZoneFocus *f, const UiZone *z, int nz, const InputState *in, bool ts_pressed, UzOut *out);
+/* The rect to ring this frame: false in a list zone, when !shown, or when nothing is focused. */
+bool uz_ring(const UiZoneFocus *f, const UiZone *z, int nz, UiRect *out);
+
+#endif /* UI_ZONE_H */

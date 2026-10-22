@@ -15,7 +15,7 @@
  *   S  SETTINGS: the root row is SEARCH, NOW PLAYING, SETTINGS; settings and library rows hit-test and pad-navigate to their events (settings_ui).
  *
  * Build (from native_apps/, one line; run under setarch -R):
- *   gcc -Wall -Wextra -Wno-unused-parameter -fsanitize=undefined -I. -I common -I jellyfin -o build/jf_ui_layout_test tests/jf_ui_layout_test.c jellyfin/jf_ui.c common/eq_panel.c jellyfin/jf_art.c common/icons.c common/jf_img.c common/logger.c common/ui_focus.c jellyfin/jf_core.c jellyfin/jf_url.c jellyfin/jf_model.c jellyfin/jf_login.c common/json.c common/http.c common/list_view.c common/top_bar.c common/icon_grid.c common/ppm.c common/pointer.c common/status_line.c control_panel/cpu_load.c common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c -lssl -lcrypto -lm
+ *   gcc -Wall -Wextra -Wno-unused-parameter -fsanitize=undefined -I. -I common -I jellyfin -o build/jf_ui_layout_test tests/jf_ui_layout_test.c jellyfin/jf_ui.c common/eq_panel.c jellyfin/jf_art.c common/icons.c common/jf_img.c common/logger.c common/ui_focus.c jellyfin/jf_core.c jellyfin/jf_url.c jellyfin/jf_model.c jellyfin/jf_login.c common/json.c common/http.c common/list_view.c common/ui_zone.c common/top_bar.c common/icon_grid.c common/ppm.c common/pointer.c common/status_line.c control_panel/cpu_load.c common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c -lssl -lcrypto -lm
  */
 #include <stdio.h>
 #include <string.h>
@@ -878,7 +878,7 @@ static void add_to_playlist(void)
     CHECK(has_event(ev, n, JF_EV_PICK_CLOSE), "T: plpick_esc_closes: Back sent no PICK_CLOSE (%d events)", n);
     r = ui.L.mixb[1];
     n = tap_at(&ui, r.x + r.w / 2, r.y + r.h / 2, 4000, ev);
-    CHECK(has_event(ev, n, JF_EV_PICK_CLOSE) && strcmp(ui.mixb[1].text, "CLOSE") == 0, "T: plpick_buttons_reuse_mixb: CLOSE sent no PICK_CLOSE (%d events)", n);
+    CHECK(has_event(ev, n, JF_EV_PICK_CLOSE) && strcmp(ui.plb[1].text, "CLOSE") == 0, "T: plpick_buttons_own: CLOSE sent no PICK_CLOSE (%d events)", n);
 
     /* plpick_add_absent_without_selection: no selection, no ADD (not greyed, and a tap on its place does nothing) */
     CHECK(!jf_ui_plpick_add_shown(&app), "T: plpick_add_absent_without_selection: ADD shown with pick_sel -1");
@@ -889,7 +889,7 @@ static void add_to_playlist(void)
     CHECK(jf_ui_plpick_add_shown(&app), "T: plpick_add_absent_without_selection: ADD missing with a selection");
     feed(&ui, 0, 0, false, false, false, 5500, ev, MINI_MAX);
     n = tap_at(&ui, r.x + r.w / 2, r.y + r.h / 2, 6000, ev);
-    CHECK(has_event(ev, n, JF_EV_PICK_ADD) && strcmp(ui.mixb[0].text, "ADD") == 0, "T: plpick_buttons_reuse_mixb: ADD sent no PICK_ADD (%d events)", n);
+    CHECK(has_event(ev, n, JF_EV_PICK_ADD) && strcmp(ui.plb[0].text, "ADD") == 0, "T: plpick_buttons_own: ADD sent no PICK_ADD (%d events)", n);
     app.dup_scan = true;
     CHECK(!jf_ui_plpick_add_shown(&app), "T: plpick_add_absent_without_selection: ADD shown during the duplicate scan");
     app.dup_scan = false;
@@ -991,6 +991,52 @@ static void folder_ui(void)
     CHECK(strlen(t) <= 33 && t[strlen(t) - 1] == '?', "U: delete_question_shows_long_name: long name gives %zu glyphs \"%s\"", strlen(t), t);
 }
 
+/* The list-over-buttons screens by pad: Down at the last row lands on the button row and STAYS there (the list used to
+ * hand focus to the row and the row block, reading the same Down, handed it straight back), and ACTION then acts. */
+static void stack_pad(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    static JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    uint32_t t = 1000;
+    int n;
+
+    for (int sel = -1; sel <= 1; sel += 2) {   /* no selection: ADD absent, CLOSE is the only button; chosen: ADD first */
+        pp_setup(&app, sel);
+        jf_ui_init(&ui, &fb, &touch, NULL, &app);
+        feed(&ui, 0, 0, false, false, false, t, ev, MINI_MAX);
+        for (int k = 0; k < 4; k++) feed_btn(&ui, BTN_ID_DOWN, t += 100, ev, MINI_MAX);   /* 3 moves to row 3, the 4th leaves */
+        n = feed_btn(&ui, BTN_ID_ACTION, t += 100, ev, MINI_MAX);
+        CHECK(has_event(ev, n, sel < 0 ? JF_EV_PICK_CLOSE : JF_EV_PICK_ADD) && !has_event(ev, n, JF_EV_PICK_SELECT),
+              "S: plpick_pad_reaches_button_row: sel %d, Down x4 then ACTION sent %d events, first type %d", sel, n, n ? (int)ev[0].type : -1);
+        if (sel > 0) {   /* Right moves to CLOSE */
+            feed_btn(&ui, BTN_ID_RIGHT, t += 100, ev, MINI_MAX);
+            n = feed_btn(&ui, BTN_ID_ACTION, t += 100, ev, MINI_MAX);
+            CHECK(has_event(ev, n, JF_EV_PICK_CLOSE), "S: plpick_pad_reaches_button_row: Right then ACTION is not CLOSE");
+        }
+        jf_ui_free(&ui);
+    }
+
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_MIX;
+    app.mix.phase = JF_MIX_TICKS;
+    app.mix.opt_n = 3;
+    for (int i = 0; i < 3; i++) strcpy(app.mix.opt[i].label, "x");
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, t += 100, ev, MINI_MAX);
+    for (int k = 0; k < 3; k++) feed_btn(&ui, BTN_ID_DOWN, t += 100, ev, MINI_MAX);
+    n = feed_btn(&ui, BTN_ID_ACTION, t += 100, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_MIX_START) && !has_event(ev, n, JF_EV_MIX_TOGGLE),
+          "S: mix_pad_reaches_start: Down x3 then ACTION is not MIX_START (%d events)", n);
+    app.mix.phase = JF_MIX_INDEX;   /* locked: START is absent, the row holds CANCEL only */
+    feed(&ui, 0, 0, false, false, false, t += 100, ev, MINI_MAX);
+    n = feed_btn(&ui, BTN_ID_ACTION, t += 100, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_BACK) && !has_event(ev, n, JF_EV_MIX_START), "S: mix_locked_start_absent: ACTION on a locked run is not CANCEL");
+    jf_ui_free(&ui);
+}
+
 int main(void)
 {
     add_to_playlist();
@@ -1014,6 +1060,7 @@ int main(void)
     playlist_menu();
     remove_label_fits();
     folder_ui();
+    stack_pad();
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");
     return 0;

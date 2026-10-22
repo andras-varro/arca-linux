@@ -19,6 +19,7 @@
 #include "list_view.h"
 #include "top_bar.h"
 #include "ui_focus.h"
+#include "ui_zone.h"
 #include "pointer.h"
 #include "jf_core.h"
 #include "eq_panel.h"
@@ -102,6 +103,8 @@ typedef struct {
     bool seeking;                        /* a finger is on the progress bar */
     int  seek_ms;                        /* its target */
     Button mixb[JF_UI_MIXBTN];
+    Button plb[JF_UI_MIXBTN];            /* PLPICK screen: ADD, CLOSE on the same rects as mixb (absent ADD is not drawn or pressed) */
+    UiZoneFocus zf;                      /* PLPICK and MIX: focus over bar / list / button row (STACK_* zones) */
     bool abar_up;                        /* the core's action_bar as of the last frame: a rising edge moves focus onto it */
     Button field[JF_UI_FIELDS], signin, signexit;
     ModalDialog dlg;

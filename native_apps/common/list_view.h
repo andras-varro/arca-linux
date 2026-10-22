@@ -149,6 +149,8 @@ typedef struct {
     int      row_h;
     int      scale;      /* text scale; lv_init derives it from row_h, a caller may set it after */
     bool     active;     /* keys act only on the active list; touch always does */
+    bool     ring_hidden;  /* the cursor row is drawn without the yellow pad edge even when active: the last input was a touch */
+    bool     tap2_any;     /* a second tap on the cursor row is LV_EV_ACTIVATE even on an inactive list */
     int      top, cursor;
     bool     cursor_dragged;  /* a drag carried the cursor into view: the next tap on it is not a second tap */
     LvSample samples[LV_SAMPLES];  /* finger positions of the current press, oldest first */
@@ -178,6 +180,8 @@ void lv_reset(ListView *lv);
 /* Re-read the count (call each frame, or after the source changed by append /
  * trim): keeps marks below the smaller count, re-clamps cursor and scroll. */
 void lv_sync(ListView *lv);
+/* Does row `index` get the yellow cursor edge: it is the cursor row of an active list and ring_hidden is clear. */
+bool lv_row_edge_lit(const ListView *lv, int index);
 
 int  lv_visible_rows(const ListView *lv);
 void lv_move_to(ListView *lv, int index);   /* cursor to index, scrolled into view */
