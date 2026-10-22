@@ -205,35 +205,35 @@ static void root_picker(void)
     app.cat = JF_CAT_ARTISTS;
     jf_ui_init(&ui, &fb, &touch, NULL, &app);
     feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
-    CHECK(!ui.pick_up, "R: picker up before anything was tapped");
+    CHECK(!ui.pick.up, "R: picker up before anything was tapped");
 
     ui.bar.title = "JELLYFIN";   /* head_rect() sets the real title itself */
     UiRect h = { ui.bar.L.title_x, ui.bar.L.top, ui.bar.L.title_w, ui.bar.L.h };
     int n = tap_at(&ui, h.x + h.w / 2, h.y + h.h / 2, 2000, ev);
-    CHECK(ui.pick_up && n == 0, "R: a tap on the header did not open the picker (up %d, %d events)", ui.pick_up, n);
-    UiRect pr = ui.pick.rect;
+    CHECK(ui.pick.up && n == 0, "R: a tap on the header did not open the picker (up %d, %d events)", ui.pick.up, n);
+    UiRect pr = ui.pick.lv.rect;
     CHECK(pr.x >= SCREEN_SAFE_LEFT && pr.x + pr.w <= SCREEN_SAFE_RIGHT && pr.y + pr.h <= SCREEN_SAFE_BOTTOM,
           "R: the picker is not inside SAFE");
     n = tap_at(&ui, pr.x + pr.w / 2, pr.y + LV_BORDER + 40 * 3 + 20, 3000, ev);
     int k = -1;
     for (int i = 0; i < n; i++) if (ev[i].type == JF_EV_CATEGORY_SET) k = ev[i].i;
-    CHECK(k == JF_CAT_GENRES && !ui.pick_up, "R: tapping the 4th row sent category %d (want %d), picker up %d", k, JF_CAT_GENRES, ui.pick_up);
+    CHECK(k == JF_CAT_GENRES && !ui.pick.up, "R: tapping the 4th row sent category %d (want %d), picker up %d", k, JF_CAT_GENRES, ui.pick.up);
 
     /* the key: opens at the current category, Down moves, ENTER picks */
     feed_btn(&ui, BTN_ID_RUN, 4000, ev, MINI_MAX);
-    CHECK(ui.pick_up && ui.pick.cursor == (int)app.cat, "R: Shift did not open the picker on the current category");
+    CHECK(ui.pick.up && ui.pick.lv.cursor == (int)app.cat, "R: Shift did not open the picker on the current category");
     feed_btn(&ui, BTN_ID_DOWN, 4100, ev, MINI_MAX);
     n = feed_btn(&ui, BTN_ID_ACTION, 4200, ev, MINI_MAX);
-    CHECK(n == 1 && ev[0].type == JF_EV_CATEGORY_SET && ev[0].i == JF_CAT_PLAYLISTS && !ui.pick_up,
+    CHECK(n == 1 && ev[0].type == JF_EV_CATEGORY_SET && ev[0].i == JF_CAT_PLAYLISTS && !ui.pick.up,
           "R: Down + ENTER picked %d (want PLAYLISTS), %d events", n ? ev[0].i : -1, n);
 
     /* close: Back, and a tap outside, send nothing */
     feed_btn(&ui, BTN_ID_RUN, 5000, ev, MINI_MAX);
     n = feed_btn(&ui, BTN_ID_BACK, 5100, ev, MINI_MAX);
-    CHECK(!ui.pick_up && n == 0, "R: Back did not close the picker quietly");
+    CHECK(!ui.pick.up && n == 0, "R: Back did not close the picker quietly");
     feed_btn(&ui, BTN_ID_RUN, 6000, ev, MINI_MAX);
     n = feed(&ui, 5, 300, true, true, false, 6100, ev, MINI_MAX);
-    CHECK(!ui.pick_up && n == 0, "R: a tap outside did not close the picker quietly (%d events)", n);
+    CHECK(!ui.pick.up && n == 0, "R: a tap outside did not close the picker quietly (%d events)", n);
     feed(&ui, 5, 300, false, false, true, 6200, ev, MINI_MAX);   /* its release, so the next tap is a fresh one */
     feed(&ui, 0, 0, false, false, false, 7000, ev, MINI_MAX);
 

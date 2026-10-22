@@ -228,6 +228,7 @@ step "16/35" "ppm";          $CC "${WARN[@]}" -O2 -c common/ppm.c             -o
                               $CC "${WARN[@]}" -O2 -c common/product.c         -o build/product.o
                               $CC "${WARN[@]}" -O2 -c common/icon_grid.c       -o build/icon_grid.o
                               $CC "${WARN[@]}" -O2 -I. -c common/top_bar.c         -o build/top_bar.o
+                              $CC "${WARN[@]}" -O2 -c common/top_pick.c        -o build/top_pick.o
                               $CC "${WARN[@]}" -O2 -c common/ui_focus.c        -o build/ui_focus.o
                               $CC "${WARN[@]}" -O2 -c common/list_view.c       -o build/list_view.o
                               $CC "${WARN[@]}" -O2 -c common/ui_zone.c         -o build/ui_zone.o
@@ -318,7 +319,7 @@ $CC "${WARN[@]}" -O2 -I. \
 # The standalone unified_calibrate was folded into it and deleted — it was a
 # second, independent copy of the same 9-tap fit, carrying the same defect.
 step "29/35" "control_panel"
-$CC "${WARN[@]}" -O2 -I. control_panel/control_panel.c common/eq_panel.c control_panel/cp_page_name.c control_panel/usb_bus.c control_panel/touch_wizard.c control_panel/led_page.c control_panel/monitor_page.c control_panel/cpu_load.c control_panel/soc_temp.c control_panel/mon_graph.c sysmon/mon_ring.c control_panel/info_page.c control_panel/network_page.c control_panel/usb_page.c control_panel/input_page.c control_panel/audio_page.c control_panel/display_page.c control_panel/bluetooth_page.c control_panel/system_page.c control_panel/log_page.c control_panel/log_filter.c control_panel/log_sources.c control_panel/ssh_page.c control_panel/cp_exec.c control_panel/backup_page.c control_panel/backup_parse.c common/usb_watch.c file_manager/fm_core.c build/list_view.o control_panel/sys_settings.c control_panel/bt_ctl.c common/status_line.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" $CALIB_OBJ build/ui_layout.o build/ui_flow.o build/ui_focus.o build/ppm.o build/icon_grid.o build/top_bar.o build/pointer.o build/product.o -o build/control_panel -lm "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. control_panel/control_panel.c common/eq_panel.c control_panel/cp_page_name.c control_panel/usb_bus.c control_panel/touch_wizard.c control_panel/led_page.c control_panel/monitor_page.c control_panel/cpu_load.c control_panel/soc_temp.c control_panel/mon_graph.c sysmon/mon_ring.c control_panel/info_page.c control_panel/network_page.c control_panel/usb_page.c control_panel/input_page.c control_panel/audio_page.c control_panel/display_page.c control_panel/bluetooth_page.c control_panel/system_page.c control_panel/log_page.c control_panel/log_filter.c control_panel/log_sources.c common/icons.c control_panel/ssh_page.c control_panel/cp_exec.c control_panel/backup_page.c control_panel/backup_parse.c common/usb_watch.c file_manager/fm_core.c build/list_view.o control_panel/sys_settings.c control_panel/bt_ctl.c common/status_line.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" $CALIB_OBJ build/ui_layout.o build/ui_flow.o build/ui_focus.o build/ppm.o build/icon_grid.o build/top_bar.o build/top_pick.o build/pointer.o build/product.o -o build/control_panel -lm "${AUDIO_LIBS[@]}"
 
 # Touch diagnostic. It was previously absent from this script, which is why a
 # deployed copy of the old trace tool was stale (pre-bezel); that tool now lives in
@@ -360,7 +361,7 @@ $CC "${WARN[@]}" -O2 -I. file_manager/file_manager.c file_manager/fm_core.c "${C
 # jellyfin: music client.  jf_core/jf_api/jf_model/jf_url/jf_login are screen-free (host tests);
 # jf_ui.c draws, jellyfin.c is the loop.  http.o and json.o come from the common block above.
 step "35/35" "jellyfin"
-$CC "${WARN[@]}" -O2 -I. -Icommon -Ijellyfin jellyfin/jellyfin.c common/eq_panel.c jellyfin/jf_ui.c jellyfin/jf_core.c jellyfin/jf_api.c jellyfin/jf_model.c jellyfin/jf_url.c jellyfin/jf_login.c jellyfin/jf_queue_store.c jellyfin/jf_art.c common/icons.c common/jf_img.c build/http.o build/json.o build/list_view.o build/ui_zone.o build/top_bar.o build/icon_grid.o build/ppm.o build/pointer.o build/ui_flow.o build/ui_focus.o control_panel/cpu_load.c common/status_line.c common/logger.c build/product.o "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/jellyfin -lm "${SSL_LIBS[@]}" "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. -Icommon -Ijellyfin jellyfin/jellyfin.c common/eq_panel.c jellyfin/jf_ui.c jellyfin/jf_core.c jellyfin/jf_api.c jellyfin/jf_model.c jellyfin/jf_url.c jellyfin/jf_login.c jellyfin/jf_queue_store.c jellyfin/jf_art.c common/icons.c common/jf_img.c build/http.o build/json.o build/list_view.o build/ui_zone.o build/top_bar.o build/top_pick.o build/icon_grid.o build/ppm.o build/pointer.o build/ui_flow.o build/ui_focus.o control_panel/cpu_load.c common/status_line.c common/logger.c build/product.o "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/jellyfin -lm "${SSL_LIBS[@]}" "${AUDIO_LIBS[@]}"
 
 # Collect icon files from source dirs → build/icons/.  control_panel/icons/ holds
 # the control panel's home-grid icons (gen_cp_icons.py); control_panel reads them

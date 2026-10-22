@@ -84,6 +84,7 @@ typedef struct {
     uint32_t    title_color;
     int         title_scale;      /* largest scale tried (3, 2 or 1); 0 = 3 */
     bool        title_cut;        /* may be cut with ".." (a status line); else dropped */
+    int         title_extra;      /* pixels kept free after the title (a drop-down arrow, common/top_pick.h); 0 = none */
     const char *message;          /* tap target, left of the title; NULL = none */
     uint32_t    message_color;
     const char *right;            /* display only; set by top_bar_info_sample */

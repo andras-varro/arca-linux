@@ -80,7 +80,7 @@ void top_bar_compute(TopBarLayout *L, const TopBar *t, const TbExtents *e) {
     }
 
     if (t->title && t->title[0]) {
-        int free_lo = lo + TOP_BAR_PAD, free_hi = hi - TOP_BAR_PAD;
+        int free_lo = lo + TOP_BAR_PAD, free_hi = hi - TOP_BAR_PAD - t->title_extra;
         int room = free_hi - free_lo;
         int smax = clamp_i(t->title_scale ? t->title_scale : 3, 1, 3);
         int w = 0, scale = 0, chars = -1;

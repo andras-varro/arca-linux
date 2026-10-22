@@ -238,12 +238,7 @@ static void src_row(void *ctx, int index, LvRow *out)
 
 static int pick_count(void *ctx) { (void)ctx; return JF_CAT_COUNT; }
 
-static void pick_row(void *ctx, int index, LvRow *out)
-{
-    (void)ctx;
-    out->title = jf_cat_name((JfCat)index);
-    out->glyph = LV_GLYPH_BLANK;
-}
+static const char *pick_name(void *ctx, int index) { (void)ctx; return jf_cat_name((JfCat)index); }
 
 static void style(Button *b, UiRect r, const char *text, int scale)
 {
@@ -294,8 +289,8 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
     for (int i = 0; i < JF_UI_FIELDS; i++) style(&ui->field[i], ui->L.field[i], "", 2);
     style(&ui->signin, ui->L.signin, "SIGN IN", 3);
     style(&ui->signexit, ui->L.signexit, "EXIT", 3);
-    LvSource ps = { pick_count, pick_row, ui };
-    lv_init(&ui->pick, ps, rect_of(0, 0, 10, 10), 40);
+    TpSource ps = { pick_count, pick_name, ui };
+    tp_init(&ui->pick, ps);
 
     ui->last_screen = (JfScreen)-1;
     touch_guard_init(&ui->guard);
@@ -307,7 +302,7 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
 void jf_ui_free(JfUi *ui)
 {
     lv_free(&ui->lv);
-    lv_free(&ui->pick);
+    tp_free(&ui->pick);
     jf_wipe(ui->fields, sizeof ui->fields);
 }
 
@@ -797,10 +792,6 @@ static void restore_view(JfUi *ui)
 
 /* ── The root header picker ────────────────────────────────────────────── */
 
-#define HEAD_ARROW   14   /* the drop-down glyph, a square box */
-#define HEAD_GAP      8
-#define PICK_W      260
-
 /* The root's title is "JELLYFIN · <CATEGORY>" followed by a drop-down arrow; the title and the arrow together are the
  * pressable header.  Sets the bar's title (the one place it is spelled) and returns the pressable rect, clamped to SAFE. */
 static const char *root_title(JfUi *ui)
@@ -815,13 +806,11 @@ static UiRect head_rect_of(JfUi *ui, const char *title, bool arrow)
     JfExtents e;
     jf_ui_extents_live(&e);
     ui->bar.title = title;
+    ui->bar.title_extra = arrow ? TP_GAP + TP_ARROW : 0;
     top_bar_layout(&ui->bar);
     const TopBarLayout *L = &ui->bar.L;
-    int x0 = L->title_x - HEAD_GAP, x1 = L->title_x + L->title_w + HEAD_GAP + (arrow ? HEAD_ARROW + HEAD_GAP : 0);
-    int y0 = L->top > e.safe_t ? L->top : e.safe_t;
-    if (x0 < e.safe_l) x0 = e.safe_l;
-    if (x1 > e.safe_r) x1 = e.safe_r;
-    return rect_of(x0, y0, x1 - x0, L->bottom - y0);
+    TpExt te = { e.safe_l, e.safe_t, e.safe_r, e.safe_b };
+    return tp_head_rect(L->title_x, L->title_w, L->top, L->bottom, &te, arrow);
 }
 
 static UiRect head_rect(JfUi *ui) { return head_rect_of(ui, root_title(ui), true); }
@@ -875,47 +864,33 @@ static int screen_zones(JfUi *ui, UiZone z[UZ_ZONES])
 
 static bool in_rect(UiRect r, int x, int y) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; }
 
-static void pick_open(JfUi *ui)
+static TpExt pick_ext(void)
 {
     JfExtents e;
     jf_ui_extents_live(&e);
-    UiRect h = head_rect(ui);
-    int x = h.x;
-    if (x + PICK_W > e.safe_r) x = e.safe_r - PICK_W;
-    if (x < e.safe_l) x = e.safe_l;
-    ui->pick.rect = rect_of(x, h.y + h.h + 4, PICK_W, 40 * JF_CAT_COUNT + 2 * LV_BORDER);
-    ui->pick.active = true;
-    lv_sync(&ui->pick);
-    lv_reset(&ui->pick);
-    lv_move_to(&ui->pick, (int)ui->app->cat);
-    ui->pick_up = true;
-    ui->dirty = true;
+    TpExt te = { e.safe_l, e.safe_t, e.safe_r, e.safe_b };
+    return te;
 }
 
-static void pick_close(JfUi *ui, uint32_t now)
+static void pick_open(JfUi *ui)
 {
-    ui->pick_up = false;
+    TpExt te = pick_ext();
+    ui->pick.sel = (int)ui->app->cat;
+    tp_open(&ui->pick, head_rect(ui), &te);
     ui->dirty = true;
-    touch_guard_screen_changed(&ui->guard, now);   /* the finger that closed it must not press what is underneath */
 }
 
-/* The picker owns every input while it is up: Up / Down and a tap move, ENTER / A / Space / a tap on the cursor row pick;
- * Back, Start, Shift and a tap outside close it. */
+/* The picker owns every input while it is up (common/top_pick.h); a pick sets the category. */
 static void pick_input(JfUi *ui, const TouchState *ts, const InputState *in, uint32_t now, JfEvent *out, int *n, int max)
 {
     ui->dirty = true;
-    if (bp(in, BTN_ID_BACK) || bp(in, BTN_ID_PAUSE) || bp(in, BTN_ID_RUN) ||
-        (ts->pressed && !in_rect(ui->pick.rect, ts->x, ts->y))) {
-        pick_close(ui, now);
-        return;
+    TpEvent ev = tp_input(&ui->pick, ts, in, now);
+    if (ev == TP_PICKED) {
+        int k = emit(out, n, max, JF_EV_CATEGORY_SET);
+        if (k >= 0) out[k].i = tp_take(&ui->pick);
     }
-    lv_sync(&ui->pick);
-    LvEvent ev = lv_input(&ui->pick, ts, in, now);
-    bool pick = ev == LV_EV_TAP || ev == LV_EV_ACTIVATE || bp(in, BTN_ID_JUMP);
-    if (!pick || ui->pick.cursor < 0 || ui->pick.cursor >= JF_CAT_COUNT) return;
-    int k = emit(out, n, max, JF_EV_CATEGORY_SET);
-    if (k >= 0) out[k].i = ui->pick.cursor;
-    pick_close(ui, now);
+    if (ev == TP_PICKED || ev == TP_CLOSED)
+        touch_guard_screen_changed(&ui->guard, now);   /* the finger that closed it must not press what is underneath */
 }
 
 int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *ptr,
@@ -936,7 +911,7 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         ts = &gated;
     }
     restore_view(ui);
-    /* a queue can start or empty on an open screen: the list makes room for the strip, or takes it back */
+    if (top_bar_info_due(&ui->bar, now) && top_bar_info_sample(&ui->bar)) ui->dirty = true;   /* the bar's CPU and clock, once a second */    /* a queue can start or empty on an open screen: the list makes room for the strip, or takes it back */
     if (is_list_screen(app->screen) && mini_wanted(app) != ui->mini_on) {
         ui->mini_on = mini_wanted(app);
         ui->lv.rect = list_rect_for(ui, app->screen);
@@ -1000,8 +975,8 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     ui->cdlg_up = false;
     if (ui->eq_up && app->screen != JF_SCR_NOWPLAYING && app->screen != JF_SCR_QUEUE) ui->eq_up = false;
     if (ui->eq_up) { eq_input(ui, ts, in, now); return n; }
-    if (ui->pick_up) {
-        if (app->screen != JF_SCR_ARTISTS) ui->pick_up = false;
+    if (ui->pick.up) {
+        if (app->screen != JF_SCR_ARTISTS) tp_close(&ui->pick);
         else { pick_input(ui, ts, in, now, out, &n, max); return n; }
     }
 
@@ -1038,12 +1013,9 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     }
     if (sc == JF_SCR_ARTISTS && !app->action_bar) {
         /* the header (title and arrow) opens the category picker on a tap; Shift / the pad's B opens it too */
-        if (ts->pressed && in_rect(head_rect(ui), ts->x, ts->y)) ui->head_press = true;
-        if (ts->released) {
-            if (ui->head_press && in_rect(head_rect(ui), ts->x, ts->y)) { pick_open(ui); ui->head_press = false; return n; }
-            ui->head_press = false;
-        }
-        if (bp(in, BTN_ID_RUN)) { pick_open(ui); return n; }
+        TpExt te = pick_ext();
+        ui->pick.sel = (int)app->cat;
+        if (tp_head_input(&ui->pick, head_rect(ui), &te, ts, in) == TP_OPENED) { ui->dirty = true; return n; }
     }
 
     if (sc == JF_SCR_SIGNIN) {
@@ -1565,11 +1537,10 @@ void jf_ui_draw(JfUi *ui)
     default: break;
     }
     ui->bar.title = title;
+    ui->bar.title_extra = app->screen == JF_SCR_ARTISTS ? TP_GAP + TP_ARROW : 0;
     top_bar_draw(fb, &ui->bar);
-    if (app->screen == JF_SCR_ARTISTS) {   /* the drop-down arrow after the title: the header opens the picker */
-        const TopBarLayout *TL = &ui->bar.L;
-        icon_draw(fb, ICON_DROPDOWN, TL->title_x + TL->title_w + HEAD_GAP, TL->top + (TL->h - HEAD_ARROW) / 2, HEAD_ARROW, COLOR_WHITE);
-    }
+    if (app->screen == JF_SCR_ARTISTS)   /* the drop-down arrow after the title: the header opens the picker */
+        tp_draw_arrow(fb, ui->bar.L.title_x, ui->bar.L.title_w, ui->bar.L.top, ui->bar.L.h);
     if (ui->zf.shown && ui->zf.zone == STACK_BAR && !app->overlay) {
         int bf = ui->zf.id;
         if (app->screen == JF_SCR_ARTISTS && bf == 2) ring(ui, head_rect(ui));
@@ -1636,13 +1607,7 @@ void jf_ui_draw(JfUi *ui)
         int nz = screen_zones(ui, z);
         if (uz_ring(&ui->zf, z, nz, &rr)) ring(ui, rr);
     }
-    if (ui->pick_up && app->screen == JF_SCR_ARTISTS) {
-        UiRect p = ui->pick.rect;
-        fb_fill_rect(fb, p.x, p.y, p.w, p.h, PANEL);
-        ui->pick.active = true;
-        lv_sync(&ui->pick);
-        lv_draw(fb, &ui->pick, "");
-    }
+    if (app->screen == JF_SCR_ARTISTS) tp_draw(fb, &ui->pick);
     if (app->confirm != JF_CONFIRM_NONE && ui->cdlg_up) modal_dialog_draw(&ui->cdlg, fb);
     if (app->overlay && ui->dlg_up) modal_dialog_draw(&ui->dlg, fb);
 }

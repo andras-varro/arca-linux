@@ -18,6 +18,7 @@
 #include "gamepad.h"
 #include "list_view.h"
 #include "top_bar.h"
+#include "top_pick.h"
 #include "ui_focus.h"
 #include "ui_zone.h"
 #include "pointer.h"
@@ -112,8 +113,8 @@ typedef struct {
     JfScreen last_screen;
     JfCat last_cat;
     JfSettingsPage last_page;            /* the settings page the list was last built for */
-    ListView pick;                       /* the root header's category picker */
-    bool pick_up, head_press;
+    TopPick pick;                        /* the root header's category picker (common/top_pick.h) */
+    bool head_press;                     /* a press began on the queue's title */
     char head_title[48];                 /* "JELLYFIN . CATEGORY", the root's bar title */
     bool lv_ready;
     char fields[JF_UI_FIELDS][64];       /* server, user, password (wiped after the POST) */

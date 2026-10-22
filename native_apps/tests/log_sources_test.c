@@ -74,8 +74,8 @@ int main(void) {
     CHECK(n == 5, "scan kept %d, want 5", n);
     static const char *const want[] = { "A", "B", "C", "D", "E" };
     for (int i = 0; i < n && i < 5; i++) CHECK(strcmp(out[i].name, want[i]) == 0, "order %d: %s want %s", i, out[i].name, want[i]);
-    n = logsrc_scan(dir, out, LOGSRC_MAX);
-    CHECK(n == LOGSRC_MAX && strcmp(out[LOGSRC_MAX - 1].name, "C") == 0, "cap: %d kept, last %s", n, out[n > 0 ? n - 1 : 0].name);
+    n = logsrc_scan(dir, out, 3);   /* the caller's array size is the cap */
+    CHECK(n == 3 && strcmp(out[2].name, "C") == 0 && LOGSRC_MAX >= 8, "cap: %d kept, last %s", n, out[n > 0 ? n - 1 : 0].name);
     CHECK(logsrc_scan("/nonexistent-lsrc-dir", out, 8) == 0, "missing directory");
 
     char cmd[320];

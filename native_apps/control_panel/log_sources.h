@@ -3,7 +3,7 @@
  * Any component adds a log to the Control Panel's Log page by installing one
  * item file; the Control Panel is not edited.  Format, key=value lines:
  *
- *     name=JELLYFIN                 tab label, upper-cased, cut to LOGSRC_NAME_MAX
+ *     name=JELLYFIN                 source name in the Log page header, upper-cased, cut to LOGSRC_NAME_MAX
  *     path=/var/log/arca/jellyfin.log   absolute path of a plain text log file
  *
  * Unknown keys and '#' lines are ignored; an item without a name or without an
@@ -13,8 +13,8 @@
 #define LOG_SOURCES_H
 
 #define LOGSRC_DIR       "/opt/arca/logs.d"
-#define LOGSRC_MAX       3      /* extra tabs the page lays out in its second row */
-#define LOGSRC_NAME_MAX  12     /* 13 glyphs of 12 px fit a third of the narrowest content width */
+#define LOGSRC_MAX       16     /* entries the Log page's drop-down keeps after its three built-in sources */
+#define LOGSRC_NAME_MAX  12     /* longer names are cut */
 #define LOGSRC_PATH_MAX  128
 
 typedef struct {
