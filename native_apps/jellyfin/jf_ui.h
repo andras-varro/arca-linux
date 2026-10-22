@@ -104,8 +104,9 @@ typedef struct {
     int  seek_ms;                        /* its target */
     Button mixb[JF_UI_MIXBTN];
     Button plb[JF_UI_MIXBTN];            /* PLPICK screen: ADD, CLOSE on the same rects as mixb (absent ADD is not drawn or pressed) */
-    UiZoneFocus zf;                      /* PLPICK and MIX: focus over bar / list / button row (STACK_* zones) */
+    UiZoneFocus zf;                      /* every list-over-buttons screen: focus over its zones (STACK_* for PLPICK and MIX, BZ_* for browse and queue) */
     bool abar_up;                        /* the core's action_bar as of the last frame: a rising edge moves focus onto it */
+    int  abar_tz;                        /* the zone the action bar occupied when it rose (the strip for the playlist menu, else the button row) */
     Button field[JF_UI_FIELDS], signin, signexit;
     ModalDialog dlg;
     bool dlg_up;

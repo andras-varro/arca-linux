@@ -13,6 +13,7 @@
  *   Q  the EQ door: the NOW PLAYING button and Shift open the panel, Back cancels, DONE saves (eq_door).
   *   M  MIX tick rows carry no bracket text or checkbox glyph; ticks draw as the ListView mark (mix_ticks).
  *   S  SETTINGS: the root row is SEARCH, NOW PLAYING, SETTINGS; settings and library rows hit-test and pad-navigate to their events (settings_ui).
+ *   Z  browse lists and the queue as a ui_zone stack: the pad reaches strip and button row, touch never moves the pad focus (zone_stack_browse).
  *
  * Build (from native_apps/, one line; run under setarch -R):
  *   gcc -Wall -Wextra -Wno-unused-parameter -fsanitize=undefined -I. -I common -I jellyfin -o build/jf_ui_layout_test tests/jf_ui_layout_test.c jellyfin/jf_ui.c common/eq_panel.c jellyfin/jf_art.c common/icons.c common/jf_img.c common/logger.c common/ui_focus.c jellyfin/jf_core.c jellyfin/jf_url.c jellyfin/jf_model.c jellyfin/jf_login.c common/json.c common/http.c common/list_view.c common/ui_zone.c common/top_bar.c common/icon_grid.c common/ppm.c common/pointer.c common/status_line.c control_panel/cpu_load.c common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c -lssl -lcrypto -lm
@@ -421,14 +422,14 @@ static void queue_row(void)
     t += 1000;
     /* the pad: Right walks the eleven and wraps; ACTION on the last is VOL- */
     feed(&ui, 0, 0, false, false, false, t, ev, MINI_MAX);
-    ui.zone = JF_ZONE_ROW;
-    ui.focus = 0;
+    lv_move_to(&ui.lv, 4);
+    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);   /* the last row: Down enters the button row at its first button */
     for (int i = 0; i < JF_UI_QROW - 1; i++) feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
-    CHECK(ui.focus == JF_UI_QROW - 1, "R: the pad reached button %d after %d Rights, want %d", ui.focus, JF_UI_QROW - 1, JF_UI_QROW - 1);
+    CHECK(ui.zf.id == JF_UI_QROW - 1, "R: the pad reached button %d after %d Rights, want %d", ui.zf.id, JF_UI_QROW - 1, JF_UI_QROW - 1);
     int k = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
     CHECK(has_event(ev, k, JF_EV_VOL_DOWN), "R: ACTION on the last button did not send VOL-");
     feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
-    CHECK(ui.focus == 0, "R: the pad did not wrap to the first button (%d)", ui.focus);
+    CHECK(ui.zf.id == 0, "R: the pad did not wrap to the first button (%d)", ui.zf.id);
     jf_ui_free(&ui);
     jf_ui_free(&np);
 }
@@ -1037,6 +1038,107 @@ static void stack_pad(void)
     jf_ui_free(&ui);
 }
 
+/* Z  the browse lists and the queue as a ui_zone stack: Down from the last row reaches the strip, then the button row, and
+ *    stays there (the list used to take the same Down back); touch never moves the pad focus or lights the pad edge, and a
+ *    touch on the selected row acts. */
+static void zone_stack_browse(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    static JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    uint32_t t = 1000;
+    int n;
+
+    /* the queue: Down at the last row, then ACTION is PREV (the first transport button) */
+    jf_app_init(&app);
+    app.screen = JF_SCR_QUEUE;
+    app.queue_n = 5;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, t, ev, MINI_MAX);
+    lv_move_to(&ui.lv, 4);
+    n = feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+    CHECK(n == 0, "Z: Down at the last queue row sent %d events", n);
+    n = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_PREV) && !has_event(ev, n, JF_EV_QUEUE_JUMP), "Z: ACTION after Down at the last queue row did not press PREV (%d events)", n);
+    jf_ui_free(&ui);
+
+    /* a track list with a queue: Down at the last row lands on the strip (ACTION = PAUSE), Down again on the button row,
+     * Right on NOW PLAYING */
+    tk_setup(&app, JF_SCR_TRACKS, false);
+    app.queue_n = 2;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, t += 1000, ev, MINI_MAX);
+    lv_move_to(&ui.lv, 2);
+    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+    n = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_PAUSE), "Z: the strip's PLAY / PAUSE is not reached by the pad (%d events)", n);
+    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+    feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
+    n = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_OPEN_NOWPLAYING), "Z: Down, Down, Right, ACTION did not open NOW PLAYING (%d events)", n);
+    jf_ui_free(&ui);
+
+    /* the queue: a touch leaves the pad focus where it was and lights nothing; the second touch plays */
+    jf_app_init(&app);
+    app.screen = JF_SCR_QUEUE;
+    app.queue_n = 6;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, t += 1000, ev, MINI_MAX);
+    lv_move_to(&ui.lv, 5);
+    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+    int zone0 = ui.zf.zone;
+    int x = ui.L.list.x + 30;
+    n = tap_at(&ui, x, row_y(&ui, 2), t += 1000, ev);
+    CHECK(ui.lv.cursor == 2 && !has_event(ev, n, JF_EV_QUEUE_JUMP), "Z: first queue tap: cursor %d, played %d", ui.lv.cursor, has_event(ev, n, JF_EV_QUEUE_JUMP));
+    CHECK(!lv_row_edge_lit(&ui.lv, 2), "Z: a touch on a queue row lit the pad edge");
+    CHECK(ui.zf.zone == zone0 && !ui.zf.shown, "Z: a touch moved the pad zone (%d -> %d) or kept the ring (%d)", zone0, ui.zf.zone, ui.zf.shown);
+    n = tap_at(&ui, x, row_y(&ui, 2), t += 1000, ev);
+    CHECK(has_event(ev, n, JF_EV_QUEUE_JUMP) && ev[0].i == 2, "Z: second queue tap did not play row 2");
+    CHECK(ui.zf.zone == zone0 && !lv_row_edge_lit(&ui.lv, 2), "Z: the second tap moved the pad zone or lit the edge");
+    jf_ui_free(&ui);
+
+    /* the root PLAYLISTS list: a tap raises the menu (the core's doing, played by hand) without lighting the edge or moving the
+     * pad zone; a tap on the selected row opens it */
+    pm_setup(&app, 0, true, JF_ITEM_PLAYLIST);
+    app.action_bar = false;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, t += 1000, ev, MINI_MAX);
+    zone0 = ui.zf.zone;
+    n = tap_at(&ui, x, row_y(&ui, 1), t += 1000, ev);
+    CHECK(has_event(ev, n, JF_EV_SELECT) && !has_event(ev, n, JF_EV_ACTIVATE), "Z: first PLAYLISTS tap: n %d cursor %d count %d rect %d,%d y %d", n, ui.lv.cursor, ui.lv.count, ui.lv.rect.x, ui.lv.rect.y, row_y(&ui, 1));
+    app.action_bar = true;
+    app.action_row = 1;
+    feed(&ui, 0, 0, false, false, false, t += 1000, ev, MINI_MAX);
+    CHECK(!lv_row_edge_lit(&ui.lv, 1) && !ui.zf.shown && ui.zf.zone == zone0, "Z: the PLAYLISTS menu after a touch: edge lit %d, ring %d, zone %d -> %d", lv_row_edge_lit(&ui.lv, 1), ui.zf.shown, zone0, ui.zf.zone);
+    n = tap_at(&ui, x, row_y(&ui, 1), t += 1000, ev);
+    CHECK(has_event(ev, n, JF_EV_ACTIVATE) && ev[0].i == 1, "Z: a second tap on the selected playlist did not open it (%d events)", n);
+    jf_ui_free(&ui);
+
+    /* the artist folder's track row: the same */
+    jf_app_init(&app);
+    app.screen = JF_SCR_ALBUMS;
+    app.ctx[JF_LIST_ALBUMS].sub = JF_SUB_PLAIN;
+    app.list = &app.lists[JF_LIST_ALBUMS];
+    app.list->n = 2;
+    app.list->total = 2;
+    app.list->items[0].type = JF_ITEM_ALBUM;
+    app.list->items[1].type = JF_ITEM_TRACK;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, t += 1000, ev, MINI_MAX);
+    zone0 = ui.zf.zone;
+    n = tap_at(&ui, x, row_y(&ui, 1), t += 1000, ev);
+    CHECK(has_event(ev, n, JF_EV_SELECT), "Z: first track tap sent no SELECT");
+    app.action_bar = true;
+    app.action_row = 1;
+    feed(&ui, 0, 0, false, false, false, t += 1000, ev, MINI_MAX);
+    CHECK(!lv_row_edge_lit(&ui.lv, 1) && !ui.zf.shown && ui.zf.zone == zone0, "Z: the track bar after a touch: edge lit %d, ring %d, zone %d -> %d", lv_row_edge_lit(&ui.lv, 1), ui.zf.shown, zone0, ui.zf.zone);
+    n = tap_at(&ui, x, row_y(&ui, 1), t += 1000, ev);
+    CHECK(has_event(ev, n, JF_EV_ACTIVATE) && ev[0].i == 1, "Z: a second tap on the selected track did not play it (%d events)", n);
+    jf_ui_free(&ui);
+}
+
 int main(void)
 {
     add_to_playlist();
@@ -1061,6 +1163,7 @@ int main(void)
     remove_label_fits();
     folder_ui();
     stack_pad();
+    zone_stack_browse();
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");
     return 0;
