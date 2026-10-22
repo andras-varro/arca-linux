@@ -378,8 +378,7 @@ int main(int argc, char *argv[])
         }
         UiRect info_r;
         bool info_up = !redraw && jf_ui_take_info(&ui, &info_r);
-        if (info_up) {   /* the bar's text alone: present its rectangle, then put the cursor back over it */
-            fb_swap_rect(&fb, info_r.x, info_r.y, info_r.w, info_r.h);
+        if (info_up) {   /* the bar's text alone, already presented: put the cursor back over it */
             pointer_invalidate(&ptr);
             pointer_paint(&ptr, &fb);
         }

@@ -243,6 +243,52 @@ int main(void) {
         unsetenv("TZ");
     }
 
+    /* H — the info-only repaint leaves the back buffer equal to a full draw of the new text,
+     * whichever way the text width moves (a stale glyph of the longer text is the defect) */
+    {
+        static uint32_t px_a[800 * 480], px_b[800 * 480];
+        static const char *const seq[] = { "CPU 30%  14:05", "CPU 5%  14:05", "CPU 100%  14:06", "CPU 5%  14:06", "CPU --%  14:07", "CPU 12%  14:07" };
+        static Framebuffer fa, fb2;
+        Framebuffer *fbs[2] = { &fa, &fb2 };
+        uint32_t *pxs[2] = { px_a, px_b };
+        for (int i = 0; i < 2; i++) {
+            fbs[i]->back_buffer = pxs[i]; fbs[i]->buffer = NULL;
+            fbs[i]->width = 800; fbs[i]->height = 480; fbs[i]->bytes_per_pixel = 4;
+            fbs[i]->double_buffering = true;
+        }
+        TopBar a, b;
+        top_bar_init(&a, true, true);  top_bar_init(&b, true, true);
+        a.title = b.title = "ALBUMS"; a.title_scale = b.title_scale = 3;
+        strcpy(a.right_buf, seq[0]);
+        top_bar_draw(&fa, &a);                               /* the full frame the repaint patches */
+        for (int s = 1; s < 6; s++) {
+            strcpy(a.right_buf, seq[s]);
+            top_bar_layout(&a);                             /* a hit-test between the sample and the repaint, as jellyfin does every frame */
+            UiRect r = { 0, 0, 0, 0 };
+            bool ok = top_bar_info_redraw(&fa, &a, &r);
+            strcpy(b.right_buf, seq[s]);
+            top_bar_draw(&fb2, &b);                          /* the reference: that text drawn in full */
+            int bad = 0;
+            for (int y = 0; y < b.L.h; y++)
+                for (int x = 0; x < 800; x++)
+                    if (px_a[y * 800 + x] != px_b[y * 800 + x]) bad++;
+            CHECK(ok, "H: step %d (%s): the repaint declined", s, seq[s]);
+            CHECK(bad == 0, "H: step %d (%s): %d bar pixels differ from a full draw", s, seq[s], bad);
+        }
+        /* top_bar_info_present(): the same repaint, and the rectangle reaches the front buffer */
+        static uint32_t front[800 * 480];
+        fa.buffer = front; fa.phys_width = 800; fa.phys_height = 480; fa.line_length = 800 * 4;
+        strcpy(a.right_buf, "CPU 9%  14:08");
+        UiRect pr = { 0, 0, 0, 0 };
+        bool pok = top_bar_info_present(&fa, &a, &pr);
+        CHECK(pok && pr.w > 0, "H: top_bar_info_present declined");
+        int fbad = 0;
+        for (int y = pr.y; y < pr.y + pr.h; y++)
+            for (int x = pr.x; x < pr.x + pr.w; x++)
+                if (front[y * 800 + x] != px_a[y * 800 + x]) fbad++;
+        CHECK(pok && fbad == 0, "H: %d pixels of the presented rectangle differ from the back buffer", fbad);
+    }
+
     if (fails) { printf("top_bar_test: %d FAILED\n", fails); return 1; }
     printf("top_bar_test: all passed\n");
     return 0;

@@ -160,9 +160,9 @@ bool jf_ui_view(const JfUi *ui, int *top, int *cursor);
 void jf_ui_mark_dirty(JfUi *ui);
 /** True once when something wants a repaint (state change, button, bar tick). */
 bool jf_ui_take_dirty(JfUi *ui);
-/** True once when only the bar's CPU / clock text changed and was repainted into the drawing buffer: *r is the rectangle for
- *  fb_swap_rect().  Call after jf_ui_take_dirty() returned false (a full frame carries the text).  False with the text moving
- *  another section sets dirty, so the next frame draws it all. */
+/** True once when only the bar's CPU / clock text changed and was repainted AND presented (top_bar_info_present): *r is the
+ *  rectangle, so a pointer painted over the front buffer must be repainted.  Call after jf_ui_take_dirty() returned false (a
+ *  full frame carries the text).  False with the text moving another section sets dirty, so the next frame draws it all. */
 bool jf_ui_take_info(JfUi *ui, UiRect *r);
 
 #endif /* ARCA_JF_UI_H */

@@ -222,7 +222,18 @@ static void root_picker(void)
     /* the key: opens at the current category, Down moves, ENTER picks */
     feed_btn(&ui, BTN_ID_RUN, 4000, ev, MINI_MAX);
     CHECK(ui.pick.up && ui.pick.lv.cursor == (int)app.cat, "R: Shift did not open the picker on the current category");
+    /* an open picker nobody touches asks for no frame (it used to ask for one every pass: ~56% CPU measured) */
+    jf_ui_take_dirty(&ui);
+    button_take_dirty();
+    ui.bar.info_next_ms = 9000;   /* the bar tick is not due: only the picker is measured */
+    int idle_frames = 0;
+    for (int i = 0; i < 20; i++) {
+        feed(&ui, 0, 0, false, false, false, 4020 + (uint32_t)i * 33, ev, MINI_MAX);
+        if (jf_ui_take_dirty(&ui)) idle_frames++;
+    }
+    CHECK(idle_frames == 0, "R: an open, untouched picker asked for %d full frames in 20 idle passes", idle_frames);
     feed_btn(&ui, BTN_ID_DOWN, 4100, ev, MINI_MAX);
+    CHECK(jf_ui_take_dirty(&ui), "R: a Down key in the open picker did not ask for a frame");
     n = feed_btn(&ui, BTN_ID_ACTION, 4200, ev, MINI_MAX);
     CHECK(n == 1 && ev[0].type == JF_EV_CATEGORY_SET && ev[0].i == JF_CAT_PLAYLISTS && !ui.pick.up,
           "R: Down + ENTER picked %d (want PLAYLISTS), %d events", n ? ev[0].i : -1, n);

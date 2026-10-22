@@ -999,10 +999,19 @@ int main(int argc, char *argv[]) {
             needs_redraw = true;
         }
 
-        /* The bar's CPU and clock: re-read once a second, and the frame is
-         * repainted only when the text changed. */
-        if (top_bar_info_due(&bar, now) && top_bar_info_sample(&bar))
-            needs_redraw = true;
+        /* The bar's CPU and clock: re-read once a second.  The text alone is
+         * patched in and its rectangle presented (top_bar_info_present); a pending
+         * frame, the confirm dialog or an open drop-down over the bar draw it all. */
+        if (top_bar_info_due(&bar, now) && top_bar_info_sample(&bar)) {
+            if (!needs_redraw && !pick_up && state.confirm_action == CONFIRM_NONE &&
+                !(state.page && state.page_fullscreen) &&
+                top_bar_info_present(&fb, &bar, NULL)) {
+                pointer_invalidate(&g_pointer);   /* the patch lacks it */
+                pointer_paint(&g_pointer, &fb);
+            } else {
+                needs_redraw = true;
+            }
+        }
 
         if (state.page && state.page_fullscreen) {
             run_current_fullscreen_mode(&fb, &touch, &state);

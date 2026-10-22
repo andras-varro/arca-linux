@@ -214,6 +214,7 @@ void top_bar_draw(Framebuffer *fb, TopBar *t) {
 
     if (t->has_back) draw_inset_button(fb, &t->back, top_bar_button_draw_rect(L, TB_BACK), false);
     if (t->has_exit) draw_inset_button(fb, &t->exit, top_bar_button_draw_rect(L, TB_EXIT), true);
+    t->drawn = *L;
 }
 
 void top_bar_receipt(const TopBar *t, const char *tag) {
@@ -267,7 +268,9 @@ bool top_bar_info_sample(TopBar *t) {
 static bool span_same(TbSpan a, TbSpan b) { return a.x == b.x && a.w == b.w; }
 
 bool top_bar_info_redraw(Framebuffer *fb, TopBar *t, UiRect *r) {
-    const TopBarLayout old = t->L;
+    /* what is on the panel, not t->L: a hit-test top_bar_layout() between the sample and here
+     * has already laid the new text out, and the old span would be lost */
+    const TopBarLayout old = t->drawn;
     if (old.h <= 0) return false;                   /* never drawn: nothing to patch */
     top_bar_layout(t);
     const TopBarLayout *L = &t->L;
@@ -294,6 +297,15 @@ bool top_bar_info_redraw(Framebuffer *fb, TopBar *t, UiRect *r) {
         fb_draw_text(fb, L->info.x, L->top + L->h / 2 - text_measure_height(TB_TEXT_SCALE) / 2,
                      t->right, TB_INFO_FG, TB_TEXT_SCALE);
     r->x = x0; r->y = L->top; r->w = x1 - x0; r->h = L->h;
+    t->drawn = *L;
+    return true;
+}
+
+bool top_bar_info_present(Framebuffer *fb, TopBar *t, UiRect *r) {
+    UiRect local;
+    if (!r) r = &local;
+    if (!top_bar_info_redraw(fb, t, r)) return false;
+    fb_swap_rect(fb, r->x, r->y, r->w, r->h);
     return true;
 }
 

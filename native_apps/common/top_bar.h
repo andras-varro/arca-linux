@@ -92,6 +92,7 @@ typedef struct {
 
     /* derived */
     TopBarLayout L;
+    TopBarLayout drawn;           /* the layout of the last top_bar_draw / info repaint: what is on the panel, which a later top_bar_layout() (hit-testing) must not overwrite */
     Button       back, exit;      /* geometry follows L; drive with button_update */
     char         right_buf[24];
     CpuSnap      cpu_prev;
@@ -145,6 +146,11 @@ bool top_bar_info_sample(TopBar *t);
  * moves another section (title, message, buttons) or the bar was never drawn: draw the
  * whole frame instead.  The caller must know nothing covers the bar (a dialog, a popup). */
 bool top_bar_info_redraw(Framebuffer *fb, TopBar *t, UiRect *r);
+/* top_bar_info_redraw() then fb_swap_rect() of that rectangle: the whole "only the text changed" step.
+ * True = done (the rectangle is in *r when r is not NULL; an app that paints a mouse pointer must
+ * pointer_invalidate + pointer_paint afterwards).  False = nothing was drawn: draw the full frame.
+ * The caller decides first that nothing covers the bar (a dialog, a popup, a drop-down). */
+bool top_bar_info_present(Framebuffer *fb, TopBar *t, UiRect *r);
 /* Make the next top_bar_info_due() true (after a child process returned). */
 void top_bar_info_invalidate(TopBar *t);
 

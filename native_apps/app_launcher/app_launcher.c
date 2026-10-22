@@ -160,14 +160,16 @@ static bool message_hit(const Launcher *l, int x, int y) {
 
 /* Re-read the bar's inputs if a second has passed.  Returns true when what
  * it draws changed (the right-hand text, or the message). */
-static bool status_refresh(Launcher *l, uint32_t now_ms) {
+static bool status_refresh(Launcher *l, uint32_t now_ms, bool *info_only) {
+    if (info_only) *info_only = false;
     if (!top_bar_info_due(&l->bar, now_ms)) return false;
-    bool changed = top_bar_info_sample(&l->bar);
+    bool text_changed = top_bar_info_sample(&l->bar);
 
     l->status_ctx.calibrated = (access("/etc/touch_calibration.conf", F_OK) == 0);
     const StatusMsg *msg = status_msg_pick(&l->status_ctx);
 
-    changed = changed || msg != l->msg;
+    bool changed = text_changed || msg != l->msg;
+    if (info_only) *info_only = text_changed && msg == l->msg;   /* the CPU / clock text alone: a rectangle repaint will do */
     l->msg = msg;
     l->bar.message = msg ? msg->text : NULL;
     top_bar_layout(&l->bar);       /* the message moves the title's room */
@@ -175,7 +177,7 @@ static bool status_refresh(Launcher *l, uint32_t now_ms) {
 }
 
 static void status_init(Launcher *l) {
-    status_refresh(l, get_time_ms());
+    status_refresh(l, get_time_ms(), NULL);
 }
 
 /* Open the page that fixes the shown message. */
@@ -871,11 +873,18 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        /* The bar: once a second, and the frame is redrawn only when its text
-         * or the message changed.  There is no partial-redraw path here (a full
-         * frame is cleared and swapped), so a changing CPU figure costs one full
-         * redraw a second while the launcher is idle. */
-        if (status_refresh(&launcher, get_time_ms())) launcher.needs_redraw = true;
+        /* The bar: once a second.  The CPU / clock text alone is patched into
+         * the drawing buffer and its rectangle presented (top_bar_info_present);
+         * a changed message, a pending frame or the power dialog over the bar
+         * draw the whole frame.  The pointer is put back over the rectangle below. */
+        bool info_only = false;
+        if (status_refresh(&launcher, get_time_ms(), &info_only)) {
+            if (info_only && !launcher.needs_redraw && !modal_dialog_is_active(&power_dialog) &&
+                top_bar_info_present(&launcher.fb, &launcher.bar, NULL))
+                pointer_invalidate(&launcher.pointer);
+            else
+                launcher.needs_redraw = true;
+        }
 
         /* Detect any visual state changes from input handling */
         if (modal_dialog_is_active(&power_dialog) != old_dialog ||

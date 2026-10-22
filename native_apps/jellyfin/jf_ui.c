@@ -327,7 +327,7 @@ bool jf_ui_take_info(JfUi *ui, UiRect *r)
 {
     if (!ui->info_dirty) return false;
     ui->info_dirty = false;
-    if (top_bar_info_redraw(ui->fb, &ui->bar, r)) return true;
+    if (top_bar_info_present(ui->fb, &ui->bar, r)) return true;   /* patched and presented */
     ui->dirty = true;                /* the text moved another section: the next frame draws it all */
     return false;
 }
@@ -908,8 +908,13 @@ static void pick_open(JfUi *ui)
 /* The picker owns every input while it is up (common/top_pick.h); a pick sets the category. */
 static void pick_input(JfUi *ui, const TouchState *ts, const InputState *in, uint32_t now, JfEvent *out, int *n, int max)
 {
-    ui->dirty = true;
     TpEvent ev = tp_input(&ui->pick, ts, in, now);
+    /* A frame only when something can have changed: an event, a finger on the panel, a pad key, or the list still
+     * moving (tp_input reports that as TP_CHANGED).  An open, untouched picker costs what a static screen does. */
+    if (ev != TP_NONE || ts->pressed || ts->released || ts->held ||
+        bp(in, BTN_ID_UP) || bp(in, BTN_ID_DOWN) || bp(in, BTN_ID_LEFT) || bp(in, BTN_ID_RIGHT) ||
+        bp(in, BTN_ID_JUMP) || bp(in, BTN_ID_ACTION))
+        ui->dirty = true;
     if (ev == TP_PICKED) {
         int k = emit(out, n, max, JF_EV_CATEGORY_SET);
         if (k >= 0) out[k].i = tp_take(&ui->pick);
