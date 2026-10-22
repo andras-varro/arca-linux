@@ -4,6 +4,10 @@
  * (/home/root/log/messages), the respawn log (which app exited, and how) and
  * the kernel ring buffer, which comes from klogctl(), not from running dmesg.
  *
+ * Any component can add a tab of its own by installing an item file in
+ * /opt/arca/logs.d (log_sources.h); the extra tabs sit in a second row, which is
+ * absent when there are none, and read exactly like the syslog tab.
+ *
  * Each tab is read once, on entering the page, on a tab change and on REFRESH —
  * never per frame.  A file is read from its last LOG_TAIL_BYTES only (seek from
  * the end), the ring buffer likewise, and at most LOG_MAX_LINES of the newest
@@ -23,6 +27,7 @@
 #include "cp_page.h"
 #include "cp_ui.h"
 #include "log_filter.h"
+#include "log_sources.h"
 #include "../common/common.h"
 
 #include <errno.h>
@@ -71,7 +76,11 @@ static int     top;                 /* vis[] index of the first row drawn */
 static int     tab;
 static bool    errors_only;
 
-static Button  tab_btn[TAB_N], err_btn, refresh_btn, sc_btn[SC_N];
+static LogSource extra[LOGSRC_MAX]; /* tabs TAB_N.. from /opt/arca/logs.d */
+static int     nextra;
+static bool    sources_scanned;
+
+static Button  tab_btn[TAB_N + LOGSRC_MAX], err_btn, refresh_btn, sc_btn[SC_N];
 static int     area_x, area_y, area_w, area_h, rows, status_y;
 
 static int     repeat_btn = -1;
@@ -123,8 +132,9 @@ static void build_vis(void) {
 /* Rescans the open tab and lands on its newest line. */
 static void load_tab(void) {
     blen = 0; cut_tail = false; read_err = NULL; nlines = 0;
-    if (tabs[tab].path) read_file_tail(tabs[tab].path);
-    else                read_kernel();
+    if (tab >= TAB_N)          read_file_tail(extra[tab - TAB_N].path);
+    else if (tabs[tab].path)   read_file_tail(tabs[tab].path);
+    else                       read_kernel();
     if (blen > 0)
         nlines = log_split_tail(buf, blen, cut_tail, lines, LOG_MAX_LINES);
     build_vis();
@@ -132,7 +142,7 @@ static void load_tab(void) {
 }
 
 static void refresh_buttons(void) {
-    for (int i = 0; i < TAB_N; i++)
+    for (int i = 0; i < TAB_N + nextra; i++)
         button_set_colors(&tab_btn[i], i == tab ? RGB(0, 90, 160) : RGB(80, 80, 80),
                           COLOR_WHITE, BTN_COLOR_HIGHLIGHT);
     button_set_text(&err_btn, errors_only ? "ERRORS ONLY: ON" : "ERRORS ONLY: OFF");
@@ -145,12 +155,24 @@ static void refresh_buttons(void) {
 static void log_page_load(const Config *cfg) { (void)cfg; }
 
 static void log_page_layout(void) {
+    if (!sources_scanned) {
+        nextra = logsrc_scan(LOGSRC_DIR, extra, LOGSRC_MAX);
+        sources_scanned = true;
+    }
     int y = CONTENT_Y + LOG_GAP;
     int tw = (CONTENT_WIDTH - (TAB_N - 1) * LOG_GAP) / TAB_N;
     for (int i = 0; i < TAB_N; i++)
         button_init_full(&tab_btn[i], CONTENT_LEFT + i * (tw + LOG_GAP), y, tw, LOG_BTN_H,
                          tabs[i].label, RGB(80, 80, 80), COLOR_WHITE, BTN_COLOR_HIGHLIGHT, 2);
     y += LOG_BTN_H + LOG_GAP;
+    if (nextra > 0) {                   /* the second row, only when a component added a log */
+        int ew = (CONTENT_WIDTH - (nextra - 1) * LOG_GAP) / nextra;
+        for (int i = 0; i < nextra; i++)
+            button_init_full(&tab_btn[TAB_N + i], CONTENT_LEFT + i * (ew + LOG_GAP), y, ew,
+                             LOG_BTN_H, extra[i].name, RGB(80, 80, 80), COLOR_WHITE,
+                             BTN_COLOR_HIGHLIGHT, 2);
+        y += LOG_BTN_H + LOG_GAP;
+    }
     int bw = (CONTENT_WIDTH - LOG_GAP) / 2;
     button_init_full(&err_btn, CONTENT_LEFT, y, bw, LOG_BTN_H, "ERRORS ONLY: OFF",
                      RGB(80, 80, 80), COLOR_WHITE, BTN_COLOR_HIGHLIGHT, 2);
@@ -193,7 +215,7 @@ static void log_page_enter(void) {
 }
 
 static void log_page_draw(Framebuffer *fb) {
-    for (int i = 0; i < TAB_N; i++) button_draw(fb, &tab_btn[i]);
+    for (int i = 0; i < TAB_N + nextra; i++) button_draw(fb, &tab_btn[i]);
     button_draw(fb, &err_btn);
     button_draw(fb, &refresh_btn);
     for (int i = 0; i < SC_N; i++) button_draw(fb, &sc_btn[i]);
@@ -259,7 +281,7 @@ static CpPageResult log_page_input(Config *cfg, int tx, int ty, bool touching, u
     (void)cfg;
     CpPageResult res = CP_PAGE_IDLE;
 
-    for (int i = 0; i < TAB_N; i++)
+    for (int i = 0; i < TAB_N + nextra; i++)
         if (button_update(&tab_btn[i], tx, ty, touching, now)) {
             tab = i;
             load_tab();
@@ -316,7 +338,7 @@ static CpPageResult log_page_input(Config *cfg, int tx, int ty, bool touching, u
 
 static int log_page_focusables(UiRect *out, int max) {
     int n = 0;
-    for (int i = 0; i < TAB_N; i++) n = focus_add_button(out, n, max, &tab_btn[i]);
+    for (int i = 0; i < TAB_N + nextra; i++) n = focus_add_button(out, n, max, &tab_btn[i]);
     n = focus_add_button(out, n, max, &err_btn);
     n = focus_add_button(out, n, max, &refresh_btn);
     for (int i = 0; i < SC_N; i++) n = focus_add_button(out, n, max, &sc_btn[i]);

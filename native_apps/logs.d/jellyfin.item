@@ -1,0 +1,2 @@
+name=JELLYFIN
+path=/var/log/arca/jellyfin.log
