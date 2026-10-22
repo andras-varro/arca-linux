@@ -1162,6 +1162,39 @@ bool jf_queue_move(JfApp *app, int from, int to)
     return true;
 }
 
+bool jf_queue_remove(JfApp *app, int i)
+{
+    int n = app->queue_n;
+    if (i < 0 || i >= n) return false;
+    memmove(&app->queue[i], &app->queue[i + 1], sizeof(app->queue[0]) * (size_t)(n - 1 - i));
+    app->queue_n = --n;
+    if (i < app->queue_cur) app->queue_cur--;
+    else if (app->queue_cur >= n && n > 0) app->queue_cur = n - 1;   /* the last entry went: cur stays inside the array */
+    return true;
+}
+
+/* REMOVE on the playing entry mirrors NEXT: the entry that slid into its slot plays, and with none left playback ends on the
+ * new last entry.  Any other row is a plain edit, so nothing is stopped or started. */
+static void on_queue_remove(JfApp *app, int i, JfCmds *out)
+{
+    if (app->screen != JF_SCR_QUEUE || i < 0 || i >= app->queue_n) return;
+    if (app->queue_n == 1) { clear_queue(app, out); return; }
+    if (i != app->queue_cur) { jf_queue_remove(app, i); return; }
+    bool live = app->play_state == JF_PLAY_PLAYING || app->play_state == JF_PLAY_FETCHING;
+    bool was_last = i == app->queue_n - 1;
+    jf_queue_remove(app, i);
+    if (!was_last) {
+        if (!have_token(app)) return;
+        app->fail_streak = 0;
+        play_track(app, i, live, out);
+    } else {
+        if (app->play_state == JF_PLAY_FETCHING) emit(out, JF_CMD_CANCEL)->kind = JF_KIND_STREAM;
+        app->play_state = JF_PLAY_END;
+        app->start_ms = app->pos_ms = 0;
+        emit(out, JF_CMD_STOP);
+    }
+}
+
 void jf_queue_restore(JfApp *app, const JfItem *items, int n, int cur, int pos_ms)
 {
     if (n <= 0) return;
@@ -1427,6 +1460,7 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
     case JF_EV_QUEUE_MOVE:
         if (app->screen == JF_SCR_QUEUE) jf_queue_move(app, ev->i, ev->j);
         break;
+    case JF_EV_QUEUE_REMOVE: on_queue_remove(app, ev->i, out); break;
     case JF_EV_QUEUE_CLEAR:
         if (app->screen == JF_SCR_QUEUE && app->queue_n > 0) app->confirm = JF_CONFIRM_CLEAR_QUEUE;
         break;

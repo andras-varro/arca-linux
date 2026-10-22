@@ -1581,6 +1581,77 @@ static void test_queue_edit(void)
     CHECK(app.queue_cur == 0 && strcmp(app.queue[0].name, "q3") == 0 && app.play_state == JF_PLAY_PLAYING && cm.n == 0, "SHUFFLE event: playing track first, no restart");
 }
 
+/* REMOVE: the selected queue row goes.  Before cur: cur follows its entry; after cur: untouched; at cur: the next entry plays
+ * (or playback ends on the last one, or the queue clears when it was the only one).  The saved queue needs no event: jellyfin.c
+ * hashes count, cur and ids each frame, and each of these changes one of them. */
+static void queue_screen(int n)
+{
+    in_tracks(5, 5);
+    fake_queue(n);
+    app.screen = JF_SCR_QUEUE;
+    cm.n = 0;
+}
+static void remove_at(int i)
+{
+    static JfEvent ev; memset(&ev, 0, sizeof ev); ev.type = JF_EV_QUEUE_REMOVE; ev.i = i;
+    step_ev(&ev);
+}
+static int count_cmds(JfCmdType t) { int c = 0; for (int k = 0; k < cm.n; k++) if (cm.c[k].type == t) c++; return c; }
+
+static void test_queue_remove(void)
+{
+    queue_screen(5); app.queue_cur = 3;
+    remove_at(1);
+    CHECK(app.queue_n == 4 && app.queue_cur == 2 && strcmp(app.queue[2].name, "q3") == 0 && qpos("q1") < 0 && cm.n == 0,
+          "remove before cur: cur follows its entry (cur %d n %d)", app.queue_cur, app.queue_n);
+
+    queue_screen(5); app.queue_cur = 1;
+    remove_at(3);
+    CHECK(app.queue_n == 4 && app.queue_cur == 1 && strcmp(app.queue[1].name, "q1") == 0 && qpos("q3") < 0 && cm.n == 0,
+          "remove after cur: cur unchanged, no command (cur %d)", app.queue_cur);
+
+    queue_screen(4); app.queue_cur = 1;
+    remove_at(1);
+    CHECK(app.queue_n == 3 && app.queue_cur == 1 && strcmp(app.queue[1].name, "q2") == 0 && app.play_state == JF_PLAY_FETCHING &&
+          count_cmds(JF_CMD_STOP) == 1 && count_cmds(JF_CMD_PLAY_STREAM) == 1 && cm.n <= 2,
+          "remove cur plays the entry that slid into its place (cur %d state %d cmds %d)", app.queue_cur, app.play_state, cm.n);
+
+    queue_screen(3); app.queue_cur = 2;
+    remove_at(2);
+    CHECK(app.queue_n == 2 && app.queue_cur == 1 && app.play_state == JF_PLAY_END && count_cmds(JF_CMD_STOP) == 1 &&
+          count_cmds(JF_CMD_PLAY_STREAM) == 0 && cm.n <= 2,
+          "remove the last cur ends playback on the new last entry (cur %d state %d)", app.queue_cur, app.play_state);
+
+    queue_screen(1); app.queue_cur = 0;
+    remove_at(0);
+    CHECK(app.queue_n == 0 && app.queue_cur == 0 && app.play_state == JF_PLAY_IDLE && has(JF_CMD_STOP) && app.screen != JF_SCR_QUEUE,
+          "remove the only entry clears the queue and leaves the screen (screen %d)", app.screen);
+
+    queue_screen(4); app.queue_cur = 2;
+    app.screen = JF_SCR_TRACKS;
+    remove_at(1);
+    CHECK(app.queue_n == 4 && app.queue_cur == 2 && cm.n == 0, "REMOVE off the QUEUE screen does nothing");
+
+    queue_screen(4); app.queue_cur = 2;
+    remove_at(-1); remove_at(4); remove_at(99);
+    CHECK(app.queue_n == 4 && app.queue_cur == 2 && cm.n == 0 && !jf_queue_remove(&app, -1) && !jf_queue_remove(&app, 4),
+          "a bad index removes nothing");
+
+    queue_screen(4); app.queue_cur = 1; app.play_state = JF_PLAY_FETCHING;
+    remove_at(1);
+    CHECK(count_cmds(JF_CMD_CANCEL) == 0 && count_cmds(JF_CMD_STOP) == 1 && count_cmds(JF_CMD_PLAY_STREAM) == 1 &&
+          app.queue_cur == 1 && app.play_state == JF_PLAY_FETCHING,
+          "removing cur while FETCHING starts the next (the new tag supersedes the old stream)");
+    queue_screen(3); app.queue_cur = 2; app.play_state = JF_PLAY_FETCHING;
+    remove_at(2);
+    CHECK(count_cmds(JF_CMD_CANCEL) == 1 && find(JF_CMD_CANCEL)->kind == JF_KIND_STREAM && app.play_state == JF_PLAY_END &&
+          app.queue_cur == 1 && cm.n <= 2, "removing the last cur while FETCHING cancels the stream, ends");
+
+    /* the pure half, no screen needed */
+    fake_queue(3); app.queue_cur = 2;
+    CHECK(jf_queue_remove(&app, 0) && app.queue_cur == 1 && app.queue_n == 2, "jf_queue_remove(0) shifts cur down");
+}
+
 /* CLR: the question first (nothing changes), then CONFIRM empties the queue, stops the music and leaves NOW PLAYING / QUEUE. */
 static void test_queue_clear(void)
 {
@@ -1703,7 +1774,7 @@ int main(void)
     test_action_bar(); test_queue_insert(); test_mix(); test_mix_seed_and_ticks(); test_mix_flow(); test_mix_choice(); test_mix_stops();
     test_mix_cancel_and_errors(); test_mix_nowplaying(); test_save();
     test_queue_clear(); test_queue_restore();
-    test_pause_stop_seek(); test_instant_confirm(); test_back_restores_view(); test_prev(); test_queue_edit();
+    test_pause_stop_seek(); test_instant_confirm(); test_back_restores_view(); test_prev(); test_queue_edit(); test_queue_remove();
     printf("jf_core_test: %d checks, %d failures\n", checks, fails);
     return fails ? 1 : 0;
 }

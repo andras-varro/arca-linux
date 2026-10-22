@@ -128,6 +128,10 @@ typedef enum {
     JF_EV_PREV,          /* .played_ms = the position now (jellyfin.c fills it): past JF_PREV_RESTART_MS the track restarts, else the previous queue entry plays (the first entry restarts) */
     JF_EV_SHUFFLE,       /* QUEUE screen: random order; the track playing keeps playing and moves to position 0 (nothing playing: all shuffled) */
     JF_EV_QUEUE_MOVE,    /* QUEUE screen: .i = entry index, .j = the index it moves to; the track playing keeps playing */
+    JF_EV_QUEUE_REMOVE,  /* QUEUE screen: .i = entry index (the UI's selected row); no confirm.  An entry before the playing one
+                          * only shifts it; the playing entry is replaced by the one after it (played at once), or, when it was
+                          * last, playback ends on the new last entry; the only entry empties the queue like a confirmed CLR.
+                          * The UI clamps its cursor to queue_n-1 afterwards.  No command saves the queue: jellyfin.c hashes it each frame */
     JF_EV_QUEUE_CLEAR,   /* QUEUE screen, CLR: asks first (confirm = CLEAR_QUEUE); the CONFIRM then empties the queue, stops playback and leaves the NOW PLAYING / QUEUE screens */
     JF_EV_PAUSE,         /* toggle: PLAYING/FETCHING -> PAUSED, PAUSED -> resume, STOPPED/END -> restart the current track from 0.  .played_ms = the position now (jellyfin.c fills it from jf_position_ms) */
     JF_EV_STOP,          /* playback ends, queue and queue_cur stay (STOPPED) */
@@ -368,6 +372,9 @@ void jf_queue_shuffle(JfApp *app, JfRng rng, void *ctx);
 
 /** Move queue entry `from` to index `to` (both in range; else false).  queue_cur follows the track it names. */
 bool jf_queue_move(JfApp *app, int from, int to);
+/* Drop entry i: queue_cur follows its entry (i < cur -> cur-1).  Pure data edit: no command, no state change, so the entry
+ * being the playing one is on_queue_remove's business, which calls this and then plays or ends.  False when i is out of range. */
+bool jf_queue_remove(JfApp *app, int i);
 
 /** Put a saved queue back (start-up, before JF_EV_START): items[0..n) (tracks), `cur` clamped, PAUSED at `pos_ms` so PLAY resumes there; nothing is played.  n <= 0 changes nothing. */
 void jf_queue_restore(JfApp *app, const JfItem *items, int n, int cur, int pos_ms);
