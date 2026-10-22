@@ -31,7 +31,7 @@ static int checks, failed;
 #define CHECK(c) do { checks++; if (!(c)) { failed++; \
     printf("FAIL line %d: %s\n", __LINE__, #c); } } while (0)
 
-enum { A_ITEMS, A_AUTH, A_STATUS, A_SILENT, A_STREAM };
+enum { A_ITEMS, A_AUTH, A_STATUS, A_SILENT, A_STREAM, A_USER };
 typedef struct { int kind; int status; } Act;
 
 #define ID1 "0123456789abcdef0123456789abcdef"
@@ -45,6 +45,10 @@ static const char ITEMS_BODY[] =
     "\"TotalRecordCount\":2,\"StartIndex\":0}";
 static const char AUTH_BODY[] =
     "{\"User\":{\"Name\":\"u\",\"Id\":\"" ID1 "\"},\"AccessToken\":\"" TOKEN "\"}";
+
+static const char USER_BODY[] =
+    "{\"Name\":\"u\",\"Id\":\"" ID1 "\",\"Policy\":{\"IsAdministrator\":true,"
+    "\"EnableContentDeletion\":true,\"EnableContentDeletionFromFolders\":[\"f1\",\"f2\"]}}";
 
 static void reply(int c, int status, const char *body, size_t n)
 {
@@ -94,6 +98,7 @@ static void serve(int ls, int hpipe, const Act *script, int nscript)
         case A_AUTH:   reply(c, 200, AUTH_BODY, strlen(AUTH_BODY)); break;
         case A_STATUS: reply(c, a.status, "nope", 4); break;
         case A_STREAM: reply(c, a.status ? a.status : 200, "0123456789", 10); break;
+        case A_USER:   reply(c, 200, USER_BODY, strlen(USER_BODY)); break;
         case A_SILENT: continue;                 /* keep the connection open, say nothing */
         }
         close(c);
@@ -495,6 +500,76 @@ static void test_save(void)
     jf_api_free(&a); srv_stop(s);
 }
 
+/* WRITE (DELETE, POST with an empty body) and USER: the wire shape, the 2xx result, no retry, and the policy parse. */
+static void test_write_and_user(void)
+{
+    JfApi a;
+    JfResult r[4];
+    char path[JF_API_PATH_MAX];
+    const char *e;
+    Act ok204[] = {{A_STATUS, 204}};
+
+    /* DELETE: no body, no Content-Length; a 204 is a success */
+    Srv *s = srv_start(ok204, 1);
+    setup(&a, s);
+    jf_api_set_auth(&a, "dev", "did", "TOK-W");
+    snprintf(path, sizeof path, "/Items/%s", ID2);
+    CHECK(jf_api_enqueue_write(&a, 31, "DELETE", path) == 0);
+    CHECK(jf_api_enqueue_write(&a, 32, "PUT", path) == -1);
+    CHECK(jf_api_enqueue_write(&a, 32, "GET", path) == -1);
+    CHECK(pump(&a, r, 4, 3000) == 1);
+    CHECK(r[0].kind == JF_KIND_WRITE && r[0].tag == 31 && r[0].err == JF_ERR_NONE && r[0].status == 204);
+    const char *h = heads(s);
+    CHECK(strstr(h, "DELETE /Items/" ID2 " HTTP/1.0\r\n") != NULL);
+    CHECK(strstr(h, "Content-Length") == NULL);
+    CHECK(strstr(h, "Token=\"TOK-W\"") != NULL);
+    e = strstr(h, "\r\n\r\n");
+    CHECK(e != NULL && e[4] == '\0');                            /* the head is all that was sent */
+    jf_api_free(&a);
+    srv_stop(s);
+
+    /* POST with the ids in the query: an empty body, Content-Length: 0 */
+    snprintf(path, sizeof path, "/Playlists/%s/Items?ids=%s&userId=%s", ID1, ID2, ID1);
+    s = srv_start(ok204, 1);
+    setup(&a, s);
+    CHECK(jf_api_enqueue_write(&a, 33, "POST", path) == 0);
+    CHECK(pump(&a, r, 4, 3000) == 1);
+    CHECK(r[0].kind == JF_KIND_WRITE && r[0].err == JF_ERR_NONE && r[0].status == 204);
+    h = heads(s);
+    CHECK(strstr(h, "POST /Playlists/" ID1 "/Items?ids=" ID2 "&userId=" ID1 " HTTP/1.0\r\n") != NULL);
+    CHECK(strstr(h, "\r\nContent-Length: 0\r\n") != NULL);
+    e = strstr(h, "\r\n\r\n");
+    CHECK(e != NULL && e[4] == '\0');
+    jf_api_free(&a);
+    srv_stop(s);
+
+    /* never retried: a 500 costs exactly one DELETE, and the result is the server error */
+    Act s500[] = {{A_STATUS, 500}};
+    s = srv_start(s500, 1);
+    setup(&a, s);
+    snprintf(path, sizeof path, "/Items/%s", ID2);
+    CHECK(jf_api_enqueue_write(&a, 34, "DELETE", path) == 0);
+    CHECK(pump(&a, r, 4, 3000) == 1 && r[0].kind == JF_KIND_WRITE && r[0].err == JF_ERR_SERVER && r[0].status == 500);
+    CHECK(count_str(heads(s), "DELETE /Items/") == 1);
+    jf_api_free(&a);
+    srv_stop(s);
+
+    /* USER: GET /Users/<uid>, the Policy of the reply lands in the result */
+    Act us[] = {{A_USER, 0}};
+    s = srv_start(us, 1);
+    setup(&a, s);
+    snprintf(path, sizeof path, "/Users/%s", ID1);
+    CHECK(jf_api_enqueue_user(&a, 41, path) == 0);
+    CHECK(jf_api_enqueue_user(&a, 41, "") == -1);
+    CHECK(pump(&a, r, 4, 3000) == 1);
+    CHECK(r[0].kind == JF_KIND_USER && r[0].tag == 41 && r[0].err == JF_ERR_NONE && r[0].status == 200);
+    CHECK(r[0].list == NULL && r[0].fd == -1);
+    CHECK(r[0].policy.is_admin && r[0].policy.content_deletion && r[0].policy.deletion_folders_n == 2);
+    CHECK(strstr(heads(s), "GET /Users/" ID1 " HTTP/1.0\r\n") != NULL);
+    jf_api_free(&a);
+    srv_stop(s);
+}
+
 static void test_classify(void)
 {
     CHECK(jf_api_classify(200, "") == JF_ERR_NONE);
@@ -529,6 +604,7 @@ int main(void)
     test_supersede_and_priority();
     test_stream();
     test_save();
+    test_write_and_user();
     printf("jf_api_test: %d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;
 }

@@ -90,7 +90,7 @@ static void test_builders(void)
     CAP_EDGE("albums_all", jf_path_albums_all(b_, cap, UID, 30, 30));
 
     n = jf_path_playlists(b, sizeof(b), UID, 0, 50);
-    EXPECT("playlists", n, b, "/Items?userId=" UID "&IncludeItemTypes=Playlist&Recursive=true&StartIndex=0&Limit=50");
+    EXPECT("playlists", n, b, "/Items?userId=" UID "&IncludeItemTypes=Playlist&Recursive=true&Fields=ChildCount&StartIndex=0&Limit=50");
     CAP_EDGE("playlists", jf_path_playlists(b_, cap, UID, 0, 50));
 
     n = jf_path_genres(b, sizeof(b), UID, 50, 50);
@@ -537,6 +537,80 @@ static void test_library_scope(void)
     CHECK(jf_path_scope(p, 80, lib) < 0, "no room: refused");
 }
 
+/* Playlist write and read paths, the user object, and the artist folder's three lists.
+ * Sabotage: a playlist add that drops userId, a delete built on the wrong resource, an artist
+ * list filtered by ParentId instead of ArtistIds, or an overflow that writes past the cap. */
+static void test_playlist_and_artist(void)
+{
+    char b[JF_API_PATH_MAX];
+    const char *ids2[] = { UID, ART };
+    const char *ids10[10];
+    for (int i = 0; i < 10; i++) ids10[i] = ALB;
+    int n;
+
+    n = jf_path_playlist_delete(b, sizeof(b), ALB);
+    EXPECT("playlist delete", n, b, "/Items/" ALB);
+    CAP_EDGE("playlist delete", jf_path_playlist_delete(b_, cap, ALB));
+    CHECK(jf_path_playlist_delete(b, sizeof(b), "short") == -1, "playlist delete: bad id accepted");
+    CHECK(jf_path_playlist_delete(b, sizeof(b), NULL) == -1, "playlist delete: NULL id accepted");
+
+    n = jf_path_playlist_add(b, sizeof(b), UID, ALB, ids2, 2);
+    EXPECT("playlist add joined ids", n, b,
+           "/Playlists/" ALB "/Items?ids=" UID "," ART "&userId=" UID);
+    CAP_EDGE("playlist add", jf_path_playlist_add(b_, cap, UID, ALB, ids2, 2));
+    CHECK(jf_path_playlist_add(b, sizeof(b), "short", ALB, ids2, 2) == -1, "playlist add: bad uid accepted");
+    CHECK(jf_path_playlist_add(b, sizeof(b), UID, "short", ids2, 2) == -1, "playlist add: bad playlist accepted");
+    const char *bad[] = { UID, "nothex" };
+    CHECK(jf_path_playlist_add(b, sizeof(b), UID, ALB, bad, 2) == -1, "playlist add: bad track id accepted");
+    CHECK(jf_path_playlist_add(b, sizeof(b), UID, ALB, ids2, 0) == -1, "playlist add: zero ids accepted");
+
+    /* ten ids (the batch size callers use) fit JF_API_PATH_MAX; sixteen do not (16 * 33 > 512 - the fixed part) */
+    n = jf_path_playlist_add(b, sizeof(b), UID, ALB, ids10, 10);
+    CHECK(n > 0 && n < JF_API_PATH_MAX, "ten ids fit JF_API_PATH_MAX (got %d)", n);
+    CHECK(strstr(b, "?ids=" ALB "," ALB "," ALB) != NULL, "ten ids joined in order");
+    const char *ids16[16];
+    for (int i = 0; i < 16; i++) ids16[i] = ALB;
+    CHECK(jf_path_playlist_add(b, JF_API_PATH_MAX, UID, ALB, ids16, 16) == -1, "overflow: 16 ids in a 512-byte path not refused");
+
+    n = jf_path_playlist_ids(b, sizeof(b), UID, ALB, 0, 100);
+    EXPECT("playlist ids page", n, b,
+           "/Playlists/" ALB "/Items?userId=" UID "&StartIndex=0&Limit=100"
+           "&EnableImages=false&EnableUserData=false&Fields=");
+    CAP_EDGE("playlist ids", jf_path_playlist_ids(b_, cap, UID, ALB, 0, 100));
+    CHECK(jf_path_playlist_ids(b, sizeof(b), "short", ALB, 0, 100) == -1, "playlist ids: bad uid accepted");
+
+    n = jf_path_user(b, sizeof(b), UID);
+    EXPECT("user", n, b, "/Users/" UID);
+    CAP_EDGE("user", jf_path_user(b_, cap, UID));
+    CHECK(jf_path_user(b, sizeof(b), "short") == -1, "user: bad uid accepted");
+
+    n = jf_path_artist_albums(b, sizeof(b), UID, ART, 0, 50);
+    EXPECT("artist albums", n, b,
+           "/Items?userId=" UID "&AlbumArtistIds=" ART "&IncludeItemTypes=MusicAlbum&Recursive=true"
+           "&SortBy=SortName&StartIndex=0&Limit=50");
+    CAP_EDGE("artist albums", jf_path_artist_albums(b_, cap, UID, ART, 0, 50));
+    CHECK(jf_path_artist_albums(b, sizeof(b), UID, "short", 0, 50) == -1, "artist albums: bad artist accepted");
+
+    n = jf_path_artist_tracks(b, sizeof(b), UID, ART, 0, 50);
+    EXPECT("artist tracks", n, b,
+           "/Items?userId=" UID "&ArtistIds=" ART "&IncludeItemTypes=Audio&Recursive=true"
+           "&SortBy=Album,ParentIndexNumber,IndexNumber&StartIndex=0&Limit=50");
+    CAP_EDGE("artist tracks", jf_path_artist_tracks(b_, cap, UID, ART, 0, 50));
+    CHECK(jf_path_artist_tracks(b, sizeof(b), "short", ART, 0, 50) == -1, "artist tracks: bad uid accepted");
+
+    /* the whole artist: the same query as the track list, one implementation for both names */
+    char c[JF_API_PATH_MAX];
+    int m = jf_path_artist_all(c, sizeof(c), UID, ART, 0, 50);
+    CHECK(m == n && strcmp(b, c) == 0, "artist all differs from artist tracks");
+    CHECK(strstr(c, "IncludeItemTypes=Audio") && strstr(c, "SortBy=Album,ParentIndexNumber,IndexNumber"), "artist all: sort or type");
+    CHECK(!strstr(c, "ParentId") && !strstr(c, "AlbumArtistIds"), "artist all: wrong filter");
+    CHECK(jf_path_artist_all(c, sizeof(c), UID, "short", 0, 50) == -1, "artist all: bad artist accepted");
+
+    /* the playlist list asks for the track count (ChildCount) */
+    n = jf_path_playlists(b, sizeof(b), UID, 0, 50);
+    EXPECT("playlists", n, b, "/Items?userId=" UID "&IncludeItemTypes=Playlist&Recursive=true&Fields=ChildCount&StartIndex=0&Limit=50");
+}
+
 int main(void)
 {
     test_builders();
@@ -549,6 +623,7 @@ int main(void)
     test_body();
     test_mix_and_save();
     test_mix_paths();
+    test_playlist_and_artist();
     printf("jf_url_test: %d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;
 }

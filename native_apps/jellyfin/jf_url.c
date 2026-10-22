@@ -157,7 +157,7 @@ int jf_path_playlists(char *out, size_t cap, const char *uid, int start, int lim
 {
     if (!jf_id_valid(uid)) return -1;
     return fin(snprintf(out, cap,
-                        "/Items?userId=%s&IncludeItemTypes=Playlist&Recursive=true"
+                        "/Items?userId=%s&IncludeItemTypes=Playlist&Recursive=true&Fields=ChildCount"
                         "&StartIndex=%d&Limit=%d", uid, start, limit), cap);
 }
 
@@ -352,6 +352,71 @@ int jf_path_mix_pool(char *out, size_t cap, const char *uid, const char *const *
 int jf_path_playlist_create(char *out, size_t cap)
 {
     return fin(snprintf(out, cap, "/Playlists"), cap);
+}
+
+int jf_path_playlist_delete(char *out, size_t cap, const char *id)
+{
+    if (!jf_id_valid(id)) return -1;
+    return fin(snprintf(out, cap, "/Items/%s", id), cap);
+}
+
+int jf_path_playlist_add(char *out, size_t cap, const char *uid, const char *playlist_id,
+                         const char *const *ids, int n)
+{
+    if (!out || cap == 0 || !jf_id_valid(uid) || !jf_id_valid(playlist_id) || !ids || n < 1) return -1;
+    int r = snprintf(out, cap, "/Playlists/%s/Items?ids=", playlist_id);
+    if (r < 0 || (size_t)r >= cap) return -1;
+    size_t w = (size_t)r;
+    for (int i = 0; i < n; i++) {
+        if (!jf_id_valid(ids[i])) return -1;
+        r = snprintf(out + w, cap - w, "%s%s", i ? "," : "", ids[i]);
+        if (r < 0 || (size_t)r >= cap - w) return -1;
+        w += (size_t)r;
+    }
+    r = snprintf(out + w, cap - w, "&userId=%s", uid);
+    if (r < 0 || (size_t)r >= cap - w) return -1;
+    return (int)(w + (size_t)r);
+}
+
+int jf_path_playlist_ids(char *out, size_t cap, const char *uid, const char *playlist_id, int start, int limit)
+{
+    if (!jf_id_valid(uid) || !jf_id_valid(playlist_id)) return -1;
+    return fin(snprintf(out, cap, "/Playlists/%s/Items?userId=%s&StartIndex=%d&Limit=%d"
+                        "&EnableImages=false&EnableUserData=false&Fields=", playlist_id, uid, start, limit), cap);
+}
+
+int jf_path_user(char *out, size_t cap, const char *uid)
+{
+    if (!jf_id_valid(uid)) return -1;
+    return fin(snprintf(out, cap, "/Users/%s", uid), cap);
+}
+
+int jf_path_artist_albums(char *out, size_t cap, const char *uid, const char *artist_id, int start, int limit)
+{
+    if (!jf_id_valid(uid) || !jf_id_valid(artist_id)) return -1;
+    return fin(snprintf(out, cap,
+                        "/Items?userId=%s&AlbumArtistIds=%s&IncludeItemTypes=MusicAlbum&Recursive=true"
+                        "&SortBy=SortName&StartIndex=%d&Limit=%d", uid, artist_id, start, limit), cap);
+}
+
+/* The artist's audio, album by album: shared by the tracks and the whole-artist queries. */
+static int artist_audio(char *out, size_t cap, const char *uid, const char *artist_id, int start, int limit)
+{
+    if (!jf_id_valid(uid) || !jf_id_valid(artist_id)) return -1;
+    return fin(snprintf(out, cap,
+                        "/Items?userId=%s&ArtistIds=%s&IncludeItemTypes=Audio&Recursive=true"
+                        "&SortBy=Album,ParentIndexNumber,IndexNumber&StartIndex=%d&Limit=%d",
+                        uid, artist_id, start, limit), cap);
+}
+
+int jf_path_artist_tracks(char *out, size_t cap, const char *uid, const char *artist_id, int start, int limit)
+{
+    return artist_audio(out, cap, uid, artist_id, start, limit);
+}
+
+int jf_path_artist_all(char *out, size_t cap, const char *uid, const char *artist_id, int start, int limit)
+{
+    return artist_audio(out, cap, uid, artist_id, start, limit);
 }
 
 int jf_save_body(char *out, size_t cap, const char *name, const char *uid, const char *const *ids, int n)

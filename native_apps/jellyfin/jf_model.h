@@ -43,7 +43,7 @@ typedef struct {
     int runtime_s;
     int norm_gain_mdb;      /**< NormalizationGain dB * 1000, rounded; 0 if absent */
     int year;               /**< ProductionYear, 0 if absent */
-    int count;              /**< SongCount of a genre (Fields=ItemCounts), 0 if absent */
+    int count;              /**< SongCount (a genre, Fields=ItemCounts), else ChildCount (a playlist's tracks), 0 if absent */
     char artist_id[33];     /**< ArtistItems[0].Id of a track, empty if absent */
     char genres[JF_GENRES_BYTES];  /**< a track's Genres (Fields=Genres): each name whole, each ended by a newline; one that does not fit is dropped */
 } JfItem;
@@ -80,9 +80,19 @@ void jf_list_clear(JfList *l);
 /** Append a page's Items to `out`.  TotalRecordCount, when present, sets out->total. */
 int jf_parse_items(const char *body, size_t len, JsonTok *toks, int ntoks, JfList *out);
 
-/** AuthenticateByName reply -> token and user id; both emptied on failure. */
+/** What the server lets a user do, from a user object's Policy.  Absent fields are false / 0. */
+typedef struct {
+    bool is_admin;               /**< IsAdministrator */
+    bool content_deletion;       /**< EnableContentDeletion */
+    int  deletion_folders_n;     /**< entries of EnableContentDeletionFromFolders */
+} JfPolicy;
+
+/** AuthenticateByName reply -> token and user id; both emptied on failure.  `policy` (may be NULL) gets User.Policy, zeroed on failure. */
 int jf_parse_auth(const char *body, size_t len, JsonTok *toks, int ntoks,
-                  char *token, size_t token_cap, char *user_id, size_t uid_cap);
+                  char *token, size_t token_cap, char *user_id, size_t uid_cap, JfPolicy *policy);
+
+/** GET /Users/<uid> reply (one user object) -> its Policy.  Any non-OK return leaves `out` zeroed. */
+int jf_parse_user_policy(const char *body, size_t len, JsonTok *toks, int ntoks, JfPolicy *out);
 
 
 /** Characters of an artist name a list row's detail text shows; longer is cut to JF_ROW_ARTIST_CHARS-2 characters + "..". */

@@ -80,6 +80,7 @@ static void read_item(const char *s, const JsonTok *t, int n, int o, JfItem *it)
     if (i >= 0 && json_num(s, &t[i], &d)) it->norm_gain_mdb = gain_mdb(d);
 
     i = json_obj_get(s, t, n, o, "SongCount");
+    if (i < 0) i = json_obj_get(s, t, n, o, "ChildCount");   /* a playlist's track count: it carries ChildCount, not SongCount */
     if (i >= 0 && json_i64(s, &t[i], &v)) it->count = clamp_i(v, 0, INT_MAX);
 
     if (it->type == JF_ITEM_ALBUM) {   /* an album is its own art source: its Id and ImageTags.Primary */
@@ -170,11 +171,48 @@ int jf_parse_items(const char *body, size_t len, JsonTok *toks, int ntoks, JfLis
     return JF_PARSE_OK;
 }
 
+/* A user object's Policy into *out.  An absent Policy, or an absent field, leaves it false / 0.  The caller has
+ * checked that `obj` is an object. */
+static void policy_of(const char *s, const JsonTok *t, int n, int obj, JfPolicy *out)
+{
+    out->is_admin = false;
+    out->content_deletion = false;
+    out->deletion_folders_n = 0;
+    int p = json_obj_get(s, t, n, obj, "Policy");
+    if (p < 0 || t[p].type != JSON_OBJECT) return;
+    int i = json_obj_get(s, t, n, p, "IsAdministrator");
+    bool v = false;
+    out->is_admin = i >= 0 && json_bool(s, &t[i], &v) && v;
+    i = json_obj_get(s, t, n, p, "EnableContentDeletion");
+    v = false;
+    out->content_deletion = i >= 0 && json_bool(s, &t[i], &v) && v;
+    i = json_obj_get(s, t, n, p, "EnableContentDeletionFromFolders");
+    if (i >= 0 && t[i].type == JSON_ARRAY) {
+        int k = 0;
+        for (int e = json_arr_first(t, n, i); e >= 0; e = json_arr_next(t, n, i, e)) k++;
+        out->deletion_folders_n = k;
+    }
+}
+
+int jf_parse_user_policy(const char *body, size_t len, JsonTok *toks, int ntoks, JfPolicy *out)
+{
+    if (!out) return JF_PARSE_BAD;
+    out->is_admin = false;
+    out->content_deletion = false;
+    out->deletion_folders_n = 0;
+    int n = json_parse(body, len, toks, ntoks);
+    if (n < 0) return map_err(n);
+    if (toks[0].type != JSON_OBJECT) return JF_PARSE_BAD;
+    policy_of(body, toks, n, 0, out);
+    return JF_PARSE_OK;
+}
+
 int jf_parse_auth(const char *body, size_t len, JsonTok *toks, int ntoks,
-                  char *token, size_t token_cap, char *user_id, size_t uid_cap)
+                  char *token, size_t token_cap, char *user_id, size_t uid_cap, JfPolicy *policy)
 {
     if (token_cap) token[0] = '\0';
     if (uid_cap) user_id[0] = '\0';
+    if (policy) memset(policy, 0, sizeof *policy);
     if (!token_cap || uid_cap < 33) return JF_PARSE_BAD;
 
     int n = json_parse(body, len, toks, ntoks);
@@ -194,6 +232,7 @@ int jf_parse_auth(const char *body, size_t len, JsonTok *toks, int ntoks,
         user_id[0] = '\0';
         return JF_PARSE_BAD;
     }
+    if (policy) policy_of(body, toks, n, u, policy);
     return JF_PARSE_OK;
 }
 

@@ -320,7 +320,7 @@ static const char AUTH[] =
 
 static int auth(const char *b, size_t tokcap, size_t uidcap, char *t, char *u)
 {
-    return jf_parse_auth(b, strlen(b), toks, JF_TOKENS_PAGE, t, tokcap, u, uidcap);
+    return jf_parse_auth(b, strlen(b), toks, JF_TOKENS_PAGE, t, tokcap, u, uidcap, NULL);
 }
 
 static void test_auth(void)
@@ -354,11 +354,11 @@ static void test_auth(void)
     size_t len = strlen(AUTH);
     int nonpart = 0;
     for (size_t k = 0; k < len; k++)
-        if (jf_parse_auth(AUTH, k, toks, JF_TOKENS_PAGE, t, sizeof t, u, sizeof u) != JF_PARSE_TRUNC || t[0] || u[0]) nonpart++;
+        if (jf_parse_auth(AUTH, k, toks, JF_TOKENS_PAGE, t, sizeof t, u, sizeof u, NULL) != JF_PARSE_TRUNC || t[0] || u[0]) nonpart++;
     CHECK(nonpart == 0, "%d auth prefixes not TRUNC/emptied", nonpart);
-    CHECK(jf_parse_auth(AUTH, len, toks, 8, t, sizeof t, u, sizeof u) == JF_PARSE_NOMEM && !t[0], "auth NOMEM");
-    CHECK(jf_parse_auth(AUTH, len, toks, JF_TOKENS_PAGE, t, 0, u, sizeof u) == JF_PARSE_BAD, "zero token cap");
-    CHECK(jf_parse_auth(AUTH, len, toks, JF_TOKENS_PAGE, t, sizeof t, u, 10) == JF_PARSE_BAD, "user id cap too small");
+    CHECK(jf_parse_auth(AUTH, len, toks, 8, t, sizeof t, u, sizeof u, NULL) == JF_PARSE_NOMEM && !t[0], "auth NOMEM");
+    CHECK(jf_parse_auth(AUTH, len, toks, JF_TOKENS_PAGE, t, 0, u, sizeof u, NULL) == JF_PARSE_BAD, "zero token cap");
+    CHECK(jf_parse_auth(AUTH, len, toks, JF_TOKENS_PAGE, t, sizeof t, u, 10, NULL) == JF_PARSE_BAD, "user id cap too small");
 }
 
 /* album_id and image_tag: the cover source of a track (its album) and of an album (itself) */
@@ -564,6 +564,77 @@ static void test_views(void)
           !strcmp(st[1].name, "Classical"), "only the 2 music libraries kept (n=%d)", l.n);
 }
 
+/* The user policy (GET /Users/<uid> and the auth reply's User.Policy), the playlist track count (ChildCount). */
+static const char USER_POLICY[] =
+    "{\"Name\":\"u\",\"Id\":\"" "0123456789abcdef0123456789abcdef" "\",\"Policy\":{\"IsAdministrator\":true,"
+    "\"EnableContentDeletion\":true,\"EnableContentDeletionFromFolders\":[\"a1\",\"b2\",\"c3\"]}}";
+
+static void test_policy(void)
+{
+    JfPolicy p;
+    /* the three fields, and the count of the folder array */
+    memset(&p, 0xff, sizeof p);
+    CHECK(jf_parse_user_policy(USER_POLICY, strlen(USER_POLICY), toks, JF_TOKENS_PAGE, &p) == JF_PARSE_OK,
+          "user policy: parse failed");
+    CHECK(p.is_admin && p.content_deletion && p.deletion_folders_n == 3, "user policy: admin %d delete %d folders %d",
+          p.is_admin, p.content_deletion, p.deletion_folders_n);
+
+    /* absent fields, an empty Policy and a user with no Policy at all all read as false / 0, and overwrite old values */
+    const char *none[] = {
+        "{\"Name\":\"u\",\"Id\":\"0123456789abcdef0123456789abcdef\"}",
+        "{\"Policy\":{}}",
+        "{\"Policy\":{\"IsAdministrator\":false,\"EnableContentDeletionFromFolders\":[]}}",
+    };
+    for (int i = 0; i < 3; i++) {
+        memset(&p, 0xff, sizeof p);
+        int rc = jf_parse_user_policy(none[i], strlen(none[i]), toks, JF_TOKENS_PAGE, &p);
+        CHECK(rc == JF_PARSE_OK && !p.is_admin && !p.content_deletion && p.deletion_folders_n == 0,
+              "absent policy case %d: rc %d admin %d delete %d folders %d", i, rc, p.is_admin, p.content_deletion, p.deletion_folders_n);
+    }
+    /* not JSON: refused, the struct is left zero rather than half-filled */
+    memset(&p, 0xff, sizeof p);
+    CHECK(jf_parse_user_policy("{\"Policy\":", 10, toks, JF_TOKENS_PAGE, &p) != JF_PARSE_OK, "truncated user accepted");
+    CHECK(!p.is_admin && !p.content_deletion && p.deletion_folders_n == 0, "refused parse left fields set");
+
+    /* the sign-in reply carries the same Policy under User */
+    const char *auth = "{\"User\":{\"Name\":\"u\",\"Id\":\"0123456789abcdef0123456789abcdef\","
+                       "\"Policy\":{\"IsAdministrator\":false,\"EnableContentDeletion\":true,"
+                       "\"EnableContentDeletionFromFolders\":[\"x\"]}},\"AccessToken\":\"tok\"}";
+    char t[64], u[33];
+    memset(&p, 0xff, sizeof p);
+    CHECK(jf_parse_auth(auth, strlen(auth), toks, JF_TOKENS_PAGE, t, sizeof t, u, sizeof u, &p) == JF_PARSE_OK,
+          "auth with policy: parse failed");
+    CHECK(!p.is_admin && p.content_deletion && p.deletion_folders_n == 1, "auth policy: admin %d delete %d folders %d",
+          p.is_admin, p.content_deletion, p.deletion_folders_n);
+    const char *bare = "{\"User\":{\"Name\":\"u\",\"Id\":\"0123456789abcdef0123456789abcdef\"},\"AccessToken\":\"tok\"}";
+    memset(&p, 0xff, sizeof p);
+    CHECK(jf_parse_auth(bare, strlen(bare), toks, JF_TOKENS_PAGE, t, sizeof t, u, sizeof u, &p) == JF_PARSE_OK
+          && !p.is_admin && !p.content_deletion && p.deletion_folders_n == 0, "auth without policy: fields not zero");
+    CHECK(jf_parse_auth(bare, strlen(bare), toks, JF_TOKENS_PAGE, t, sizeof t, u, sizeof u, NULL) == JF_PARSE_OK,
+          "auth with NULL policy refused");
+}
+
+static void test_playlist_count(void)
+{
+    JfItem items[4];
+    JfList l;
+    const char *child = "{\"Items\":[{\"Name\":\"P\",\"Id\":\"0123456789abcdef0123456789abcdef\",\"Type\":\"Playlist\",\"ChildCount\":7}]}";
+    jf_list_init(&l, items, 4);
+    CHECK(jf_parse_items(child, strlen(child), toks, JF_TOKENS_PAGE, &l) == JF_PARSE_OK, "playlist ChildCount: parse failed");
+    CHECK(l.n == 1 && items[0].count == 7, "playlist count from ChildCount: %d", l.n ? items[0].count : -1);
+
+    const char *none = "{\"Items\":[{\"Name\":\"P\",\"Id\":\"0123456789abcdef0123456789abcdef\",\"Type\":\"Playlist\"}]}";
+    jf_list_init(&l, items, 4);
+    CHECK(jf_parse_items(none, strlen(none), toks, JF_TOKENS_PAGE, &l) == JF_PARSE_OK, "playlist no count: parse failed");
+    CHECK(l.n == 1 && items[0].count == 0, "playlist with no count field: count %d", l.n ? items[0].count : -1);
+
+    /* a genre keeps reading SongCount */
+    const char *genre = "{\"Items\":[{\"Name\":\"G\",\"Id\":\"0123456789abcdef0123456789abcdef\",\"Type\":\"MusicGenre\",\"SongCount\":5}]}";
+    jf_list_init(&l, items, 4);
+    CHECK(jf_parse_items(genre, strlen(genre), toks, JF_TOKENS_PAGE, &l) == JF_PARSE_OK && l.n == 1 && items[0].count == 5,
+          "genre SongCount no longer read");
+}
+
 int main(void)
 {
     test_pool_page_budget();
@@ -579,6 +650,8 @@ int main(void)
     test_skips_and_cap();
     test_root_types();
     test_auth();
+    test_policy();
+    test_playlist_count();
     test_mix_fields();
     test_art_fields();
     printf("jf_model_test: %d checks, %d failed\n", checks, fails);

@@ -98,6 +98,26 @@ int jf_auth_body(char *out, size_t cap, const char *user, const char *password);
 /** "/Playlists": the POST that creates a playlist. */
 int jf_path_playlist_create(char *out, size_t cap);
 
+/** DELETE target: a playlist (or any item the user may delete): "/Items/<id>". */
+int jf_path_playlist_delete(char *out, size_t cap, const char *id);
+/**
+ * POST target that adds `n` (1..) tracks to a playlist: "/Playlists/<pl>/Items?ids=a,b,..&userId=<uid>".  The ids go in the
+ * query, 33 bytes each, so the path cap decides how many fit: 10 fit JF_API_PATH_MAX; a larger add is several requests
+ * (callers batch 10).  -1 when an id is bad, `n` < 1, or the path does not fit `cap`.
+ */
+int jf_path_playlist_add(char *out, size_t cap, const char *uid, const char *playlist_id,
+                         const char *const *ids, int n);
+/** One page of a playlist's tracks, the fields the playlist view needs and nothing else. */
+int jf_path_playlist_ids(char *out, size_t cap, const char *uid, const char *playlist_id, int start, int limit);
+/** GET /Users/<uid>: one user object, whose Policy says what the user may delete. */
+int jf_path_user(char *out, size_t cap, const char *uid);
+/** An artist's albums (AlbumArtistIds: the albums the artist is the album artist of). */
+int jf_path_artist_albums(char *out, size_t cap, const char *uid, const char *artist_id, int start, int limit);
+/** An artist's tracks, in album order (ArtistIds: every track the artist performs on, compilations included). */
+int jf_path_artist_tracks(char *out, size_t cap, const char *uid, const char *artist_id, int start, int limit);
+/** The same query as jf_path_artist_tracks, for the whole artist; one implementation behind both names. */
+int jf_path_artist_all(char *out, size_t cap, const char *uid, const char *artist_id, int start, int limit);
+
 /**
  * {"Name":..,"Ids":[..],"UserId":..,"MediaType":"Audio"} with the name JSON-escaped.  -1 when `uid` or an id is
  * not 32 hex, `n` is outside 1..JF_SAVE_IDS_MAX, or it does not fit.

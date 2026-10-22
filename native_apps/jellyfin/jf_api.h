@@ -2,13 +2,14 @@
  * jf_api.h — the Jellyfin client's request queue: one HTTP request in flight at
  * a time over a four-slot ring, polled once per frame, never blocking.
  *
- * Four kinds.  AUTH is a POST (sign-in).  SAVE is a POST of a JSON body (create a playlist) whose
+ * Six kinds.  AUTH is a POST (sign-in).  WRITE is a DELETE or an empty-body POST whose status is the result (as SAVE,
+ * never retried).  USER is a GET of one user object, its Policy parsed into the result.  SAVE is a POST of a JSON body (create a playlist) whose
  * reply body is ignored: the status is the result.  LIST is a GET whose body is parsed
  * with jf_parse_items() into a caller-given JfList.  STREAM is a GET in
  * HTTP_STREAM mode: on a 200 the result carries the socket, positioned at the
  * first body byte (http_take_fd), for audio_music_start_fd().
  *
- * Order: AUTH > SAVE > STREAM > LIST, oldest first within a kind (a save is one short user action, so it
+ * Order: AUTH > SAVE = WRITE > STREAM > LIST = USER, oldest first within a kind (a save is one short user action, so it
  * does not wait behind a stream).  An in-flight request
  * is never preempted, with one exception: SUPERSESSION.  A new LIST drops every
  * queued LIST and ends the in-flight one, a new STREAM does the same to STREAMs;
@@ -51,7 +52,10 @@
 #define JF_API_TOKEN_MAX  64
 #define JF_API_NAME_MAX   64
 
-typedef enum { JF_KIND_NONE = 0, JF_KIND_AUTH, JF_KIND_LIST, JF_KIND_STREAM, JF_KIND_SAVE } JfKind;
+typedef enum { JF_KIND_NONE = 0, JF_KIND_AUTH, JF_KIND_LIST, JF_KIND_STREAM, JF_KIND_SAVE,
+               JF_KIND_WRITE,   /* DELETE or POST with an empty body: the status is the result, never retried */
+               JF_KIND_USER     /* GET /Users/<uid>: one user object, its Policy in JfResult.policy */
+             } JfKind;
 
 typedef enum {
     JF_ERR_NONE = 0,
@@ -72,6 +76,7 @@ typedef struct {
     JfList  *list;        /**< LIST: the caller's list, items appended on success */
     char     token[JF_API_TOKEN_MAX];   /**< AUTH: AccessToken; caller wipes      */
     char     user_id[JF_ID_LEN + 1];    /**< AUTH: User.Id; caller wipes          */
+    JfPolicy policy;                    /**< AUTH: User.Policy; USER: the user's Policy; zero otherwise */
     int      fd;          /**< STREAM: the socket on success, else -1             */
 } JfResult;
 
@@ -81,6 +86,7 @@ typedef struct {
     unsigned seq;                       /**< enqueue order, oldest first          */
     JfList  *list;
     char     path[JF_API_PATH_MAX];
+    char     method[8];                /**< WRITE: "POST" or "DELETE" */
     char     body[JF_API_POST_BYTES];   /**< AUTH and SAVE only; wiped when the request ends */
     size_t   body_len;
 } JfSlot;
@@ -128,6 +134,10 @@ int  jf_api_enqueue_list(JfApi *a, unsigned tag, const char *path, JfList *list)
 int  jf_api_enqueue_stream(JfApi *a, unsigned tag, const char *path);
 /** POST /Playlists: the first `n` (1..JF_SAVE_IDS_MAX) ids as a new playlist `name`.  The reply body is ignored. */
 int  jf_api_enqueue_save(JfApi *a, unsigned tag, const char *name, const char *user_id, const char *const *ids, int n);
+/** DELETE or POST of `path` with an empty body (a POST sends Content-Length: 0); `method` is "POST" or "DELETE", else -1.  A 200 or 204 is success. */
+int  jf_api_enqueue_write(JfApi *a, unsigned tag, const char *method, const char *path);
+/** GET of `path` (/Users/<uid>), parsed into JfResult.policy. */
+int  jf_api_enqueue_user(JfApi *a, unsigned tag, const char *path);
 
 /** Drop every queued and in-flight request of `kind`; no result is delivered. */
 void jf_api_cancel_kind(JfApi *a, JfKind kind);
