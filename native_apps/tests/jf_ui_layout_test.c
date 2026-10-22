@@ -918,6 +918,79 @@ static void add_to_playlist(void)
     CHECK(strcmp(t, "COULD NOT CHECK DUPLICATES - ADD?") == 0, "T: dup_confirm_titles: unknown is \"%s\"", t);
 }
 
+/* The artist folder (ALBUMS / PLAIN), the picker and the search: header counts, the PLAY ALL button, the delete question. */
+static void folder_ui(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    static JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    char t[96];
+
+    jf_app_init(&app);
+    app.screen = JF_SCR_ALBUMS;
+    app.ctx[JF_LIST_ALBUMS].sub = JF_SUB_PLAIN;
+    app.list = &app.lists[JF_LIST_ALBUMS];
+    app.list->n = 7;
+    app.list->total = 13;      /* the album phase's total, not the rows */
+    for (int i = 0; i < 7; i++) app.list->items[i].type = i < 6 ? JF_ITEM_ALBUM : JF_ITEM_TRACK;
+    CHECK(jf_ui_head_count(&app, t, sizeof t) && strcmp(t, "6 ALBUMS, 1 TRACK") == 0, "U: folder_header_counts_rows_by_type: \"%s\"", t);
+    app.list->n = 1; app.list->items[0].type = JF_ITEM_ALBUM;
+    CHECK(jf_ui_head_count(&app, t, sizeof t) && strcmp(t, "1 ALBUM") == 0, "U: folder_header_counts_rows_by_type: one album is \"%s\"", t);
+    app.list->items[0].type = JF_ITEM_TRACK;
+    CHECK(jf_ui_head_count(&app, t, sizeof t) && strcmp(t, "1 TRACK") == 0, "U: folder_header_counts_rows_by_type: one track is \"%s\"", t);
+    app.list->n = 3; app.list->items[1].type = JF_ITEM_TRACK; app.list->items[2].type = JF_ITEM_TRACK;
+    CHECK(jf_ui_head_count(&app, t, sizeof t) && strcmp(t, "3 TRACKS") == 0, "U: folder_header_counts_rows_by_type: tracks only is \"%s\"", t);
+    app.list->n = 0;
+    CHECK(!jf_ui_head_count(&app, t, sizeof t), "U: folder_header_counts_rows_by_type: an empty folder says \"%s\"", t);
+
+    /* a genre's albums keep the server count */
+    app.ctx[JF_LIST_ALBUMS].sub = JF_SUB_GENRE;
+    CHECK(jf_ui_head_count(&app, t, sizeof t) && strcmp(t, "13 ALBUMS") == 0, "U: genre_header_keeps_total: \"%s\"", t);
+
+    /* the picker names playlists */
+    app.screen = JF_SCR_PLPICK;
+    app.list = &app.lists[JF_LIST_PLPICK];
+    app.list->n = 7; app.list->total = 7;
+    CHECK(jf_ui_head_count(&app, t, sizeof t) && strcmp(t, "7 PLAYLISTS") == 0, "U: picker_header_says_playlists: \"%s\"", t);
+    app.list->n = 1; app.list->total = 1;
+    CHECK(jf_ui_head_count(&app, t, sizeof t) && strcmp(t, "1 PLAYLIST") == 0, "U: picker_header_says_playlists: one is \"%s\"", t);
+
+    /* search: the rows once an inline artist made them exceed the server's total, the total while it is the larger */
+    app.screen = JF_SCR_SEARCH;
+    app.list = &app.lists[JF_LIST_SEARCH];
+    app.list->n = 9; app.list->total = 2;
+    CHECK(jf_ui_head_count(&app, t, sizeof t) && strcmp(t, "9 RESULTS") == 0, "U: search_header_follows_inline_rows: \"%s\"", t);
+    app.list->n = 2; app.list->total = 40;
+    CHECK(jf_ui_head_count(&app, t, sizeof t) && strcmp(t, "40 RESULTS") == 0, "U: search_header_follows_inline_rows: paging total is \"%s\"", t);
+
+    /* PLAY ALL on the artist folder's bottom row, and not on a genre's albums */
+    app.screen = JF_SCR_ALBUMS;
+    app.list = &app.lists[JF_LIST_ALBUMS];
+    app.ctx[JF_LIST_ALBUMS].sub = JF_SUB_PLAIN;
+    app.list->n = 2; app.list->total = 2;
+    app.list->items[0].type = JF_ITEM_ALBUM; app.list->items[1].type = JF_ITEM_ALBUM;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    UiRect r = ui.L.row3[2];
+    int n = tap_at(&ui, r.x + r.w / 2, r.y + r.h / 2, 2000, ev);
+    CHECK(has_event(ev, n, JF_EV_PLAY_ALL), "U: folder_has_play_all: a tap on the third button sent no PLAY_ALL (%d events)", n);
+    app.ctx[JF_LIST_ALBUMS].sub = JF_SUB_GENRE;
+    feed(&ui, 0, 0, false, false, false, 3000, ev, MINI_MAX);
+    n = tap_at(&ui, r.x + r.w / 2, r.y + r.h / 2, 4000, ev);
+    CHECK(!has_event(ev, n, JF_EV_PLAY_ALL), "U: folder_has_play_all: a genre's albums sent PLAY_ALL");
+    jf_ui_free(&ui);
+
+    /* the delete question shows a 20-glyph name whole, and a longer one cut inside the dialog's 400 px */
+    snprintf(app.confirm_seed.name, sizeof app.confirm_seed.name, "arca-test-playlist-20");
+    jf_ui_delete_msg(&app, t, sizeof t);
+    CHECK(strcmp(t, "DELETE arca-test-playlist-20?") == 0 || strcmp(t, "DELETE ARCA-TEST-PLAYLIST-20?") == 0, "U: delete_question_shows_long_name: \"%s\"", t);
+    snprintf(app.confirm_seed.name, sizeof app.confirm_seed.name, "a very long playlist name that cannot fit the dialog at all");
+    jf_ui_delete_msg(&app, t, sizeof t);
+    CHECK(strlen(t) <= 33 && t[strlen(t) - 1] == '?', "U: delete_question_shows_long_name: long name gives %zu glyphs \"%s\"", strlen(t), t);
+}
+
 int main(void)
 {
     add_to_playlist();
@@ -940,6 +1013,7 @@ int main(void)
     queue_widths();
     playlist_menu();
     remove_label_fits();
+    folder_ui();
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");
     return 0;

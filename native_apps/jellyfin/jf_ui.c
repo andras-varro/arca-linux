@@ -506,6 +506,9 @@ static void settings_sync(JfUi *ui)
  * PLAY ALL.  The root's categories are stepped with Left / Right and the header picker. */
 static bool at_root(const JfApp *app) { return app->screen == JF_SCR_ARTISTS; }
 
+/* The artist folder (albums, then tracks of other albums): the core queues its whole discography for PLAY ALL; a genre's albums have no such handler. */
+static bool artist_folder(const JfApp *app) { return app->screen == JF_SCR_ALBUMS && app->ctx[JF_LIST_ALBUMS].sub == JF_SUB_PLAIN; }
+
 /* An album's or a playlist's tracks carry a fourth button, + PLAYLIST; a genre's track list, search and an artist's albums do not. */
 static bool tracks4(const JfApp *app)
 {
@@ -520,7 +523,7 @@ static bool row3_on(const JfApp *app, int i)
     if (i == 0) return true;
     if (i == 1) return app->queue_n > 0;
     if (i == 3) return tracks4(app);
-    return at_root(app) || app->screen == JF_SCR_TRACKS || app->screen == JF_SCR_SEARCH;
+    return at_root(app) || app->screen == JF_SCR_TRACKS || app->screen == JF_SCR_SEARCH || artist_folder(app);
 }
 
 static int row3_step(const JfApp *app, int cur, int dir)
@@ -860,8 +863,7 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
                 modal_dialog_set_button(&ui->cdlg, 0, "ADD ANYWAY", BTN_BG, COLOR_WHITE);
                 modal_dialog_set_button(&ui->cdlg, 1, "CANCEL", RGB(90, 40, 40), COLOR_WHITE);
             } else if (app->confirm == JF_CONFIRM_DELETE_PLAYLIST) {
-                lv_fit(nm, sizeof nm, app->confirm_seed.name, 8 * 6 * 2, 2);
-                snprintf(msg, sizeof msg, "DELETE PLAYLIST %s?", nm);
+                jf_ui_delete_msg(app, msg, sizeof msg);
                 modal_dialog_init(&ui->cdlg, "DELETE PLAYLIST", msg, 2);
                 modal_dialog_set_button(&ui->cdlg, 0, "DELETE", BTN_BG, COLOR_WHITE);
                 modal_dialog_set_button(&ui->cdlg, 1, "CANCEL", RGB(90, 40, 40), COLOR_WHITE);
@@ -1254,18 +1256,56 @@ static void ring(JfUi *ui, UiRect r)
     fb_draw_rect(ui->fb, r.x - 3, r.y - 3, r.w + 6, r.h + 6, RING);
 }
 
+/* The header count.  The artist folder's list holds albums and then tracks from other artists' albums, and the server's total
+ * counts one fetch phase's items, so the folder counts its rows by type; the picker lists playlists; a search that inlined an
+ * artist has more rows than the server's total, and the rows are then what the screen holds. */
+bool jf_ui_head_count(const JfApp *app, char *buf, size_t cap)
+{
+    if (cap) buf[0] = '\0';
+    const JfList *l = app->list;
+    if (!l || l->total <= 0) return false;
+    if (app->screen == JF_SCR_ALBUMS && app->ctx[JF_LIST_ALBUMS].sub == JF_SUB_PLAIN) {
+        int a = 0, t = 0;
+        for (int i = 0; i < l->n; i++) {
+            if (l->items[i].type == JF_ITEM_ALBUM) a++;
+            else if (l->items[i].type == JF_ITEM_TRACK) t++;
+        }
+        if (!a && !t) return false;
+        int k = 0;
+        if (a) k += snprintf(buf + k, cap - (size_t)k, "%d ALBUM%s", a, a == 1 ? "" : "S");
+        if (t) snprintf(buf + k, cap - (size_t)k, "%s%d TRACK%s", a ? ", " : "", t, t == 1 ? "" : "S");
+        return true;
+    }
+    if (app->screen == JF_SCR_PLPICK) {
+        snprintf(buf, cap, "%d PLAYLIST%s", l->total, l->total == 1 ? "" : "S");
+        return true;
+    }
+    int cnt = l->total;
+    const char *what = app->screen == JF_SCR_ARTISTS ? jf_cat_name(app->cat) : app->screen == JF_SCR_SEARCH ? "RESULTS"
+                     : app->screen == JF_SCR_ALBUMS ? "ALBUMS" : "TRACKS";
+    if (app->screen == JF_SCR_SEARCH && l->n > cnt) cnt = l->n;
+    snprintf(buf, cap, "%d %s", cnt, what);
+    return true;
+}
+
+/* The delete question.  The dialog's message line holds 33 glyphs at scale 2 (400 px, then it drops to scale 1), so "DELETE "
+ * and "?" leave 25 for the name; the title already says PLAYLIST. */
+void jf_ui_delete_msg(const JfApp *app, char *buf, size_t cap)
+{
+    char nm[64];
+    lv_fit(nm, sizeof nm, app->confirm_seed.name, 25 * 6 * 2, 2);
+    snprintf(buf, cap, "DELETE %s?", nm);
+}
+
 static void draw_banner(JfUi *ui)
 {
     const JfApp *app = ui->app;
     UiRect b = ui->L.banner;
     if (app->banner[0]) fb_draw_text(ui->fb, b.x + 4, b.y + 2, app->banner, RING, 2);
     else if (app->list && app->list->total > 0) {
-        /* the server's count, so a ranked first page is not read as the whole answer */
-        char c[32];
-        const char *what = app->screen == JF_SCR_ARTISTS ? jf_cat_name(app->cat) : app->screen == JF_SCR_SEARCH ? "RESULTS"
-                         : app->screen == JF_SCR_ALBUMS ? "ALBUMS" : "TRACKS";
-        snprintf(c, sizeof c, "%d %s", app->list->total, what);
-        fb_draw_text(ui->fb, b.x + 4, b.y + 2, c, DIM, 2);
+        /* the server's count, so a ranked first page is not read as the whole answer (jf_ui_head_count says where rows replace it) */
+        char c[48];
+        if (jf_ui_head_count(app, c, sizeof c)) fb_draw_text(ui->fb, b.x + 4, b.y + 2, c, DIM, 2);
     }
     if (app->busy || app->pick_wait || app->dup_scan || app->add_pending)
         fb_draw_text(ui->fb, b.x + b.w - 8 - text_measure_width("LOADING", 2), b.y + 2, "LOADING", DIM, 2);
