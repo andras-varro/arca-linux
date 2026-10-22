@@ -7,6 +7,9 @@
  *      audio_close(), must leave fd 0 open.  A zeroed `AudioWavStream.fd` is 0,
  *      and closing "the stream" would close stdin.
  *   B  a streamed bed survives an output-device move: still active, same fd.
+ *   D  audio_music_stop() closes the stream fd through its AudioFdIo hook once the
+ *      release fade has ended (not before, not twice, not a reused number); the
+ *      same on end of stream and across a second start.
  *   C  (control) the fd really belongs to the Audio while it plays, and
  *      audio_close() really closes it, so A cannot pass on a stream never open.
  *
@@ -97,6 +100,11 @@ static bool write_wav(const char *path, long frames)
 
 static void pump_n(Audio *a, int n) { for (int i = 0; i < n; i++) audio_pump(a); }
 static bool fd_open(int fd) { return fcntl(fd, F_GETFD) != -1; }
+
+static int g_io_closes;
+static ssize_t count_read(int fd, void *buf, size_t n) { return read(fd, buf, n); }
+static void count_close(int fd) { g_io_closes++; close(fd); }
+static const AudioFdIo COUNT_IO = { count_read, count_close };
 /* Still the PIPE, not a descriptor that closed and was reused (the file open takes the lowest free one). */
 static bool fd0_is_pipe(void) { struct stat st; return fstat(0, &st) == 0 && S_ISFIFO(st.st_mode); }
 
@@ -163,6 +171,69 @@ int main(void)
     audio_close(&a);
     check(!fd_open(sv[0]), "C: audio_close() closed the stream fd");
     close(sv[1]);
+
+    /* ── D: the stream fd is closed through its hook once the release ends ── */
+    printf("  D  stop closes the stream fd (through the hook) when the fade ends\n");
+    {
+        memset(&g_fake, 0, sizeof g_fake);
+        check(audio_init_unchecked(&a) == 0 && a.available, "D: the fake stream opens");
+        audio_set_fd_io(&a, &COUNT_IO);
+        int d[2];
+        if (socketpair(AF_UNIX, SOCK_STREAM, 0, d) != 0) { perror("socketpair"); return 2; }
+        write(d[1], h, 44);
+        write(d[1], pcm, sizeof pcm);
+        g_io_closes = 0;
+        check(audio_music_start_fd(&a, d[0], 1), "D: the stream starts");
+        pump_n(&a, 10);
+        audio_music_stop(&a);
+        check(g_io_closes == 0 && fd_open(d[0]), "D: not closed while the release fade runs");
+        check(audio_music_active(&a), "D: the voice is still fading (not cut)");
+        for (int i = 0; i < 200 && audio_music_active(&a); i++) audio_pump(&a);
+        pump_n(&a, 2);
+        check(!audio_music_active(&a), "D: the fade finished");
+        check(g_io_closes == 1, "D: the hook's close ran exactly once after the fade");
+        check(!fd_open(d[0]), "D: the socket is closed after the fade, before audio_close()");
+        /* the number is reused by something else: nothing may close it again */
+        int reuse = dup(d[1]);
+        check(reuse == d[0], "D: (control) the fd number was reused");
+        pump_n(&a, 5);
+        check(fd_open(reuse), "D: a reused fd number is not closed by the Audio");
+        /* a new track starts after the old one: one close each, none doubled */
+        int e[2];
+        if (socketpair(AF_UNIX, SOCK_STREAM, 0, e) != 0) { perror("socketpair"); return 2; }
+        write(e[1], h, 44);
+        write(e[1], pcm, sizeof pcm);
+        check(audio_music_start_fd(&a, e[0], 1), "D: a second stream starts");
+        check(g_io_closes == 1, "D: starting the second did not close anything again");
+        pump_n(&a, 5);
+        audio_close(&a);
+        check(g_io_closes == 2 && !fd_open(e[0]), "D: audio_close() closes the live one once");
+        check(fd_open(reuse), "D: and still not the reused number");
+        close(reuse); close(d[1]); close(e[1]);
+
+        /* end of stream: the voice runs dry on its own */
+        memset(&g_fake, 0, sizeof g_fake);
+        check(audio_init_unchecked(&a) == 0 && a.available, "D: EOF: the fake stream opens");
+        audio_set_fd_io(&a, &COUNT_IO);
+        int f[2];
+        if (socketpair(AF_UNIX, SOCK_STREAM, 0, f) != 0) { perror("socketpair"); return 2; }
+        unsigned char fh[44];
+        memcpy(fh, h, 44);
+        uint32_t dl = 4000;
+        memcpy(fh + 40, &dl, 4);
+        write(f[1], fh, 44);
+        write(f[1], pcm, 4000);
+        shutdown(f[1], SHUT_WR);
+        g_io_closes = 0;
+        check(audio_music_start_fd(&a, f[0], 1), "D: EOF: the stream starts");
+        for (int i = 0; i < 400 && audio_music_active(&a); i++) audio_pump(&a);
+        pump_n(&a, 2);
+        check(!audio_music_active(&a), "D: EOF: the voice ended");
+        check(g_io_closes == 1 && !fd_open(f[0]), "D: EOF: closed once as soon as it ended");
+        audio_close(&a);
+        check(g_io_closes == 1, "D: EOF: audio_close() does not close it again");
+        close(f[1]);
+    }
 
     printf("\naudio_stream_fd_test: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

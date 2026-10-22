@@ -636,6 +636,26 @@ static void stream_move(Audio *audio)
     if (stream_open(audio) != 0) audio->reopening = true;
 }
 
+/** Close a streamed bed's descriptor once its voice has nothing left to play.
+ *
+ * ⚠️ audio_music_stop() releases the voice and leaves the fd, because the mixer
+ * pulls from the stream until the envelope reaches 0 — closing there would cut
+ * the voice.  This is the other half: the first pump after the fade (or after
+ * the stream ran dry on its own) closes it, through the stream's AudioFdIo, so an
+ * https connection does not sit ESTABLISHED behind a stopped or paused track.
+ * ⚠️ **Thread: the caller's.**  There is no audio thread (audio.h) — the mixer
+ * runs inside audio_pump(), i.e. on the render loop, which is also the thread that
+ * opened the fd, and the TLS slot table behind http_stream_close() is not
+ * thread-safe.  The close sets fd -1, so audio_music_start_fd() and audio_close()
+ * cannot close it a second time, nor close a number something else has reused. */
+static void music_stream_reap(Audio *audio)
+{
+    AudioSampleVoice *sv = &audio->music;
+    if (!audio->available || !sv->streaming || sv->stream.fd < 0) return;
+    if (sample_live(audio, sv)) return;
+    audio_wav_stream_close(&sv->stream);
+}
+
 void audio_pump(Audio *audio)
 {
     if (audio && audio->available &&
@@ -644,8 +664,8 @@ void audio_pump(Audio *audio)
     } else if (audio_live(audio) && audio_out_usb_returned(&audio->out)) {
         stream_move(audio);
     }
-    if (!audio_live(audio)) return;
-    cont_service(audio);
+    if (audio_live(audio)) cont_service(audio);
+    music_stream_reap(audio);
 }
 
 void audio_interrupt(Audio *audio)
