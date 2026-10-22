@@ -113,6 +113,7 @@ typedef enum { JF_PLAY_IDLE = 0, JF_PLAY_FETCHING, JF_PLAY_PLAYING, JF_PLAY_END,
 
 typedef enum { JF_CONFIRM_NONE = 0, JF_CONFIRM_INSTANT_MIX, JF_CONFIRM_CLEAR_QUEUE, JF_CONFIRM_SIGN_OUT,
                JF_CONFIRM_DELETE_PLAYLIST,  /* confirm_seed = the playlist row; CONFIRM sends the DELETE */
+               JF_CONFIRM_QUIT,          /* QUIT while music plays: CONFIRM stops and leaves */
                JF_CONFIRM_ADD_DUP           /* the add would duplicate (dup_hits of pick_n already in add_name) or could not be checked (dup_unknown); CONFIRM adds all */ } JfConfirm;
 
 /* The settings view is a table of rows (the extension point: a new setting is one JfSettingId and one line in

@@ -604,6 +604,12 @@ static void on_confirm(JfApp *app, JfCmds *out)
         clear_queue(app, out);
         return;
     }
+    if (app->confirm == JF_CONFIRM_QUIT) {
+        app->confirm = JF_CONFIRM_NONE;
+        emit(out, JF_CMD_STOP);
+        emit(out, JF_CMD_EXIT);
+        return;
+    }
     if (app->confirm == JF_CONFIRM_SIGN_OUT) {
         app->confirm = JF_CONFIRM_NONE;
         sign_out(app, out);
@@ -1855,6 +1861,11 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
     case JF_EV_TRACK_ENDED:    on_track_ended(app, ev->played_ms, out); goto done;
     case JF_EV_START:          on_start(app, &ev->login, out); goto done;
     case JF_EV_QUIT:
+        /* Leaving stops the music: while it plays (or loads) ask first; anything else leaves at once. */
+        if (app->play_state == JF_PLAY_PLAYING || app->play_state == JF_PLAY_FETCHING) {
+            app->confirm = JF_CONFIRM_QUIT;
+            goto done;
+        }
         emit(out, JF_CMD_STOP);
         emit(out, JF_CMD_EXIT);
         goto done;
@@ -1947,7 +1958,6 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
         break;
     case JF_EV_QUEUE_JUMP:
         if (app->screen == JF_SCR_QUEUE && ev->i >= 0 && ev->i < app->queue_n && have_token(app)) {
-            pop(app, out);
             app->fail_streak = 0;
             play_track(app, ev->i, app->play_state == JF_PLAY_PLAYING || app->play_state == JF_PLAY_FETCHING, out);
         }

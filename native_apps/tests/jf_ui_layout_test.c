@@ -917,6 +917,20 @@ static void add_to_playlist(void)
     app.dup_unknown = true;
     jf_ui_dup_title(&app, t, sizeof t);
     CHECK(strcmp(t, "COULD NOT CHECK DUPLICATES - ADD?") == 0, "T: dup_confirm_titles: unknown is \"%s\"", t);
+
+    /* signout_label: the host of the typed server address, upcased; plain SIGN OUT when there is none */
+    snprintf(app.login.server, sizeof app.login.server, "https://music.example.lan:8096/");
+    jf_ui_signout_label(&app, t, sizeof t);
+    CHECK(strcmp(t, "SIGN OUT FROM MUSIC.EXAMPLE.LAN") == 0, "T: signout_label: \"%s\"", t);
+    snprintf(app.login.server, sizeof app.login.server, "10.0.0.1:8096");
+    jf_ui_signout_label(&app, t, sizeof t);
+    CHECK(strcmp(t, "SIGN OUT FROM 10.0.0.1") == 0, "T: signout_label: bare host:port is \"%s\"", t);
+    app.login.server[0] = '\0';
+    jf_ui_signout_label(&app, t, sizeof t);
+    CHECK(strcmp(t, "SIGN OUT") == 0, "T: signout_label: no server is \"%s\"", t);
+    snprintf(app.login.server, sizeof app.login.server, "a bad host");
+    jf_ui_signout_label(&app, t, sizeof t);
+    CHECK(strcmp(t, "SIGN OUT") == 0, "T: signout_label: unparsable server is \"%s\"", t);
 }
 
 /* The artist folder (ALBUMS / PLAIN), the picker and the search: header counts, the PLAY ALL button, the delete question. */

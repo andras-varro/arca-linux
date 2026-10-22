@@ -324,7 +324,9 @@ static void test_queue(void)
     send(JF_EV_OPEN_QUEUE, 0);
     CHECK(app.screen == JF_SCR_QUEUE, "queue");
     send(JF_EV_QUEUE_JUMP, 1);
-    CHECK(app.screen == JF_SCR_NOWPLAYING && app.queue_cur == 1 && has(JF_CMD_PLAY_STREAM), "jump plays that entry, back on now playing");
+    CHECK(app.screen == JF_SCR_QUEUE && app.queue_cur == 1 && has(JF_CMD_PLAY_STREAM), "jump plays that entry and stays on the queue");
+    send(JF_EV_BACK, 0);
+    CHECK(app.screen == JF_SCR_NOWPLAYING, "BACK from the queue -> now playing");
     send(JF_EV_BACK, 0);
     CHECK(app.screen == JF_SCR_TRACKS, "BACK from now playing -> TRACKS");
 
@@ -529,6 +531,20 @@ static void test_quit(void)
     in_tracks(3, 3);
     send(JF_EV_QUIT, 0);
     CHECK(cm.n == 2 && cm.c[0].type == JF_CMD_STOP && cm.c[1].type == JF_CMD_EXIT, "QUIT -> STOP, EXIT");
+    /* closing while music plays asks first; CONFIRM then stops and leaves, BACK keeps playing */
+    in_tracks(3, 3);
+    app.queue_n = 3; app.queue_cur = 0; app.play_state = JF_PLAY_PLAYING;
+    send(JF_EV_QUIT, 0);
+    CHECK(cm.n == 0 && app.confirm == JF_CONFIRM_QUIT, "QUIT while playing: asks, emits nothing");
+    send(JF_EV_BACK, 0);
+    CHECK(app.confirm == JF_CONFIRM_NONE && cm.n == 0 && app.play_state == JF_PLAY_PLAYING, "BACK on the quit question keeps playing");
+    send(JF_EV_QUIT, 0);
+    send(JF_EV_CONFIRM, 0);
+    CHECK(cm.n == 2 && cm.c[0].type == JF_CMD_STOP && cm.c[1].type == JF_CMD_EXIT && app.confirm == JF_CONFIRM_NONE, "CONFIRM on the quit question -> STOP, EXIT");
+    in_tracks(3, 3);
+    app.queue_n = 3; app.play_state = JF_PLAY_PAUSED;
+    send(JF_EV_QUIT, 0);
+    CHECK(cm.n == 2 && cm.c[1].type == JF_CMD_EXIT && app.confirm == JF_CONFIRM_NONE, "QUIT while paused leaves at once");
     jf_app_init(&app);
     send(JF_EV_BACK, 0);
     CHECK(has(JF_CMD_EXIT), "BACK on SIGNIN leaves");

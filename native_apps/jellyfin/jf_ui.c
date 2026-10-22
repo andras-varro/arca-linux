@@ -204,7 +204,7 @@ static void src_row(void *ctx, int index, LvRow *out)
         int ids[JF_SET_COUNT];
         int cnt = jf_settings_rows(app, ids);
         if (index < 0 || index >= cnt) return;
-        if (ids[index] == JF_SET_SIGNOUT) snprintf(t, sizeof ui->rowtxt[0], "SIGN OUT");
+        if (ids[index] == JF_SET_SIGNOUT) jf_ui_signout_label(app, t, sizeof ui->rowtxt[0]);
         else {
             int r = chosen_lib_row(app);
             if (r == 0) snprintf(t, sizeof ui->rowtxt[0], "ALL LIBRARIES");
@@ -495,6 +495,21 @@ void jf_ui_dup_title(const JfApp *app, char *buf, size_t cap)
     lv_fit(nm, sizeof nm, app->add_name, 20 * 6 * 2, 2);
     if (app->dup_hits >= app->pick_n) snprintf(buf, cap, "ALREADY IN %s", nm);
     else snprintf(buf, cap, "%d OF %d ALREADY IN %s", app->dup_hits, app->pick_n, nm);
+}
+
+/* The sign-out row: "SIGN OUT FROM <host>", the host of the address typed at sign-in, upcased.  The list view cuts a long row
+ * with "..." at its width, so the host (the tail) is what gives way.  No usable address: plain "SIGN OUT". */
+void jf_ui_signout_label(const JfApp *app, char *buf, size_t cap)
+{
+    char host[64];
+    int port = 0;
+    bool tls = false;
+    if (!app->login.server[0] || jf_parse_server(app->login.server, host, sizeof host, &port, &tls) != JF_SERVER_OK) {
+        snprintf(buf, cap, "SIGN OUT");
+        return;
+    }
+    for (char *p = host; *p; p++) if (*p >= 'a' && *p <= 'z') *p = (char)(*p - 32);
+    snprintf(buf, cap, "SIGN OUT FROM %s", host);
 }
 
 /* The new playlist's name: the keyboard asks (an empty or cancelled entry sends nothing); the core makes it from the picked ids. */
@@ -938,6 +953,10 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
             } else if (app->confirm == JF_CONFIRM_SIGN_OUT) {
                 modal_dialog_init(&ui->cdlg, "SIGN OUT?", "THE QUEUE IS CLEARED", 2);
                 modal_dialog_set_button(&ui->cdlg, 0, "SIGN OUT", BTN_BG, COLOR_WHITE);
+                modal_dialog_set_button(&ui->cdlg, 1, "CANCEL", RGB(90, 40, 40), COLOR_WHITE);
+            } else if (app->confirm == JF_CONFIRM_QUIT) {
+                modal_dialog_init(&ui->cdlg, "EXIT?", "THE MUSIC STOPS", 2);
+                modal_dialog_set_button(&ui->cdlg, 0, "EXIT", BTN_BG, COLOR_WHITE);
                 modal_dialog_set_button(&ui->cdlg, 1, "CANCEL", RGB(90, 40, 40), COLOR_WHITE);
             } else if (app->confirm == JF_CONFIRM_ADD_DUP) {
                 jf_ui_dup_title(app, msg, sizeof msg);

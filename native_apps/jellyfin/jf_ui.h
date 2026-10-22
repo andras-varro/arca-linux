@@ -77,6 +77,8 @@ bool jf_ui_plpick_add_shown(const JfApp *app);
 /** The duplicate question's message: "ALREADY IN <name>", "<k> OF <n> ALREADY IN <name>" or, when the scan could not tell,
  *  "COULD NOT CHECK DUPLICATES - ADD?".  The name is cut to fit the dialog. */
 void jf_ui_dup_title(const JfApp *app, char *buf, size_t cap);
+/** The SETTINGS sign-out row: "SIGN OUT FROM <HOST>" from the address typed at sign-in, "SIGN OUT" when there is none or it does not parse. */
+void jf_ui_signout_label(const JfApp *app, char *buf, size_t cap);
 /** The header count under the bar (without the LOADING mark): the artist folder counts its rows by type ("6 ALBUMS, 1 TRACK",
  *  a zero part omitted; the server's total counts items of one fetch phase and is not the rows), the picker says PLAYLISTS,
  *  a search whose inline artist expansion made more rows than the server's total shows the rows, other lists the server's total.
