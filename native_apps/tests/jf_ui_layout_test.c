@@ -641,6 +641,125 @@ static void eq_door(void)
     jf_ui_free(&ui);
 }
 
+/* P  the playlist action menu: it takes the mini player's strip (its rects, its list shortening), shows OPEN / DELETE /
+ *    CANCEL or OPEN / CANCEL when the server's policy gives no delete right, hides the mini player's own buttons while
+ *    up, hands the list its rectangle back, and sends OPEN / DELETE / CANCEL with the row; a track row keeps the
+ *    five-button bar */
+static void pm_setup(JfApp *app, int queue_n, bool can_delete, JfItemType type)
+{
+    jf_app_init(app);
+    app->screen = JF_SCR_ARTISTS;
+    app->cat = JF_CAT_PLAYLISTS;
+    app->list = &app->lists[JF_LIST_ARTISTS];
+    app->list->n = 2;
+    app->list->total = 2;
+    for (int i = 0; i < 2; i++) {
+        app->list->items[i].type = type;
+        snprintf(app->list->items[i].name, sizeof app->list->items[i].name, "LIST%d", i);
+        app->list->items[i].count = 12;
+    }
+    app->queue_n = queue_n;
+    app->policy_known = can_delete;
+    app->policy.is_admin = can_delete;
+    app->action_bar = true;
+    app->action_row = 1;
+}
+
+static void playlist_menu(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    static JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    UiRect r;
+    int n;
+
+    /* with delete and no mini player: the strip is used, three buttons on the mini_btn rects */
+    pm_setup(&app, 0, true, JF_ITEM_PLAYLIST);
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    CHECK(ui.mini_on && ui.lv.rect.h == ui.L.list_mini.h, "P: playlist_menu_uses_mini_strip_rects: list not shortened (mini_on %d, h %d)", ui.mini_on, ui.lv.rect.h);
+    static const JfEventType want[3] = { JF_EV_ACTIVATE, JF_EV_PLAYLIST_DELETE, JF_EV_DISMISS };
+    for (int k = 0; k < 3; k++) {
+        r = ui.L.mini_btn[k];
+        n = tap_at(&ui, r.x + r.w / 2, r.y + r.h / 2, 2000u + 1000u * (uint32_t)k, ev);
+        CHECK(has_event(ev, n, want[k]), "P: playlist_menu_emits_open_delete_dismiss: mini_btn[%d] sent no event %d (%d events)", k, (int)want[k], n);
+        for (int j = 0; j < n; j++) if (ev[j].type == want[k] && want[k] != JF_EV_DISMISS)
+            CHECK(ev[j].i == 1, "P: playlist_menu_emits_open_delete_dismiss: button %d sent row %d, want action_row 1", k, ev[j].i);
+    }
+    /* the pad: A on OPEN acts, Right then A is DELETE, Left from OPEN wraps to CANCEL */
+    n = feed_btn(&ui, BTN_ID_ACTION, 6000, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_ACTIVATE) && ev[0].i == 1, "P: playlist_menu_emits_open_delete_dismiss: Enter on the first button is not OPEN");
+    feed_btn(&ui, BTN_ID_RIGHT, 6100, ev, MINI_MAX);
+    n = feed_btn(&ui, BTN_ID_ACTION, 6200, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_PLAYLIST_DELETE), "P: playlist_menu_emits_open_delete_dismiss: Right, Enter is not DELETE (%d events)", n);
+    feed_btn(&ui, BTN_ID_RIGHT, 6300, ev, MINI_MAX);
+    n = feed_btn(&ui, BTN_ID_ACTION, 6400, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_DISMISS), "P: playlist_menu_emits_open_delete_dismiss: third button is not CANCEL (%d events)", n);
+    n = feed_btn(&ui, BTN_ID_DOWN, 6500, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_DISMISS), "P: playlist_menu_emits_open_delete_dismiss: Down did not dismiss");
+    /* the menu goes: the list gets its rectangle back, there is no mini player to return */
+    app.action_bar = false;
+    feed(&ui, 0, 0, false, false, false, 7000, ev, MINI_MAX);
+    CHECK(!ui.mini_on && ui.lv.rect.h == ui.L.list.h, "P: playlist_menu_restores_list_rect_after_cancel: list is %d high, want %d (mini_on %d)", ui.lv.rect.h, ui.L.list.h, ui.mini_on);
+    jf_ui_free(&ui);
+
+    /* without delete right: two buttons, OPEN and CANCEL; the queue's mini player returns afterwards */
+    pm_setup(&app, 1, false, JF_ITEM_PLAYLIST);
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    static const JfEventType want2[2] = { JF_EV_ACTIVATE, JF_EV_DISMISS };
+    for (int k = 0; k < 2; k++) {
+        r = ui.L.mini_btn[k + 1];
+        n = tap_at(&ui, r.x + r.w / 2, r.y + r.h / 2, 2000u + 1000u * (uint32_t)k, ev);
+        CHECK(has_event(ev, n, want2[k]) && !has_event(ev, n, JF_EV_PLAYLIST_DELETE), "P: playlist_menu_two_buttons_when_no_delete: button %d sent no %d (%d events)", k, (int)want2[k], n);
+    }
+    /* the mini player's own buttons are not hit-tested while the menu is up (PAUSE sits under the vacant first slot) */
+    r = ui.L.mini_btn[0];
+    n = tap_at(&ui, r.x + r.w / 2, r.y + r.h / 2, 5000, ev);
+    CHECK(!has_event(ev, n, JF_EV_PAUSE) && !has_event(ev, n, JF_EV_VOL_DOWN) && !has_event(ev, n, JF_EV_VOL_UP),
+          "P: playlist_menu_hides_mini_buttons: a mini player button answered under the menu (%d events)", n);
+    app.action_bar = false;
+    feed(&ui, 0, 0, false, false, false, 7000, ev, MINI_MAX);
+    CHECK(ui.mini_on && ui.lv.rect.h == ui.L.list_mini.h, "P: playlist_menu_restores_list_rect_after_cancel: mini player did not return (mini_on %d)", ui.mini_on);
+    r = ui.L.mini_btn[0];
+    n = tap_at(&ui, r.x + r.w / 2, r.y + r.h / 2, 9000, ev);
+    CHECK(has_event(ev, n, JF_EV_PAUSE), "P: playlist_menu_hides_mini_buttons: PAUSE dead after the menu closed (%d events)", n);
+    jf_ui_free(&ui);
+
+    /* a track row keeps the five-button bar in the button row, and the strip stays out */
+    pm_setup(&app, 0, true, JF_ITEM_TRACK);
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    CHECK(!ui.mini_on, "P: track_bar_unchanged_for_track_rows: the strip came up for a track row");
+    r = ui.L.abar[4];
+    n = tap_at(&ui, r.x + r.w / 2, r.y + r.h / 2, 2000, ev);
+    CHECK(has_event(ev, n, JF_EV_INSTANT_MIX) && ev[0].i == 1, "P: track_bar_unchanged_for_track_rows: abar[4] is not INSTANT MIX on the row (%d events)", n);
+    for (int k = 0; k < 4; k++) feed_btn(&ui, BTN_ID_RIGHT, 3000u + 100u * (uint32_t)k, ev, MINI_MAX);
+    n = feed_btn(&ui, BTN_ID_ACTION, 4000, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_INSTANT_MIX), "P: track_bar_unchanged_for_track_rows: four Rights then Enter is not INSTANT MIX (%d events)", n);
+    jf_ui_free(&ui);
+}
+
+/* Q  the queue's REMOVE label keeps the margin the other labels have: its ink (6 px a glyph times the scale) is inside the
+ *    button less 12 px */
+static void remove_label_fits(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    JfApp app;
+    JfUi ui;
+    memset(&app, 0, sizeof app);
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    for (int i = 4; i < JF_UI_QROW; i++) {
+        int ink = 6 * (int)strlen(ui.qrow[i].text) * ui.qrow[i].text_scale;
+        CHECK(ink <= ui.L.qrow[i].w - 12, "Q: remove_label_fits: queue button %d \"%s\" is %d px of ink in a %d px button", i, ui.qrow[i].text, ink, ui.L.qrow[i].w);
+    }
+    CHECK(strcmp(ui.qrow[7].text, "REMOVE") == 0, "Q: remove_label_fits: the label was renamed");
+    jf_ui_free(&ui);
+}
+
 int main(void)
 {
     run(0, 0, 0, 0);
@@ -660,6 +779,8 @@ int main(void)
     qrow_shape();
     queue_touch();
     queue_widths();
+    playlist_menu();
+    remove_label_fits();
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");
     return 0;

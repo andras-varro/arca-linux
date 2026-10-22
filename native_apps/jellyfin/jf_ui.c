@@ -261,10 +261,13 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
     static const char *tn[JF_UI_NP] = { "", "", "", "", "QUEUE", "MIX", "I-MIX", "EQ", "VOL+", "VOL-" };
     static const char *tmini[JF_UI_MINI] = { "PAUSE", "VOL -", "VOL +" };
     for (int i = 0; i < JF_UI_MINI; i++) style(&ui->mini_b[i], ui->L.mini_btn[i], tmini[i], 2);
+    for (int i = 0; i < JF_UI_MINI; i++) style(&ui->pmenu[i], ui->L.mini_btn[i], "", 2);
     for (int i = 0; i < JF_UI_ABAR; i++) style(&ui->abar[i], ui->L.abar[i], ta[i], 2);
     for (int i = 0; i < JF_UI_NP; i++) style(&ui->np[i], ui->L.np[i], tn[i], 2);
     static const char *tq[JF_UI_QROW] = { "", "", "", "", "SAVE", "CLR", "RND", "REMOVE", "EQ", "VOL+", "VOL-" };
-    for (int i = 0; i < JF_UI_QROW; i++) style(&ui->qrow[i], ui->L.qrow[i], tq[i], 2);
+    /* a label whose ink at scale 2 would leave no margin in its button (REMOVE in the 65 px buttons) drops to scale 1 */
+    for (int i = 0; i < JF_UI_QROW; i++)
+        style(&ui->qrow[i], ui->L.qrow[i], tq[i], 6 * (int)strlen(tq[i]) * 2 <= ui->L.qrow[i].w - 12 ? 2 : 1);
     style(&ui->mixb[0], ui->L.mixb[0], "START", 2);
     style(&ui->mixb[1], ui->L.mixb[1], "CANCEL", 2);
     for (int i = 0; i < JF_UI_FIELDS; i++) style(&ui->field[i], ui->L.field[i], "", 2);
@@ -365,11 +368,35 @@ static void do_save(JfUi *ui, Pointer *ptr, JfEvent *out, int *n, int max)
 
 static bool bp(const InputState *in, int id) { return in && in->buttons[id].pressed; }
 
-/* The mini player rides on the browse screens while a queue exists. */
+/* The playlist action menu: the core raised the action bar on a playlist row (the track bar is the five-button one). */
+static bool pmenu_up(const JfApp *app)
+{
+    return app->action_bar && app->list && app->action_row >= 0 && app->action_row < app->list->n &&
+           app->list->items[app->action_row].type == JF_ITEM_PLAYLIST;
+}
+
+/* OPEN, DELETE and CANCEL; DELETE is absent (not greyed) when the policy gives no right, so two buttons share the strip */
+static int pmenu_n(const JfApp *app) { return jf_can_delete(app) ? 3 : 2; }
+
+/* Button j of the shown ones sits in the strip slot that keeps CANCEL at the right edge. */
+static int pmenu_slot(const JfApp *app, int j) { return JF_UI_MINI - pmenu_n(app) + j; }
+
+/* 0 OPEN, 1 DELETE, 2 CANCEL */
+static int pmenu_kind(const JfApp *app, int j) { return pmenu_n(app) == 3 ? j : (j == 0 ? 0 : 2); }
+
+/* The strip is up for the mini player (a queue exists) and for the playlist menu, which takes its place. */
 static bool mini_wanted(const JfApp *app)
 {
-    return app->queue_n > 0 && is_list_screen(app->screen);
+    return (app->queue_n > 0 || pmenu_up(app)) && is_list_screen(app->screen);
 }
+
+/* The mini player itself: its buttons are neither drawn nor hit-tested while the menu is on the strip. */
+static bool mini_player(const JfApp *app)
+{
+    return mini_wanted(app) && !pmenu_up(app);
+}
+
+static int abar_count(const JfApp *app) { return pmenu_up(app) ? pmenu_n(app) : JF_UI_ABAR; }
 
 static const char *mini_play_label(const JfApp *app)
 {
@@ -524,6 +551,14 @@ static void abar_act(int i, int row, JfEvent *out, int *n, int max)
     static const JfEventType t[JF_UI_ABAR] = { JF_EV_ACTIVATE, JF_EV_PLAY_NEXT, JF_EV_ADD_QUEUE, JF_EV_MIX, JF_EV_INSTANT_MIX };
     int k = emit(out, n, max, t[i]);
     if (k >= 0) out[k].i = row;
+}
+
+/* The playlist menu's button j: OPEN enters the playlist, DELETE asks first, CANCEL drops the menu; all on list row `row`. */
+static void pmenu_act(const JfApp *app, int j, int row, JfEvent *out, int *n, int max)
+{
+    static const JfEventType t[3] = { JF_EV_ACTIVATE, JF_EV_PLAYLIST_DELETE, JF_EV_DISMISS };
+    int k = emit(out, n, max, t[pmenu_kind(app, j)]);
+    if (k >= 0 && pmenu_kind(app, j) != 2) out[k].i = row;
 }
 
 /* The equaliser panel: opened from NOW PLAYING (the EQ button, Shift / pad B), it owns the whole screen and every input
@@ -759,6 +794,12 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
                 modal_dialog_init(&ui->cdlg, "SIGN OUT?", "THE QUEUE IS CLEARED", 2);
                 modal_dialog_set_button(&ui->cdlg, 0, "SIGN OUT", BTN_BG, COLOR_WHITE);
                 modal_dialog_set_button(&ui->cdlg, 1, "CANCEL", RGB(90, 40, 40), COLOR_WHITE);
+            } else if (app->confirm == JF_CONFIRM_DELETE_PLAYLIST) {
+                lv_fit(nm, sizeof nm, app->confirm_seed.name, 8 * 6 * 2, 2);
+                snprintf(msg, sizeof msg, "DELETE PLAYLIST %s?", nm);
+                modal_dialog_init(&ui->cdlg, "DELETE PLAYLIST", msg, 2);
+                modal_dialog_set_button(&ui->cdlg, 0, "DELETE", BTN_BG, COLOR_WHITE);
+                modal_dialog_set_button(&ui->cdlg, 1, "CANCEL", RGB(90, 40, 40), COLOR_WHITE);
             } else {
             lv_fit(nm, sizeof nm, app->confirm_seed.name, 8 * 6 * 2, 2);
             snprintf(msg, sizeof msg, "REPLACE QUEUE WITH INSTANT MIX OF %s?", nm);
@@ -987,12 +1028,18 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     if (!app->action_bar && ui->zone == JF_ZONE_ABAR) { ui->zone = JF_ZONE_LIST; ui->dirty = true; }
     ui->abar_up = app->action_bar;
     if (ui->zone == JF_ZONE_ABAR) {
-        if (bp(in, BTN_ID_LEFT))  ui->focus = (ui->focus + JF_UI_ABAR - 1) % JF_UI_ABAR;
-        if (bp(in, BTN_ID_RIGHT)) ui->focus = (ui->focus + 1) % JF_UI_ABAR;
+        int ac = abar_count(app);
+        if (ui->focus >= ac) ui->focus = 0;   /* the policy can arrive while the menu is up */
+        if (bp(in, BTN_ID_LEFT))  ui->focus = (ui->focus + ac - 1) % ac;
+        if (bp(in, BTN_ID_RIGHT)) ui->focus = (ui->focus + 1) % ac;
         if (bp(in, BTN_ID_UP) || bp(in, BTN_ID_DOWN)) { emit(out, &n, max, JF_EV_DISMISS); ui->zone = JF_ZONE_LIST; }
+        else if (act && pmenu_up(app)) pmenu_act(app, ui->focus, app->action_row, out, &n, max);
         else if (act) abar_act(ui->focus, app->action_row, out, &n, max);
     }
-    if (app->action_bar) {
+    if (pmenu_up(app)) {
+        for (int j = 0; j < pmenu_n(app); j++)
+            if (button_check_tap(&ui->pmenu[pmenu_slot(app, j)], ts, now)) pmenu_act(app, j, app->action_row, out, &n, max);
+    } else if (app->action_bar) {
         for (int i = 0; i < JF_UI_ABAR; i++)
             if (button_check_tap(&ui->abar[i], ts, now)) abar_act(i, app->action_row, out, &n, max);
     }
@@ -1074,12 +1121,12 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         Button *qb = ui->qrow;
         for (int i = 0; i < Q_BTNS; i++)
             if (button_check_tap(&qb[i], ts, now)) queue_row_act(ui, ptr, i, now, out, &n, max);
-    } else if (has_row && !app->action_bar) {
+    } else if (has_row && (!app->action_bar || pmenu_up(app))) {
         Button *rb = ui->row3;
         for (int i = 0; i < row_n(app); i++)
             if (row3_on(app, i) && button_check_tap(&rb[i], ts, now)) row3_act(ui, ptr, i, out, &n, max);
     }
-    if (mini_wanted(app)) {
+    if (mini_player(app)) {
         static const JfEventType mt[JF_UI_MINI] = { JF_EV_PAUSE, JF_EV_VOL_DOWN, JF_EV_VOL_UP };
         for (int i = 0; i < JF_UI_MINI; i++)
             if (button_check_tap(&ui->mini_b[i], ts, now)) emit(out, &n, max, mt[i]);
@@ -1146,7 +1193,7 @@ static void draw_signin(JfUi *ui)
 
 static void draw_row3(JfUi *ui)
 {
-    if (ui->app->action_bar) {   /* the bar takes the button row's place */
+    if (ui->app->action_bar && !pmenu_up(ui->app)) {   /* the track bar takes the button row's place; the playlist menu is on the strip */
         for (int i = 0; i < JF_UI_ABAR; i++) {
             button_draw(ui->fb, &ui->abar[i]);
             if (ui->show_ring && ui->zone == JF_ZONE_ABAR && ui->focus == i) ring(ui, ui->L.abar[i]);
@@ -1249,6 +1296,34 @@ static void draw_mini(JfUi *ui)
     for (int i = 0; i < JF_UI_MINI; i++) button_draw(fb, &ui->mini_b[i]);
 }
 
+/* The playlist menu on the strip: "<NAME>  <N> TRACKS" (the name only when the server gave no count; the name is what is cut
+ * to fit, never the count) and its buttons, the focused one ringed. */
+static void draw_pmenu(JfUi *ui)
+{
+    const JfApp *app = ui->app;
+    const JfItem *it = &app->list->items[app->action_row];
+    UiRect m = ui->L.mini_title;
+    fb_fill_rect(ui->fb, m.x, m.y, m.w, m.h, PANEL);
+    char sfx[24] = "", nm[96], t[128];
+    if (it->count > 0) snprintf(sfx, sizeof sfx, "  %d TRACKS", it->count);
+    lv_fit(nm, sizeof nm, it->name, m.w - 12 - text_measure_width(sfx, 2), 2);
+    snprintf(t, sizeof t, "%s%s", nm, sfx);
+    fb_draw_text(ui->fb, m.x + 6, m.y + (m.h - 14) / 2, t, COLOR_WHITE, 2);
+    static const char *label[3] = { "OPEN", "DELETE", "CANCEL" };
+    for (int j = 0; j < pmenu_n(app); j++) {
+        Button *b = &ui->pmenu[pmenu_slot(app, j)];
+        snprintf(b->text, sizeof b->text, "%s", label[pmenu_kind(app, j)]);
+        button_draw(ui->fb, b);
+        if (ui->show_ring && ui->zone == JF_ZONE_ABAR && ui->focus == j) ring(ui, ui->L.mini_btn[pmenu_slot(app, j)]);
+    }
+}
+
+static void draw_strip(JfUi *ui)
+{
+    if (pmenu_up(ui->app)) draw_pmenu(ui);
+    else draw_mini(ui);
+}
+
 void jf_ui_draw(JfUi *ui)
 {
     const JfApp *app = ui->app;
@@ -1291,7 +1366,7 @@ void jf_ui_draw(JfUi *ui)
         draw_nowplaying(ui);
         break;
     case JF_SCR_ARTISTS:
-        if (mini_wanted(app)) draw_mini(ui);
+        if (mini_wanted(app)) draw_strip(ui);
         ui->lv.active = ui->zone == JF_ZONE_LIST;
         lv_sync(&ui->lv);
         lv_draw(fb, &ui->lv, app->busy ? "" : "NOTHING HERE");
@@ -1329,7 +1404,7 @@ void jf_ui_draw(JfUi *ui)
         }
         break;
     default:
-        if (mini_wanted(app)) draw_mini(ui);
+        if (mini_wanted(app)) draw_strip(ui);
         ui->lv.active = ui->zone == JF_ZONE_LIST;
         lv_sync(&ui->lv);
         lv_draw(fb, &ui->lv, app->busy ? "" : "NOTHING HERE");

@@ -80,6 +80,7 @@ typedef struct {
     TopBar bar;
     ListView lv;
     Button row3[JF_UI_ROW3], np[JF_UI_NP], abar[JF_UI_ABAR], qrow[JF_UI_QROW], mini_b[JF_UI_MINI];
+    Button pmenu[JF_UI_MINI];            /* the playlist action menu: OPEN, DELETE, CANCEL on the mini player's button rects */
     ModalDialog cdlg;                    /* the INSTANT MIX confirmation */
     bool cdlg_up;
     bool mini_on;                        /* the strip is up (and the list rect is the shorter one) */
