@@ -376,7 +376,14 @@ int main(int argc, char *argv[])
             pointer_invalidate(&ptr);
             pointer_paint(&ptr, &fb);
         }
-        bool ptr_moved = !redraw && pointer_paint(&ptr, &fb);
+        UiRect info_r;
+        bool info_up = !redraw && jf_ui_take_info(&ui, &info_r);
+        if (info_up) {   /* the bar's text alone: present its rectangle, then put the cursor back over it */
+            fb_swap_rect(&fb, info_r.x, info_r.y, info_r.w, info_r.h);
+            pointer_invalidate(&ptr);
+            pointer_paint(&ptr, &fb);
+        }
+        bool ptr_moved = !redraw && !info_up && pointer_paint(&ptr, &fb);
         fb_overtemp_poll(&fb);
         bool active = redraw || ptr_moved || app.busy || jf_art_busy() || lv_needs_frames(&ui.lv) || (audio_ok && audio_pump_active(&audio));
         usleep(active ? FRAME_DELAY_ACTIVE_US : FRAME_DELAY_IDLE_US);

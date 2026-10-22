@@ -1359,6 +1359,42 @@ static void pg_seek(void)
     jf_ui_free(&ui);
 }
 
+/* R  the bar's CPU / clock text changing on an idle screen asks for a rectangle repaint, never a full frame; a real
+ *    state change still asks for the frame, and a cover over the bar (dialog) makes the text change a full frame too */
+static void info_only(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_ALBUMS;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);   /* settle: begin_screen, first sample */
+    jf_ui_take_dirty(&ui);
+    ui.info_dirty = false;
+    button_take_dirty();   /* drain the global look flag earlier cases left set */
+
+    strcpy(ui.bar.right_buf, "CPU 0%  00:00");   /* the next sample reads different text */
+    ui.bar.info_next_ms = 0;
+    feed(&ui, 0, 0, false, false, false, 5000, ev, MINI_MAX);
+    CHECK(ui.info_dirty, "R: a changed bar text did not set the info-only flag");
+    CHECK(!ui.dirty && !jf_ui_take_dirty(&ui), "R: a changed bar text on an idle screen asked for a full frame");
+    jf_ui_take_dirty(&ui);
+
+    app.banner_seq++;   /* negative control: a real state change */
+    feed(&ui, 0, 0, false, false, false, 5100, ev, MINI_MAX);
+    CHECK(jf_ui_take_dirty(&ui), "R: a banner change did not ask for a full frame");
+
+    ui.dlg_up = true;   /* something over the bar */
+    strcpy(ui.bar.right_buf, "CPU 0%  00:00");
+    ui.bar.info_next_ms = 0;
+    feed(&ui, 0, 0, false, false, false, 9000, ev, MINI_MAX);
+    CHECK(jf_ui_take_dirty(&ui) && !ui.info_dirty, "R: a text change under a dialog did not ask for a full frame");
+    jf_ui_free(&ui);
+}
+
 int main(void)
 {
     add_to_playlist();
@@ -1388,6 +1424,7 @@ int main(void)
     zone_signin();
     pad_reach();
     pg_seek();
+    info_only();
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");
     return 0;

@@ -125,6 +125,7 @@ typedef struct {
     char rowtxt[32][48];                 /* detail strings of the rows being drawn */
     int  rowtxt_i;
     bool dirty;
+    bool info_dirty;                     /* only the bar's CPU / clock text changed: a rect repaint, not a frame (jf_ui_take_info) */
     unsigned seen_banner;
     unsigned seen_restore;               /* the core's restore_seq as of the last frame */
     bool restore_pend;                   /* a BACK came: put the list view back once the rows are loaded */
@@ -159,5 +160,9 @@ bool jf_ui_view(const JfUi *ui, int *top, int *cursor);
 void jf_ui_mark_dirty(JfUi *ui);
 /** True once when something wants a repaint (state change, button, bar tick). */
 bool jf_ui_take_dirty(JfUi *ui);
+/** True once when only the bar's CPU / clock text changed and was repainted into the drawing buffer: *r is the rectangle for
+ *  fb_swap_rect().  Call after jf_ui_take_dirty() returned false (a full frame carries the text).  False with the text moving
+ *  another section sets dirty, so the next frame draws it all. */
+bool jf_ui_take_info(JfUi *ui, UiRect *r);
 
 #endif /* ARCA_JF_UI_H */

@@ -319,7 +319,17 @@ bool jf_ui_take_dirty(JfUi *ui)
 {
     bool d = ui->dirty || button_take_dirty();
     ui->dirty = false;
+    if (d) ui->info_dirty = false;   /* the full frame carries the new text */
     return d;
+}
+
+bool jf_ui_take_info(JfUi *ui, UiRect *r)
+{
+    if (!ui->info_dirty) return false;
+    ui->info_dirty = false;
+    if (top_bar_info_redraw(ui->fb, &ui->bar, r)) return true;
+    ui->dirty = true;                /* the text moved another section: the next frame draws it all */
+    return false;
 }
 
 /* ── Input ─────────────────────────────────────────────────────────────── */
@@ -926,7 +936,12 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         ts = &gated;
     }
     restore_view(ui);
-    if (top_bar_info_due(&ui->bar, now) && top_bar_info_sample(&ui->bar)) ui->dirty = true;   /* the bar's CPU and clock, once a second */    /* a queue can start or empty on an open screen: the list makes room for the strip, or takes it back */
+    if (top_bar_info_due(&ui->bar, now) && top_bar_info_sample(&ui->bar)) {   /* the bar's CPU and clock, once a second */
+        /* Only the bar's text changed: repaint just it, unless something sits over the bar. */
+        if (ui->eq_up || app->overlay || app->confirm != JF_CONFIRM_NONE || ui->dlg_up || ui->cdlg_up || ui->pick.up) ui->dirty = true;
+        else ui->info_dirty = true;
+    }
+    /* a queue can start or empty on an open screen: the list makes room for the strip, or takes it back */
     if (is_list_screen(app->screen) && mini_wanted(app) != ui->mini_on) {
         ui->mini_on = mini_wanted(app);
         ui->lv.rect = list_rect_for(ui, app->screen);

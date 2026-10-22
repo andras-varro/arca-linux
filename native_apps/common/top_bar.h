@@ -138,6 +138,13 @@ void top_bar_receipt(const TopBar *t, const char *tag);
  * the clock, and says whether the text changed — redraw only on true. */
 bool top_bar_info_due(TopBar *t, uint32_t now_ms);
 bool top_bar_info_sample(TopBar *t);
+/* After top_bar_info_sample() said the text changed, on a bar that is already drawn:
+ * repaint only the old and new text span into the drawing buffer and return true with
+ * *r the rectangle to present (fb_swap_rect), so the back buffer stays the whole frame
+ * and the next fb_swap() shows no old text.  False, nothing drawn, when the change
+ * moves another section (title, message, buttons) or the bar was never drawn: draw the
+ * whole frame instead.  The caller must know nothing covers the bar (a dialog, a popup). */
+bool top_bar_info_redraw(Framebuffer *fb, TopBar *t, UiRect *r);
 /* Make the next top_bar_info_due() true (after a child process returned). */
 void top_bar_info_invalidate(TopBar *t);
 

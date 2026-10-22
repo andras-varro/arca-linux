@@ -264,6 +264,39 @@ bool top_bar_info_sample(TopBar *t) {
     return changed;
 }
 
+static bool span_same(TbSpan a, TbSpan b) { return a.x == b.x && a.w == b.w; }
+
+bool top_bar_info_redraw(Framebuffer *fb, TopBar *t, UiRect *r) {
+    const TopBarLayout old = t->L;
+    if (old.h <= 0) return false;                   /* never drawn: nothing to patch */
+    top_bar_layout(t);
+    const TopBarLayout *L = &t->L;
+    if (old.left != L->left || old.right != L->right || old.top != L->top || old.bottom != L->bottom ||
+        !span_same(old.back, L->back) || !span_same(old.exit, L->exit) || !span_same(old.msg, L->msg) ||
+        old.msg_chars != L->msg_chars || old.title_scale != L->title_scale || old.title_x != L->title_x ||
+        old.title_w != L->title_w || old.title_chars != L->title_chars)
+        return false;                               /* the new width moved another section */
+
+    /* old and new text span, so a shorter text leaves none of the longer one behind */
+    int x0 = L->info.w > 0 ? L->info.x : old.info.x;
+    int x1 = L->info.w > 0 ? L->info.x + L->info.w : old.info.x + old.info.w;
+    if (old.info.w > 0) {
+        if (old.info.x < x0) x0 = old.info.x;
+        if (old.info.x + old.info.w > x1) x1 = old.info.x + old.info.w;
+    }
+    if (x1 > L->right) x1 = L->right;
+    if (x1 <= x0) return false;
+    if (L->title_scale && x0 < L->title_x + L->title_w + t->title_extra) return false;
+    if (L->msg.w > 0 && x0 < L->msg.x + L->msg.w) return false;
+
+    fb_fill_rect(fb, x0, L->top, x1 - x0, L->h, TB_BG);
+    if (L->info.w > 0)
+        fb_draw_text(fb, L->info.x, L->top + L->h / 2 - text_measure_height(TB_TEXT_SCALE) / 2,
+                     t->right, TB_INFO_FG, TB_TEXT_SCALE);
+    r->x = x0; r->y = L->top; r->w = x1 - x0; r->h = L->h;
+    return true;
+}
+
 void top_bar_draw_focus(Framebuffer *fb, const TopBarLayout *L, TbHit which) {
     if (which == TB_NONE) return;
     UiRect r = top_bar_ring_rect(L, which);
