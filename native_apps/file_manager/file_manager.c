@@ -1194,7 +1194,12 @@ int main(int argc, char *argv[]) {
 
         if (status[0] && now - status_ms > 6000) { status[0] = '\0'; needs_redraw = true; }
         if (status_dirty) { needs_redraw = true; status_dirty = false; }
-        if (top_bar_info_due(&bar, now) && top_bar_info_sample(&bar)) needs_redraw = true;
+        /* The bar's CPU / clock text alone: patched into the drawing buffer and its rectangle presented (top_bar_info_present);
+         * a pending frame, a dialog over the bar, or text that moves another section draws the whole frame. */
+        if (top_bar_info_due(&bar, now) && top_bar_info_sample(&bar)) {
+            if (!needs_redraw && !dlg.active && top_bar_info_present(&fb, &bar, NULL)) pointer_invalidate(&ptr);
+            else needs_redraw = true;
+        }
 
         bool eject_off = !(P[act].mode == PM_DIR && P[act].root_usb);
         btn[B_EJECT].disabled = eject_off;

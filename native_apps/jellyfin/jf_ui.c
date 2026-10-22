@@ -425,29 +425,31 @@ static void settings_zones(JfUi *ui, UiZone z[UZ_ZONES])
     z[STACK_LIST].lv = &ui->lv;
 }
 
-/* Now playing: the bar over one spatial zone of the ten buttons (one row, two in portrait), all always present. */
-enum { NPZ_BAR = 0, NPZ_ROW, NPZ_N };
+/* Now playing: three panes - the bar, the seek bar (one UZ_SLIDER button: Left / Right seek) and the ten buttons (one row, two in portrait). */
+enum { NPZ_BAR = 0, NPZ_SEEK, NPZ_ROW, NPZ_N };
 
 static void np_zones(JfUi *ui, UiZone z[UZ_ZONES])
 {
     memset(z, 0, UZ_ZONES * sizeof z[0]);
     if (ui->bar.has_back) zone_add(&z[NPZ_BAR], top_bar_ring_rect(&ui->bar.L, TB_BACK), 0);
     if (ui->bar.has_exit) zone_add(&z[NPZ_BAR], top_bar_ring_rect(&ui->bar.L, TB_EXIT), 1);
+    zone_add(&z[NPZ_SEEK], ui->L.seek, 0);
+    z[NPZ_SEEK].flags = UZ_SLIDER;
     for (int i = 0; i < JF_UI_NP; i++) zone_add(&z[NPZ_ROW], ui->L.np[i], i);
 }
 
 /* SIGN IN is absent (not greyed) until the server and the user are filled. */
 static bool signin_can(const JfUi *ui) { return ui->fields[0][0] && ui->fields[1][0]; }
 
-/* Sign-in: the bar (EXIT only) over one spatial zone: the three fields (ids 0..2), SIGN IN (3, when present), EXIT (4). */
-enum { SIZ_BAR = 0, SIZ_BTN, SIZ_N };
+/* Sign-in: three panes - the bar (EXIT only), the three fields (ids 0..2) and the buttons: SIGN IN (3, when present), EXIT (4). */
+enum { SIZ_BAR = 0, SIZ_FIELDS, SIZ_BTN, SIZ_N };
 
 static void signin_zones(JfUi *ui, UiZone z[UZ_ZONES])
 {
     memset(z, 0, UZ_ZONES * sizeof z[0]);
     if (ui->bar.has_back) zone_add(&z[SIZ_BAR], top_bar_ring_rect(&ui->bar.L, TB_BACK), 0);
     if (ui->bar.has_exit) zone_add(&z[SIZ_BAR], top_bar_ring_rect(&ui->bar.L, TB_EXIT), 1);
-    for (int i = 0; i < JF_UI_FIELDS; i++) zone_add(&z[SIZ_BTN], ui->L.field[i], i);
+    for (int i = 0; i < JF_UI_FIELDS; i++) zone_add(&z[SIZ_FIELDS], ui->L.field[i], i);
     if (signin_can(ui)) zone_add(&z[SIZ_BTN], ui->L.signin, 3);
     zone_add(&z[SIZ_BTN], ui->L.signexit, 4);
 }
@@ -554,8 +556,9 @@ static void begin_screen(JfUi *ui)
     ui->abar_tz = -1;
     ui->lv.ring_hidden = ui->lv.tap2_any = false;   /* the settings list keeps today's look; the zone screens set them every frame */
     bool shown = ui->zf.shown;   /* the ring stays as the last screen left it: a touch hid it, a key shows it */
-    uz_begin(&ui->zf, STACK_LIST);
-    ui->zf.shown = shown;   /* now playing and sign-in start on their first button: NPZ_ROW and SIZ_BTN are the same index as STACK_LIST */
+    /* every screen is a pane cycle (Tab / LB-RB); now playing starts on its buttons, sign-in on its fields, the rest on the list */
+    uz_begin_cycle(&ui->zf, app->screen == JF_SCR_NOWPLAYING ? NPZ_ROW : STACK_LIST);
+    ui->zf.shown = shown;
     ui->dirty = true;
     ui->bar.has_back = app->screen != JF_SCR_ARTISTS && app->screen != JF_SCR_SIGNIN;
     ui->bar.has_exit = true;
@@ -592,7 +595,7 @@ static void settings_sync(JfUi *ui)
 }
 
 /* The button row: SEARCH, NOW PLAYING and, at the root, SETTINGS; below the root SEARCH, NOW PLAYING and (on track lists)
- * PLAY ALL.  The root's categories are stepped with Left / Right and the header picker. */
+ * PLAY ALL.  The root's categories are picked from the header drop-down. */
 static bool at_root(const JfApp *app) { return app->screen == JF_SCR_ARTISTS; }
 
 /* The artist folder (albums, then tracks of other albums): the core queues its whole discography for PLAY ALL; a genre's albums have no such handler. */
@@ -704,7 +707,7 @@ static void pmenu_act(const JfApp *app, int j, int row, JfEvent *out, int *n, in
     if (k >= 0 && pmenu_kind(app, j) != 2) out[k].i = row;
 }
 
-/* The equaliser panel: opened from NOW PLAYING (the EQ button, Shift / pad B), it owns the whole screen and every input
+/* The equaliser panel: opened from NOW PLAYING (the EQ button), it owns the whole screen and every input
  * until DONE or CANCEL.  The loop applies what jf_ui_eq_take() hands back. */
 static void eq_open(JfUi *ui, uint32_t now)
 {
@@ -856,13 +859,11 @@ static void browse_zones(JfUi *ui, UiZone z[UZ_ZONES])
     z[BZ_LIST].lv = &ui->lv;
     if (pmenu_up(app)) {
         for (int j = 0; j < pmenu_n(app); j++) zone_add(&z[BZ_MINI], ui->L.mini_btn[pmenu_slot(app, j)], j);
-        z[BZ_MINI].flags = UZ_TRAP;
     } else if (mini_player(app)) {
         for (int i = 0; i < JF_UI_MINI; i++) zone_add(&z[BZ_MINI], ui->L.mini_btn[i], i);
     }
     if (app->action_bar && !pmenu_up(app)) {
         for (int i = 0; i < JF_UI_ABAR; i++) zone_add(&z[BZ_ROW], ui->L.abar[i], i);
-        z[BZ_ROW].flags = UZ_TRAP;
     } else if (app->screen == JF_SCR_QUEUE) {
         if (app->queue_n > 0) for (int i = 0; i < Q_BTNS; i++) zone_add(&z[BZ_ROW], ui->L.qrow[i], i);
     } else {
@@ -1020,12 +1021,11 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     }
 
     bool pad_nav = bp(in, BTN_ID_UP) || bp(in, BTN_ID_DOWN) || bp(in, BTN_ID_LEFT) ||
-                   bp(in, BTN_ID_RIGHT) || bp(in, BTN_ID_JUMP) || bp(in, BTN_ID_ACTION);
+                   bp(in, BTN_ID_RIGHT) || bp(in, BTN_ID_JUMP) || bp(in, BTN_ID_ACTION) ||
+                   bp(in, BTN_ID_NEXT) || bp(in, BTN_ID_PREV);
     if (ts->pressed) ui->zf.shown = false;
     if (pad_nav) ui->zf.shown = true;
     if (ts->pressed || ts->released || pad_nav) ui->dirty = true;
-
-    bool go_back = bp(in, BTN_ID_PAUSE) || bp(in, BTN_ID_BACK);
     if (ts->pressed) {
         TbHit h = top_bar_hit(&ui->bar.L, ts->x, ts->y);
         ui->back_press = h == TB_BACK;
@@ -1051,10 +1051,12 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         }
     }
     if (sc == JF_SCR_ARTISTS && !app->action_bar) {
-        /* the header (title and arrow) opens the category picker on a tap; Shift / the pad's B opens it too */
+        /* the header (title and arrow) opens the category picker on a tap; the pad reaches it as a top bar item (Tab, then Enter) */
         TpExt te = pick_ext();
         ui->pick.sel = (int)app->cat;
-        if (tp_head_input(&ui->pick, head_rect(ui), &te, ts, in) == TP_OPENED) { ui->dirty = true; return n; }
+        InputState nokeys;
+        memset(&nokeys, 0, sizeof nokeys);
+        if (tp_head_input(&ui->pick, head_rect(ui), &te, ts, &nokeys) == TP_OPENED) { ui->dirty = true; return n; }
     }
 
     if (sc == JF_SCR_SIGNIN) {
@@ -1083,34 +1085,22 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     }
 
     if (sc == JF_SCR_NOWPLAYING) {
-        /* The ten buttons in their order (PREV, PLAY/PAUSE, STOP, NEXT, QUEUE, MIX, I-MIX, EQ, VOL +, VOL -) are one ui_zone
-         * button zone under the top bar.  Left / Right are the volume (on the bar they walk it); Up / Down move
-         * and walk the buttons in order, wrapping, in every layout (Up from the first
-         * reaches the bar, Down from the bar returns to the first).  Shift / the pad's B opens the equaliser.  Start / Esc
-         * and Space pause, Select / Backspace go back (the bar has BACK too). */
-        if (bp(in, BTN_ID_BACK)) emit(out, &n, max, JF_EV_BACK);
-        if (bp(in, BTN_ID_PAUSE) || bp(in, BTN_ID_JUMP)) emit(out, &n, max, JF_EV_PAUSE);
-        bool on_bar = ui->zf.zone == NPZ_BAR;      /* there Left / Right walk BACK / EXIT instead */
-        if (!on_bar && bp(in, BTN_ID_LEFT))  emit(out, &n, max, JF_EV_VOL_DOWN);
-        if (!on_bar && bp(in, BTN_ID_RIGHT)) emit(out, &n, max, JF_EV_VOL_UP);
+        /* Three panes (Tab / LB-RB): the top bar, the seek bar (Left / Right seek 10 s from the drawn position) and the ten buttons
+         * (PREV, PLAY/PAUSE, STOP, NEXT, QUEUE, MIX, I-MIX, EQ, VOL +, VOL -).  Enter / Space / A act on the focused item, Esc / B go back. */
         UiZone z[UZ_ZONES];
         np_zones(ui, z);
-        InputState zin = *in;
-        if (!on_bar) zin.buttons[BTN_ID_LEFT].pressed = zin.buttons[BTN_ID_RIGHT].pressed = false;
-        zin.buttons[BTN_ID_JUMP].pressed = false;
-        if (ui->zf.zone == NPZ_ROW && ui->zf.id >= 0 && (bp(in, BTN_ID_DOWN) || (bp(in, BTN_ID_UP) && ui->zf.id > 0))) {
-            int step = bp(in, BTN_ID_DOWN) ? 1 : JF_UI_NP - 1;
-            uz_focus(&ui->zf, z, NPZ_N, NPZ_ROW, (ui->zf.id + step) % JF_UI_NP);
-            zin.buttons[BTN_ID_UP].pressed = zin.buttons[BTN_ID_DOWN].pressed = false;
-            ui->zf.shown = true;
+        UzOut zo;
+        uz_input(&ui->zf, z, NPZ_N, in, ts->pressed, &zo);
+        if (zo.moved) ui->dirty = true;
+        if (zo.back) emit(out, &n, max, JF_EV_BACK);
+        if (zo.left_right) {   /* the same absolute JF_EV_SEEK as the bar: the core clamps the top, a clamp here keeps the bottom at 0 */
+            int target = ui->played_ms + zo.left_right * 10000;
+            int k = emit(out, &n, max, JF_EV_SEEK);
+            if (k >= 0) out[k].i = target < 0 ? 0 : target;
             ui->dirty = true;
         }
-        UzOut zo;
-        uz_input(&ui->zf, z, NPZ_N, &zin, ts->pressed, &zo);
-        if (zo.moved) ui->dirty = true;
-        if (bp(in, BTN_ID_RUN)) eq_open(ui, now);
         if (zo.activate >= 0 && ui->zf.zone == NPZ_BAR) emit(out, &n, max, zo.activate == 0 ? JF_EV_BACK : JF_EV_QUIT);
-        else if (zo.activate >= 0) np_press(ui, zo.activate, now, out, &n, max);
+        else if (zo.activate >= 0 && ui->zf.zone == NPZ_ROW) np_press(ui, zo.activate, now, out, &n, max);
         for (int i = 0; i < JF_UI_NP; i++)
             if (button_check_tap(&ui->np[i], ts, now)) np_press(ui, i, now, out, &n, max);
         /* seek: a finger on the bar shows the target, lifting it sends the seek; a tap is a jump */
@@ -1131,13 +1121,6 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
                 ui->seeking = false;
             } else if (!ts->held && !ts->pressed) ui->seeking = false;
         }
-        /* Page Up / Page Down: 10 s back / forward from the position the seek bar draws (played_ms); the same
-         * absolute JF_EV_SEEK as the bar, so the core clamps the top and a clamp here keeps the bottom at 0 */
-        if (bp(in, BTN_ID_PGUP) || bp(in, BTN_ID_PGDN)) {
-            int target = ui->played_ms + (bp(in, BTN_ID_PGDN) ? 10000 : -10000);
-            int k = emit(out, &n, max, JF_EV_SEEK);
-            if (k >= 0) out[k].i = target < 0 ? 0 : target;
-        }
         return n;
     }
 
@@ -1151,7 +1134,6 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         bool locked = !pl && mix_locked(app);
         bool first_on = pl ? jf_ui_plpick_add_shown(app) : !locked;
         int cnt = pl ? src_count(ui) : app->mix.opt_n;
-        if (go_back) emit(out, &n, max, pl ? JF_EV_PICK_CLOSE : JF_EV_BACK);
         UiZone z[UZ_ZONES];
         stack_zones(ui, z, first_on);
         lv_sync(&ui->lv);
@@ -1159,18 +1141,20 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         UzOut zo;
         uz_input(&ui->zf, z, 3, in, ts->pressed, &zo);
         if (zo.moved) ui->dirty = true;
+        if (zo.back) emit(out, &n, max, pl ? JF_EV_PICK_CLOSE : JF_EV_BACK);
         stack_lv_look(ui);
         LvEvent ev = lv_input(&ui->lv, ts, zo.list_in, now);
         if (ev != LV_EV_NONE) ui->dirty = true;
         bool pick = ev == LV_EV_TAP || ev == LV_EV_ACTIVATE;
-        if (zo.list_in && bp(zo.list_in, BTN_ID_JUMP)) pick = true;
-        if (pl && pick && ui->lv.cursor == 0) do_pick_new(ui, ptr, out, &n, max);
-        else if (pl && pick && ui->lv.cursor > 0 && ui->lv.cursor < cnt) {
+        int prow = ui->lv.cursor;
+        if (zo.activate_row >= 0) { pick = true; prow = zo.activate_row; }
+        if (pl && pick && prow == 0) do_pick_new(ui, ptr, out, &n, max);
+        else if (pl && pick && prow > 0 && prow < cnt) {
             int k = emit(out, &n, max, JF_EV_PICK_SELECT);
-            if (k >= 0) out[k].i = ui->lv.cursor - 1;
-        } else if (!pl && pick && !locked && ui->lv.cursor >= 0 && ui->lv.cursor < cnt) {
+            if (k >= 0) out[k].i = prow - 1;
+        } else if (!pl && pick && !locked && prow >= 0 && prow < cnt) {
             int k = emit(out, &n, max, JF_EV_MIX_TOGGLE);
-            if (k >= 0) out[k].i = ui->lv.cursor;
+            if (k >= 0) out[k].i = prow;
         }
         JfEventType first_ev = pl ? JF_EV_PICK_ADD : JF_EV_MIX_START;
         JfEventType close_ev = pl ? JF_EV_PICK_CLOSE : JF_EV_BACK;
@@ -1187,7 +1171,6 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
          * returns from the library page to the main page first), Up from the top row reaches the bar. */
         settings_sync(ui);
         int cnt = src_count(ui);
-        if (go_back) emit(out, &n, max, JF_EV_BACK);
         const InputState *lin = NULL;
         UiZone z[UZ_ZONES];
         settings_zones(ui, z);
@@ -1196,21 +1179,23 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         UzOut zo;
         uz_input(&ui->zf, z, STACK_ROW, in, ts->pressed, &zo);
         if (zo.moved) ui->dirty = true;
+        if (zo.back) emit(out, &n, max, JF_EV_BACK);
         lin = zo.list_in;
         ui->lv.active = ui->zf.zone == STACK_LIST;
         LvEvent ev = lv_input(&ui->lv, ts, lin, now);
         if (ev != LV_EV_NONE) ui->dirty = true;
         bool pick = ev == LV_EV_TAP || ev == LV_EV_ACTIVATE;
-        if (lin && bp(lin, BTN_ID_JUMP)) pick = true;
-        if (pick && ui->lv.cursor >= 0 && ui->lv.cursor < cnt) {
+        int prow = ui->lv.cursor;
+        if (zo.activate_row >= 0) { pick = true; prow = zo.activate_row; }
+        if (pick && prow >= 0 && prow < cnt) {
             if (app->settings_page == JF_SETPAGE_LIBRARY) {
                 int k = emit(out, &n, max, JF_EV_LIBRARY_SET);
-                if (k >= 0) out[k].i = ui->lv.cursor - 1;
+                if (k >= 0) out[k].i = prow - 1;
             } else {
                 int ids[JF_SET_COUNT];
                 jf_settings_rows(app, ids);
                 int k = emit(out, &n, max, JF_EV_SETTING_ACTIVATE);
-                if (k >= 0) out[k].i = ids[ui->lv.cursor];
+                if (k >= 0) out[k].i = ids[prow];
             }
         } else if (zo.activate >= 0 && ui->zf.zone == STACK_BAR) {
             emit(out, &n, max, zo.activate == 0 ? JF_EV_BACK : JF_EV_QUIT);
@@ -1243,10 +1228,9 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
             if (button_check_tap(&ui->abar[i], ts, now)) abar_act(i, app->action_row, out, &n, max);
     }
     int count = src_count(ui);
-    if (go_back) emit(out, &n, max, JF_EV_BACK);
 
-    /* Shift + Up / Down on the queue moves the cursor row one place (Shift is BTN_ID_RUN, held) instead of walking the cursor:
-     * the zone stack is shown the frame without that direction. */
+    /* Shift + Up / Down on the queue's list pane moves the cursor row one place (Shift is BTN_ID_RUN, held) instead of walking the
+     * cursor: the zone stack is shown the frame without that direction.  The one screen-specific key kept. */
     int qmove = 0;
     InputState kin;
     const InputState *zin = in;
@@ -1262,14 +1246,9 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     uz_input(&ui->zf, z, BZ_N, zin, ts->pressed, &zo);
     if (qmove) { ui->zf.shown = true; queue_move(ui, qmove, out, &n, max); }
     if (zo.moved || qmove) ui->dirty = true;
+    if (zo.back) emit(out, &n, max, JF_EV_BACK);
 
-    if (sc == JF_SCR_ARTISTS) {
-        /* Left / Right are free in the list zone (the list takes only Up / Down); the bar and the rows keep them for moving
-         * along their buttons. */
-        int step = zo.list_in ? bp(in, BTN_ID_RIGHT) - bp(in, BTN_ID_LEFT) : 0;
-        if (step) { int k = emit(out, &n, max, JF_EV_CATEGORY); if (k >= 0) out[k].i = step; }
-        if (app->cat != ui->last_cat) { ui->last_cat = app->cat; lv_reset(&ui->lv); ui->dirty = true; }
-    }
+    if (sc == JF_SCR_ARTISTS && app->cat != ui->last_cat) { ui->last_cat = app->cat; lv_reset(&ui->lv); ui->dirty = true; }
 
     const InputState *lin = qmove ? NULL : zo.list_in;
     stack_lv_look(ui);
@@ -1283,27 +1262,28 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     }
     if (ev != LV_EV_NONE) ui->dirty = true;
     /* A first touch on a row only selects it (a track or playlist row raises its bar; the queue's cursor just moves); a touch on the
-     * selected row acts: the queue plays it, a browse row plays or opens it.  The pad's ACTION / JUMP select as ever. */
-    bool by_key = lin && (bp(lin, BTN_ID_ACTION) || bp(lin, BTN_ID_JUMP));
-    bool key_jump = lin && bp(lin, BTN_ID_JUMP);
+     * selected row acts: the queue plays it, a browse row plays or opens it.  Enter / Space / A (out.activate_row) act on the cursor row:
+     * the queue plays it, a browse row is selected (its bar opens) or, with its bar already up, played / opened. */
     JfEventType pe = JF_EV_NONE;
-    if (queue) { if (ev == LV_EV_ACTIVATE || key_jump) pe = JF_EV_QUEUE_JUMP; }
-    else if (ev == LV_EV_ACTIVATE && (!by_key || (app->action_bar && app->action_row == ui->lv.cursor))) pe = JF_EV_ACTIVATE;
-    else if (ev == LV_EV_TAP || ev == LV_EV_ACTIVATE || key_jump) pe = JF_EV_SELECT;
-    if (pe != JF_EV_NONE && ui->lv.cursor >= 0 && ui->lv.cursor < count) {
+    int arow = ui->lv.cursor;
+    if (queue) { if (ev == LV_EV_ACTIVATE) pe = JF_EV_QUEUE_JUMP; }
+    else if (ev == LV_EV_ACTIVATE) pe = JF_EV_ACTIVATE;
+    else if (ev == LV_EV_TAP) pe = JF_EV_SELECT;
+    if (zo.activate_row >= 0) {
+        arow = zo.activate_row;
+        if (queue) pe = JF_EV_QUEUE_JUMP;
+        else pe = app->action_bar && app->action_row == arow ? JF_EV_ACTIVATE : JF_EV_SELECT;
+    }
+    if (pe != JF_EV_NONE && arow >= 0 && arow < count) {
         int k = emit(out, &n, max, pe);
-        if (k >= 0) out[k].i = ui->lv.cursor;
+        if (k >= 0) out[k].i = arow;
     }
 
     if (!queue && app->list && ui->zf.zone == BZ_LIST && count > 0 && ui->lv.cursor >= count - 6 &&
         count < app->list->total && !app->list->full && !app->list->pending && !app->busy)
         emit(out, &n, max, JF_EV_NEED_MORE);
 
-    if (zo.left >= 0) {
-        emit(out, &n, max, JF_EV_DISMISS);
-        uz_focus(&ui->zf, z, BZ_N, BZ_LIST, -1);
-        ui->dirty = true;
-    } else if (zo.activate >= 0) {
+    if (zo.activate >= 0) {
         int a = zo.activate;
         if (ui->zf.zone == BZ_BAR) {
             if (a == 2) { pick_open(ui); return n; }

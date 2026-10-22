@@ -191,6 +191,20 @@ static int feed_btn(JfUi *ui, int id, uint32_t now, JfEvent *out, int max)
     return jf_ui_input(ui, &ts, &in, &ptr, now, out, max);
 }
 
+/* Shift held with a button pressed: Shift+Tab is NEXT with RUN held (= previous pane) */
+static int feed_shift_btn(JfUi *ui, int id, uint32_t now, JfEvent *out, int max)
+{
+    TouchState ts = { 0, 0, false, false, false };
+    InputState in;
+    Pointer ptr;
+    memset(&in, 0, sizeof in);
+    memset(&ptr, 0, sizeof ptr);
+    in.buttons[BTN_ID_RUN].held = true;
+    in.buttons[id].pressed = true;
+    in.buttons[id].held = true;
+    return jf_ui_input(ui, &ts, &in, &ptr, now, out, max);
+}
+
 /* The root: the header opens the category picker (touch and key), a row picks, outside closes; the bottom row names the
  * neighbouring categories; below the root the row has no category buttons. */
 static void root_picker(void)
@@ -220,8 +234,14 @@ static void root_picker(void)
     CHECK(k == JF_CAT_GENRES && !ui.pick.up, "R: tapping the 4th row sent category %d (want %d), picker up %d", k, JF_CAT_GENRES, ui.pick.up);
 
     /* the key: opens at the current category, Down moves, ENTER picks */
-    feed_btn(&ui, BTN_ID_RUN, 4000, ev, MINI_MAX);
-    CHECK(ui.pick.up && ui.pick.lv.cursor == (int)app.cat, "R: Shift did not open the picker on the current category");
+    /* the key: Shift+Tab from the list reaches the bar, Right walks to the header slot (id 2), Enter opens */
+    feed_shift_btn(&ui, BTN_ID_NEXT, 3900, ev, MINI_MAX);
+    for (int i = 0; i < 4 && !(ui.zf.zone == 0 && ui.zf.id == 2); i++) feed_btn(&ui, BTN_ID_RIGHT, 3910 + (uint32_t)i, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 0 && ui.zf.id == 2, "R: the bar's header slot was not reached (zone %d id %d)", ui.zf.zone, ui.zf.id);
+    feed_btn(&ui, BTN_ID_RUN, 3950, ev, MINI_MAX);
+    CHECK(!ui.pick.up, "R: Shift alone opened the picker");
+    n = feed_btn(&ui, BTN_ID_ACTION, 4000, ev, MINI_MAX);
+    CHECK(ui.pick.up && ui.pick.lv.cursor == (int)app.cat, "R: Enter on the header slot did not open the picker on the current category");
     /* an open picker nobody touches asks for no frame (it used to ask for one every pass: ~56% CPU measured) */
     jf_ui_take_dirty(&ui);
     button_take_dirty();
@@ -239,22 +259,22 @@ static void root_picker(void)
           "R: Down + ENTER picked %d (want PLAYLISTS), %d events", n ? ev[0].i : -1, n);
 
     /* close: Back, and a tap outside, send nothing */
-    feed_btn(&ui, BTN_ID_RUN, 5000, ev, MINI_MAX);
+    feed_btn(&ui, BTN_ID_ACTION, 5000, ev, MINI_MAX);   /* focus still on the header slot */
     n = feed_btn(&ui, BTN_ID_BACK, 5100, ev, MINI_MAX);
     CHECK(!ui.pick.up && n == 0, "R: Back did not close the picker quietly");
-    feed_btn(&ui, BTN_ID_RUN, 6000, ev, MINI_MAX);
+    feed_btn(&ui, BTN_ID_ACTION, 6000, ev, MINI_MAX);
     n = feed(&ui, 5, 300, true, true, false, 6100, ev, MINI_MAX);
     CHECK(!ui.pick.up && n == 0, "R: a tap outside did not close the picker quietly (%d events)", n);
     feed(&ui, 5, 300, false, false, true, 6200, ev, MINI_MAX);   /* its release, so the next tap is a fresh one */
     feed(&ui, 0, 0, false, false, false, 7000, ev, MINI_MAX);
 
-    /* the bottom row: SEARCH, NOW PLAYING (needs a queue), SETTINGS; the categories step with Left / Right (the row had category buttons) */
+    /* the bottom row: SEARCH, NOW PLAYING (needs a queue), SETTINGS; Left / Right no longer step the category (keys only move focus inside a pane) */
     app.cat = JF_CAT_ALBUMS;
     ui.last_cat = app.cat;
     n = feed_btn(&ui, BTN_ID_LEFT, 8000, ev, MINI_MAX);
-    CHECK(n == 1 && ev[0].type == JF_EV_CATEGORY && ev[0].i == -1, "R: Left did not step back (%d events)", n);
+    CHECK(!has_event(ev, n, JF_EV_CATEGORY), "R: Left still steps the category (%d events)", n);
     n = feed_btn(&ui, BTN_ID_RIGHT, 9000, ev, MINI_MAX);
-    CHECK(n == 1 && ev[0].type == JF_EV_CATEGORY && ev[0].i == 1, "R: Right did not step forward (%d events)", n);
+    CHECK(!has_event(ev, n, JF_EV_CATEGORY), "R: Right still steps the category (%d events)", n);
     n = tap_at(&ui, ui.L.row3[1].x + 20, ui.L.row3[1].y + 20, 10000, ev);
     CHECK(!has_event(ev, n, JF_EV_OPEN_NOWPLAYING), "R: NOW PLAYING answered with no queue");
     app.queue_n = 1;
@@ -432,7 +452,7 @@ static void queue_row(void)
     CHECK(first_event(&ui, TL->title_x + TL->title_w / 2, TL->top + TL->h / 2, t) == JF_EV_BACK, "R: a tap on the QUEUE title did not send BACK");
     t += 1000;
     /* the pad: Right walks the eleven and wraps; ACTION on the last is VOL- */
-    feed(&ui, 0, 0, false, false, false, t, ev, MINI_MAX);
+    feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);   /* Tab from the list: the button row at its first button */
     lv_move_to(&ui.lv, 4);
     feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);   /* the last row: Down enters the button row at its first button */
     for (int i = 0; i < JF_UI_QROW - 1; i++) feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
@@ -649,7 +669,9 @@ static void eq_door(void)
 
     feed(&ui, 0, 0, false, false, false, 12000, ev, MINI_MAX);
     n = feed_btn(&ui, BTN_ID_RUN, 13000, ev, MINI_MAX);
-    CHECK(ui.eq_up && n == 0, "Q: Shift did not open the panel (up %d)", ui.eq_up);
+    CHECK(!ui.eq_up && n == 0, "Q: Shift opened the panel (EQ opens only by its button; up %d)", ui.eq_up);
+    n = tap_at(&ui, b.x + b.w / 2, b.y + b.h / 2, 14000, ev);
+    CHECK(ui.eq_up && n == 0, "Q: a second tap on EQ did not open the panel (up %d)", ui.eq_up);
     /* edit: a tap on the DONE button after the guards are quiet */
     UiRect d = ui.eq.L.done;
     n = tap_at(&ui, d.x + d.w / 2, d.y + d.h / 2, 16000, ev);
@@ -715,7 +737,9 @@ static void playlist_menu(void)
     n = feed_btn(&ui, BTN_ID_ACTION, 6400, ev, MINI_MAX);
     CHECK(has_event(ev, n, JF_EV_DISMISS), "P: playlist_menu_emits_open_delete_dismiss: third button is not CANCEL (%d events)", n);
     n = feed_btn(&ui, BTN_ID_DOWN, 6500, ev, MINI_MAX);
-    CHECK(has_event(ev, n, JF_EV_DISMISS), "P: playlist_menu_emits_open_delete_dismiss: Down did not dismiss");
+    CHECK(n == 0, "P: playlist_menu_emits_open_delete_dismiss: Down in the menu pane sent %d events (it no longer dismisses)", n);
+    n = feed_btn(&ui, BTN_ID_PAUSE, 6600, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_BACK), "P: playlist_menu_emits_open_delete_dismiss: Esc in the menu pane did not send BACK");
     /* the menu goes: the list gets its rectangle back, there is no mini player to return */
     app.action_bar = false;
     feed(&ui, 0, 0, false, false, false, 7000, ev, MINI_MAX);
@@ -1017,8 +1041,8 @@ static void folder_ui(void)
     CHECK(strlen(t) <= 33 && t[strlen(t) - 1] == '?', "U: delete_question_shows_long_name: long name gives %zu glyphs \"%s\"", strlen(t), t);
 }
 
-/* The list-over-buttons screens by pad: Down at the last row lands on the button row and STAYS there (the list used to
- * hand focus to the row and the row block, reading the same Down, handed it straight back), and ACTION then acts. */
+/* The list-over-buttons screens by pad: Tab goes from the list to the button row (arrows never leave a pane), and ACTION
+ * then acts. */
 static void stack_pad(void)
 {
     static Framebuffer fb;
@@ -1033,10 +1057,10 @@ static void stack_pad(void)
         pp_setup(&app, sel);
         jf_ui_init(&ui, &fb, &touch, NULL, &app);
         feed(&ui, 0, 0, false, false, false, t, ev, MINI_MAX);
-        for (int k = 0; k < 4; k++) feed_btn(&ui, BTN_ID_DOWN, t += 100, ev, MINI_MAX);   /* 3 moves to row 3, the 4th leaves */
+        feed_btn(&ui, BTN_ID_NEXT, t += 100, ev, MINI_MAX);   /* Tab: list pane -> button row */
         n = feed_btn(&ui, BTN_ID_ACTION, t += 100, ev, MINI_MAX);
         CHECK(has_event(ev, n, sel < 0 ? JF_EV_PICK_CLOSE : JF_EV_PICK_ADD) && !has_event(ev, n, JF_EV_PICK_SELECT),
-              "S: plpick_pad_reaches_button_row: sel %d, Down x4 then ACTION sent %d events, first type %d", sel, n, n ? (int)ev[0].type : -1);
+              "S: plpick_pad_reaches_button_row: sel %d, Tab then ACTION sent %d events, first type %d", sel, n, n ? (int)ev[0].type : -1);
         if (sel > 0) {   /* Right moves to CLOSE */
             feed_btn(&ui, BTN_ID_RIGHT, t += 100, ev, MINI_MAX);
             n = feed_btn(&ui, BTN_ID_ACTION, t += 100, ev, MINI_MAX);
@@ -1052,10 +1076,10 @@ static void stack_pad(void)
     for (int i = 0; i < 3; i++) strcpy(app.mix.opt[i].label, "x");
     jf_ui_init(&ui, &fb, &touch, NULL, &app);
     feed(&ui, 0, 0, false, false, false, t += 100, ev, MINI_MAX);
-    for (int k = 0; k < 3; k++) feed_btn(&ui, BTN_ID_DOWN, t += 100, ev, MINI_MAX);
+    feed_btn(&ui, BTN_ID_NEXT, t += 100, ev, MINI_MAX);
     n = feed_btn(&ui, BTN_ID_ACTION, t += 100, ev, MINI_MAX);
     CHECK(has_event(ev, n, JF_EV_MIX_START) && !has_event(ev, n, JF_EV_MIX_TOGGLE),
-          "S: mix_pad_reaches_start: Down x3 then ACTION is not MIX_START (%d events)", n);
+          "S: mix_pad_reaches_start: Tab then ACTION is not MIX_START (%d events)", n);
     app.mix.phase = JF_MIX_INDEX;   /* locked: START is absent, the row holds CANCEL only */
     feed(&ui, 0, 0, false, false, false, t += 100, ev, MINI_MAX);
     n = feed_btn(&ui, BTN_ID_ACTION, t += 100, ev, MINI_MAX);
@@ -1076,7 +1100,7 @@ static void zone_stack_browse(void)
     uint32_t t = 1000;
     int n;
 
-    /* the queue: Down at the last row, then ACTION is PREV (the first transport button) */
+    /* the queue: Down at the last row stays in the list, Tab reaches the button row, ACTION is PREV (the first transport button) */
     jf_app_init(&app);
     app.screen = JF_SCR_QUEUE;
     app.queue_n = 5;
@@ -1084,25 +1108,26 @@ static void zone_stack_browse(void)
     feed(&ui, 0, 0, false, false, false, t, ev, MINI_MAX);
     lv_move_to(&ui.lv, 4);
     n = feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
-    CHECK(n == 0, "Z: Down at the last queue row sent %d events", n);
+    CHECK(n == 0 && ui.zf.zone == 1 && ui.lv.cursor == 4, "Z: Down at the last queue row sent %d events, zone %d, cursor %d (want 0, 1, 4)", n, ui.zf.zone, ui.lv.cursor);
+    feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
     n = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
-    CHECK(has_event(ev, n, JF_EV_PREV) && !has_event(ev, n, JF_EV_QUEUE_JUMP), "Z: ACTION after Down at the last queue row did not press PREV (%d events)", n);
+    CHECK(has_event(ev, n, JF_EV_PREV) && !has_event(ev, n, JF_EV_QUEUE_JUMP), "Z: Tab then ACTION at the last queue row did not press PREV (%d events)", n);
     jf_ui_free(&ui);
 
-    /* a track list with a queue: Down at the last row lands on the strip (ACTION = PAUSE), Down again on the button row,
+    /* a track list with a queue: Tab from the list lands on the strip (ACTION = PAUSE), Tab again on the button row,
      * Right on NOW PLAYING */
     tk_setup(&app, JF_SCR_TRACKS, false);
     app.queue_n = 2;
     jf_ui_init(&ui, &fb, &touch, NULL, &app);
     feed(&ui, 0, 0, false, false, false, t += 1000, ev, MINI_MAX);
     lv_move_to(&ui.lv, 2);
-    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+    feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
     n = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
     CHECK(has_event(ev, n, JF_EV_PAUSE), "Z: the strip's PLAY / PAUSE is not reached by the pad (%d events)", n);
-    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+    feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
     feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
     n = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
-    CHECK(has_event(ev, n, JF_EV_OPEN_NOWPLAYING), "Z: Down, Down, Right, ACTION did not open NOW PLAYING (%d events)", n);
+    CHECK(has_event(ev, n, JF_EV_OPEN_NOWPLAYING), "Z: Tab, Tab, Right, ACTION did not open NOW PLAYING (%d events)", n);
     jf_ui_free(&ui);
 
     /* the queue: a touch leaves the pad focus where it was and lights nothing; the second touch plays */
@@ -1164,8 +1189,9 @@ static void zone_stack_browse(void)
     jf_ui_free(&ui);
 }
 
-/* Y  now playing and settings on ui_zone: Up from the button row reaches the bar (ACTION there is BACK), Down returns, Left / Right
- * stay the volume and never move focus, a touch hides the ring; settings: Up at row 0 -> bar, Right BACK -> EXIT, Down -> list
+/* Y  now playing and settings on ui_zone: now playing has three panes (bar / seek slider / ten buttons) and starts on the buttons;
+ * Left / Right move focus inside the row and never send the volume, Tab goes on to the bar (ACTION there is BACK), a touch
+ * hides the ring; settings: Up at row 0 stays in the list, Shift+Tab reaches the bar, Right BACK -> EXIT, Tab returns to the list
  * with the cursor unmoved.  The portrait two-row walk is spatial inside ui_zone (ui_zone_test); the layout here is landscape. */
 static void zone_np_settings(void)
 {
@@ -1179,18 +1205,22 @@ static void zone_np_settings(void)
     jf_ui_init(&ui, &fb, &touch, NULL, &app);
     feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
     uint32_t t = 2000;
+    CHECK(ui.zf.zone == 2, "Y: now playing did not start on the buttons (zone %d)", ui.zf.zone);
+    int id0 = ui.zf.id;
     feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
-    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
-    CHECK(ui.zf.zone == 1 && ui.zf.id == 2, "Y: two Downs on now playing left zone %d id %d, want the buttons, 2", ui.zf.zone, ui.zf.id);
-    int k = feed_btn(&ui, BTN_ID_LEFT, t += 1000, ev, MINI_MAX);
-    CHECK(has_event(ev, k, JF_EV_VOL_DOWN) && ui.zf.id == 2, "Y: Left was not the volume or moved focus (id %d)", ui.zf.id);
-    k = feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
-    CHECK(has_event(ev, k, JF_EV_VOL_UP) && ui.zf.id == 2, "Y: Right was not the volume or moved focus (id %d)", ui.zf.id);
     feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
-    feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
-    CHECK(ui.zf.zone == 1 && ui.zf.id == 0, "Y: Up twice from button 2 gave zone %d id %d, want button 0", ui.zf.zone, ui.zf.id);
-    feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
-    CHECK(ui.zf.zone == 0, "Y: Up from the first button did not reach the bar (zone %d)", ui.zf.zone);
+    CHECK(ui.zf.zone == 2 && ui.zf.id == id0, "Y: landscape Down / Up walked the button row (zone %d id %d, was %d)", ui.zf.zone, ui.zf.id, id0);
+    int k = feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
+    CHECK(!has_event(ev, k, JF_EV_VOL_UP) && !has_event(ev, k, JF_EV_VOL_DOWN) && ui.zf.zone == 2 && ui.zf.id == (id0 + 1) % JF_UI_NP,
+          "Y: Right on the button row did not move focus %d -> %d, or sent a volume event", id0, ui.zf.id);
+    k = feed_btn(&ui, BTN_ID_LEFT, t += 1000, ev, MINI_MAX);
+    CHECK(!has_event(ev, k, JF_EV_VOL_UP) && !has_event(ev, k, JF_EV_VOL_DOWN) && ui.zf.id == id0,
+          "Y: Left on the button row did not move focus back (id %d, was %d), or sent a volume event", ui.zf.id, id0);
+    for (int i = 0; i < JF_UI_NP && ui.zf.id != 0; i++) feed_btn(&ui, BTN_ID_LEFT, t += 1000, ev, MINI_MAX);
+    feed_btn(&ui, BTN_ID_LEFT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 2 && ui.zf.id == JF_UI_NP - 1, "Y: Left from the first button gave zone %d id %d, want the last button (wrap)", ui.zf.zone, ui.zf.id);
+    feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 0, "Y: Tab from the button row did not wrap to the bar (zone %d)", ui.zf.zone);
     k = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
     CHECK(has_event(ev, k, JF_EV_BACK), "Y: ACTION on the bar's BACK did not send BACK");
     k = feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
@@ -1199,7 +1229,9 @@ static void zone_np_settings(void)
     k = feed_btn(&ui, BTN_ID_LEFT, t += 1000, ev, MINI_MAX);
     CHECK(ui.zf.id == 0 && !has_event(ev, k, JF_EV_VOL_DOWN), "Y: Left on the bar was not EXIT -> BACK (id %d)", ui.zf.id);
     feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
-    CHECK(ui.zf.zone == 1 && ui.zf.id == 0, "Y: Down from the bar gave zone %d id %d, want button 0", ui.zf.zone, ui.zf.id);
+    CHECK(ui.zf.zone == 0 && ui.zf.id == 0, "Y: Down on the bar left the pane (zone %d id %d)", ui.zf.zone, ui.zf.id);
+    feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 1, "Y: Tab from the bar did not reach the seek slider (zone %d)", ui.zf.zone);
     feed(&ui, ui.L.np[0].x + 20, ui.L.np[0].y + 20, true, true, false, t += 1000, ev, MINI_MAX);
     CHECK(!ui.zf.shown, "Y: a touch on now playing left the ring shown");
     jf_ui_free(&ui);
@@ -1209,19 +1241,21 @@ static void zone_np_settings(void)
     jf_ui_init(&ui, &fb, &touch, NULL, &app);
     feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
     t = 2000;
+    int cur = ui.lv.cursor;
     feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
-    CHECK(ui.zf.zone == 0 && ui.zf.id == 0, "Y: settings Up at row 0 gave zone %d id %d, want the bar's BACK", ui.zf.zone, ui.zf.id);
+    CHECK(ui.zf.zone == 1 && ui.lv.cursor == cur, "Y: settings Up at row 0 gave zone %d cursor %d, want to stay in the list at %d", ui.zf.zone, ui.lv.cursor, cur);
+    feed_shift_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 0 && ui.zf.id == 0, "Y: settings Shift+Tab gave zone %d id %d, want the bar's BACK", ui.zf.zone, ui.zf.id);
     feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
     CHECK(ui.zf.zone == 0 && ui.zf.id == 1, "Y: settings Right on the bar gave id %d, want EXIT (1)", ui.zf.id);
-    int cur = ui.lv.cursor;
-    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
-    CHECK(ui.zf.zone == 1 && ui.lv.cursor == cur, "Y: settings Down from the bar gave zone %d, cursor %d -> %d", ui.zf.zone, cur, ui.lv.cursor);
+    feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 1 && ui.lv.cursor == cur, "Y: settings Tab from the bar gave zone %d, cursor %d -> %d", ui.zf.zone, cur, ui.lv.cursor);
     jf_ui_free(&ui);
 }
 
-/* Z  sign-in on ui_zone: with the server or user empty SIGN IN (id 3) is absent, so Down / Right never land on it and EXIT (4) is
- * reached; filled, Down reaches SIGN IN and ACTION sends SIGNIN; Up from the first field reaches the bar, whose ACTION quits;
- * a touch hides the ring. */
+/* Z  sign-in on ui_zone: three panes (bar / fields / buttons) cycled by Tab and Shift+Tab; with the server or user empty SIGN IN
+ * (id 3) is absent, so the button pane holds EXIT (4) alone; filled, the pane starts on SIGN IN and ACTION sends SIGNIN; the
+ * bar's ACTION quits; a touch hides the ring. */
 static void zone_signin(void)
 {
     static Framebuffer fb;
@@ -1234,14 +1268,18 @@ static void zone_signin(void)
     jf_ui_init(&ui, &fb, &touch, NULL, &app);
     feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
     uint32_t t = 2000;
-    bool saw3 = false, saw4 = false;
-    for (int k = 0; k < 8; k++) {
-        feed_btn(&ui, k % 2 ? BTN_ID_RIGHT : BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
-        if (ui.zf.zone == 1 && ui.zf.id == 3) saw3 = true;
-        if (ui.zf.zone == 1 && ui.zf.id == 4) saw4 = true;
-    }
-    CHECK(!saw3, "Z: with the user empty the walk landed on the absent SIGN IN");
-    CHECK(saw4, "Z: with the user empty the walk never reached EXIT");
+    CHECK(ui.zf.zone == 1, "Z: sign-in did not start on the fields (zone %d)", ui.zf.zone);
+    feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 2 && ui.zf.id == 4, "Z: with the user empty Tab from the fields gave zone %d id %d, want the buttons, EXIT (4)", ui.zf.zone, ui.zf.id);
+    feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
+    feed_btn(&ui, BTN_ID_LEFT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 2 && ui.zf.id == 4, "Z: with the user empty the button pane landed on id %d (the absent SIGN IN is 3)", ui.zf.id);
+    feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 0, "Z: Tab from the buttons did not wrap to the bar (zone %d)", ui.zf.zone);
+    feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 1, "Z: Tab from the bar did not reach the fields (zone %d)", ui.zf.zone);
+    feed_shift_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 0, "Z: Shift+Tab from the fields did not reach the bar (zone %d)", ui.zf.zone);
     jf_ui_free(&ui);
 
     memset(&app, 0, sizeof app);
@@ -1251,15 +1289,15 @@ static void zone_signin(void)
     snprintf(ui.fields[0], sizeof ui.fields[0], "http://x");
     snprintf(ui.fields[1], sizeof ui.fields[1], "u");
     t = 2000;
-    for (int k = 0; k < 8 && !(ui.zf.zone == 1 && ui.zf.id == 3); k++) feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
-    CHECK(ui.zf.zone == 1 && ui.zf.id == 3, "Z: Down never reached SIGN IN with the fields filled (zone %d id %d)", ui.zf.zone, ui.zf.id);
+    feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 2 && ui.zf.id == 3, "Z: Tab never reached SIGN IN with the fields filled (zone %d id %d)", ui.zf.zone, ui.zf.id);
     int k = 0;
-    if (ui.zf.zone == 1 && ui.zf.id == 3) {   /* only on SIGN IN: ACTION on a field opens the blocking keyboard */
+    if (ui.zf.zone == 2 && ui.zf.id == 3) {   /* only on SIGN IN: ACTION on a field opens the blocking keyboard */
         k = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
         CHECK(has_event(ev, k, JF_EV_SIGNIN), "Z: ACTION on SIGN IN sent no SIGNIN");
     }
-    for (int j = 0; j < 4; j++) feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
-    CHECK(ui.zf.zone == 0, "Z: Up from SIGN IN, past the fields, did not reach the bar (zone %d)", ui.zf.zone);
+    feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);   /* buttons -> bar */
+    CHECK(ui.zf.zone == 0, "Z: Tab from SIGN IN did not reach the bar (zone %d)", ui.zf.zone);
     if (ui.zf.zone == 0) {
         k = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
         CHECK(has_event(ev, k, JF_EV_QUIT), "Z: ACTION on the bar's EXIT did not quit");
@@ -1270,9 +1308,9 @@ static void zone_signin(void)
     jf_ui_free(&ui);
 }
 
-/* P  pad / keyboard reach: the portrait now-playing rows are walked in order by Up / Down (Left / Right stay the volume) and
- * Up from the first still reaches the bar; BACK and Start on the sign-in screen do not quit it; ACTION on the row whose
- * action bar is already up (the touch second tap) sends ACTIVATE. */
+/* P  pad / keyboard reach: the portrait now-playing rows are walked by Up / Down inside the button pane (Left / Right move
+ * focus, never the volume); BACK and Start on the sign-in screen do not quit it; ACTION on the row whose action bar is
+ * already up (the touch second tap) sends ACTIVATE. */
 static void pad_reach(void)
 {
     static Framebuffer fb;
@@ -1289,29 +1327,22 @@ static void pad_reach(void)
     JfExtents pe = { 0, 0, 480, 800, 17, 17, 480 - 17, 800 - 17 };
     jf_ui_layout(&ui.L, &pe);
     feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
-    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);   /* bar -> a button (spatially) */
-    CHECK(ui.zf.zone == 1, "P: portrait Down from the bar left zone %d, want the buttons", ui.zf.zone);
-    for (int k = 0; k < JF_UI_NP && ui.zf.id > 0; k++) feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
-    CHECK(ui.zf.zone == 1 && ui.zf.id == 0, "P: portrait Ups did not walk back to button 0 (zone %d id %d)", ui.zf.zone, ui.zf.id);
-    for (int i = 1; i <= JF_UI_NP; i++) {
-        n = feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
-        CHECK(ui.zf.zone == 1 && ui.zf.id == i % JF_UI_NP, "P: portrait Down step %d reached id %d, want %d", i, ui.zf.id, i % JF_UI_NP);
-        CHECK(!has_event(ev, n, JF_EV_VOL_UP) && !has_event(ev, n, JF_EV_VOL_DOWN), "P: portrait Down sent a volume event");
-    }
-    for (int i = JF_UI_NP - 1; i >= 1; i--) {   /* now on 0 (wrapped): Up walks 0 -> bar is not the wrap, so go down first */
-        feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
-        CHECK(ui.zf.id == JF_UI_NP - i, "P: portrait Down to %d gave id %d", JF_UI_NP - i, ui.zf.id);
-    }
-    for (int i = JF_UI_NP - 1; i >= 1; i--) {
-        feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
-        CHECK(ui.zf.zone == 1 && ui.zf.id == i - 1, "P: portrait Up from %d reached id %d", i, ui.zf.id);
-    }
-    feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
-    CHECK(ui.zf.zone == 0, "P: portrait Up from the first button did not reach the bar (zone %d)", ui.zf.zone);
+    CHECK(ui.zf.zone == 2, "P: portrait now playing did not start on the button row (zone %d)", ui.zf.zone);
+    for (int k = 0; k < JF_UI_NP && ui.zf.id != 0; k++) feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 2 && ui.zf.id == 0, "P: portrait Rights did not wrap round to button 0 (zone %d id %d)", ui.zf.zone, ui.zf.id);
+    /* Down steps to the second wrapped row (portrait only), stays there, Up steps back and then stays: no bar, no wrap */
+    n = feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 2 && ui.zf.id == JF_UI_NP / 2, "P: portrait Down from button 0 reached zone %d id %d, want the second row (%d)", ui.zf.zone, ui.zf.id, JF_UI_NP / 2);
+    CHECK(!has_event(ev, n, JF_EV_VOL_UP) && !has_event(ev, n, JF_EV_VOL_DOWN), "P: portrait Down sent a volume event");
     feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 2 && ui.zf.id == JF_UI_NP / 2, "P: portrait Down from the last row moved to zone %d id %d", ui.zf.zone, ui.zf.id);
+    feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 2 && ui.zf.id == 0, "P: portrait Up from the second row reached zone %d id %d, want button 0", ui.zf.zone, ui.zf.id);
+    feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 2 && ui.zf.id == 0, "P: portrait Up from the first row left the pane (zone %d id %d)", ui.zf.zone, ui.zf.id);
     int before = ui.zf.id;
     n = feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
-    CHECK(has_event(ev, n, JF_EV_VOL_UP) && ui.zf.id == before, "P: portrait Right was not the volume (id %d -> %d)", before, ui.zf.id);
+    CHECK(!has_event(ev, n, JF_EV_VOL_UP) && ui.zf.id == before + 1, "P: portrait Right moved focus %d -> %d or sent VOL+", before, ui.zf.id);
     jf_ui_free(&ui);
 
     memset(&app, 0, sizeof app);
@@ -1339,8 +1370,9 @@ static void pad_reach(void)
     jf_ui_free(&ui);
 }
 
-/* P  NOW PLAYING: PgDn / PgUp send JF_EV_SEEK with the absolute target (the played position +/- 10 s, clamped at 0)
- *    and no volume event; the position is the one the seek bar draws (jf_ui_set_played) */
+/* P  NOW PLAYING: the seek slider pane (Shift+Tab from the button row): Right / Left send JF_EV_SEEK with the absolute target
+ *    (the played position +/- 10 s, clamped at 0) and never a volume event; PgDn / PgUp no longer seek; the position is the
+ *    one the seek bar draws (jf_ui_set_played) */
 static void pg_seek(void)
 {
     static Framebuffer fb;
@@ -1354,19 +1386,28 @@ static void pg_seek(void)
     app.queue[0].runtime_s = 300;
     jf_ui_init(&ui, &fb, &touch, NULL, &app);
     feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 2, "P: now playing did not start on the button row (zone %d)", ui.zf.zone);
 
     jf_ui_set_played(&ui, 60000);
-    int n = feed_btn(&ui, BTN_ID_PGDN, 2000, ev, MINI_MAX);
-    CHECK(n == 1 && ev[0].type == JF_EV_SEEK && ev[0].i == 70000, "P: PgDn at 60 s sent %d events, first %d/%d, want SEEK 70000", n, n ? (int)ev[0].type : -1, n ? ev[0].i : -1);
-    CHECK(!has_event(ev, n, JF_EV_VOL_UP) && !has_event(ev, n, JF_EV_VOL_DOWN), "P: PgDn sent a volume event");
+    int n = feed_btn(&ui, BTN_ID_PGDN, 1500, ev, MINI_MAX);
+    CHECK(!has_event(ev, n, JF_EV_SEEK), "P: PgDn still seeks (%d events)", n);
+    n = feed_btn(&ui, BTN_ID_PGUP, 1600, ev, MINI_MAX);
+    CHECK(!has_event(ev, n, JF_EV_SEEK), "P: PgUp still seeks (%d events)", n);
 
-    n = feed_btn(&ui, BTN_ID_PGUP, 3000, ev, MINI_MAX);
-    CHECK(n == 1 && ev[0].type == JF_EV_SEEK && ev[0].i == 50000, "P: PgUp at 60 s sent %d events, first %d/%d, want SEEK 50000", n, n ? (int)ev[0].type : -1, n ? ev[0].i : -1);
-    CHECK(!has_event(ev, n, JF_EV_VOL_UP) && !has_event(ev, n, JF_EV_VOL_DOWN), "P: PgUp sent a volume event");
+    feed_shift_btn(&ui, BTN_ID_NEXT, 1700, ev, MINI_MAX);   /* Shift+Tab: the button row -> the slider */
+    CHECK(ui.zf.zone == 1, "P: Shift+Tab from the button row did not reach the slider (zone %d)", ui.zf.zone);
+    n = feed_btn(&ui, BTN_ID_RIGHT, 2000, ev, MINI_MAX);
+    CHECK(n == 1 && ev[0].type == JF_EV_SEEK && ev[0].i == 70000, "P: slider Right at 60 s sent %d events, first %d/%d, want SEEK 70000", n, n ? (int)ev[0].type : -1, n ? ev[0].i : -1);
+    CHECK(!has_event(ev, n, JF_EV_VOL_UP) && !has_event(ev, n, JF_EV_VOL_DOWN), "P: slider Right sent a volume event");
+
+    n = feed_btn(&ui, BTN_ID_LEFT, 3000, ev, MINI_MAX);
+    CHECK(n == 1 && ev[0].type == JF_EV_SEEK && ev[0].i == 50000, "P: slider Left at 60 s sent %d events, first %d/%d, want SEEK 50000", n, n ? (int)ev[0].type : -1, n ? ev[0].i : -1);
+    CHECK(!has_event(ev, n, JF_EV_VOL_UP) && !has_event(ev, n, JF_EV_VOL_DOWN), "P: slider Left sent a volume event");
+    CHECK(ui.zf.zone == 1, "P: slider Left moved the zone to %d", ui.zf.zone);
 
     jf_ui_set_played(&ui, 3000);
-    n = feed_btn(&ui, BTN_ID_PGUP, 4000, ev, MINI_MAX);
-    CHECK(n == 1 && ev[0].type == JF_EV_SEEK && ev[0].i == 0, "P: PgUp at 3 s sent %d events, first %d/%d, want SEEK 0", n, n ? (int)ev[0].type : -1, n ? ev[0].i : -1);
+    n = feed_btn(&ui, BTN_ID_LEFT, 4000, ev, MINI_MAX);
+    CHECK(n == 1 && ev[0].type == JF_EV_SEEK && ev[0].i == 0, "P: slider Left at 3 s sent %d events, first %d/%d, want SEEK 0", n, n ? (int)ev[0].type : -1, n ? ev[0].i : -1);
     jf_ui_free(&ui);
 }
 
@@ -1406,6 +1447,86 @@ static void info_only(void)
     jf_ui_free(&ui);
 }
 
+/* N  pane cycling on a list screen (track list, mini player present, its action bar up): Tab / Shift+Tab walk bar, list, strip and
+ *    button row both ways and wrap; arrows stay inside a pane (Down at the last row stays); Esc and pad B go back; Enter / Space
+ *    on a row is the row's activation */
+static void nav_cycle(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    static JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    uint32_t t = 1000;
+    int n;
+
+    tk_setup(&app, JF_SCR_TRACKS, false);
+    app.queue_n = 2;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, t, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 1, "N: a track list did not start on the list pane (zone %d)", ui.zf.zone);
+    int cur = ui.lv.cursor;
+
+    /* Enter and Space on a fresh row: SELECT with the cursor row */
+    n = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
+    CHECK(n == 1 && ev[0].type == JF_EV_SELECT && ev[0].i == cur, "N: Enter on a list row sent %d events, first %d/%d, want SELECT %d", n, n ? (int)ev[0].type : -1, n ? ev[0].i : -1, cur);
+    n = feed_btn(&ui, BTN_ID_JUMP, t += 1000, ev, MINI_MAX);
+    CHECK(n == 1 && ev[0].type == JF_EV_SELECT && ev[0].i == cur, "N: Space on a list row sent %d events, first %d/%d, want SELECT %d", n, n ? (int)ev[0].type : -1, n ? ev[0].i : -1, cur);
+
+    /* Esc, Backspace and pad B go back from the list pane */
+    n = feed_btn(&ui, BTN_ID_PAUSE, t += 1000, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_BACK), "N: Esc on a list screen sent no BACK (%d events)", n);
+    n = feed_btn(&ui, BTN_ID_BACK, t += 1000, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_BACK), "N: Backspace on a list screen sent no BACK (%d events)", n);
+    n = feed_btn(&ui, BTN_ID_CANCEL, t += 1000, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_BACK), "N: pad B on a list screen sent no BACK (%d events)", n);
+    n = feed_shift_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
+    CHECK(!has_event(ev, n, JF_EV_BACK), "N: Shift+Up sent BACK");
+
+    /* Down at the last row stays in the list: no zone move, cursor unchanged */
+    lv_move_to(&ui.lv, 2);
+    n = feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 1 && ui.lv.cursor == 2 && n == 0, "N: Down at the last row gave zone %d, cursor %d, %d events (want 1, 2, 0)", ui.zf.zone, ui.lv.cursor, n);
+    n = feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 1 && ui.lv.cursor == 1, "N: Up from the last row gave zone %d, cursor %d (want 1, 1)", ui.zf.zone, ui.lv.cursor);
+
+    /* the panes in Tab order: list -> strip -> button row -> bar -> list, and back with Shift+Tab */
+    static const int fwd[4] = { 2, 3, 0, 1 };
+    for (int i = 0; i < 4; i++) {
+        feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+        CHECK(ui.zf.zone == fwd[i], "N: Tab step %d reached zone %d, want %d", i + 1, ui.zf.zone, fwd[i]);
+    }
+    static const int back[4] = { 0, 3, 2, 1 };
+    for (int i = 0; i < 4; i++) {
+        feed_shift_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+        CHECK(ui.zf.zone == back[i], "N: Shift+Tab step %d reached zone %d, want %d", i + 1, ui.zf.zone, back[i]);
+    }
+    CHECK(ui.lv.cursor == 1, "N: cycling the panes moved the list cursor to %d (want 1)", ui.lv.cursor);
+
+    /* the action bar up (raised by the core after a key select): focus lands on it; Tab leaves it, Down / Up do not dismiss it,
+     * and Esc is BACK */
+    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);   /* a key press: the ring is shown, so the bar takes focus */
+    app.action_bar = true;
+    app.action_row = ui.lv.cursor;
+    feed(&ui, 0, 0, false, false, false, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 3, "N: the raised action bar did not take focus (zone %d)", ui.zf.zone);
+    n = feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
+    n += feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 3 && !has_event(ev, n, JF_EV_DISMISS), "N: Down / Up on the action bar left it or dismissed it (zone %d)", ui.zf.zone);
+    feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 0, "N: Tab from the action bar reached zone %d, want the bar pane (0)", ui.zf.zone);
+    feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 1, "N: Tab again reached zone %d, want the list (1)", ui.zf.zone);
+    feed_shift_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+    feed_shift_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 3, "N: Shift+Tab twice from the list reached zone %d, want the action bar (3)", ui.zf.zone);
+    feed_shift_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 2, "N: Shift+Tab from the action bar reached zone %d, want the mini player (2)", ui.zf.zone);
+    n = feed_btn(&ui, BTN_ID_PAUSE, t += 1000, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_BACK), "N: Esc with the action bar up sent no BACK (the core drops the bar)");
+    jf_ui_free(&ui);
+}
+
 int main(void)
 {
     add_to_playlist();
@@ -1435,6 +1556,7 @@ int main(void)
     zone_signin();
     pad_reach();
     pg_seek();
+    nav_cycle();
     info_only();
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");
