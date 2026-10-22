@@ -451,10 +451,9 @@ static void queue_row(void)
     TopBarLayout *TL = &ui.bar.L;
     CHECK(first_event(&ui, TL->title_x + TL->title_w / 2, TL->top + TL->h / 2, t) == JF_EV_BACK, "R: a tap on the QUEUE title did not send BACK");
     t += 1000;
-    /* the pad: Right walks the eleven and wraps; ACTION on the last is VOL- */
-    feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);   /* Tab from the list: the button row at its first button */
-    lv_move_to(&ui.lv, 4);
-    feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);   /* the last row: Down enters the button row at its first button */
+    /* the pad: Tab from the list reaches the button row (zone 3) at its first button; Right walks the eleven and wraps; ACTION on the last is VOL- */
+    feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 3, "R: Tab from the queue list did not reach the button row (zone %d)", ui.zf.zone);
     for (int i = 0; i < JF_UI_QROW - 1; i++) feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
     CHECK(ui.zf.id == JF_UI_QROW - 1, "R: the pad reached button %d after %d Rights, want %d", ui.zf.id, JF_UI_QROW - 1, JF_UI_QROW - 1);
     int k = feed_btn(&ui, BTN_ID_ACTION, t += 1000, ev, MINI_MAX);
@@ -1328,8 +1327,17 @@ static void pad_reach(void)
     jf_ui_layout(&ui.L, &pe);
     feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
     CHECK(ui.zf.zone == 2, "P: portrait now playing did not start on the button row (zone %d)", ui.zf.zone);
-    for (int k = 0; k < JF_UI_NP && ui.zf.id != 0; k++) feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
-    CHECK(ui.zf.zone == 2 && ui.zf.id == 0, "P: portrait Rights did not wrap round to button 0 (zone %d id %d)", ui.zf.zone, ui.zf.id);
+    int id0 = ui.zf.id;
+    CHECK(id0 == 0, "P: portrait now playing did not start on button 0 (id %d)", id0);
+    /* one RIGHT per step: each lands on the next button of the same row (ui_zone wraps Left / Right inside the row, rows of
+     * JF_UI_NP / 2 in portrait), the step past the row's last button wraps to its first, and none sends a volume event */
+    const int row = JF_UI_NP / 2;
+    for (int i = 1; i <= row; i++) {
+        n = feed_btn(&ui, BTN_ID_RIGHT, t += 1000, ev, MINI_MAX);
+        int want = (id0 / row) * row + (id0 % row + i) % row;
+        CHECK(ui.zf.zone == 2 && ui.zf.id == want, "P: portrait Right %d from button %d reached zone %d id %d, want %d", i, id0, ui.zf.zone, ui.zf.id, want);
+        CHECK(!has_event(ev, n, JF_EV_VOL_UP) && !has_event(ev, n, JF_EV_VOL_DOWN), "P: portrait Right %d sent a volume event (%d events)", i, n);
+    }
     /* Down steps to the second wrapped row (portrait only), stays there, Up steps back and then stays: no bar, no wrap */
     n = feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
     CHECK(ui.zf.zone == 2 && ui.zf.id == JF_UI_NP / 2, "P: portrait Down from button 0 reached zone %d id %d, want the second row (%d)", ui.zf.zone, ui.zf.id, JF_UI_NP / 2);
@@ -1511,8 +1519,9 @@ static void nav_cycle(void)
     feed(&ui, 0, 0, false, false, false, t += 1000, ev, MINI_MAX);
     CHECK(ui.zf.zone == 3, "N: the raised action bar did not take focus (zone %d)", ui.zf.zone);
     n = feed_btn(&ui, BTN_ID_DOWN, t += 1000, ev, MINI_MAX);
-    n += feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
-    CHECK(ui.zf.zone == 3 && !has_event(ev, n, JF_EV_DISMISS), "N: Down / Up on the action bar left it or dismissed it (zone %d)", ui.zf.zone);
+    CHECK(ui.zf.zone == 3 && !has_event(ev, n, JF_EV_DISMISS), "N: Down on the action bar left it or dismissed it (zone %d, %d events)", ui.zf.zone, n);
+    n = feed_btn(&ui, BTN_ID_UP, t += 1000, ev, MINI_MAX);
+    CHECK(ui.zf.zone == 3 && !has_event(ev, n, JF_EV_DISMISS), "N: Up on the action bar left it or dismissed it (zone %d, %d events)", ui.zf.zone, n);
     feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
     CHECK(ui.zf.zone == 0, "N: Tab from the action bar reached zone %d, want the bar pane (0)", ui.zf.zone);
     feed_btn(&ui, BTN_ID_NEXT, t += 1000, ev, MINI_MAX);
