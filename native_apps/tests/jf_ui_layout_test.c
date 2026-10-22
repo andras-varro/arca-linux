@@ -39,9 +39,14 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     JfExtents e = { 0, 0, 800, 480, inset_l, inset_t, 800 - inset_r, 480 - inset_b };
     JfLayout L;
     jf_ui_layout(&L, &e);
-    UiRect press[48];
+    UiRect press[64];
     int n = 0;
     for (int i = 0; i < JF_UI_ROW3; i++) press[n++] = L.row3[i];
+    for (int i = 0; i < JF_UI_ROW4; i++) {   /* the TRACKS screens' four-button row: pressable, clear of the list and of each other */
+        press[n++] = L.row4[i];
+        CHECK(disjoint(L.row4[i], L.list) && L.row4[i].y == L.row3[0].y, "C: row4[%d] overlaps the list or left the button row", i);
+        for (int j = i + 1; j < JF_UI_ROW4; j++) CHECK(disjoint(L.row4[i], L.row4[j]), "C: row4 %d/%d overlap", i, j);
+    }
     for (int i = 0; i < JF_UI_FIELDS; i++) press[n++] = L.field[i];
     press[n++] = L.signin; press[n++] = L.signexit;
     for (int i = 0; i < JF_UI_ABAR; i++) press[n++] = L.abar[i];
@@ -760,8 +765,162 @@ static void remove_label_fits(void)
     jf_ui_free(&ui);
 }
 
+/* T  ADD TO PLAYLIST, the UI half: the track action bar's sixth button and the TRACKS screens' fourth bottom button open the
+ *    picker; the picker is "+ NEW PLAYLIST" over the playlists, selects without opening, shows ADD only with a selection and
+ *    closes on Back; the duplicate question names the playlist and the counts */
+static void tk_setup(JfApp *app, JfScreen sc, bool bar)
+{
+    jf_app_init(app);
+    app->screen = sc;
+    app->list = &app->lists[sc == JF_SCR_ALBUMS ? JF_LIST_ARTISTS : JF_LIST_TRACKS];
+    app->list->n = 3;
+    app->list->total = 3;
+    for (int i = 0; i < 3; i++) {
+        app->list->items[i].type = sc == JF_SCR_ALBUMS ? JF_ITEM_ALBUM : JF_ITEM_TRACK;
+        snprintf(app->list->items[i].name, sizeof app->list->items[i].name, "ITEM%d", i);
+    }
+    app->action_bar = bar;
+    app->action_row = 2;
+}
+
+static void pp_setup(JfApp *app, int sel)
+{
+    jf_app_init(app);
+    app->screen = JF_SCR_PLPICK;
+    app->list = &app->lists[JF_LIST_PLPICK];
+    app->lists[JF_LIST_PLPICK].n = 3;
+    app->lists[JF_LIST_PLPICK].total = 3;
+    for (int i = 0; i < 3; i++) {
+        app->lists[JF_LIST_PLPICK].items[i].type = JF_ITEM_PLAYLIST;
+        snprintf(app->lists[JF_LIST_PLPICK].items[i].name, sizeof app->lists[JF_LIST_PLPICK].items[i].name, "PL%d", i);
+    }
+    app->pick_n = 5;
+    app->pick_sel = sel;
+}
+
+static void add_to_playlist(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    static JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    UiRect r;
+    int n;
+
+    /* abar_has_6_and_fits_800: six buttons, the new one named, INSTANT MIX shortened */
+    CHECK(JF_UI_ABAR == 6, "T: abar_has_6_and_fits_800: JF_UI_ABAR is %d", JF_UI_ABAR);
+    tk_setup(&app, JF_SCR_TRACKS, true);
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    CHECK(strcmp(ui.abar[5].text, "+ PLAYLIST") == 0 && strcmp(ui.abar[4].text, "I-MIX") == 0,
+          "T: abar_has_6_and_fits_800: labels are \"%s\" / \"%s\"", ui.abar[5].text, ui.abar[4].text);
+    for (int i = 0; i < JF_UI_ABAR; i++) {
+        int ink = 6 * (int)strlen(ui.abar[i].text) * ui.abar[i].text_scale;
+        CHECK(ui.L.abar[i].x + ui.L.abar[i].w <= 800 && ink <= ui.L.abar[i].w - 12,
+              "T: abar_has_6_and_fits_800: button %d \"%s\" is %d px of ink in a %d px button at x %d", i, ui.abar[i].text, ink, ui.L.abar[i].w, ui.L.abar[i].x);
+    }
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+
+    /* abar_plus_playlist_emits_pick_open */
+    r = ui.L.abar[5];
+    n = tap_at(&ui, r.x + r.w / 2, r.y + r.h / 2, 2000, ev);
+    CHECK(has_event(ev, n, JF_EV_PICK_OPEN) && ev[0].i == 2, "T: abar_plus_playlist_emits_pick_open: no PICK_OPEN on row 2 (%d events)", n);
+    r = ui.L.abar[4];
+    n = tap_at(&ui, r.x + r.w / 2, r.y + r.h / 2, 3000, ev);
+    CHECK(has_event(ev, n, JF_EV_INSTANT_MIX) && !has_event(ev, n, JF_EV_PICK_OPEN), "T: abar_plus_playlist_emits_pick_open: I-MIX button changed its event");
+    for (int k = 0; k < 5; k++) feed_btn(&ui, BTN_ID_RIGHT, 4000u + 100u * (uint32_t)k, ev, MINI_MAX);
+    n = feed_btn(&ui, BTN_ID_ACTION, 5000, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_PICK_OPEN), "T: abar_plus_playlist_emits_pick_open: five Rights then Enter is not + PLAYLIST (%d events)", n);
+    jf_ui_free(&ui);
+
+    /* row3_plus_playlist_on_album_tracks_only: an album's or playlist's tracks only, not an artist's albums, search or a genre's tracks */
+    static const struct { JfScreen sc; bool genre; bool want; const char *name; } rc[4] = {
+        { JF_SCR_TRACKS, false, true, "tracks" }, { JF_SCR_TRACKS, true, false, "genre tracks" },
+        { JF_SCR_ALBUMS, false, false, "albums" }, { JF_SCR_SEARCH, false, false, "search" } };
+    for (int k = 0; k < 4; k++) {
+        tk_setup(&app, rc[k].sc, false);
+        if (rc[k].genre) app.ctx[JF_LIST_TRACKS].sub = JF_SUB_GENRE;
+        jf_ui_init(&ui, &fb, &touch, NULL, &app);
+        feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+        r = ui.L.row4[3];
+        n = tap_at(&ui, r.x + r.w / 2, r.y + r.h / 2, 2000, ev);
+        bool got = has_event(ev, n, JF_EV_PICK_OPEN);
+        CHECK(got == rc[k].want && (!got || ev[0].i == -1), "T: row3_plus_playlist_on_album_tracks_only: %s: PICK_OPEN %d, want %d", rc[k].name, got, rc[k].want);
+        if (k == 0) CHECK(strcmp(ui.row4[3].text, "+ PLAYLIST") == 0, "T: row3_plus_playlist_on_album_tracks_only: label \"%s\"", ui.row4[3].text);
+        jf_ui_free(&ui);
+    }
+
+    /* the picker's rows: row 0 is NEW PLAYLIST, row k is playlist k-1 */
+    pp_setup(&app, -1);
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    LvRow row;
+    memset(&row, 0, sizeof row);
+    CHECK(ui.lv.src.count(ui.lv.src.ctx) == 4, "T: plpick_row0_is_new_playlist: %d rows, want 4", ui.lv.src.count(ui.lv.src.ctx));
+    ui.lv.src.row(ui.lv.src.ctx, 0, &row);
+    CHECK(row.title && strcmp(row.title, "+ NEW PLAYLIST") == 0, "T: plpick_row0_is_new_playlist: row 0 is \"%s\"", row.title ? row.title : "(null)");
+    for (int k = 1; k <= 3; k++) {
+        memset(&row, 0, sizeof row);
+        ui.lv.src.row(ui.lv.src.ctx, k, &row);
+        char want[8];
+        snprintf(want, sizeof want, "PL%d", k - 1);
+        CHECK(row.title && strstr(row.title, want), "T: plpick_row_k_maps_to_list_k_minus_1: row %d is \"%s\", want %s", k, row.title ? row.title : "(null)", want);
+    }
+
+    /* plpick_select_emits_pick_select_not_activate: a tap on list row 2 selects playlist 1 and opens nothing */
+    r = ui.lv.rect;
+    n = tap_at(&ui, r.x + r.w / 2, r.y + 2 * 40 + 20, 2000, ev);
+    CHECK(has_event(ev, n, JF_EV_PICK_SELECT) && ev[0].i == 1, "T: plpick_select_emits_pick_select_not_activate: no PICK_SELECT 1 (%d events)", n);
+    CHECK(!has_event(ev, n, JF_EV_SELECT) && !has_event(ev, n, JF_EV_ACTIVATE), "T: plpick_select_emits_pick_select_not_activate: a tap opened something");
+
+    /* plpick_esc_closes */
+    n = feed_btn(&ui, BTN_ID_BACK, 3000, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_PICK_CLOSE), "T: plpick_esc_closes: Back sent no PICK_CLOSE (%d events)", n);
+    r = ui.L.mixb[1];
+    n = tap_at(&ui, r.x + r.w / 2, r.y + r.h / 2, 4000, ev);
+    CHECK(has_event(ev, n, JF_EV_PICK_CLOSE) && strcmp(ui.mixb[1].text, "CLOSE") == 0, "T: plpick_buttons_reuse_mixb: CLOSE sent no PICK_CLOSE (%d events)", n);
+
+    /* plpick_add_absent_without_selection: no selection, no ADD (not greyed, and a tap on its place does nothing) */
+    CHECK(!jf_ui_plpick_add_shown(&app), "T: plpick_add_absent_without_selection: ADD shown with pick_sel -1");
+    r = ui.L.mixb[0];
+    n = tap_at(&ui, r.x + r.w / 2, r.y + r.h / 2, 5000, ev);
+    CHECK(!has_event(ev, n, JF_EV_PICK_ADD), "T: plpick_add_absent_without_selection: a tap on the empty ADD place sent PICK_ADD");
+    app.pick_sel = 1;
+    CHECK(jf_ui_plpick_add_shown(&app), "T: plpick_add_absent_without_selection: ADD missing with a selection");
+    feed(&ui, 0, 0, false, false, false, 5500, ev, MINI_MAX);
+    n = tap_at(&ui, r.x + r.w / 2, r.y + r.h / 2, 6000, ev);
+    CHECK(has_event(ev, n, JF_EV_PICK_ADD) && strcmp(ui.mixb[0].text, "ADD") == 0, "T: plpick_buttons_reuse_mixb: ADD sent no PICK_ADD (%d events)", n);
+    app.dup_scan = true;
+    CHECK(!jf_ui_plpick_add_shown(&app), "T: plpick_add_absent_without_selection: ADD shown during the duplicate scan");
+    app.dup_scan = false;
+
+    /* plpick_select_marks_one_row: pick_sel 1 is list row 2, and only that row carries the yellow bar */
+    feed(&ui, 0, 0, false, false, false, 7000, ev, MINI_MAX);
+    int marked = 0;
+    for (int i = 0; i < 4; i++) if (lv_is_marked(&ui.lv, i)) marked++;
+    CHECK(marked == 1 && lv_is_marked(&ui.lv, 2), "T: plpick_select_marks_one_row: %d rows marked, row 2 %d", marked, lv_is_marked(&ui.lv, 2));
+    app.pick_sel = -1;
+    feed(&ui, 0, 0, false, false, false, 8000, ev, MINI_MAX);
+    CHECK(!lv_is_marked(&ui.lv, 2) && !lv_is_marked(&ui.lv, 0), "T: plpick_select_marks_one_row: a mark stayed with no selection");
+    jf_ui_free(&ui);
+
+    /* dup_confirm_titles */
+    char t[96];
+    snprintf(app.add_name, sizeof app.add_name, "MIXTAPE");
+    app.pick_n = 1; app.dup_hits = 1; app.dup_unknown = false;
+    jf_ui_dup_title(&app, t, sizeof t);
+    CHECK(strcmp(t, "ALREADY IN MIXTAPE") == 0, "T: dup_confirm_titles: one of one is \"%s\"", t);
+    app.pick_n = 12; app.dup_hits = 3;
+    jf_ui_dup_title(&app, t, sizeof t);
+    CHECK(strcmp(t, "3 OF 12 ALREADY IN MIXTAPE") == 0, "T: dup_confirm_titles: some is \"%s\"", t);
+    app.dup_unknown = true;
+    jf_ui_dup_title(&app, t, sizeof t);
+    CHECK(strcmp(t, "COULD NOT CHECK DUPLICATES - ADD?") == 0, "T: dup_confirm_titles: unknown is \"%s\"", t);
+}
+
 int main(void)
 {
+    add_to_playlist();
     run(0, 0, 0, 0);
     run(17, 17, 3, 3);       /* the measured unit */
     run(30, 30, 10, 10);

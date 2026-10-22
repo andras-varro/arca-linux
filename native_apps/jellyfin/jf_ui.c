@@ -64,9 +64,12 @@ void jf_ui_layout(JfLayout *L, const JfExtents *e)
     int w3 = (sw - 2 * GAP) / 3;
     for (int i = 0; i < JF_UI_ROW3; i++)
         L->row3[i] = rect_of(sl + i * (w3 + GAP), rowy, w3, JF_UI_BTN_H);
-    int w5 = (sw - 4 * GAP) / 5;
+    int w4 = (sw - 3 * GAP) / 4;
+    for (int i = 0; i < JF_UI_ROW4; i++)
+        L->row4[i] = rect_of(sl + i * (w4 + GAP), rowy, w4, JF_UI_BTN_H);
+    int w6 = (sw - 5 * GAP) / 6;
     for (int i = 0; i < JF_UI_ABAR; i++)
-        L->abar[i] = rect_of(sl + i * (w5 + GAP), rowy, w5, JF_UI_BTN_H);
+        L->abar[i] = rect_of(sl + i * (w6 + GAP), rowy, w6, JF_UI_BTN_H);
     for (int i = 0; i < JF_UI_MIXBTN; i++)
         L->mixb[i] = rect_of(sl + i * ((sw - GAP) / 2 + GAP), rowy, (sw - GAP) / 2, JF_UI_BTN_H);
     /* now playing and its queue view: one row of buttons, none narrower than the minimum; when the width does not hold
@@ -118,6 +121,7 @@ static int src_count(void *ctx)
     const JfUi *ui = ctx;
     if (ui->app->screen == JF_SCR_QUEUE) return ui->app->queue_n;
     if (ui->app->screen == JF_SCR_MIX) return ui->app->mix.opt_n;
+    if (ui->app->screen == JF_SCR_PLPICK) return ui->app->lists[JF_LIST_PLPICK].n + 1;   /* row 0 is + NEW PLAYLIST */
     if (ui->app->screen == JF_SCR_SETTINGS) {
         int ids[JF_SET_COUNT];
         if (ui->app->settings_page == JF_SETPAGE_LIBRARY) return 1 + ui->app->lists[JF_LIST_LIBS].n;
@@ -148,6 +152,7 @@ static int chosen_lib_row(const JfApp *app)
 static bool mark_want(const JfApp *app, int i)
 {
     if (app->screen == JF_SCR_SETTINGS) return app->settings_page == JF_SETPAGE_LIBRARY && i == chosen_lib_row(app);
+    if (app->screen == JF_SCR_PLPICK) return i == app->pick_sel + 1 && app->pick_sel >= 0;   /* the chosen playlist, one bar */
     return i < app->mix.opt_n && i < JF_MIX_OPT_MAX && app->mix.opt[i].on;
 }
 
@@ -175,6 +180,14 @@ static void src_row(void *ctx, int index, LvRow *out)
         /* The tick is not drawn here: mix_sync_marks() mirrors it into the ListView mark, which draws the bar. */
         out->title = app->mix.opt[index].label;
         out->glyph = LV_GLYPH_BLANK;
+        return;
+    }
+    if (app->screen == JF_SCR_PLPICK) {
+        /* row 0 starts a new playlist; row k is the picker list's k-1'th playlist */
+        out->glyph = LV_GLYPH_BLANK;
+        if (index == 0) { out->title = "+ NEW PLAYLIST"; return; }
+        if (index < 0 || index > app->lists[JF_LIST_PLPICK].n) return;
+        out->title = app->lists[JF_LIST_PLPICK].items[index - 1].name;
         return;
     }
     if (app->screen == JF_SCR_SETTINGS) {
@@ -257,12 +270,18 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
 
     static const char *t3[JF_UI_ROW3] = { "SEARCH", "NOW PLAYING", "PLAY ALL" };
     for (int i = 0; i < JF_UI_ROW3; i++) style(&ui->row3[i], ui->L.row3[i], t3[i], 2);
-    static const char *ta[JF_UI_ABAR] = { "PLAY", "PLAY NEXT", "ADD QUEUE", "MIX", "INSTANT MIX" };
+    static const char *ta[JF_UI_ABAR] = { "PLAY", "PLAY NEXT", "ADD QUEUE", "MIX", "I-MIX", "+ PLAYLIST" };
     static const char *tn[JF_UI_NP] = { "", "", "", "", "QUEUE", "MIX", "I-MIX", "EQ", "VOL+", "VOL-" };
     static const char *tmini[JF_UI_MINI] = { "PAUSE", "VOL -", "VOL +" };
     for (int i = 0; i < JF_UI_MINI; i++) style(&ui->mini_b[i], ui->L.mini_btn[i], tmini[i], 2);
     for (int i = 0; i < JF_UI_MINI; i++) style(&ui->pmenu[i], ui->L.mini_btn[i], "", 2);
-    for (int i = 0; i < JF_UI_ABAR; i++) style(&ui->abar[i], ui->L.abar[i], ta[i], 2);
+    /* a label whose ink at scale 2 would leave no margin in its button ("+ PLAYLIST" is 120 px in a 124 px one) drops to scale 1 */
+    for (int i = 0; i < JF_UI_ABAR; i++)
+        style(&ui->abar[i], ui->L.abar[i], ta[i], 6 * (int)strlen(ta[i]) * 2 <= ui->L.abar[i].w - 12 ? 2 : 1);
+    for (int i = 0; i < JF_UI_ROW4; i++) {
+        const char *t4 = i < JF_UI_ROW3 ? t3[i] : "+ PLAYLIST";
+        style(&ui->row4[i], ui->L.row4[i], t4, 6 * (int)strlen(t4) * 2 <= ui->L.row4[i].w - 12 ? 2 : 1);
+    }
     for (int i = 0; i < JF_UI_NP; i++) style(&ui->np[i], ui->L.np[i], tn[i], 2);
     static const char *tq[JF_UI_QROW] = { "", "", "", "", "SAVE", "CLR", "RND", "REMOVE", "EQ", "VOL+", "VOL-" };
     /* a label whose ink at scale 2 would leave no margin in its button (REMOVE in the 65 px buttons) drops to scale 1 */
@@ -398,6 +417,35 @@ static bool mini_player(const JfApp *app)
 
 static int abar_count(const JfApp *app) { return pmenu_up(app) ? pmenu_n(app) : JF_UI_ABAR; }
 
+/* ADD exists only with a playlist chosen and nothing in flight: it is absent (not greyed) otherwise. */
+bool jf_ui_plpick_add_shown(const JfApp *app)
+{
+    return app->pick_sel >= 0 && app->pick_sel < app->lists[JF_LIST_PLPICK].n &&
+           !app->pick_wait && !app->dup_scan && !app->add_pending;
+}
+
+/* The duplicate question's message.  The name is cut to the dialog's width (20 glyphs at scale 2); the counts say how much
+ * of the add is already there, and an unchecked add says so instead. */
+void jf_ui_dup_title(const JfApp *app, char *buf, size_t cap)
+{
+    char nm[64];
+    if (app->dup_unknown) { snprintf(buf, cap, "COULD NOT CHECK DUPLICATES - ADD?"); return; }
+    lv_fit(nm, sizeof nm, app->add_name, 20 * 6 * 2, 2);
+    if (app->dup_hits >= app->pick_n) snprintf(buf, cap, "ALREADY IN %s", nm);
+    else snprintf(buf, cap, "%d OF %d ALREADY IN %s", app->dup_hits, app->pick_n, nm);
+}
+
+/* The new playlist's name: the keyboard asks (an empty or cancelled entry sends nothing); the core makes it from the picked ids. */
+static void do_pick_new(JfUi *ui, Pointer *ptr, JfEvent *out, int *n, int max)
+{
+    char name[96] = "";
+    int rc = keyboard_enter(ui->fb, ui->touch, ui->gm, "PLAYLIST NAME", name, 80, KB_LAYOUT_FULL);
+    drain_after_keyboard(ui, ptr);
+    if (rc != KB_RESULT_OK || !name[0]) return;
+    int k = emit(out, n, max, JF_EV_PICK_NEW);
+    if (k >= 0) snprintf(out[k].term, sizeof out[k].term, "%s", name);
+}
+
 static const char *mini_play_label(const JfApp *app)
 {
     return app->play_state == JF_PLAY_PLAYING || app->play_state == JF_PLAY_FETCHING ? "PAUSE" : "PLAY";
@@ -426,7 +474,7 @@ static void begin_screen(JfUi *ui)
         if (!ui->fields[0][0]) snprintf(ui->fields[0], sizeof ui->fields[0], "%s", app->login.server);
         if (!ui->fields[1][0]) snprintf(ui->fields[1], sizeof ui->fields[1], "%s", app->login.user);
     }
-    if (app->screen == JF_SCR_QUEUE || app->screen == JF_SCR_MIX || is_list_screen(app->screen)) {
+    if (app->screen == JF_SCR_QUEUE || app->screen == JF_SCR_MIX || app->screen == JF_SCR_PLPICK || is_list_screen(app->screen)) {
         ui->mini_on = mini_wanted(app);
         ui->lv.rect = list_rect_for(ui, app->screen);
         lv_reset(&ui->lv);
@@ -457,13 +505,21 @@ static void settings_sync(JfUi *ui)
 /* The button row: SEARCH, NOW PLAYING and, at the root, SETTINGS; below the root SEARCH, NOW PLAYING and (on track lists)
  * PLAY ALL.  The root's categories are stepped with Left / Right and the header picker. */
 static bool at_root(const JfApp *app) { return app->screen == JF_SCR_ARTISTS; }
-static int row_n(const JfApp *app) { (void)app; return JF_UI_ROW3; }
+
+/* An album's or a playlist's tracks carry a fourth button, + PLAYLIST; a genre's track list, search and an artist's albums do not. */
+static bool tracks4(const JfApp *app)
+{
+    return app->screen == JF_SCR_TRACKS && app->ctx[JF_LIST_TRACKS].sub != JF_SUB_GENRE;
+}
+
+static int row_n(const JfApp *app) { return tracks4(app) ? JF_UI_ROW4 : JF_UI_ROW3; }
 
 /* Which slots of the row exist on this screen. */
 static bool row3_on(const JfApp *app, int i)
 {
     if (i == 0) return true;
     if (i == 1) return app->queue_n > 0;
+    if (i == 3) return tracks4(app);
     return at_root(app) || app->screen == JF_SCR_TRACKS || app->screen == JF_SCR_SEARCH;
 }
 
@@ -481,6 +537,10 @@ static void row3_act(JfUi *ui, Pointer *ptr, int i, JfEvent *out, int *n, int ma
 {
     if (i == 0) do_search(ui, ptr, out, n, max);
     else if (i == 1) emit(out, n, max, JF_EV_OPEN_NOWPLAYING);
+    else if (i == 3) {   /* every track of the list; the core fetches the pages not loaded yet */
+        int k = emit(out, n, max, JF_EV_PICK_OPEN);
+        if (k >= 0) out[k].i = -1;
+    }
     else emit(out, n, max, at_root(ui->app) ? JF_EV_SETTINGS_OPEN : JF_EV_PLAY_ALL);
 }
 
@@ -545,10 +605,10 @@ static void np_act(int i, JfEvent *out, int *n, int max)
     else emit(out, n, max, t[i]);
 }
 
-/* The five buttons of the action bar, on list row `row` (-1 = the playing track, NOW PLAYING's MIX pair). */
+/* The six buttons of the action bar, on list row `row` (-1 = the playing track, NOW PLAYING's MIX pair). */
 static void abar_act(int i, int row, JfEvent *out, int *n, int max)
 {
-    static const JfEventType t[JF_UI_ABAR] = { JF_EV_ACTIVATE, JF_EV_PLAY_NEXT, JF_EV_ADD_QUEUE, JF_EV_MIX, JF_EV_INSTANT_MIX };
+    static const JfEventType t[JF_UI_ABAR] = { JF_EV_ACTIVATE, JF_EV_PLAY_NEXT, JF_EV_ADD_QUEUE, JF_EV_MIX, JF_EV_INSTANT_MIX, JF_EV_PICK_OPEN };
     int k = emit(out, n, max, t[i]);
     if (k >= 0) out[k].i = row;
 }
@@ -794,6 +854,11 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
                 modal_dialog_init(&ui->cdlg, "SIGN OUT?", "THE QUEUE IS CLEARED", 2);
                 modal_dialog_set_button(&ui->cdlg, 0, "SIGN OUT", BTN_BG, COLOR_WHITE);
                 modal_dialog_set_button(&ui->cdlg, 1, "CANCEL", RGB(90, 40, 40), COLOR_WHITE);
+            } else if (app->confirm == JF_CONFIRM_ADD_DUP) {
+                jf_ui_dup_title(app, msg, sizeof msg);
+                modal_dialog_init(&ui->cdlg, "ADD TO PLAYLIST", msg, 2);
+                modal_dialog_set_button(&ui->cdlg, 0, "ADD ANYWAY", BTN_BG, COLOR_WHITE);
+                modal_dialog_set_button(&ui->cdlg, 1, "CANCEL", RGB(90, 40, 40), COLOR_WHITE);
             } else if (app->confirm == JF_CONFIRM_DELETE_PLAYLIST) {
                 lv_fit(nm, sizeof nm, app->confirm_seed.name, 8 * 6 * 2, 2);
                 snprintf(msg, sizeof msg, "DELETE PLAYLIST %s?", nm);
@@ -934,6 +999,50 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
                 ui->seeking = false;
             } else if (!ts->held && !ts->pressed) ui->seeking = false;
         }
+        return n;
+    }
+
+    if (sc == JF_SCR_PLPICK) {
+        /* Row 0 is + NEW PLAYLIST (the keyboard names it); the other rows only select.  ADD (absent until something is
+         * chosen) and CLOSE are the MIX screen's two button slots. */
+        bool add = jf_ui_plpick_add_shown(app);
+        int cnt = src_count(ui);
+        snprintf(ui->mixb[0].text, sizeof ui->mixb[0].text, "%s", add ? "ADD" : "");
+        snprintf(ui->mixb[1].text, sizeof ui->mixb[1].text, "CLOSE");
+        if (go_back) emit(out, &n, max, JF_EV_PICK_CLOSE);
+        const InputState *lin = NULL;
+        if (ui->zone == JF_ZONE_LIST) {
+            lin = in;
+            if (bp(in, BTN_ID_DOWN) && ui->lv.cursor >= cnt - 1) {
+                ui->zone = JF_ZONE_ROW; ui->focus = add ? 0 : 1; lin = NULL; ui->dirty = true;
+            } else if (bp(in, BTN_ID_UP) && ui->lv.cursor <= 0) {
+                ui->zone = JF_ZONE_BAR; ui->bar_focus = ui->bar.has_back ? 0 : 1; lin = NULL; ui->dirty = true;
+            }
+        }
+        ui->lv.active = ui->zone == JF_ZONE_LIST;
+        lv_sync(&ui->lv);
+        mix_sync_marks(ui);
+        LvEvent ev = lv_input(&ui->lv, ts, lin, now);
+        if (ev != LV_EV_NONE) ui->dirty = true;
+        bool pick = ev == LV_EV_TAP || ev == LV_EV_ACTIVATE;
+        if (ui->zone == JF_ZONE_LIST && lin && bp(lin, BTN_ID_JUMP)) pick = true;
+        if (pick && ui->lv.cursor == 0) do_pick_new(ui, ptr, out, &n, max);
+        else if (pick && ui->lv.cursor > 0 && ui->lv.cursor < cnt) {
+            int k = emit(out, &n, max, JF_EV_PICK_SELECT);
+            if (k >= 0) out[k].i = ui->lv.cursor - 1;
+        }
+        if (ui->zone == JF_ZONE_ROW) {
+            if (!add) ui->focus = 1;
+            else if (bp(in, BTN_ID_LEFT) || bp(in, BTN_ID_RIGHT)) ui->focus ^= 1;
+            if (bp(in, BTN_ID_UP) || bp(in, BTN_ID_DOWN)) ui->zone = JF_ZONE_LIST;
+            else if (act) emit(out, &n, max, ui->focus == 0 ? JF_EV_PICK_ADD : JF_EV_PICK_CLOSE);
+        } else if (ui->zone == JF_ZONE_BAR) {
+            if ((bp(in, BTN_ID_LEFT) || bp(in, BTN_ID_RIGHT)) && ui->bar.has_back) ui->bar_focus ^= 1;
+            if (bp(in, BTN_ID_DOWN)) ui->zone = JF_ZONE_LIST;
+            else if (act) emit(out, &n, max, ui->bar_focus == 0 ? JF_EV_PICK_CLOSE : JF_EV_QUIT);
+        }
+        if (add && button_check_tap(&ui->mixb[0], ts, now)) emit(out, &n, max, JF_EV_PICK_ADD);
+        if (button_check_tap(&ui->mixb[1], ts, now)) emit(out, &n, max, JF_EV_PICK_CLOSE);
         return n;
     }
 
@@ -1122,7 +1231,7 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         for (int i = 0; i < Q_BTNS; i++)
             if (button_check_tap(&qb[i], ts, now)) queue_row_act(ui, ptr, i, now, out, &n, max);
     } else if (has_row && (!app->action_bar || pmenu_up(app))) {
-        Button *rb = ui->row3;
+        Button *rb = tracks4(app) ? ui->row4 : ui->row3;
         for (int i = 0; i < row_n(app); i++)
             if (row3_on(app, i) && button_check_tap(&rb[i], ts, now)) row3_act(ui, ptr, i, out, &n, max);
     }
@@ -1158,7 +1267,8 @@ static void draw_banner(JfUi *ui)
         snprintf(c, sizeof c, "%d %s", app->list->total, what);
         fb_draw_text(ui->fb, b.x + 4, b.y + 2, c, DIM, 2);
     }
-    if (app->busy) fb_draw_text(ui->fb, b.x + b.w - 8 - text_measure_width("LOADING", 2), b.y + 2, "LOADING", DIM, 2);
+    if (app->busy || app->pick_wait || app->dup_scan || app->add_pending)
+        fb_draw_text(ui->fb, b.x + b.w - 8 - text_measure_width("LOADING", 2), b.y + 2, "LOADING", DIM, 2);
     if (app->screen == JF_SCR_MIX && !app->banner[0] &&
         (app->mix.phase == JF_MIX_INDEX || app->mix.phase == JF_MIX_POOL)) {
         char c[32];
@@ -1200,12 +1310,15 @@ static void draw_row3(JfUi *ui)
         }
         return;
     }
+    bool t4 = tracks4(ui->app);
+    Button *rb = t4 ? ui->row4 : ui->row3;
+    const UiRect *rr = t4 ? ui->L.row4 : ui->L.row3;
     if (at_root(ui->app)) snprintf(ui->row3[2].text, sizeof ui->row3[2].text, "SETTINGS");
     else snprintf(ui->row3[2].text, sizeof ui->row3[2].text, "PLAY ALL");
-    for (int i = 0; i < JF_UI_ROW3; i++) {
+    for (int i = 0; i < row_n(ui->app); i++) {
         if (!row3_on(ui->app, i)) continue;
-        button_draw(ui->fb, &ui->row3[i]);
-        if (ui->show_ring && ui->zone == JF_ZONE_ROW && ui->focus == i) ring(ui, ui->L.row3[i]);
+        button_draw(ui->fb, &rb[i]);
+        if (ui->show_ring && ui->zone == JF_ZONE_ROW && ui->focus == i) ring(ui, rr[i]);
     }
 }
 
@@ -1342,6 +1455,10 @@ void jf_ui_draw(JfUi *ui)
         break;
     case JF_SCR_ARTISTS: title = root_title(ui); break;
     case JF_SCR_NOWPLAYING: title = "NOW PLAYING"; break;
+    case JF_SCR_PLPICK:
+        snprintf(ui->head_title, sizeof ui->head_title, "ADD %d TRACK%s TO PLAYLIST", app->pick_n, app->pick_n == 1 ? "" : "S");
+        title = ui->head_title;
+        break;
     case JF_SCR_QUEUE: title = "QUEUE"; break;
     case JF_SCR_SETTINGS: title = app->settings_page == JF_SETPAGE_LIBRARY ? "LIBRARY" : "SETTINGS"; break;
     default: break;
@@ -1391,6 +1508,18 @@ void jf_ui_draw(JfUi *ui)
         lv_sync(&ui->lv);
         mix_sync_marks(ui);
         lv_draw(fb, &ui->lv, "NOTHING HERE");
+        break;
+    case JF_SCR_PLPICK:
+        ui->lv.active = ui->zone == JF_ZONE_LIST;
+        lv_sync(&ui->lv);
+        mix_sync_marks(ui);
+        lv_draw(fb, &ui->lv, "");
+        snprintf(ui->mixb[0].text, sizeof ui->mixb[0].text, "%s", jf_ui_plpick_add_shown(app) ? "ADD" : "");
+        snprintf(ui->mixb[1].text, sizeof ui->mixb[1].text, "CLOSE");
+        for (int i = jf_ui_plpick_add_shown(app) ? 0 : 1; i < JF_UI_MIXBTN; i++) {
+            button_draw(fb, &ui->mixb[i]);
+            if (ui->show_ring && ui->zone == JF_ZONE_ROW && ui->focus == i) ring(ui, ui->L.mixb[i]);
+        }
         break;
     case JF_SCR_MIX:
         ui->lv.active = ui->zone == JF_ZONE_LIST;

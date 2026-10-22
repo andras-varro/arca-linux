@@ -24,13 +24,14 @@
 #include "eq_panel.h"
 
 #define JF_UI_ROW3   3     /* browse screens: SEARCH, NOW PLAYING, PLAY ALL; the root: SEARCH, NOW PLAYING, SETTINGS */
+#define JF_UI_ROW4   4     /* an album's or playlist's tracks: those three and + PLAYLIST (a quarter of the width each; the layout has no screen argument, so JF_UI_ROW3 stays) */
 #define JF_UI_ART   120    /* now playing: the cover square, the height of the info block */
 #define JF_UI_NP     10    /* now playing, one row (wraps in portrait): PREV, PLAY/PAUSE, STOP, NEXT, QUEUE, MIX, I-MIX, EQ, VOL +, VOL - */
 #define JF_UI_NP_EQ  7     /* the EQ button's index in that row */
 #define JF_UI_QROW  11     /* the queue view of now playing: PREV, PLAY/PAUSE, STOP, NEXT, SAVE, CLR, RND, REMOVE, EQ, VOL +, VOL - */
 #define JF_UI_QROW_EQ 8    /* the EQ button's index in that row */
 #define JF_UI_FIELDS 3     /* sign-in: SERVER, USER, PASSWORD */
-#define JF_UI_ABAR   5     /* action bar: PLAY, PLAY NEXT, ADD QUEUE, MIX, INSTANT MIX */
+#define JF_UI_ABAR   6     /* action bar: PLAY, PLAY NEXT, ADD QUEUE, MIX, I-MIX, + PLAYLIST */
 #define JF_UI_MINI   3     /* mini player: PLAY/PAUSE, VOL -, VOL + */
 #define JF_UI_MINI_H 40    /* the strip above the button row */
 #define JF_UI_MIXBTN 2     /* MIX screen: START, CANCEL */
@@ -59,6 +60,7 @@ typedef struct {
     UiRect seek;                    /* now playing: the progress bar's touch area (taller than the bar); pressable */
     UiRect mixb[JF_UI_MIXBTN];      /* MIX screen: START, CANCEL in the button row; pressable (the tick rows are the list) */
     UiRect row3[JF_UI_ROW3];        /* pressable */
+    UiRect row4[JF_UI_ROW4];        /* the four-button row of an album's or playlist's tracks; pressable */
     UiRect field[JF_UI_FIELDS];     /* sign-in rows, pressable */
     UiRect signin, signexit;        /* sign-in buttons, pressable */
     UiRect progress;                /* now playing bar, drawn only */
@@ -67,6 +69,12 @@ typedef struct {
 
 void jf_ui_layout(JfLayout *L, const JfExtents *e);
 void jf_ui_extents_live(JfExtents *e);
+
+/** The picker's ADD button exists only with a playlist selected and no scan, add or collection in flight (absent, not greyed). */
+bool jf_ui_plpick_add_shown(const JfApp *app);
+/** The duplicate question's message: "ALREADY IN <name>", "<k> OF <n> ALREADY IN <name>" or, when the scan could not tell,
+ *  "COULD NOT CHECK DUPLICATES - ADD?".  The name is cut to fit the dialog. */
+void jf_ui_dup_title(const JfApp *app, char *buf, size_t cap);
 
 /* ABAR: the action bar owns focus while the core says it is up (Left / Right move, ENTER acts, Up / Down dismiss it). */
 typedef enum { JF_ZONE_LIST = 0, JF_ZONE_ROW, JF_ZONE_BAR, JF_ZONE_ABAR } JfZone;
@@ -79,7 +87,7 @@ typedef struct {
     JfLayout L;
     TopBar bar;
     ListView lv;
-    Button row3[JF_UI_ROW3], np[JF_UI_NP], abar[JF_UI_ABAR], qrow[JF_UI_QROW], mini_b[JF_UI_MINI];
+    Button row3[JF_UI_ROW3], row4[JF_UI_ROW4], np[JF_UI_NP], abar[JF_UI_ABAR], qrow[JF_UI_QROW], mini_b[JF_UI_MINI];
     Button pmenu[JF_UI_MINI];            /* the playlist action menu: OPEN, DELETE, CANCEL on the mini player's button rects */
     ModalDialog cdlg;                    /* the INSTANT MIX confirmation */
     bool cdlg_up;
