@@ -69,6 +69,12 @@ static int cur_list(const JfApp *app) { return list_of_screen(app->screen); }
 
 static bool have_token(const JfApp *app) { return app->login.token[0] != '\0'; }
 
+bool jf_can_delete(const JfApp *app)
+{
+    return app->policy_known && !app->delete_denied &&
+           (app->policy.is_admin || app->policy.content_deletion || app->policy.deletion_folders_n > 0);
+}
+
 /* ── list requests ─────────────────────────────────────────────────────── */
 
 static const char *const CAT_NAME[JF_CAT_COUNT] = { "ALBUMS", "ARTISTS", "PLAYLISTS", "GENRES", "SONGS" };
@@ -521,8 +527,31 @@ static void sign_out(JfApp *app, JfCmds *out)
     set_banner(app, "SIGNED OUT");
 }
 
+/* DELETE on a playlist row: ask first; nothing is sent until CONFIRM.  One delete at a time. */
+static void on_playlist_delete(JfApp *app, int i)
+{
+    int lid = cur_list(app);
+    if (app->delete_pending || lid < 0 || i < 0 || i >= app->lists[lid].n || !have_token(app)) return;
+    if (app->lists[lid].items[i].type != JF_ITEM_PLAYLIST) return;
+    app->confirm_seed = app->lists[lid].items[i];
+    app->confirm = JF_CONFIRM_DELETE_PLAYLIST;
+}
+
 static void on_confirm(JfApp *app, JfCmds *out)
 {
+    if (app->confirm == JF_CONFIRM_DELETE_PLAYLIST) {
+        app->confirm = JF_CONFIRM_NONE;
+        if (app->delete_pending || !have_token(app)) return;
+        JfCmd *c = emit(out, JF_CMD_REQUEST);
+        c->kind = JF_KIND_WRITE;
+        c->tag = ++app->delete_tag;
+        copy(c->method, sizeof(c->method), "DELETE");
+        if (jf_path_playlist_delete(c->path, sizeof(c->path), app->confirm_seed.id) < 0) { out->n--; return; }
+        copy(app->del_name, sizeof(app->del_name), app->confirm_seed.name);
+        app->delete_pending = true;
+        app->retry = *c;
+        return;
+    }
     if (app->confirm == JF_CONFIRM_CLEAR_QUEUE) {
         app->confirm = JF_CONFIRM_NONE;
         clear_queue(app, out);
@@ -850,6 +879,10 @@ static void on_save(JfApp *app, const char *name, JfCmds *out)
 static void session_expired(JfApp *app, JfCmds *out)
 {
     app->save_pending = false;
+    app->delete_pending = false;     /* the policy belongs to the user who is gone; the next sign-in answers it again */
+    app->user_pending = false;
+    app->policy_known = app->delete_denied = false;
+    memset(&app->policy, 0, sizeof(app->policy));
     app->mix.phase = JF_MIX_OFF;
     jf_wipe(app->login.token, sizeof(app->login.token));
     app->login.user_id[0] = '\0';
@@ -897,6 +930,9 @@ static void on_auth(JfApp *app, const JfResult *r, JfCmds *out)
     copy(app->id_user, sizeof(app->id_user), app->login.user);
     copy(app->login.token, sizeof(app->login.token), r->token);
     copy(app->login.user_id, sizeof(app->login.user_id), r->user_id);
+    app->policy = r->policy;
+    app->policy_known = true;
+    app->delete_denied = false;
     emit(out, JF_CMD_SET_AUTH);
     emit(out, JF_CMD_SAVE_LOGIN);
     app->nav_n = 0;
@@ -974,6 +1010,52 @@ static void on_save_result(JfApp *app, const JfResult *r, JfCmds *out)
     set_banner(app, b);
 }
 
+/* GET /Users/<uid>: the policy that decides whether DELETE is offered.  A failure leaves it unknown (DELETE stays absent) and is
+ * silent: nothing the user did depends on it, and a genuinely dead session is caught by the next list request. */
+static void on_user_result(JfApp *app, const JfResult *r)
+{
+    if (!app->user_pending || r->tag != app->user_tag) return;
+    app->user_pending = false;
+    if (r->err != JF_ERR_NONE) return;
+    app->policy = r->policy;
+    app->policy_known = true;
+}
+
+static void request_user(JfApp *app, JfCmds *out)
+{
+    JfCmd *c = emit(out, JF_CMD_REQUEST);
+    c->kind = JF_KIND_USER;
+    c->tag = ++app->user_tag;
+    if (jf_path_user(c->path, sizeof(c->path), app->login.user_id) < 0) { out->n--; return; }
+    app->user_pending = true;
+}
+
+/* The DELETE's answer.  401 / 403 here is the server refusing THIS right (a non-admin with EnableContentDeletion still got 401,
+ * measured), not a dead session: no sign-out, the token stays, DELETE is withdrawn and the policy is asked again.  Any other
+ * failure is the overlay, and RETRY re-sends (a DELETE of a gone item is harmless). */
+static void on_write_result(JfApp *app, const JfResult *r, JfCmds *out)
+{
+    if (!app->delete_pending || r->tag != app->delete_tag) return;
+    app->delete_pending = false;
+    if (r->err == JF_ERR_UNAUTH || r->err == JF_ERR_FORBIDDEN) {
+        set_banner(app, "SERVER REFUSED: NO DELETE RIGHT");
+        app->delete_denied = true;
+        request_user(app, out);
+        return;
+    }
+    if (r->err != JF_ERR_NONE) {
+        char t[48];
+        bool again = r->err == JF_ERR_UNREACHABLE || r->err == JF_ERR_SERVER;
+        set_overlay(app, err_text(t, sizeof t, r->err, r->status), again ? (JF_BTN_RETRY | JF_BTN_CLOSE) : JF_BTN_CLOSE);
+        return;
+    }
+    char b[48];
+    snprintf(b, sizeof b, "DELETED: %.38s", app->del_name);
+    if (app->screen == JF_SCR_ARTISTS && app->cat == JF_CAT_PLAYLISTS && app->nav_n == 0)
+        retarget(app, JF_LIST_ARTISTS, "", CAT_NAME[app->cat], JF_SUB_PLAIN, out);   /* the row is gone: page 0 again */
+    set_banner(app, b);
+}
+
 static void on_result(JfApp *app, const JfResult *r, JfCmds *out)
 {
     switch (r->kind) {
@@ -981,6 +1063,8 @@ static void on_result(JfApp *app, const JfResult *r, JfCmds *out)
     case JF_KIND_LIST:   on_list(app, r, out); break;
     case JF_KIND_STREAM: on_stream(app, r, out); break;
     case JF_KIND_SAVE:   on_save_result(app, r, out); break;
+    case JF_KIND_WRITE:  on_write_result(app, r, out); break;
+    case JF_KIND_USER:   on_user_result(app, r); break;
     default: break;
     }
 }
@@ -1006,6 +1090,7 @@ static void on_start(JfApp *app, const JfLogin *lg, JfCmds *out)
         app->screen = JF_SCR_ARTISTS;
         app->cat = JF_CAT_ARTISTS;
         retarget(app, JF_LIST_ARTISTS, "", CAT_NAME[app->cat], JF_SUB_PLAIN, out);
+        request_user(app, out);   /* a restored session has no sign-in reply to take the policy from; after the list request so it stays the first */
     } else {
         go_signin(app);
     }
@@ -1061,7 +1146,9 @@ static void on_select(JfApp *app, int i, JfCmds *out)
 {
     int lid = cur_list(app);
     if (lid < 0 || i < 0 || i >= app->lists[lid].n) return;
-    if (app->lists[lid].items[i].type != JF_ITEM_TRACK) { app->action_bar = false; on_activate(app, i, out); return; }
+    /* A playlist of the Playlists view gets a menu (OPEN / DELETE / CANCEL) in the track bar's mechanism; elsewhere it opens. */
+    bool menu = app->lists[lid].items[i].type == JF_ITEM_PLAYLIST && app->screen == JF_SCR_ARTISTS && app->cat == JF_CAT_PLAYLISTS;
+    if (app->lists[lid].items[i].type != JF_ITEM_TRACK && !menu) { app->action_bar = false; on_activate(app, i, out); return; }
     if (app->action_bar && app->action_row == i) app->action_bar = false;
     else { app->action_bar = true; app->action_row = i; }
 }
@@ -1413,6 +1500,7 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
             *c = app->retry;
             for (int k = 0; k < JF_LIST_COUNT; k++) app->lists[k].pending = false;
             if (c->list) c->list->pending = true;
+            if (c->kind == JF_KIND_WRITE) app->delete_pending = true;   /* the re-sent DELETE keeps its tag */
         } else if (ev->type == JF_EV_CLOSE_ERROR || ev->type == JF_EV_BACK) {
             app->overlay = false;
         }
@@ -1450,6 +1538,7 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
     case JF_EV_SAVE_PLAYLIST: on_save(app, ev->term, out); break;
     case JF_EV_CONFIRM:  on_confirm(app, out); break;
     case JF_EV_DISMISS:  break;
+    case JF_EV_PLAYLIST_DELETE: on_playlist_delete(app, ev->i); break;
     case JF_EV_BACK:     if (!bar_was && !confirm_was) on_back(app, out); break;
     case JF_EV_PLAY_ALL: on_play_all(app, out); break;
     case JF_EV_NEXT:     on_next(app, out); break;

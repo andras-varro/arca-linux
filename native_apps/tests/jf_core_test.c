@@ -134,8 +134,9 @@ static void test_start(void)
 
     signed_in();
     CHECK(app.screen == JF_SCR_ARTISTS && app.list == &app.lists[JF_LIST_ARTISTS], "token -> ARTISTS");
-    CHECK(cm.n == 3 && cm.c[0].type == JF_CMD_SET_SERVER && cm.c[1].type == JF_CMD_SET_AUTH && cm.c[2].type == JF_CMD_REQUEST,
-          "START emits SET_SERVER, SET_AUTH, REQUEST (n %d)", cm.n);
+    /* a restored session also asks for its delete policy (one USER request, after the list request) */
+    CHECK(cm.n == 4 && cm.c[3].type == JF_CMD_REQUEST && cm.c[3].kind == JF_KIND_USER && cm.c[0].type == JF_CMD_SET_SERVER && cm.c[1].type == JF_CMD_SET_AUTH && cm.c[2].type == JF_CMD_REQUEST,
+          "START emits SET_SERVER, SET_AUTH, REQUEST, USER (n %d)", cm.n);
     CHECK(strcmp(cm.c[0].host, "10.0.0.1") == 0 && cm.c[0].port == 8096, "server host/port");
     char want[JF_PATH_MAX];
     jf_path_artists(want, sizeof(want), UID, 0, JF_PAGE_ARTISTS);
@@ -1767,6 +1768,192 @@ static void test_signout(void)
     CHECK(!has(JF_CMD_PURGE_LOCAL) && app.queue_n == 1, "the same server and user keeps the queue");
 }
 
+/* ── DELETE PLAYLIST ───────────────────────────────────────────────────── */
+
+static void send_write_result(unsigned tag, JfErr e, int status)
+{
+    JfResult r; memset(&r, 0, sizeof r);
+    r.kind = JF_KIND_WRITE; r.tag = tag; r.err = e; r.status = status; r.fd = -1;
+    send_result(&r);
+}
+static void send_user_result(unsigned tag, JfErr e, bool admin, bool del, int folders)
+{
+    JfResult r; memset(&r, 0, sizeof r);
+    r.kind = JF_KIND_USER; r.tag = tag; r.err = e; r.fd = -1;
+    r.policy.is_admin = admin; r.policy.content_deletion = del; r.policy.deletion_folders_n = folders;
+    send_result(&r);
+}
+/* signed in on the PLAYLISTS view with `n` playlist rows, the policy answered (admin) */
+static void in_playlists(int n)
+{
+    signed_in();
+    unsigned ut = app.user_tag;
+    artists_loaded(3, 3);
+    send(JF_EV_CATEGORY, 1);
+    JfCmd pl = *find(JF_CMD_REQUEST); reply_list(&pl, JF_ITEM_PLAYLIST, n, n);
+    send_user_result(ut, JF_ERR_NONE, true, false, 0);
+}
+/* the one WRITE the last step emitted */
+static const JfCmd *the_write(void)
+{
+    const JfCmd *w = NULL;
+    for (int k = 0; k < cm.n; k++) if (cm.c[k].type == JF_CMD_REQUEST && cm.c[k].kind == JF_KIND_WRITE) w = &cm.c[k];
+    return w;
+}
+
+static unsigned wtag(void) { const JfCmd *w = the_write(); return w ? w->tag : 0; }
+
+static void test_playlist_delete(void)
+{
+    char want[JF_PATH_MAX];
+
+    /* playlist_select_raises_bar_not_open */
+    in_playlists(3);
+    send(JF_EV_SELECT, 1);
+    CHECK(app.action_bar && app.action_row == 1 && app.screen == JF_SCR_ARTISTS && cm.n == 0,
+          "a playlist row raises the action bar instead of opening (screen %d, cmds %d)", app.screen, cm.n);
+    send(JF_EV_ACTIVATE, 1);
+    CHECK(app.screen == JF_SCR_TRACKS, "OPEN (ACTIVATE) still enters the playlist");
+
+    /* playlist_delete_asks_confirm */
+    in_playlists(3);
+    send(JF_EV_SELECT, 2);
+    send(JF_EV_PLAYLIST_DELETE, 2);
+    CHECK(app.confirm == JF_CONFIRM_DELETE_PLAYLIST && cm.n == 0 && strcmp(app.confirm_seed.id, app.lists[JF_LIST_ARTISTS].items[2].id) == 0 &&
+          strcmp(app.confirm_seed.name, app.lists[JF_LIST_ARTISTS].items[2].name) == 0, "DELETE asks first, names the row, sends nothing");
+
+    /* playlist_delete_confirm_emits_delete */
+    send(JF_EV_CONFIRM, 0);
+    const JfCmd *w = the_write();
+    jf_path_playlist_delete(want, sizeof want, app.lists[JF_LIST_ARTISTS].items[2].id);
+    CHECK(w && cm.n == 1 && strcmp(w->method, "DELETE") == 0 && strcmp(w->path, want) == 0 && w->tag != 0 && app.confirm == JF_CONFIRM_NONE,
+          "CONFIRM sends one DELETE /Items/<id> (cmds %d)", cm.n);
+    unsigned tag = w ? w->tag : 0;
+
+    /* playlist_delete_second_confirm_ignored_while_pending */
+    send(JF_EV_SELECT, 2); send(JF_EV_PLAYLIST_DELETE, 2); send(JF_EV_CONFIRM, 0);
+    CHECK(!the_write() && cm.n == 0, "a second delete while one is pending sends nothing");
+
+    /* playlist_delete_ok_refreshes_list */
+    char name[96]; snprintf(name, sizeof name, "%s", app.lists[JF_LIST_ARTISTS].items[2].name);
+    send_write_result(tag, JF_ERR_NONE, 204);
+    char b[128]; snprintf(b, sizeof b, "DELETED: %s", name);
+    jf_path_playlists(want, sizeof want, UID, 0, JF_PAGE_ARTISTS);
+    CHECK(strcmp(app.banner, b) == 0 && cm.n == 1 && has(JF_CMD_REQUEST) && find(JF_CMD_REQUEST)->kind == JF_KIND_LIST &&
+          strcmp(find(JF_CMD_REQUEST)->path, want) == 0 && app.lists[JF_LIST_ARTISTS].n == 0 && !app.overlay,
+          "2xx: banner '%s', Playlists list re-requested from page 0 (banner '%s')", b, app.banner);
+    if (!has(JF_CMD_REQUEST)) return;   /* pre-fix source: nothing more to drive */
+    JfCmd pl2 = *find(JF_CMD_REQUEST); reply_list(&pl2, JF_ITEM_PLAYLIST, 2, 2);
+    CHECK(app.lists[JF_LIST_ARTISTS].n == 2, "the refreshed list shows what the server still has");
+    send(JF_EV_SELECT, 0); send(JF_EV_PLAYLIST_DELETE, 0); send(JF_EV_CONFIRM, 0);
+    CHECK(the_write() != NULL, "after the result a new delete is allowed");
+
+    /* a long name still fits the banner */
+    in_playlists(1);
+    memset(app.lists[JF_LIST_ARTISTS].items[0].name, 'N', 90); app.lists[JF_LIST_ARTISTS].items[0].name[90] = '\0';
+    send(JF_EV_PLAYLIST_DELETE, 0); send(JF_EV_CONFIRM, 0);
+    send_write_result(wtag(), JF_ERR_NONE, 204);
+    CHECK(strlen(app.banner) == 47 && !strncmp(app.banner, "DELETED: NNN", 12), "long name: banner cut to the field");
+
+    /* playlist_delete_cancel_no_command */
+    in_playlists(3);
+    send(JF_EV_SELECT, 1); send(JF_EV_PLAYLIST_DELETE, 1);
+    send(JF_EV_DISMISS, 0);
+    CHECK(app.confirm == JF_CONFIRM_NONE && cm.n == 0, "DISMISS cancels the question");
+    send(JF_EV_CONFIRM, 0);
+    CHECK(cm.n == 0, "a CONFIRM after the cancel does nothing");
+    send(JF_EV_PLAYLIST_DELETE, 1); send(JF_EV_BACK, 0);
+    CHECK(app.confirm == JF_CONFIRM_NONE && cm.n == 0 && app.screen == JF_SCR_ARTISTS, "BACK cancels too, and is spent");
+
+    /* playlist_delete_401_banner_no_signout / playlist_delete_403_same */
+    for (int pass = 0; pass < 2; pass++) {
+        in_playlists(3);
+        send(JF_EV_PLAYLIST_DELETE, 0); send(JF_EV_CONFIRM, 0);
+        send_write_result(wtag(), pass ? JF_ERR_FORBIDDEN : JF_ERR_UNAUTH, pass ? 403 : 401);
+        CHECK(strcmp(app.banner, "SERVER REFUSED: NO DELETE RIGHT") == 0 && app.login.token[0] && !has(JF_CMD_CLEAR_LOGIN) &&
+              app.screen == JF_SCR_ARTISTS && !app.overlay && app.delete_denied && app.lists[JF_LIST_ARTISTS].n == 3,
+              "%s on DELETE: refusal banner, token kept, no sign-out, list untouched", pass ? "403" : "401");
+        const JfCmd *u = find(JF_CMD_REQUEST);
+        char up[JF_PATH_MAX]; jf_path_user(up, sizeof up, UID);
+        CHECK(cm.n == 1 && u && u->kind == JF_KIND_USER && strcmp(u->path, up) == 0, "one USER re-fetch after a refusal");
+        /* playlist_delete_denied_hides_button */
+        CHECK(!jf_can_delete(&app), "after a refusal jf_can_delete is false even for an admin policy");
+        send_user_result(u ? u->tag : 0, JF_ERR_NONE, true, false, 0);
+        CHECK(!jf_can_delete(&app), "the re-fetched policy does not undo the refusal");
+    }
+
+    /* other failures: the overlay, RETRY re-sends the same DELETE */
+    in_playlists(2);
+    send(JF_EV_PLAYLIST_DELETE, 1); send(JF_EV_CONFIRM, 0);
+    w = the_write(); tag = wtag(); snprintf(want, sizeof want, "%s", w ? w->path : "");
+    send_write_result(tag, JF_ERR_UNREACHABLE, 0);
+    CHECK(app.overlay && (app.overlay_buttons & JF_BTN_RETRY) && !app.delete_denied && app.login.token[0], "unreachable: overlay with RETRY");
+    send(JF_EV_RETRY, 0);
+    w = the_write();
+    CHECK(w && strcmp(w->method, "DELETE") == 0 && strcmp(w->path, want) == 0, "RETRY re-sends the DELETE");
+    send_write_result(wtag(), JF_ERR_NONE, 204);
+    CHECK(!strncmp(app.banner, "DELETED: ", 9), "the retried delete succeeds");
+
+    /* a stale / unrelated WRITE result is dropped */
+    in_playlists(2);
+    send_write_result(77, JF_ERR_UNAUTH, 401);
+    CHECK(app.login.token[0] && !app.delete_denied && app.screen == JF_SCR_ARTISTS, "a WRITE result nobody asked for changes nothing");
+}
+
+static void test_playlist_policy(void)
+{
+    /* playlist_menu_policy_table: admin / content_deletion / folders>0 / none / unknown */
+    static const struct { bool known, admin, del; int folders; bool want; const char *what; } T[] = {
+        { true,  true,  false, 0, true,  "admin" },
+        { true,  false, true,  0, true,  "EnableContentDeletion" },
+        { true,  false, false, 2, true,  "folders non-empty" },
+        { true,  false, false, 0, false, "none" },
+        { false, true,  true,  3, false, "unknown (not answered yet)" },
+    };
+    for (unsigned k = 0; k < sizeof T / sizeof T[0]; k++) {
+        in_playlists(1);
+        app.policy.is_admin = T[k].admin; app.policy.content_deletion = T[k].del; app.policy.deletion_folders_n = T[k].folders;
+        app.policy_known = T[k].known;
+        CHECK(jf_can_delete(&app) == T[k].want, "jf_can_delete for %s should be %d", T[k].what, T[k].want);
+    }
+
+    /* start_fetches_user_policy_when_signed_in */
+    signed_in();
+    const JfCmd *u = NULL;
+    for (int k = 0; k < cm.n; k++) if (cm.c[k].type == JF_CMD_REQUEST && cm.c[k].kind == JF_KIND_USER) u = &cm.c[k];
+    char up[JF_PATH_MAX]; jf_path_user(up, sizeof up, UID);
+    CHECK(u && strcmp(u->path, up) == 0 && u->tag != 0 && !jf_can_delete(&app), "a restored session asks for its policy once; DELETE absent until answered");
+    CHECK(find(JF_CMD_REQUEST)->kind == JF_KIND_LIST, "the list request stays the first REQUEST");
+    unsigned t = u ? u->tag : 0;
+    send_user_result(t + 5, JF_ERR_NONE, true, true, 1);
+    CHECK(!jf_can_delete(&app), "a USER reply with another tag is dropped");
+    send_user_result(t, JF_ERR_NONE, false, true, 0);
+    CHECK(jf_can_delete(&app) && app.policy_known, "the USER reply fills the policy");
+    /* a failed fetch leaves the policy unknown, and does not sign out */
+    signed_in();
+    t = app.user_tag;
+    send_user_result(t, JF_ERR_UNAUTH, true, true, 1);
+    CHECK(!jf_can_delete(&app) && app.login.token[0], "a failed policy fetch: still unknown, nothing else happens");
+    /* no token: no fetch */
+    jf_app_init(&app); app.session_fn = test_session;
+    { static JfEvent ev; memset(&ev, 0, sizeof ev); ev.type = JF_EV_START; step_ev(&ev); }
+    CHECK(app.screen == JF_SCR_SIGNIN && !has(JF_CMD_REQUEST), "no token: no policy fetch");
+
+    /* sign-in fills it from the auth reply */
+    send_signin("10.0.0.1:8096", "bob", "pw");
+    JfResult r; memset(&r, 0, sizeof r); r.kind = JF_KIND_AUTH; r.tag = app.auth_tag; snprintf(r.token, sizeof r.token, "t2"); snprintf(r.user_id, 33, UID);
+    r.policy.is_admin = true;
+    send_result(&r);
+    CHECK(jf_can_delete(&app) && cm.n >= 1, "the auth reply carries the policy");
+
+    /* signout_clears_policy */
+    app.delete_denied = true;
+    send(JF_EV_SETTINGS_OPEN, 0);
+    send(JF_EV_SETTING_ACTIVATE, JF_SET_SIGNOUT);
+    send(JF_EV_CONFIRM, 0);
+    CHECK(!app.policy_known && !app.policy.is_admin && !app.delete_denied && !jf_can_delete(&app), "sign-out clears the policy and the refusal");
+}
+
 int main(void)
 {
     test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue(); test_sink_channels();
@@ -1775,6 +1962,7 @@ int main(void)
     test_mix_cancel_and_errors(); test_mix_nowplaying(); test_save();
     test_queue_clear(); test_queue_restore();
     test_pause_stop_seek(); test_instant_confirm(); test_back_restores_view(); test_prev(); test_queue_edit(); test_queue_remove();
+    test_playlist_delete(); test_playlist_policy();
     printf("jf_core_test: %d checks, %d failures\n", checks, fails);
     return fails ? 1 : 0;
 }

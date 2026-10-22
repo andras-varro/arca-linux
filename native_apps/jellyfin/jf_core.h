@@ -95,7 +95,8 @@ typedef enum { JF_SUB_PLAIN = 0, JF_SUB_GENRE, JF_SUB_PLAYLIST } JfSub;
  * queue_cur kept; PAUSE then restarts the current track from 0. */
 typedef enum { JF_PLAY_IDLE = 0, JF_PLAY_FETCHING, JF_PLAY_PLAYING, JF_PLAY_END, JF_PLAY_PAUSED, JF_PLAY_STOPPED } JfPlayState;
 
-typedef enum { JF_CONFIRM_NONE = 0, JF_CONFIRM_INSTANT_MIX, JF_CONFIRM_CLEAR_QUEUE, JF_CONFIRM_SIGN_OUT } JfConfirm;
+typedef enum { JF_CONFIRM_NONE = 0, JF_CONFIRM_INSTANT_MIX, JF_CONFIRM_CLEAR_QUEUE, JF_CONFIRM_SIGN_OUT,
+               JF_CONFIRM_DELETE_PLAYLIST   /* confirm_seed = the playlist row; CONFIRM sends the DELETE */ } JfConfirm;
 
 /* The settings view is a table of rows (the extension point: a new setting is one JfSettingId and one line in
  * jf_settings_rows()).  Page MAIN lists the rows; page LIBRARY lists ALL LIBRARIES then each lists[JF_LIST_LIBS] item. */
@@ -122,6 +123,8 @@ typedef enum {
     JF_EV_INSTANT_MIX,   /* .i: list row, or -1 = the playing track; the mix replaces the queue and plays */
     JF_EV_SAVE_PLAYLIST, /* .term: the playlist name (the UI never sends an empty one); saves the queue's first JF_SAVE_IDS_MAX */
     JF_EV_DISMISS,       /* drop the action bar */
+    JF_EV_PLAYLIST_DELETE,/* .i: list row of a playlist (the Playlists view, from its action bar): asks first (confirm = DELETE_PLAYLIST, confirm_seed = the row, so the
+                          * UI names it); the CONFIRM sends one WRITE DELETE and the result shows a banner.  Ignored while a delete is pending */
     JF_EV_BACK,
     JF_EV_PLAY_ALL,
     JF_EV_NEXT,
@@ -305,6 +308,9 @@ typedef struct {
     JfConfirm confirm;       /* a modal question is up (INSTANT MIX over a non-empty queue): CONFIRM proceeds, BACK / DISMISS cancels */
     JfItem confirm_seed;     /* the seed the confirmed fetch will use */
     JfLogin login;           /* server and user are kept on 401; token is emptied */
+    JfPolicy policy;         /* what the server lets this user delete, from the sign-in reply or the one USER fetch of a restored session; read it through jf_can_delete() */
+    bool policy_known;       /* policy has been answered since sign-in (until then DELETE is not offered) */
+    bool delete_denied;      /* the server refused a DELETE this session (401/403 although the policy allowed it): DELETE is not offered again */
 
     /* ── private to jf_core.c ──────────────────────────────────────────── */
     JfList lists[JF_LIST_COUNT];
@@ -316,6 +322,9 @@ typedef struct {
     JfCmd retry;
     unsigned auth_tag, stream_tag, save_tag;
     bool auth_pending, save_pending;
+    bool delete_pending, user_pending;   /* a DELETE / the policy fetch is in flight */
+    unsigned delete_tag, user_tag;
+    char del_name[96];                   /* the playlist being deleted, for the banner */
     char save_name[96];
     bool play_wait;
     int play_wait_from;
@@ -337,6 +346,11 @@ typedef struct {
 
 /** The settings rows to show, in order (JfSettingId values; returns the count).  An unavailable row is absent: LIBRARY needs 2 or more music libraries. */
 int jf_settings_rows(const JfApp *app, int ids[JF_SET_COUNT]);
+
+/** True when DELETE may be offered on a playlist: the policy is known, the server has not refused a delete this session, and the user is an
+ *  administrator, has EnableContentDeletion, or has delete-from-folders entries.  The server can still refuse (a non-admin with
+ *  EnableContentDeletion got 401 on a playlist, measured): that path sets delete_denied. */
+bool jf_can_delete(const JfApp *app);
 
 /** Zero the app, wire the list storage, session_fn = jf_session_id, volume = default. */
 void jf_app_init(JfApp *app);
