@@ -106,6 +106,7 @@ SUITE_ROWS=(
     "dump_boot_regs_test.sh|deploy"
     "setup_build_env_test.sh|deploy"
     "smoke_first_screen_test.sh|deploy"
+    "cpu_budget_test.sh|deploy"
     "arca_app_test.sh|deploy"
     "doc_check.sh|docs"
 )
