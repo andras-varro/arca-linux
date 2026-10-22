@@ -27,6 +27,8 @@ typedef struct {
     char token[64];
     char device_id[64];
     int volume_step;
+    char library[33];        /* chosen music library id; empty = all libraries */
+    char library_name[64];
 } JfLogin;
 
 /**
@@ -42,6 +44,9 @@ int jf_login_save(const JfLogin *l, const char *path);
 
 /** Forget the session: wipe token and user_id in `l` and rewrite the file without them. */
 int jf_login_clear(JfLogin *l, const char *path);
+
+/** Sign out: like jf_login_clear, and the chosen library is forgotten too.  Server and user stay (sign-in prefill). */
+int jf_login_signout(JfLogin *l, const char *path);
 
 /** Zero `n` bytes in a way the compiler may not drop (a password or token buffer). */
 void jf_wipe(void *p, size_t n);

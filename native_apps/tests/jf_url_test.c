@@ -516,9 +516,31 @@ static void test_mix_paths(void)
     }
 }
 
+/* Library scoping: jf_path_views, and jf_path_scope appends &ParentId only for a valid non-empty id.
+ * Sabotage: scope ignoring `lib` (the ParentId check fails), or appending for an empty lib (byte-identity check fails). */
+static void test_library_scope(void)
+{
+    char p[512], q[512];
+    const char *lib = "00000000000000000000000000000a01";
+    const char *uid = "0000000000000000000000000000abcd";
+    CHECK(jf_path_views(p, sizeof p, uid) > 0 && !strcmp(p, "/Users/0000000000000000000000000000abcd/Views"), "views path: %s", p);
+    CHECK(jf_path_views(p, sizeof p, "bad") < 0, "views: a bad uid is refused");
+    jf_path_artists(p, sizeof p, uid, 0, 50); strcpy(q, p);
+    CHECK(jf_path_scope(p, sizeof p, "") > 0 && !strcmp(p, q), "empty lib: byte-identical path");
+    CHECK(jf_path_scope(p, sizeof p, NULL) > 0 && !strcmp(p, q), "NULL lib: byte-identical path");
+    int n = jf_path_scope(p, sizeof p, lib);
+    CHECK(n > 0 && n == (int)strlen(p) && strstr(p, "&ParentId=00000000000000000000000000000a01") && !strncmp(p, q, strlen(q)),
+          "lib appended: %s", p);
+    jf_path_artists(p, sizeof p, uid, 0, 50);
+    CHECK(jf_path_scope(p, sizeof p, "zz") < 0, "an invalid lib id is refused");
+    jf_path_artists(p, 80, uid, 0, 50);
+    CHECK(jf_path_scope(p, 80, lib) < 0, "no room: refused");
+}
+
 int main(void)
 {
     test_builders();
+    test_library_scope();
     test_ids();
     test_session();
     test_encode();

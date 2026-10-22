@@ -59,6 +59,11 @@ int jf_login_load(JfLogin *l, const char *path)
         copy(l->device_id, sizeof l->device_id, config_get(&cfg, "device_id", ""));
         const char *uid = config_get(&cfg, "user_id", "");
         if (jf_id_valid(uid)) copy(l->user_id, sizeof l->user_id, uid);
+        const char *lib = config_get(&cfg, "library", "");
+        if (jf_id_valid(lib)) {
+            copy(l->library, sizeof l->library, lib);
+            copy(l->library_name, sizeof l->library_name, config_get(&cfg, "library_name", ""));
+        }
         int v = config_get_int(&cfg, "volume_step", JF_VOLUME_DEFAULT);
         l->volume_step = v < 0 ? 0 : v > JF_VOLUME_MAX ? JF_VOLUME_MAX : v;
     }
@@ -91,6 +96,10 @@ int jf_login_save(const JfLogin *l, const char *path)
     config_set(&cfg, "user", l->user);
     if (l->user_id[0]) config_set(&cfg, "user_id", l->user_id);
     if (l->token[0]) config_set(&cfg, "token", l->token);
+    if (l->library[0]) {
+        config_set(&cfg, "library", l->library);
+        config_set(&cfg, "library_name", l->library_name);
+    }
     config_set(&cfg, "device_id", l->device_id);
     config_set_int(&cfg, "volume_step", vs);
 
@@ -108,4 +117,11 @@ int jf_login_clear(JfLogin *l, const char *path)
     jf_wipe(l->token, sizeof l->token);
     jf_wipe(l->user_id, sizeof l->user_id);
     return jf_login_save(l, path);
+}
+
+int jf_login_signout(JfLogin *l, const char *path)
+{
+    jf_wipe(l->library, sizeof l->library);
+    jf_wipe(l->library_name, sizeof l->library_name);
+    return jf_login_clear(l, path);
 }

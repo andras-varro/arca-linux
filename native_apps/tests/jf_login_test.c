@@ -173,6 +173,35 @@ static void test_wipe(void)
     CHECK(nz == 0, "jf_login_wipe leaves %d non-zero bytes", nz);
 }
 
+#define LIB1 "00000000000000000000000000000a01"
+/* The library choice survives a save/load (a fresh-config save with a fixed key list would drop it), a sign-out forgets it
+ * and keeps server and user, and a load drops a library that is not 32 hex.  Sabotage: no config_set of "library" in save. */
+static void test_library(void)
+{
+    JfLogin a, b;
+    memset(&a, 0, sizeof a);
+    snprintf(a.server, sizeof a.server, "10.0.0.1:8096"); snprintf(a.user, sizeof a.user, "bob");
+    snprintf(a.token, sizeof a.token, "tok"); snprintf(a.device_id, sizeof a.device_id, "dev");
+    snprintf(a.user_id, sizeof a.user_id, LIB1);
+    snprintf(a.library, sizeof a.library, LIB1); snprintf(a.library_name, sizeof a.library_name, "Classical");
+    a.volume_step = 5;
+    CHECK(jf_login_save(&a, path) == 0, "save");
+    jf_login_load(&b, path);
+    CHECK(!strcmp(b.library, LIB1) && !strcmp(b.library_name, "Classical"), "library round trip: '%s' '%s'", b.library, b.library_name);
+    a.volume_step = 6;
+    jf_login_save(&a, path); jf_login_load(&b, path);
+    CHECK(!strcmp(b.library, LIB1), "a save after a volume change keeps the library");
+    CHECK(jf_login_signout(&a, path) == 0, "signout");
+    CHECK(!a.library[0] && !a.library_name[0] && !a.token[0], "signout empties library and token in memory");
+    jf_login_load(&b, path);
+    CHECK(!b.library[0] && !b.library_name[0] && !b.token[0] && !strcmp(b.server, "10.0.0.1:8096") && !strcmp(b.user, "bob"),
+          "signout file: no library/token, server and user kept");
+    FILE *f = fopen(path, "w");
+    fputs("server=h\nuser=u\nlibrary=notahexid\nlibrary_name=X\n", f); fclose(f);
+    jf_login_load(&b, path);
+    CHECK(!b.library[0] && !b.library_name[0], "an invalid library id is dropped on load");
+}
+
 int main(void)
 {
     snprintf(dir, sizeof dir, "/tmp/jf_login_test_XXXXXX");
@@ -183,6 +212,7 @@ int main(void)
     test_clear();
     test_load_edges();
     test_wipe();
+    test_library();
 
     char cmd[200];
     snprintf(cmd, sizeof cmd, "rm -rf '%s'", dir);

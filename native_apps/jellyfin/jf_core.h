@@ -48,6 +48,7 @@
 #define JF_CAP_SEED        2
 #define JF_CAP_GENRES    100      /* JF_MIX_GENRE_PAGE */
 #define JF_CAP_POOL       40      /* JF_MIX_PAGE */
+#define JF_CAP_LIBS       16      /* music libraries of one server */
 
 /* MIX.  A page of 50 Audio items with Fields=Genres is ~66 KB and ~4700 tokens (measured), too near the old 5000-token
  * budget, so 40 (measured up to 5259 tokens and 83670 bytes: JF_TOKENS_PAGE is 8000 and JF_API_BODY_BYTES 160 KB for it); a genre-index page of 100 with SongCount is ~38 KB and ~3700 tokens. */
@@ -60,20 +61,22 @@
 #define JF_MIX_SMALL     120      /* a server total up to this is paged in a stable order and shuffled here: random pages would repeat */
 #define JF_QUEUE_MAX     200
 #define JF_NAV_MAX        16
-#define JF_CMDS_MAX        4
+#define JF_CMDS_MAX        5
 #define JF_PATH_MAX      512
 #define JF_FAIL_LIMIT      3      /* consecutive failed tracks that stop playback */
 #define JF_SHORT_MS     5000      /* a track that played less than this failed */
 
 typedef enum { JF_SCR_SIGNIN = 0, JF_SCR_ARTISTS, JF_SCR_ALBUMS, JF_SCR_TRACKS,
                JF_SCR_SEARCH, JF_SCR_NOWPLAYING, JF_SCR_QUEUE,
-               JF_SCR_MIX       /* the tick screen of MIX: JfApp.mix.opt */ } JfScreen;
+               JF_SCR_MIX,      /* the tick screen of MIX: JfApp.mix.opt */
+               JF_SCR_SETTINGS  /* the settings view: rows from jf_settings_rows(), JfApp.settings_page */ } JfScreen;
 
 typedef enum { JF_LIST_ARTISTS = 0, JF_LIST_ALBUMS, JF_LIST_TRACKS, JF_LIST_SEARCH,
                JF_LIST_MIX,       /* no screen of its own: the reply of an INSTANT MIX request */
                JF_LIST_SEED,      /* no screen: the one-row reply that gives MIX its seed's genres, year and artist */
                JF_LIST_GENRES,    /* no screen: one page of the genre index, folded into the ticked keys and cleared */
                JF_LIST_POOL,      /* no screen: one page of candidate tracks for a MIX */
+               JF_LIST_LIBS,      /* no screen of its own: the music libraries (Views reply), items are JF_ITEM_LIBRARY; JfApp.lib_n = items stored */
                JF_LIST_COUNT } JfListId;
 
 /* The root browse category (JF_SCR_ARTISTS shows it), in the order JF_EV_CATEGORY cycles. */
@@ -92,7 +95,12 @@ typedef enum { JF_SUB_PLAIN = 0, JF_SUB_GENRE, JF_SUB_PLAYLIST } JfSub;
  * queue_cur kept; PAUSE then restarts the current track from 0. */
 typedef enum { JF_PLAY_IDLE = 0, JF_PLAY_FETCHING, JF_PLAY_PLAYING, JF_PLAY_END, JF_PLAY_PAUSED, JF_PLAY_STOPPED } JfPlayState;
 
-typedef enum { JF_CONFIRM_NONE = 0, JF_CONFIRM_INSTANT_MIX, JF_CONFIRM_CLEAR_QUEUE } JfConfirm;
+typedef enum { JF_CONFIRM_NONE = 0, JF_CONFIRM_INSTANT_MIX, JF_CONFIRM_CLEAR_QUEUE, JF_CONFIRM_SIGN_OUT } JfConfirm;
+
+/* The settings view is a table of rows (the extension point: a new setting is one JfSettingId and one line in
+ * jf_settings_rows()).  Page MAIN lists the rows; page LIBRARY lists ALL LIBRARIES then each lists[JF_LIST_LIBS] item. */
+typedef enum { JF_SET_LIBRARY = 0, JF_SET_SIGNOUT, JF_SET_COUNT } JfSettingId;
+typedef enum { JF_SETPAGE_MAIN = 0, JF_SETPAGE_LIBRARY } JfSettingsPage;
 
 /* Buttons of the error overlay (JfApp.overlay_buttons). */
 #define JF_BTN_RETRY  1u
@@ -136,6 +144,9 @@ typedef enum {
     JF_EV_NEED_MORE,     /* the list cursor is near the end of the loaded rows */
     JF_EV_CATEGORY,      /* .i: +1 next, -1 previous root category; only at the root (ARTISTS screen, nav empty) */
     JF_EV_CATEGORY_SET,  /* .i: a JfCat to show (the root header picker); same conditions as JF_EV_CATEGORY, no-op when it is already shown */
+    JF_EV_SETTINGS_OPEN, /* root only (ARTISTS, nav empty): opens JF_SCR_SETTINGS, page MAIN, and fetches the libraries; BACK leaves (from page LIBRARY it returns to MAIN) */
+    JF_EV_SETTING_ACTIVATE, /* .i: a JfSettingId present in jf_settings_rows(); SETTINGS screen, page MAIN.  LIBRARY opens page LIBRARY, SIGNOUT raises confirm = JF_CONFIRM_SIGN_OUT (CONFIRM signs out) */
+    JF_EV_LIBRARY_SET,   /* .i: -1 = ALL LIBRARIES, else an index into lists[JF_LIST_LIBS].items; SETTINGS page LIBRARY with lib_n >= 2.  Saves, returns to the root and reloads it; the queue keeps playing */
     JF_EV_QUIT,          /* the X / EXIT button */
     /* results and audio facts */
     JF_EV_RESULT,        /* .res: a copy of the JfResult from jf_api_poll */
@@ -174,6 +185,7 @@ typedef enum {
     JF_CMD_SET_GAIN,     /* audio_music_set_gain(.norm_mdb, .user_mdb) */
     JF_CMD_SAVE_LOGIN,   /* jf_login_save(&app->login) */
     JF_CMD_CLEAR_LOGIN,  /* jf_login_clear(&app->login); the core already emptied the token */
+    JF_CMD_PURGE_LOCAL,  /* delete the saved queue file and the art cache (disk and memory tiles): the queue belonged to another server or user, or the user signed out */
     JF_CMD_EXIT
 } JfCmdType;
 
@@ -275,6 +287,8 @@ typedef struct {
     int start_ms;            /* where the live stream started (0, or a seek / resume offset): shown elapsed = start_ms + time since START_AUDIO */
     int pos_ms;              /* PAUSED: the held position */
     uint32_t rng_state;      /* the shuffle's generator (xorshift32); jf_seed() */
+    JfSettingsPage settings_page;   /* JF_SCR_SETTINGS: which page shows */
+    int lib_n;               /* music libraries known (lists[JF_LIST_LIBS].n after the last fetch; 0 before it) */
     JfConfirm confirm;       /* a modal question is up (INSTANT MIX over a non-empty queue): CONFIRM proceeds, BACK / DISMISS cancels */
     JfItem confirm_seed;     /* the seed the confirmed fetch will use */
     JfLogin login;           /* server and user are kept on 401; token is emptied */
@@ -304,7 +318,12 @@ typedef struct {
     JfItem store_seed[JF_CAP_SEED];
     JfItem store_genres[JF_CAP_GENRES];
     JfItem store_pool[JF_CAP_POOL];
+    JfItem store_libs[JF_CAP_LIBS];
+    char id_server[64], id_user[64];   /* the server and user the saved queue and art belong to (set at start, kept by a sign-in) */
 } JfApp;
+
+/** The settings rows to show, in order (JfSettingId values; returns the count).  An unavailable row is absent: LIBRARY needs 2 or more music libraries. */
+int jf_settings_rows(const JfApp *app, int ids[JF_SET_COUNT]);
 
 /** Zero the app, wire the list storage, session_fn = jf_session_id, volume = default. */
 void jf_app_init(JfApp *app);

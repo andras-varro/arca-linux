@@ -550,9 +550,24 @@ static void test_row_detail(void)
     CHECK(tiny[0] == '\0', "n == 1 gives the empty string");
 }
 
+/* A Views reply: only CollectionType "music" entries are kept, as JF_ITEM_LIBRARY.  Sabotage: keep every collection. */
+static void test_views(void)
+{
+    static const char V[] = "{\"Items\":[{\"Name\":\"Music\",\"Id\":\"" ID1 "\",\"Type\":\"CollectionFolder\",\"CollectionType\":\"music\"},"
+        "{\"Name\":\"Movies\",\"Id\":\"" ID2 "\",\"Type\":\"CollectionFolder\",\"CollectionType\":\"movies\"},"
+        "{\"Name\":\"Classical\",\"Id\":\"" ID3 "\",\"Type\":\"CollectionFolder\",\"CollectionType\":\"music\"},"
+        "{\"Name\":\"Lists\",\"Id\":\"" ID4 "\",\"Type\":\"ManualPlaylistsFolder\",\"CollectionType\":\"playlists\"}],\"TotalRecordCount\":4}";
+    JfItem st[8]; JfList l;
+    jf_list_init(&l, st, 8);
+    CHECK(parse(V, &l) == JF_PARSE_OK, "views parse");
+    CHECK(l.n == 2 && st[0].type == JF_ITEM_LIBRARY && st[1].type == JF_ITEM_LIBRARY && !strcmp(st[0].id, ID1) &&
+          !strcmp(st[1].name, "Classical"), "only the 2 music libraries kept (n=%d)", l.n);
+}
+
 int main(void)
 {
     test_pool_page_budget();
+    test_views();
     test_artist_rule();
     test_row_detail();
     test_pages();

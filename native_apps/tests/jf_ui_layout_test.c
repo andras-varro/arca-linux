@@ -11,7 +11,11 @@
  *   I  mini player taps send their events; a queue that starts on an open list shortens it (mini_taps, mini_flip).
  *   R  the queue view of now playing: 12 buttons in one row (wrapping when narrower than 738 px), the transport sends now playing's events, CLR, EQ, the title returns (queue_row, queue_widths).
  *   Q  the EQ door: the NOW PLAYING button and Shift open the panel, Back cancels, DONE saves (eq_door).
- *   M  MIX tick rows carry no bracket text or checkbox glyph; ticks draw as the ListView mark (mix_ticks).
+  *   M  MIX tick rows carry no bracket text or checkbox glyph; ticks draw as the ListView mark (mix_ticks).
+ *   S  SETTINGS: the root row is SEARCH, NOW PLAYING, SETTINGS; settings and library rows hit-test and pad-navigate to their events (settings_ui).
+ *
+ * Build (from native_apps/, one line; run under setarch -R):
+ *   gcc -Wall -Wextra -Wno-unused-parameter -fsanitize=undefined -I. -I common -I jellyfin -o build/jf_ui_layout_test tests/jf_ui_layout_test.c jellyfin/jf_ui.c common/eq_panel.c jellyfin/jf_art.c common/icons.c common/jf_img.c common/logger.c common/ui_focus.c jellyfin/jf_core.c jellyfin/jf_url.c jellyfin/jf_model.c jellyfin/jf_login.c common/json.c common/http.c common/list_view.c common/top_bar.c common/icon_grid.c common/ppm.c common/pointer.c common/status_line.c control_panel/cpu_load.c common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c -lssl -lcrypto -lm
  */
 #include <stdio.h>
 #include <string.h>
@@ -56,12 +60,8 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     CHECK(inside(L.list, e.safe_l, e.safe_t, e.safe_r, e.safe_b), "B: list outside SAFE (inset %d)", inset_t);
     CHECK(L.list.y > L.bar_bottom, "B: list starts under the bar rule");
     CHECK(L.list.h >= 2 * 40, "B: list shows at least two rows (inset %d): h %d", inset_t, L.list.h);
-    for (int i = 0; i < JF_UI_ROW4; i++) {
-        press[n++] = L.row4[i];
-        CHECK(disjoint(L.row4[i], L.list) && disjoint(L.row4[i], L.banner), "E: row4[%d] overlaps the list or banner (inset %d)", i, inset_t);
-        CHECK(L.row4[i].y == L.row3[0].y && L.row4[i].w >= 120, "E: row4[%d] left the button row or is narrower than a category name needs (w %d)", i, L.row4[i].w);
-        for (int j = i + 1; j < JF_UI_ROW4; j++) CHECK(disjoint(L.row4[i], L.row4[j]), "E: row4 %d/%d overlap", i, j);
-    }
+    /* E  the settings view has no button row: its list runs through the row's place, inside SAFE, under the banner */
+    CHECK(inside(L.list_set, e.safe_l, e.safe_t, e.safe_r, e.safe_b) && L.list_set.y == L.list.y && L.list_set.y + L.list_set.h >= L.row3[0].y + L.row3[0].h, "E: list_set does not cover the list and the button row (inset %d)", inset_t);
     for (int i = 0; i < JF_UI_ROW3; i++) {
         CHECK(disjoint(L.row3[i], L.list), "C: row3[%d] overlaps the list", i);
         for (int j = i + 1; j < JF_UI_ROW3; j++) CHECK(disjoint(L.row3[i], L.row3[j]), "C: row3 %d/%d overlap", i, j);
@@ -231,17 +231,17 @@ static void root_picker(void)
     feed(&ui, 5, 300, false, false, true, 6200, ev, MINI_MAX);   /* its release, so the next tap is a fresh one */
     feed(&ui, 0, 0, false, false, false, 7000, ev, MINI_MAX);
 
-    /* the bottom row: outer buttons step the category, the middle ones are SEARCH and NOW PLAYING (the latter needs a queue) */
+    /* the bottom row: SEARCH, NOW PLAYING (needs a queue), SETTINGS; the categories step with Left / Right (the row had category buttons) */
     app.cat = JF_CAT_ALBUMS;
     ui.last_cat = app.cat;
-    n = tap_at(&ui, ui.L.row4[0].x + 20, ui.L.row4[0].y + 20, 8000, ev);
-    CHECK(n == 1 && ev[0].type == JF_EV_CATEGORY && ev[0].i == -1, "R: the left button did not step back (%d events)", n);
-    n = tap_at(&ui, ui.L.row4[3].x + 20, ui.L.row4[3].y + 20, 9000, ev);
-    CHECK(n == 1 && ev[0].type == JF_EV_CATEGORY && ev[0].i == 1, "R: the right button did not step forward (%d events)", n);
-    n = tap_at(&ui, ui.L.row4[2].x + 20, ui.L.row4[2].y + 20, 10000, ev);
+    n = feed_btn(&ui, BTN_ID_LEFT, 8000, ev, MINI_MAX);
+    CHECK(n == 1 && ev[0].type == JF_EV_CATEGORY && ev[0].i == -1, "R: Left did not step back (%d events)", n);
+    n = feed_btn(&ui, BTN_ID_RIGHT, 9000, ev, MINI_MAX);
+    CHECK(n == 1 && ev[0].type == JF_EV_CATEGORY && ev[0].i == 1, "R: Right did not step forward (%d events)", n);
+    n = tap_at(&ui, ui.L.row3[1].x + 20, ui.L.row3[1].y + 20, 10000, ev);
     CHECK(!has_event(ev, n, JF_EV_OPEN_NOWPLAYING), "R: NOW PLAYING answered with no queue");
     app.queue_n = 1;
-    n = tap_at(&ui, ui.L.row4[2].x + 20, ui.L.row4[2].y + 20, 11000, ev);
+    n = tap_at(&ui, ui.L.row3[1].x + 20, ui.L.row3[1].y + 20, 11000, ev);
     CHECK(has_event(ev, n, JF_EV_OPEN_NOWPLAYING), "R: NOW PLAYING did not open with a queue");
     jf_ui_free(&ui);
 
@@ -250,8 +250,98 @@ static void root_picker(void)
     app.screen = JF_SCR_ALBUMS;
     jf_ui_init(&ui, &fb, &touch, NULL, &app);
     feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
-    n = tap_at(&ui, ui.L.row4[3].x + 20, ui.L.row4[3].y + 20, 2000, ev);
+    n = tap_at(&ui, ui.L.row3[2].x + 20, ui.L.row3[2].y + 20, 2000, ev);
     CHECK(!has_event(ev, n, JF_EV_CATEGORY) && !has_event(ev, n, JF_EV_CATEGORY_SET), "R: a category button below the root");
+    jf_ui_free(&ui);
+}
+
+/* SETTINGS: the root's bottom row is SEARCH, NOW PLAYING, SETTINGS (no category buttons); the settings rows hit-test to
+ * their events; the library page's ALL row sends -1 and a library row its index; pad and keyboard reach every row. */
+static void settings_ui(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+    jf_app_init(&app);
+    app.screen = JF_SCR_ARTISTS;
+    app.queue_n = 1;
+    snprintf(app.login.token, sizeof app.login.token, "t");
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    int n;
+    for (int i = 1; i < JF_UI_ROW3; i++) {   /* slot 0 is SEARCH: it opens the blocking keyboard */
+        n = tap_at(&ui, ui.L.row3[i].x + ui.L.row3[i].w / 2, ui.L.row3[i].y + 20, 2000u + 1000u * (uint32_t)i, ev);
+        CHECK(!has_event(ev, n, JF_EV_CATEGORY), "S: root row button %d sent a category step", i);
+        CHECK((i == 2) == has_event(ev, n, JF_EV_SETTINGS_OPEN) && (i == 1) == has_event(ev, n, JF_EV_OPEN_NOWPLAYING), "S: root row button %d: wrong events (%d)", i, n);
+    }
+    jf_ui_free(&ui);
+
+    /* the settings screen: two libraries, so LIBRARY then SIGN OUT */
+    jf_app_init(&app);
+    app.screen = JF_SCR_SETTINGS;
+    app.nav_n = 1;
+    app.lib_n = 2;
+    app.lists[JF_LIST_LIBS].n = 2;
+    snprintf(app.lists[JF_LIST_LIBS].items[0].id, sizeof app.lists[0].items[0].id, "a1");
+    snprintf(app.lists[JF_LIST_LIBS].items[0].name, sizeof app.lists[0].items[0].name, "ROCK");
+    snprintf(app.lists[JF_LIST_LIBS].items[1].id, sizeof app.lists[0].items[0].id, "b2");
+    snprintf(app.lists[JF_LIST_LIBS].items[1].name, sizeof app.lists[0].items[1].name, "JAZZ");
+    int ids[JF_SET_COUNT];
+    int cnt = jf_settings_rows(&app, ids);
+    CHECK(cnt == 2 && ids[0] == JF_SET_LIBRARY && ids[1] == JF_SET_SIGNOUT, "S: settings rows %d", cnt);
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    CHECK(ui.lv.count == 2, "S: settings list has %d rows, want 2", ui.lv.count);
+    for (int r = 0; r < cnt; r++) {
+        int y = ui.lv.rect.y + LV_BORDER + 40 * r + 20;
+        n = tap_at(&ui, ui.lv.rect.x + ui.lv.rect.w / 2, y, 2000u + 1000u * (uint32_t)r, ev);
+        CHECK(n >= 1 && ev[0].type == JF_EV_SETTING_ACTIVATE && ev[0].i == ids[r], "S: tapping settings row %d sent %d/%d (%d events)",
+              r, n ? (int)ev[0].type : -1, n ? ev[0].i : -1, n);
+    }
+    /* the pad: Down walks, ENTER acts; every row is reachable */
+    jf_ui_free(&ui);
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 10000, ev, MINI_MAX);
+    for (int r = 0; r < cnt; r++) {
+        n = feed_btn(&ui, BTN_ID_ACTION, 11000u + 1000u * (uint32_t)r, ev, MINI_MAX);
+        CHECK(n >= 1 && ev[0].type == JF_EV_SETTING_ACTIVATE && ev[0].i == ids[r], "S: ENTER on settings row %d sent %d/%d", r, n ? (int)ev[0].type : -1, n ? ev[0].i : -1);
+        feed_btn(&ui, BTN_ID_DOWN, 11500u + 1000u * (uint32_t)r, ev, MINI_MAX);
+    }
+    n = feed_btn(&ui, BTN_ID_BACK, 15000, ev, MINI_MAX);
+    CHECK(has_event(ev, n, JF_EV_BACK), "S: Back left no BACK event on settings");
+    jf_ui_free(&ui);
+
+    /* the library page: ALL LIBRARIES, then each library; the chosen one is the marked row */
+    app.settings_page = JF_SETPAGE_LIBRARY;
+    snprintf(app.login.library, sizeof app.login.library, "b2");
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 20000, ev, MINI_MAX);
+    CHECK(ui.lv.count == 3, "S: library page has %d rows, want 3", ui.lv.count);
+    CHECK(ui.lv.cursor == 2, "S: library page cursor is on row %d, want the chosen library (2)", ui.lv.cursor);
+    CHECK(lv_is_marked(&ui.lv, 2) && !lv_is_marked(&ui.lv, 0) && !lv_is_marked(&ui.lv, 1), "S: the chosen library is not the one marked row");
+    for (int r = 0; r < 3; r++) {
+        int y = ui.lv.rect.y + LV_BORDER + 40 * r + 20;
+        n = tap_at(&ui, ui.lv.rect.x + ui.lv.rect.w / 2, y, 21000u + 1000u * (uint32_t)r, ev);
+        CHECK(n >= 1 && ev[0].type == JF_EV_LIBRARY_SET && ev[0].i == r - 1, "S: tapping library row %d sent %d/%d", r, n ? (int)ev[0].type : -1, n ? ev[0].i : -99);
+    }
+    jf_ui_free(&ui);
+    app.login.library[0] = '\0';
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 30000, ev, MINI_MAX);
+    CHECK(lv_is_marked(&ui.lv, 0) && !lv_is_marked(&ui.lv, 1), "S: ALL LIBRARIES is not marked when no library is chosen");
+    n = feed_btn(&ui, BTN_ID_ACTION, 31000, ev, MINI_MAX);
+    CHECK(n >= 1 && ev[0].type == JF_EV_LIBRARY_SET && ev[0].i == -1, "S: ENTER on the ALL row sent %d/%d", n ? (int)ev[0].type : -1, n ? ev[0].i : -99);
+    jf_ui_free(&ui);
+
+    /* a single library: LIBRARY is absent, not greyed */
+    app.lib_n = 1;
+    app.settings_page = JF_SETPAGE_MAIN;
+    cnt = jf_settings_rows(&app, ids);
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 40000, ev, MINI_MAX);
+    CHECK(cnt == 1 && ids[0] == JF_SET_SIGNOUT && ui.lv.count == 1, "S: with one library the list has %d rows (want only SIGN OUT)", ui.lv.count);
     jf_ui_free(&ui);
 }
 
@@ -495,6 +585,7 @@ int main(void)
     mini_flip(JF_SCR_ARTISTS, "artists");
     mix_ticks();
     root_picker();
+    settings_ui();
     queue_shuffle_cursor();
     queue_row();
     queue_widths();

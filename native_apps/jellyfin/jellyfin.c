@@ -3,6 +3,7 @@
  * Input -> JfEvent -> jf_step -> execute JfCmds (jf_api / audio / jf_login) -> draw.
  * All policy is in jf_core.c, all screens in jf_ui.c.  Leaving the app stops the music.
  */
+#include <dirent.h>
 #include <signal.h>
 #include <stdio.h>
 #include <time.h>
@@ -68,6 +69,22 @@ static uint32_t queue_signature(void)
     for (int i = 0; i < app.queue_n; i++)
         for (const char *p = app.queue[i].id; *p; p++) h = (h ^ (unsigned char)*p) * 16777619u;
     return h;
+}
+
+/* The saved queue and the art cache belong to one server and user: delete both files (the decoded tiles in memory
+ * are keyed by album id and age out on their own). */
+static void purge_local(void)
+{
+    unlink(JF_QUEUE_PATH);
+    DIR *d = opendir(JF_ART_CACHE_DIR);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        char p[256];
+        if (e->d_name[0] == '.') continue;
+        if (snprintf(p, sizeof p, "%s/%s", JF_ART_CACHE_DIR, e->d_name) < (int)sizeof p) unlink(p);
+    }
+    closedir(d);
 }
 
 static void queue_persist(int pos_ms)
@@ -178,6 +195,9 @@ static void execute(const JfCmds *cmds, uint32_t now)
             break;
         case JF_CMD_CLEAR_LOGIN:
             jf_login_clear(&app.login, JF_CONF_PATH);
+            break;
+        case JF_CMD_PURGE_LOCAL:
+            purge_local();
             break;
         case JF_CMD_EXIT:
             running = 0;

@@ -27,7 +27,8 @@
 #define JF_GENRES_BYTES 160
 
 typedef enum { JF_ITEM_NONE = 0, JF_ITEM_ARTIST, JF_ITEM_ALBUM, JF_ITEM_TRACK,
-               JF_ITEM_PLAYLIST, JF_ITEM_GENRE } JfItemType;
+               JF_ITEM_PLAYLIST, JF_ITEM_GENRE,
+               JF_ITEM_LIBRARY   /* a music library (CollectionType "music") of the Views reply */ } JfItemType;
 
 typedef struct {
     char id[33];

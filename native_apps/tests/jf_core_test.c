@@ -1615,10 +1615,91 @@ static void test_queue_restore(void)
     CHECK(p && strstr(p->path, it[2].id) && app.play_state == JF_PLAY_FETCHING, "PLAY resumes the restored track");
 }
 
+/* Settings, library choice, sign-out, purge.  Sabotages: no PURGE_LOCAL / token left behind on sign-out; LIBRARY_SET without
+ * SAVE_LOGIN or retarget; ParentId missing from the scoped root; LIBRARY_SET allowed with < 2 libraries; always/never purge on auth. */
+static void libs_open(int n)
+{
+    signed_in();
+    artists_loaded(3, 3);
+    send(JF_EV_SETTINGS_OPEN, 0);
+    CHECK(app.screen == JF_SCR_SETTINGS, "settings opens");
+    const JfCmd *c = find(JF_CMD_REQUEST);
+    CHECK(c && strstr(c->path, "/Views"), "opening asks for the views: %s", c ? c->path : "(none)");
+    JfItem it[3];
+    for (int k = 0; k < n; k++) { memset(&it[k], 0, sizeof it[k]); it[k].type = JF_ITEM_LIBRARY; snprintf(it[k].id, 33, "%032x", 0xa00 + k); snprintf(it[k].name, 96, "LIB%d", k); }
+    if (c) reply_items(c, it, n, n);
+}
+static void test_settings(void)
+{
+    int rows[JF_SET_COUNT];
+    libs_open(2);
+    CHECK(app.lib_n == 2 && jf_settings_rows(&app, rows) == 2 && rows[0] == JF_SET_LIBRARY && rows[1] == JF_SET_SIGNOUT, "2 libraries: LIBRARY + SIGN OUT rows");
+    send(JF_EV_SETTING_ACTIVATE, JF_SET_LIBRARY);
+    CHECK(app.settings_page == JF_SETPAGE_LIBRARY, "LIBRARY page");
+    send(JF_EV_BACK, 0);
+    CHECK(app.screen == JF_SCR_SETTINGS && app.settings_page == JF_SETPAGE_MAIN, "BACK on the library page returns to MAIN");
+    send(JF_EV_LIBRARY_SET, 1);
+    CHECK(app.screen == JF_SCR_SETTINGS && !has(JF_CMD_SAVE_LOGIN), "LIBRARY_SET on page MAIN is a no-op");
+    send(JF_EV_SETTING_ACTIVATE, JF_SET_LIBRARY);
+    app.queue_n = 1; app.play_state = JF_PLAY_PLAYING;
+    send(JF_EV_LIBRARY_SET, 1);
+    const JfCmd *r = find(JF_CMD_REQUEST);
+    CHECK(has(JF_CMD_SAVE_LOGIN) && r && strstr(r->path, "&ParentId=00000000000000000000000000000a01"), "choose: saved, root scoped: %s", r ? r->path : "(none)");
+    CHECK(!strcmp(app.login.library_name, "LIB1") && app.screen == JF_SCR_ARTISTS && app.nav_n == 0, "back at the root");
+    CHECK(app.queue_n == 1 && app.play_state == JF_PLAY_PLAYING && !has(JF_CMD_STOP), "queue keeps playing");
+    send(JF_EV_LIBRARY_SET, 0);
+    CHECK(!has(JF_CMD_SAVE_LOGIN), "LIBRARY_SET off the settings screen is a no-op");
+    send(JF_EV_SETTINGS_OPEN, 0);
+    r = find(JF_CMD_REQUEST);
+    JfItem it[2]; memset(it, 0, sizeof it);
+    for (int k = 0; k < 2; k++) { it[k].type = JF_ITEM_LIBRARY; snprintf(it[k].id, 33, "%032x", 0xa00 + k); }
+    if (r) reply_items(r, it, 2, 2);
+    send(JF_EV_SETTING_ACTIVATE, JF_SET_LIBRARY);
+    send(JF_EV_LIBRARY_SET, -1);
+    CHECK(!app.login.library[0] && has(JF_CMD_SAVE_LOGIN), "ALL LIBRARIES clears the choice");
+    libs_open(1);
+    CHECK(jf_settings_rows(&app, rows) == 1 && rows[0] == JF_SET_SIGNOUT, "1 library: LIBRARY row absent");
+    send(JF_EV_SETTING_ACTIVATE, JF_SET_LIBRARY);
+    CHECK(app.settings_page == JF_SETPAGE_MAIN, "an absent row cannot be activated");
+}
+static void test_signout(void)
+{
+    libs_open(2);
+    snprintf(app.login.library, 33, "%032x", 0xa01);
+    app.queue_n = 2; app.play_state = JF_PLAY_PLAYING;
+    send(JF_EV_SETTING_ACTIVATE, JF_SET_SIGNOUT);
+    CHECK(app.confirm == JF_CONFIRM_SIGN_OUT && app.screen == JF_SCR_SETTINGS, "sign-out asks first");
+    send(JF_EV_BACK, 0);
+    CHECK(app.confirm == JF_CONFIRM_NONE && app.screen == JF_SCR_SETTINGS && cm.n == 0 && app.login.token[0], "BACK cancels, nothing emitted");
+    send(JF_EV_SETTING_ACTIVATE, JF_SET_SIGNOUT);
+    send(JF_EV_CONFIRM, 0);
+    CHECK(has(JF_CMD_STOP) && has(JF_CMD_PURGE_LOCAL) && has(JF_CMD_CLEAR_LOGIN), "STOP + PURGE_LOCAL + CLEAR_LOGIN");
+    CHECK(app.screen == JF_SCR_SIGNIN && !app.login.token[0] && !app.login.user_id[0] && !app.login.library[0] && app.queue_n == 0 &&
+          app.play_state == JF_PLAY_IDLE && !strcmp(app.login.server, "10.0.0.1:8096") && !strcmp(app.login.user, "bob"),
+          "signed out: token, id, library, queue gone; server and user kept");
+    /* sign-in as a different user purges; the same user does not */
+    app.queue_n = 1; send_signin("10.0.0.1:8096", "bob", "pw");
+    JfResult r; memset(&r, 0, sizeof r); r.kind = JF_KIND_AUTH; r.tag = app.auth_tag; snprintf(r.token, sizeof r.token, "t2"); snprintf(r.user_id, 33, UID);
+    send_result(&r);
+    CHECK(!has(JF_CMD_PURGE_LOCAL), "same server and user after sign-out: no second purge");
+    signed_in();
+    app.queue_n = 1; app.login.token[0] = '\0'; app.screen = JF_SCR_SIGNIN;
+    send_signin("10.0.0.9:8096", "alice", "pw");
+    r.tag = app.auth_tag;
+    send_result(&r);
+    CHECK(has(JF_CMD_PURGE_LOCAL) && app.queue_n == 0, "a different server/user purges the queue and art");
+    signed_in();
+    app.queue_n = 1; app.login.token[0] = '\0'; app.screen = JF_SCR_SIGNIN;
+    send_signin("10.0.0.1:8096", "bob", "pw");
+    r.tag = app.auth_tag;
+    send_result(&r);
+    CHECK(!has(JF_CMD_PURGE_LOCAL) && app.queue_n == 1, "the same server and user keeps the queue");
+}
+
 int main(void)
 {
     test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue(); test_sink_channels();
-    test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit(); test_categories(); test_category_pick();
+    test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit(); test_categories(); test_category_pick(); test_settings(); test_signout();
     test_action_bar(); test_queue_insert(); test_mix(); test_mix_seed_and_ticks(); test_mix_flow(); test_mix_choice(); test_mix_stops();
     test_mix_cancel_and_errors(); test_mix_nowplaying(); test_save();
     test_queue_clear(); test_queue_restore();

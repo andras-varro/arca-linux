@@ -62,6 +62,10 @@ int jf_path_instant_mix(char *out, size_t cap, const char *uid, const char *trac
 int jf_path_item_by_id(char *out, size_t cap, const char *uid, const char *id);
 /** The genre index with SongCount (Fields=ItemCounts; the plain list has none): 100 per page is ~38 KB and ~3700 tokens. */
 int jf_path_genre_index(char *out, size_t cap, const char *uid, int start, int limit);
+/** GET /Users/<uid>/Views: the user's libraries (jf_parse_items keeps the music ones as JF_ITEM_LIBRARY). */
+int jf_path_views(char *out, size_t cap, const char *uid);
+/** Scope an already built root path to a library: appends "&ParentId=<lib>".  Empty `lib` leaves the path byte-identical; an invalid id or no room returns -1; else the new length. */
+int jf_path_scope(char *path, size_t cap, const char *lib);
 /**
  * Audio items for a MIX.  `genre_ids` joined by ',' (the server ORs them; a '|' is ignored and returns the whole library),
  * `artist_id` NULL/"" = any artist, `decade` 0 = any year else the decade's first year (1980 -> Years=1980,...,1989),

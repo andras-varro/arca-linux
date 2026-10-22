@@ -59,13 +59,11 @@ void jf_ui_layout(JfLayout *L, const JfExtents *e)
     int top = y0 + BANNER_H + 2;
     int rowy = e->safe_b - JF_UI_BTN_H - 4;
     L->list = rect_of(sl, top, sw, rowy - 4 - top);
+    L->list_set = rect_of(sl, top, sw, rowy + JF_UI_BTN_H - top);
 
     int w3 = (sw - 2 * GAP) / 3;
     for (int i = 0; i < JF_UI_ROW3; i++)
         L->row3[i] = rect_of(sl + i * (w3 + GAP), rowy, w3, JF_UI_BTN_H);
-    int w4 = (sw - 3 * GAP) / 4;
-    for (int i = 0; i < JF_UI_ROW4; i++)
-        L->row4[i] = rect_of(sl + i * (w4 + GAP), rowy, w4, JF_UI_BTN_H);
     int w5 = (sw - 4 * GAP) / 5;
     for (int i = 0; i < JF_UI_ABAR; i++)
         L->abar[i] = rect_of(sl + i * (w5 + GAP), rowy, w5, JF_UI_BTN_H);
@@ -120,6 +118,11 @@ static int src_count(void *ctx)
     const JfUi *ui = ctx;
     if (ui->app->screen == JF_SCR_QUEUE) return ui->app->queue_n;
     if (ui->app->screen == JF_SCR_MIX) return ui->app->mix.opt_n;
+    if (ui->app->screen == JF_SCR_SETTINGS) {
+        int ids[JF_SET_COUNT];
+        if (ui->app->settings_page == JF_SETPAGE_LIBRARY) return 1 + ui->app->lists[JF_LIST_LIBS].n;
+        return jf_settings_rows(ui->app, ids);
+    }
     if (is_list_screen(ui->app->screen) && ui->app->list) return ui->app->list->n;
     return 0;
 }
@@ -133,13 +136,28 @@ static void mmss(char *out, size_t cap, int s)
 /* The MIX ticks live in app state (JfApp.mix.opt[i].on); the ListView draws its own mark bar from a bitmap.  Each
  * frame, copy the one into the other.  lv_key(LV_KEY_MARK) only toggles the cursor row, so move the cursor to each
  * row that disagrees, toggle it, and put the cursor back.  Rows past opt_n end up unmarked. */
+/* The settings view's library page marks the chosen library the same way: row 0 is ALL LIBRARIES, row k the k-1'th library. */
+static int chosen_lib_row(const JfApp *app)
+{
+    if (!app->login.library[0]) return 0;
+    for (int k = 0; k < app->lists[JF_LIST_LIBS].n; k++)
+        if (strcmp(app->lists[JF_LIST_LIBS].items[k].id, app->login.library) == 0) return k + 1;
+    return 0;
+}
+
+static bool mark_want(const JfApp *app, int i)
+{
+    if (app->screen == JF_SCR_SETTINGS) return app->settings_page == JF_SETPAGE_LIBRARY && i == chosen_lib_row(app);
+    return i < app->mix.opt_n && i < JF_MIX_OPT_MAX && app->mix.opt[i].on;
+}
+
 static void mix_sync_marks(JfUi *ui)
 {
     ListView *lv = &ui->lv;
     const JfApp *app = ui->app;
     int saved = lv->cursor;
     for (int i = 0; i < lv->count; i++) {
-        bool want = i < app->mix.opt_n && i < JF_MIX_OPT_MAX && app->mix.opt[i].on;
+        bool want = mark_want(app, i);
         if (lv_is_marked(lv, i) == want) continue;
         lv->cursor = i;
         lv_key(lv, LV_KEY_MARK);
@@ -157,6 +175,28 @@ static void src_row(void *ctx, int index, LvRow *out)
         /* The tick is not drawn here: mix_sync_marks() mirrors it into the ListView mark, which draws the bar. */
         out->title = app->mix.opt[index].label;
         out->glyph = LV_GLYPH_BLANK;
+        return;
+    }
+    if (app->screen == JF_SCR_SETTINGS) {
+        char *t = ui->rowtxt[ui->rowtxt_i];
+        ui->rowtxt_i = (ui->rowtxt_i + 1) % 32;
+        out->glyph = LV_GLYPH_BLANK;
+        out->title = t;
+        t[0] = '\0';
+        if (app->settings_page == JF_SETPAGE_LIBRARY) {
+            if (index == 0) snprintf(t, sizeof ui->rowtxt[0], "ALL LIBRARIES");
+            else if (index - 1 < app->lists[JF_LIST_LIBS].n) snprintf(t, sizeof ui->rowtxt[0], "%.47s", app->lists[JF_LIST_LIBS].items[index - 1].name);
+            return;
+        }
+        int ids[JF_SET_COUNT];
+        int cnt = jf_settings_rows(app, ids);
+        if (index < 0 || index >= cnt) return;
+        if (ids[index] == JF_SET_SIGNOUT) snprintf(t, sizeof ui->rowtxt[0], "SIGN OUT");
+        else {
+            int r = chosen_lib_row(app);
+            if (r == 0) snprintf(t, sizeof ui->rowtxt[0], "ALL LIBRARIES");
+            else snprintf(t, sizeof ui->rowtxt[0], "LIBRARY: %.38s", app->lists[JF_LIST_LIBS].items[r - 1].name);
+        }
         return;
     }
     if (app->screen == JF_SCR_QUEUE) {
@@ -230,7 +270,6 @@ void jf_ui_init(JfUi *ui, Framebuffer *fb, TouchInput *touch, GamepadManager *gm
     for (int i = 0; i < JF_UI_FIELDS; i++) style(&ui->field[i], ui->L.field[i], "", 2);
     style(&ui->signin, ui->L.signin, "SIGN IN", 3);
     style(&ui->signexit, ui->L.signexit, "EXIT", 3);
-    for (int i = 0; i < JF_UI_ROW4; i++) style(&ui->row4[i], ui->L.row4[i], "", 2);
     LvSource ps = { pick_count, pick_row, ui };
     lv_init(&ui->pick, ps, rect_of(0, 0, 10, 10), 40);
 
@@ -343,6 +382,8 @@ static UiRect list_rect_for(const JfUi *ui, JfScreen s)
     return ui->mini_on ? ui->L.list_mini : ui->L.list;
 }
 
+static void settings_sync(JfUi *ui);
+
 static void begin_screen(JfUi *ui)
 {
     const JfApp *app = ui->app;
@@ -365,20 +406,38 @@ static void begin_screen(JfUi *ui)
         if (app->screen == JF_SCR_QUEUE && app->queue_n > 0) lv_move_to(&ui->lv, app->queue_cur);
     }
     if (app->screen == JF_SCR_NOWPLAYING) { ui->zone = JF_ZONE_ROW; ui->focus = 0; }
+    if (app->screen == JF_SCR_SETTINGS) {
+        ui->mini_on = false;
+        ui->lv.rect = ui->L.list_set;
+        ui->last_page = (JfSettingsPage)-1;
+        settings_sync(ui);
+    }
 }
 
-/* The root screen's button row is <previous category> SEARCH NOW PLAYING <next category>; below it, SEARCH, NOW PLAYING
- * and (on track lists) PLAY ALL.  `i` below is the slot in whichever row the screen has. */
+/* The settings page changed (or the screen just opened): the list starts over, on the chosen library when it is the library page. */
+static void settings_sync(JfUi *ui)
+{
+    const JfApp *app = ui->app;
+    if (app->settings_page == ui->last_page) return;
+    ui->last_page = app->settings_page;
+    lv_reset(&ui->lv);
+    lv_sync(&ui->lv);
+    if (app->settings_page == JF_SETPAGE_LIBRARY) lv_move_to(&ui->lv, chosen_lib_row(app));
+    mix_sync_marks(ui);
+    ui->dirty = true;
+}
+
+/* The button row: SEARCH, NOW PLAYING and, at the root, SETTINGS; below the root SEARCH, NOW PLAYING and (on track lists)
+ * PLAY ALL.  The root's categories are stepped with Left / Right and the header picker. */
 static bool at_root(const JfApp *app) { return app->screen == JF_SCR_ARTISTS; }
-static int row_n(const JfApp *app) { return at_root(app) ? JF_UI_ROW4 : JF_UI_ROW3; }
+static int row_n(const JfApp *app) { (void)app; return JF_UI_ROW3; }
 
 /* Which slots of the row exist on this screen. */
 static bool row3_on(const JfApp *app, int i)
 {
-    if (at_root(app)) return i != 2 || app->queue_n > 0;
     if (i == 0) return true;
     if (i == 1) return app->queue_n > 0;
-    return app->screen == JF_SCR_TRACKS || app->screen == JF_SCR_SEARCH;
+    return at_root(app) || app->screen == JF_SCR_TRACKS || app->screen == JF_SCR_SEARCH;
 }
 
 static int row3_step(const JfApp *app, int cur, int dir)
@@ -393,15 +452,9 @@ static int row3_step(const JfApp *app, int cur, int dir)
 
 static void row3_act(JfUi *ui, Pointer *ptr, int i, JfEvent *out, int *n, int max)
 {
-    if (at_root(ui->app)) {
-        if (i == 1) do_search(ui, ptr, out, n, max);
-        else if (i == 2) emit(out, n, max, JF_EV_OPEN_NOWPLAYING);
-        else { int k = emit(out, n, max, JF_EV_CATEGORY); if (k >= 0) out[k].i = i == 0 ? -1 : 1; }
-        return;
-    }
     if (i == 0) do_search(ui, ptr, out, n, max);
     else if (i == 1) emit(out, n, max, JF_EV_OPEN_NOWPLAYING);
-    else emit(out, n, max, JF_EV_PLAY_ALL);
+    else emit(out, n, max, at_root(ui->app) ? JF_EV_SETTINGS_OPEN : JF_EV_PLAY_ALL);
 }
 
 /* The queue screen's button row: 0..3 the transport (as on now playing), 4 SAVE (as playlist), 5 CLR (clear, after a confirm),
@@ -693,6 +746,10 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
                 modal_dialog_init(&ui->cdlg, "QUEUE", msg, 2);
                 modal_dialog_set_button(&ui->cdlg, 0, "YES", BTN_BG, COLOR_WHITE);
                 modal_dialog_set_button(&ui->cdlg, 1, "NO", RGB(90, 40, 40), COLOR_WHITE);
+            } else if (app->confirm == JF_CONFIRM_SIGN_OUT) {
+                modal_dialog_init(&ui->cdlg, "SIGN OUT?", "THE QUEUE IS CLEARED", 2);
+                modal_dialog_set_button(&ui->cdlg, 0, "SIGN OUT", BTN_BG, COLOR_WHITE);
+                modal_dialog_set_button(&ui->cdlg, 1, "CANCEL", RGB(90, 40, 40), COLOR_WHITE);
             } else {
             lv_fit(nm, sizeof nm, app->confirm_seed.name, 8 * 6 * 2, 2);
             snprintf(msg, sizeof msg, "REPLACE QUEUE WITH INSTANT MIX OF %s?", nm);
@@ -872,6 +929,44 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         return n;
     }
 
+    if (sc == JF_SCR_SETTINGS) {
+        /* The rows are the list over the whole body (no button row): tap / ENTER / A act on a row, BACK leaves (the core
+         * returns from the library page to the main page first), Up from the top row reaches the bar. */
+        settings_sync(ui);
+        int cnt = src_count(ui);
+        if (go_back) emit(out, &n, max, JF_EV_BACK);
+        const InputState *lin = NULL;
+        if (ui->zone == JF_ZONE_LIST) {
+            lin = in;
+            if (bp(in, BTN_ID_UP) && ui->lv.cursor <= 0) {
+                ui->zone = JF_ZONE_BAR; ui->bar_focus = ui->bar.has_back ? 0 : 1; lin = NULL; ui->dirty = true;
+            }
+        }
+        ui->lv.active = ui->zone == JF_ZONE_LIST;
+        lv_sync(&ui->lv);
+        mix_sync_marks(ui);
+        LvEvent ev = lv_input(&ui->lv, ts, lin, now);
+        if (ev != LV_EV_NONE) ui->dirty = true;
+        bool pick = ev == LV_EV_TAP || ev == LV_EV_ACTIVATE;
+        if (ui->zone == JF_ZONE_LIST && lin && bp(lin, BTN_ID_JUMP)) pick = true;
+        if (pick && ui->lv.cursor >= 0 && ui->lv.cursor < cnt) {
+            if (app->settings_page == JF_SETPAGE_LIBRARY) {
+                int k = emit(out, &n, max, JF_EV_LIBRARY_SET);
+                if (k >= 0) out[k].i = ui->lv.cursor - 1;
+            } else {
+                int ids[JF_SET_COUNT];
+                jf_settings_rows(app, ids);
+                int k = emit(out, &n, max, JF_EV_SETTING_ACTIVATE);
+                if (k >= 0) out[k].i = ids[ui->lv.cursor];
+            }
+        } else if (ui->zone == JF_ZONE_BAR) {
+            if ((bp(in, BTN_ID_LEFT) || bp(in, BTN_ID_RIGHT)) && ui->bar.has_back) ui->bar_focus ^= 1;
+            if (bp(in, BTN_ID_DOWN)) ui->zone = JF_ZONE_LIST;
+            else if (act) emit(out, &n, max, ui->bar_focus == 0 ? JF_EV_BACK : JF_EV_QUIT);
+        }
+        return n;
+    }
+
     /* list screens and the queue */
     bool queue = sc == JF_SCR_QUEUE;
     bool has_row = queue ? app->queue_n > 0 : true;   /* the queue's one button is SAVE AS PLAYLIST */
@@ -965,7 +1060,7 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         for (int i = 0; i < Q_BTNS; i++)
             if (button_check_tap(&qb[i], ts, now)) queue_row_act(ui, ptr, i, now, out, &n, max);
     } else if (has_row && !app->action_bar) {
-        Button *rb = at_root(app) ? ui->row4 : ui->row3;
+        Button *rb = ui->row3;
         for (int i = 0; i < row_n(app); i++)
             if (row3_on(app, i) && button_check_tap(&rb[i], ts, now)) row3_act(ui, ptr, i, out, &n, max);
     }
@@ -1043,19 +1138,8 @@ static void draw_row3(JfUi *ui)
         }
         return;
     }
-    if (at_root(ui->app)) {   /* <previous category> SEARCH NOW PLAYING <next category>, the outer two named for their targets */
-        JfCat c = ui->app->cat;
-        snprintf(ui->row4[0].text, sizeof ui->row4[0].text, "%s", jf_cat_name(jf_cat_step(c, -1)));
-        snprintf(ui->row4[1].text, sizeof ui->row4[1].text, "SEARCH");
-        snprintf(ui->row4[2].text, sizeof ui->row4[2].text, "NOW PLAYING");
-        snprintf(ui->row4[3].text, sizeof ui->row4[3].text, "%s", jf_cat_name(jf_cat_step(c, 1)));
-        for (int i = 0; i < JF_UI_ROW4; i++) {
-            if (!row3_on(ui->app, i)) continue;
-            button_draw(ui->fb, &ui->row4[i]);
-            if (ui->show_ring && ui->zone == JF_ZONE_ROW && ui->focus == i) ring(ui, ui->L.row4[i]);
-        }
-        return;
-    }
+    if (at_root(ui->app)) snprintf(ui->row3[2].text, sizeof ui->row3[2].text, "SETTINGS");
+    else snprintf(ui->row3[2].text, sizeof ui->row3[2].text, "PLAY ALL");
     for (int i = 0; i < JF_UI_ROW3; i++) {
         if (!row3_on(ui->app, i)) continue;
         button_draw(ui->fb, &ui->row3[i]);
@@ -1169,6 +1253,7 @@ void jf_ui_draw(JfUi *ui)
     case JF_SCR_ARTISTS: title = root_title(ui); break;
     case JF_SCR_NOWPLAYING: title = "NOW PLAYING"; break;
     case JF_SCR_QUEUE: title = "QUEUE"; break;
+    case JF_SCR_SETTINGS: title = app->settings_page == JF_SETPAGE_LIBRARY ? "LIBRARY" : "SETTINGS"; break;
     default: break;
     }
     ui->bar.title = title;
@@ -1209,6 +1294,13 @@ void jf_ui_draw(JfUi *ui)
                 if (ui->show_ring && ui->zone == JF_ZONE_ROW && ui->focus == i) ring(ui, ui->L.qrow[i]);
             }
         }
+        break;
+    case JF_SCR_SETTINGS:
+        settings_sync(ui);
+        ui->lv.active = ui->zone == JF_ZONE_LIST;
+        lv_sync(&ui->lv);
+        mix_sync_marks(ui);
+        lv_draw(fb, &ui->lv, "NOTHING HERE");
         break;
     case JF_SCR_MIX:
         ui->lv.active = ui->zone == JF_ZONE_LIST;

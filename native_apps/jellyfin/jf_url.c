@@ -375,3 +375,17 @@ int jf_save_body(char *out, size_t cap, const char *name, const char *uid, const
     if (r < 0) out[0] = '\0';
     return r;
 }
+
+int jf_path_views(char *out, size_t cap, const char *uid)
+{
+    if (!jf_id_valid(uid)) return -1;
+    return fin(snprintf(out, cap, "/Users/%s/Views", uid), cap);
+}
+
+int jf_path_scope(char *path, size_t cap, const char *lib)
+{
+    size_t n = strlen(path);
+    if (!lib || !lib[0]) return (int)n;
+    if (!jf_id_valid(lib)) return -1;
+    return fin(snprintf(path + n, cap - n, "&ParentId=%s", lib), cap - n) < 0 ? -1 : (int)strlen(path);
+}

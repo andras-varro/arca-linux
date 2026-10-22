@@ -9,7 +9,7 @@
 #include <string.h>
 
 static const int PAGE[JF_LIST_COUNT] = { JF_PAGE_ARTISTS, JF_PAGE_ALBUMS, JF_PAGE_TRACKS, JF_PAGE_SEARCH, JF_MIX_LIMIT,
-                                         1, JF_MIX_GENRE_PAGE, JF_MIX_PAGE };
+                                         1, JF_MIX_GENRE_PAGE, JF_MIX_PAGE, JF_CAP_LIBS };
 
 /* ── small helpers ─────────────────────────────────────────────────────── */
 
@@ -73,7 +73,7 @@ static bool have_token(const JfApp *app) { return app->login.token[0] != '\0'; }
 
 static const char *const CAT_NAME[JF_CAT_COUNT] = { "ALBUMS", "ARTISTS", "PLAYLISTS", "GENRES", "SONGS" };
 
-static int build_path(const JfApp *app, int lid, int start, char *out, size_t cap)
+static int build_path_raw(const JfApp *app, int lid, int start, char *out, size_t cap)
 {
     const char *uid = app->login.user_id;
     const char *id = app->ctx[lid].id;
@@ -96,6 +96,7 @@ static int build_path(const JfApp *app, int lid, int start, char *out, size_t ca
                                       : jf_path_tracks(out, cap, uid, id, start, lim);
     case JF_LIST_MIX:     return jf_path_instant_mix(out, cap, uid, id, JF_MIX_LIMIT);
     case JF_LIST_SEED:    return jf_path_item_by_id(out, cap, uid, id);
+    case JF_LIST_LIBS:    return jf_path_views(out, cap, uid);
     case JF_LIST_GENRES:  return jf_path_genre_index(out, cap, uid, start, lim);
     case JF_LIST_POOL: {
         const JfMix *m = &app->mix;
@@ -106,6 +107,17 @@ static int build_path(const JfApp *app, int lid, int start, char *out, size_t ca
     }
     default:              return jf_path_search(out, cap, uid, id, start, lim);
     }
+}
+
+/* The chosen library (empty = all) scopes every root browse path; playlists, an item's own children and the mix helpers
+ * are keyed by an id or live outside the music libraries, so they stay as built. */
+static int build_path(const JfApp *app, int lid, int start, char *out, size_t cap)
+{
+    int n = build_path_raw(app, lid, start, out, cap);
+    if (n < 0) return n;
+    bool scoped = lid == JF_LIST_ALBUMS || lid == JF_LIST_SEARCH || lid == JF_LIST_GENRES || lid == JF_LIST_POOL ||
+                  (lid == JF_LIST_ARTISTS && app->cat != JF_CAT_PLAYLISTS);
+    return scoped ? jf_path_scope(out, cap, app->login.library) : n;
 }
 
 /* Request the page that starts at `start`.  A new LIST supersedes every other
@@ -214,6 +226,7 @@ static void refresh(JfApp *app)
     case JF_SCR_NOWPLAYING: copy(app->crumb, sizeof(app->crumb), "NOW PLAYING"); break;
     case JF_SCR_QUEUE:      copy(app->crumb, sizeof(app->crumb), "QUEUE"); break;
     case JF_SCR_MIX:        snprintf(app->crumb, sizeof(app->crumb), "MIX: %.100s", app->mix.seed.name); break;
+    case JF_SCR_SETTINGS:   copy(app->crumb, sizeof(app->crumb), "SETTINGS"); break;
     }
     bool any = app->auth_pending || app->save_pending || app->play_wait || app->play_state == JF_PLAY_FETCHING;
     for (int k = 0; k < JF_LIST_COUNT; k++) any = any || app->lists[k].pending;
@@ -410,11 +423,114 @@ static void clear_queue(JfApp *app, JfCmds *out)
     set_banner(app, "QUEUE CLEARED");
 }
 
+/* ── settings: LIBRARY and SIGN OUT ────────────────────────────────────── */
+
+static void session_expired(JfApp *app, JfCmds *out);
+
+int jf_settings_rows(const JfApp *app, int ids[JF_SET_COUNT])
+{
+    int n = 0;
+    if (app->lib_n >= 2) ids[n++] = JF_SET_LIBRARY;   /* absent, not greyed, with 0 or 1 music library */
+    ids[n++] = JF_SET_SIGNOUT;
+    return n;
+}
+
+static bool at_root(const JfApp *app) { return app->screen == JF_SCR_ARTISTS && app->nav_n == 0 && have_token(app); }
+
+static void on_settings_open(JfApp *app, JfCmds *out)
+{
+    if (!at_root(app)) return;
+    nav_push(app);
+    app->screen = JF_SCR_SETTINGS;
+    app->settings_page = JF_SETPAGE_MAIN;
+    retarget(app, JF_LIST_LIBS, "", "LIBRARIES", JF_SUB_PLAIN, out);
+}
+
+static void forget_library(JfApp *app)
+{
+    app->login.library[0] = '\0';
+    app->login.library_name[0] = '\0';
+}
+
+/* The libraries are in: remember how many, and drop a saved choice that no longer applies (gone, or only one library left). */
+static void on_libs_reply(JfApp *app, JfCmds *out)
+{
+    const JfList *l = &app->lists[JF_LIST_LIBS];
+    app->lib_n = l->n;
+    if (!app->login.library[0]) return;
+    bool found = false;
+    for (int k = 0; k < l->n; k++) if (!strcmp(l->items[k].id, app->login.library)) found = true;
+    if (found && l->n >= 2) return;
+    forget_library(app);
+    emit(out, JF_CMD_SAVE_LOGIN);
+
+    retarget(app, JF_LIST_ARTISTS, "", CAT_NAME[app->cat], JF_SUB_PLAIN, out);
+}
+
+static void on_setting_activate(JfApp *app, int id)
+{
+    if (app->screen != JF_SCR_SETTINGS || app->settings_page != JF_SETPAGE_MAIN) return;
+    int rows[JF_SET_COUNT];
+    int n = jf_settings_rows(app, rows);
+    for (int k = 0; k < n; k++) {
+        if (rows[k] != id) continue;
+        if (id == JF_SET_LIBRARY) app->settings_page = JF_SETPAGE_LIBRARY;
+        else if (id == JF_SET_SIGNOUT) app->confirm = JF_CONFIRM_SIGN_OUT;
+        return;
+    }
+}
+
+static void on_library_set(JfApp *app, int i, JfCmds *out)
+{
+    if (app->screen != JF_SCR_SETTINGS || app->settings_page != JF_SETPAGE_LIBRARY || app->lib_n < 2) return;
+    const JfList *l = &app->lists[JF_LIST_LIBS];
+    if (i < -1 || i >= l->n) return;
+    const char *id = i < 0 ? "" : l->items[i].id;
+    bool changed = strcmp(id, app->login.library) != 0;
+    if (changed) {
+        copy(app->login.library, sizeof(app->login.library), id);
+        copy(app->login.library_name, sizeof(app->login.library_name), i < 0 ? "" : l->items[i].name);
+        emit(out, JF_CMD_SAVE_LOGIN);
+    }
+    app->settings_page = JF_SETPAGE_MAIN;
+    app->nav_n = 0;
+    app->screen = JF_SCR_ARTISTS;
+    if (changed) retarget(app, JF_LIST_ARTISTS, "", CAT_NAME[app->cat], JF_SUB_PLAIN, out);   /* the queue and playback are untouched */
+}
+
+/* The queue, the art and the library choice belong to one server and user: forget them. */
+static void drop_local(JfApp *app, JfCmds *out)
+{
+    emit(out, JF_CMD_STOP);
+    app->queue_n = 0;
+    app->queue_cur = 0;
+    app->play_state = JF_PLAY_IDLE;
+    app->queue_name[0] = '\0';
+    forget_library(app);
+    app->lib_n = 0;
+    jf_list_clear(&app->lists[JF_LIST_LIBS]);
+    emit(out, JF_CMD_PURGE_LOCAL);
+}
+
+static void sign_out(JfApp *app, JfCmds *out)
+{
+    drop_local(app, out);
+    session_expired(app, out);       /* token and user id gone, requests cancelled, sign-in screen; the server and user stay for prefill */
+    app->settings_page = JF_SETPAGE_MAIN;
+    app->id_server[0] = app->id_user[0] = '\0';
+    set_banner(app, "SIGNED OUT");
+}
+
 static void on_confirm(JfApp *app, JfCmds *out)
 {
     if (app->confirm == JF_CONFIRM_CLEAR_QUEUE) {
         app->confirm = JF_CONFIRM_NONE;
         clear_queue(app, out);
+        return;
+    }
+    if (app->confirm == JF_CONFIRM_SIGN_OUT) {
+        app->confirm = JF_CONFIRM_NONE;
+        sign_out(app, out);
         return;
     }
     if (app->confirm != JF_CONFIRM_INSTANT_MIX) return;
@@ -775,6 +891,10 @@ static void on_auth(JfApp *app, const JfResult *r, JfCmds *out)
     app->auth_pending = false;
     if (r->err == JF_ERR_UNAUTH) { set_banner(app, "WRONG USER OR PASSWORD"); return; }
     if (r->err != JF_ERR_NONE || !r->token[0] || !r->user_id[0]) { char t[48]; set_banner(app, err_text(t, sizeof t, r->err, r->status)); return; }
+    if ((app->id_server[0] || app->id_user[0]) && (strcmp(app->id_server, app->login.server) != 0 || strcmp(app->id_user, app->login.user) != 0))
+        drop_local(app, out);        /* a different server or user: the saved queue and art are not theirs */
+    copy(app->id_server, sizeof(app->id_server), app->login.server);
+    copy(app->id_user, sizeof(app->id_user), app->login.user);
     copy(app->login.token, sizeof(app->login.token), r->token);
     copy(app->login.user_id, sizeof(app->login.user_id), r->user_id);
     emit(out, JF_CMD_SET_AUTH);
@@ -807,6 +927,7 @@ static void on_list(JfApp *app, const JfResult *r, JfCmds *out)
     }
     /* A page that consumed nothing while the server claims more would be asked for forever. */
     if (l->loaded <= app->req_loaded[lid]) l->total = l->loaded;
+    if (lid == JF_LIST_LIBS) { on_libs_reply(app, out); return; }
     if (lid == JF_LIST_MIX) { on_mix_reply(app, out); return; }
     if (lid == JF_LIST_SEED) { on_seed_reply(app); return; }
     if (lid == JF_LIST_GENRES) { on_genres_reply(app, out); return; }
@@ -869,6 +990,8 @@ static void on_result(JfApp *app, const JfResult *r, JfCmds *out)
 static void on_start(JfApp *app, const JfLogin *lg, JfCmds *out)
 {
     app->login = *lg;
+    copy(app->id_server, sizeof(app->id_server), lg->server);
+    copy(app->id_user, sizeof(app->id_user), lg->user);
     int v = lg->volume_step;
     app->volume_step = app->login.volume_step = v < 0 ? 0 : v > JF_VOLUME_MAX ? JF_VOLUME_MAX : v;
     char host[JF_HOST_MAX];
@@ -1149,6 +1272,7 @@ static void on_search(JfApp *app, const char *term, JfCmds *out)
 
 static void on_back(JfApp *app, JfCmds *out)
 {
+    if (app->screen == JF_SCR_SETTINGS && app->settings_page == JF_SETPAGE_LIBRARY) { app->settings_page = JF_SETPAGE_MAIN; return; }
     if (app->screen == JF_SCR_SIGNIN || app->nav_n == 0) {
         emit(out, JF_CMD_STOP);
         emit(out, JF_CMD_EXIT);
@@ -1220,6 +1344,7 @@ void jf_app_init(JfApp *app)
     jf_list_init(&app->lists[JF_LIST_SEED], app->store_seed, JF_CAP_SEED);
     jf_list_init(&app->lists[JF_LIST_GENRES], app->store_genres, JF_CAP_GENRES);
     jf_list_init(&app->lists[JF_LIST_POOL], app->store_pool, JF_CAP_POOL);
+    jf_list_init(&app->lists[JF_LIST_LIBS], app->store_libs, JF_CAP_LIBS);
     app->cat = JF_CAT_ARTISTS;
     app->session_fn = jf_session_id;
     app->volume_step = JF_VOLUME_DEFAULT;
@@ -1314,6 +1439,9 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
     case JF_EV_NEED_MORE: on_need_more(app, out); break;
     case JF_EV_CATEGORY: on_category(app, ev->i, out); break;
     case JF_EV_CATEGORY_SET: on_category_set(app, ev->i, out); break;
+    case JF_EV_SETTINGS_OPEN: on_settings_open(app, out); break;
+    case JF_EV_SETTING_ACTIVATE: on_setting_activate(app, ev->i); break;
+    case JF_EV_LIBRARY_SET: on_library_set(app, ev->i, out); break;
     case JF_EV_OPEN_NOWPLAYING:
         if (cur_list(app) >= 0 && app->queue_n > 0) { nav_push(app); app->screen = JF_SCR_NOWPLAYING; }
         break;

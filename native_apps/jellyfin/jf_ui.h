@@ -23,8 +23,7 @@
 #include "jf_core.h"
 #include "eq_panel.h"
 
-#define JF_UI_ROW3   3     /* browse screens: SEARCH, NOW PLAYING, PLAY ALL */
-#define JF_UI_ROW4   4     /* the root screen: previous category, SEARCH, NOW PLAYING, next category */
+#define JF_UI_ROW3   3     /* browse screens: SEARCH, NOW PLAYING, PLAY ALL; the root: SEARCH, NOW PLAYING, SETTINGS */
 #define JF_UI_ART   120    /* now playing: the cover square, the height of the info block */
 #define JF_UI_NP     10    /* now playing, one row (wraps in portrait): PREV, PLAY/PAUSE, STOP, NEXT, QUEUE, MIX, I-MIX, EQ, VOL +, VOL - */
 #define JF_UI_NP_EQ  7     /* the EQ button's index in that row */
@@ -47,6 +46,7 @@ typedef struct {
     int    bar_bottom;              /* top_bar_bottom(): the rule is drawn on this row */
     UiRect banner;                  /* notice / busy line under the bar */
     UiRect list;                    /* browse list and queue list (above the button row) */
+    UiRect list_set;                /* the settings view: the list through the button row's place (that screen has no button row) */
     UiRect abar[JF_UI_ABAR];        /* the action bar: in the button row's place while it is up; pressable */
     UiRect qrow[JF_UI_QROW];        /* the queue screen's button row (one row, or the fewest equal rows stacked upward when narrow); pressable */
     UiRect list_q;                  /* the queue list: above that row, whatever its row count */
@@ -59,7 +59,6 @@ typedef struct {
     UiRect seek;                    /* now playing: the progress bar's touch area (taller than the bar); pressable */
     UiRect mixb[JF_UI_MIXBTN];      /* MIX screen: START, CANCEL in the button row; pressable (the tick rows are the list) */
     UiRect row3[JF_UI_ROW3];        /* pressable */
-    UiRect row4[JF_UI_ROW4];        /* the root screen's button row; pressable */
     UiRect field[JF_UI_FIELDS];     /* sign-in rows, pressable */
     UiRect signin, signexit;        /* sign-in buttons, pressable */
     UiRect progress;                /* now playing bar, drawn only */
@@ -80,7 +79,7 @@ typedef struct {
     JfLayout L;
     TopBar bar;
     ListView lv;
-    Button row3[JF_UI_ROW3], row4[JF_UI_ROW4], np[JF_UI_NP], abar[JF_UI_ABAR], qrow[JF_UI_QROW], mini_b[JF_UI_MINI];
+    Button row3[JF_UI_ROW3], np[JF_UI_NP], abar[JF_UI_ABAR], qrow[JF_UI_QROW], mini_b[JF_UI_MINI];
     ModalDialog cdlg;                    /* the INSTANT MIX confirmation */
     bool cdlg_up;
     bool mini_on;                        /* the strip is up (and the list rect is the shorter one) */
@@ -94,6 +93,7 @@ typedef struct {
     unsigned dlg_buttons;
     JfScreen last_screen;
     JfCat last_cat;
+    JfSettingsPage last_page;            /* the settings page the list was last built for */
     ListView pick;                       /* the root header's category picker */
     bool pick_up, head_press;
     char head_title[48];                 /* "JELLYFIN . CATEGORY", the root's bar title */

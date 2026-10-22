@@ -148,6 +148,11 @@ int jf_parse_items(const char *body, size_t len, JsonTok *toks, int ntoks, JfLis
         if (out->loaded < INT_MAX) out->loaded++;
         if (toks[e].type != JSON_OBJECT) continue;
         JfItemType ty = type_of(body, toks, n, e);
+        if (ty == JF_ITEM_NONE) {   /* a Views entry has no music Type: its CollectionType says what it is */
+            int ci = json_obj_get(body, toks, n, e, "CollectionType");
+            char ct[16];
+            if (ci >= 0 && toks[ci].type == JSON_STRING && json_str(body, &toks[ci], ct, sizeof ct) > 0 && !strcmp(ct, "music")) ty = JF_ITEM_LIBRARY;
+        }
         if (ty == JF_ITEM_NONE) continue;
         char id[40];
         int il = -1;
