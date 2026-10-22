@@ -504,7 +504,7 @@ if [[ -n "$BUNDLE_DIR" ]]; then
             || err "staging failed: $f"
     done
 
-    # The log items (format: control_panel/log_sources.h): the Log page's extra tabs.
+    # The log items (format: control_panel/log_sources.h): the Log page's extra sources.
     for f in logs.d/*.item; do
         [ -f "$f" ] || continue
         arca_bundle_add "$BUNDLE_DIR" native_apps 0644 "$f" "/opt/arca/logs.d/$(basename "$f")" \
@@ -804,7 +804,7 @@ ssh "$DEVICE" "chmod 644 /opt/arca/backup.d/*.item"
 ok "Backup items installed ($(find backup.d -name '*.item' | wc -l) file(s))"
 echo ""
 
-# Deploy the log items: the extra tabs of the Control Panel's Log page.
+# Deploy the log items: the extra sources of the Control Panel's Log page.
 info "Installing log items..."
 ssh "$DEVICE" "mkdir -p /opt/arca/logs.d"
 scp logs.d/*.item "$DEVICE:/opt/arca/logs.d/"

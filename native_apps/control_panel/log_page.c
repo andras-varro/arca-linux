@@ -1,14 +1,18 @@
 /* log_page.c — control_panel's Log page: the unit's logs, read-only, at the panel.
  *
- * Exposed only as cp_log_page (cp_page.h).  Three tabs: the syslog
+ * Exposed only as cp_log_page (cp_page.h).  Three built-in sources: the syslog
  * (/home/root/log/messages), the respawn log (which app exited, and how) and
  * the kernel ring buffer, which comes from klogctl(), not from running dmesg.
  *
- * Any component can add a tab of its own by installing an item file in
- * /opt/arca/logs.d (log_sources.h); the extra tabs sit in a second row, which is
- * absent when there are none, and read exactly like the syslog tab.
+ * Any component can add a source of its own by installing an item file in
+ * /opt/arca/logs.d (log_sources.h); it follows the built-in three in the list
+ * and reads exactly like the syslog.
  *
- * Each tab is read once, on entering the page, on a tab change and on REFRESH —
+ * The source is chosen from the drop-down on the page title (the CpPage header
+ * hook, common/top_pick.h): the header names the open source, a tap on it opens
+ * a scrolling list of every source.
+ *
+ * A source is read once, on entering the page, on a pick and on REFRESH —
  * never per frame.  A file is read from its last LOG_TAIL_BYTES only (seek from
  * the end), the ring buffer likewise, and at most LOG_MAX_LINES of the newest
  * lines are kept; the page says so when it cut anything.  The first line of a
@@ -76,11 +80,13 @@ static int     top;                 /* vis[] index of the first row drawn */
 static int     tab;
 static bool    errors_only;
 
-static LogSource extra[LOGSRC_MAX]; /* tabs TAB_N.. from /opt/arca/logs.d */
+static LogSource extra[LOGSRC_MAX]; /* sources TAB_N.. from /opt/arca/logs.d */
 static int     nextra;
 static bool    sources_scanned;
+static TopPick pick;                /* the title's drop-down over tab */
+static bool    pick_ready;
 
-static Button  tab_btn[TAB_N + LOGSRC_MAX], err_btn, refresh_btn, sc_btn[SC_N];
+static Button  err_btn, refresh_btn, sc_btn[SC_N];
 static int     area_x, area_y, area_w, area_h, rows, status_y;
 
 static int     repeat_btn = -1;
@@ -141,10 +147,30 @@ static void load_tab(void) {
     top = log_clamp_top(nvis, nvis, rows);
 }
 
+/* The drop-down's entries: the built-in sources, then the logs.d items in scan order. */
+static int src_count(void *ctx) { (void)ctx; return TAB_N + nextra; }
+
+static const char *src_name(void *ctx, int i) {
+    (void)ctx;
+    return i < TAB_N ? tabs[i].label : extra[i - TAB_N].name;
+}
+
+static TopPick *log_page_header(const char **title) {
+    if (!pick_ready) {
+        TpSource s = { src_count, src_name, NULL };
+        tp_init(&pick, s);
+        pick_ready = true;
+    }
+    pick.sel = tab;
+    *title = src_name(NULL, tab);
+    return &pick;
+}
+
+static void log_page_leave(void) {
+    if (pick_ready) tp_close(&pick);
+}
+
 static void refresh_buttons(void) {
-    for (int i = 0; i < TAB_N + nextra; i++)
-        button_set_colors(&tab_btn[i], i == tab ? RGB(0, 90, 160) : RGB(80, 80, 80),
-                          COLOR_WHITE, BTN_COLOR_HIGHLIGHT);
     button_set_text(&err_btn, errors_only ? "ERRORS ONLY: ON" : "ERRORS ONLY: OFF");
     button_set_colors(&err_btn, errors_only ? RGB(170, 60, 40) : RGB(80, 80, 80),
                       COLOR_WHITE, BTN_COLOR_HIGHLIGHT);
@@ -160,19 +186,6 @@ static void log_page_layout(void) {
         sources_scanned = true;
     }
     int y = CONTENT_Y + LOG_GAP;
-    int tw = (CONTENT_WIDTH - (TAB_N - 1) * LOG_GAP) / TAB_N;
-    for (int i = 0; i < TAB_N; i++)
-        button_init_full(&tab_btn[i], CONTENT_LEFT + i * (tw + LOG_GAP), y, tw, LOG_BTN_H,
-                         tabs[i].label, RGB(80, 80, 80), COLOR_WHITE, BTN_COLOR_HIGHLIGHT, 2);
-    y += LOG_BTN_H + LOG_GAP;
-    if (nextra > 0) {                   /* the second row, only when a component added a log */
-        int ew = (CONTENT_WIDTH - (nextra - 1) * LOG_GAP) / nextra;
-        for (int i = 0; i < nextra; i++)
-            button_init_full(&tab_btn[TAB_N + i], CONTENT_LEFT + i * (ew + LOG_GAP), y, ew,
-                             LOG_BTN_H, extra[i].name, RGB(80, 80, 80), COLOR_WHITE,
-                             BTN_COLOR_HIGHLIGHT, 2);
-        y += LOG_BTN_H + LOG_GAP;
-    }
     int bw = (CONTENT_WIDTH - LOG_GAP) / 2;
     button_init_full(&err_btn, CONTENT_LEFT, y, bw, LOG_BTN_H, "ERRORS ONLY: OFF",
                      RGB(80, 80, 80), COLOR_WHITE, BTN_COLOR_HIGHLIGHT, 2);
@@ -215,7 +228,6 @@ static void log_page_enter(void) {
 }
 
 static void log_page_draw(Framebuffer *fb) {
-    for (int i = 0; i < TAB_N + nextra; i++) button_draw(fb, &tab_btn[i]);
     button_draw(fb, &err_btn);
     button_draw(fb, &refresh_btn);
     for (int i = 0; i < SC_N; i++) button_draw(fb, &sc_btn[i]);
@@ -281,13 +293,12 @@ static CpPageResult log_page_input(Config *cfg, int tx, int ty, bool touching, u
     (void)cfg;
     CpPageResult res = CP_PAGE_IDLE;
 
-    for (int i = 0; i < TAB_N + nextra; i++)
-        if (button_update(&tab_btn[i], tx, ty, touching, now)) {
-            tab = i;
-            load_tab();
-            refresh_buttons();
-            res = CP_PAGE_REDRAW;
-        }
+    int picked = pick_ready ? tp_take(&pick) : -1;
+    if (picked >= 0 && picked < TAB_N + nextra) {
+        tab = picked;
+        load_tab();
+        res = CP_PAGE_REDRAW;
+    }
     if (button_update(&err_btn, tx, ty, touching, now)) {
         errors_only = !errors_only;
         build_vis();
@@ -338,7 +349,6 @@ static CpPageResult log_page_input(Config *cfg, int tx, int ty, bool touching, u
 
 static int log_page_focusables(UiRect *out, int max) {
     int n = 0;
-    for (int i = 0; i < TAB_N + nextra; i++) n = focus_add_button(out, n, max, &tab_btn[i]);
     n = focus_add_button(out, n, max, &err_btn);
     n = focus_add_button(out, n, max, &refresh_btn);
     for (int i = 0; i < SC_N; i++) n = focus_add_button(out, n, max, &sc_btn[i]);
@@ -351,7 +361,9 @@ const CpPage cp_log_page = {
     .load       = log_page_load,
     .layout     = log_page_layout,
     .enter      = log_page_enter,
-    .draw       = log_page_draw,
+    .leave      = log_page_leave,
+    .draw      = log_page_draw,
     .input      = log_page_input,
     .focusables = log_page_focusables,
+    .header     = log_page_header,
 };

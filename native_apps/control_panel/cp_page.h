@@ -18,6 +18,7 @@
 #include "../common/config.h"
 #include "../common/ui_focus.h"
 #include "../common/gamepad.h"
+#include "../common/top_pick.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -84,6 +85,16 @@ typedef struct CpPage {
      * is repainted.  false = the ring moves as usual.  UP/DOWN never come
      * here.  NULL = arrows only ever move the ring. */
     bool (*focus_nudge)(Config *cfg, int idx, int dir);
+
+    /* Optional.  The page's title is a drop-down (common/top_pick.h): returns
+     * its TopPick and writes the title to show into *title (the current
+     * choice) — also setting the pick's sel to that choice, which the popup
+     * opens on.  The panel then draws the title with the arrow, makes the
+     * header a pad focus target, routes the header tap / Shift and the popup's
+     * input, and draws the popup over the page.  The page reads the pick with
+     * tp_take() in input().  The panel closes the popup when the page is left
+     * (leave()).  NULL = a plain title. */
+    TopPick *(*header)(const char **title);
 } CpPage;
 
 extern const CpPage cp_led_page;       /* led_page.c */

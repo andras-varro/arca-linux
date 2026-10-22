@@ -259,6 +259,12 @@ void draw_usage_bar(Framebuffer *fb, int x, int y, int width,
  * Page Bar
  * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
+/* The pressable screen, for a title drop-down's header and popup. */
+static TpExt pick_ext(void) {
+    TpExt te = { SCREEN_SAFE_LEFT, SCREEN_SAFE_TOP, SCREEN_SAFE_RIGHT, SCREEN_SAFE_BOTTOM };
+    return te;
+}
+
 /* The bar's content follows the view: BACK on a page, the exit X on the home
  * grid.  BACK sits on the left, where the full-screen testers keep theirs: the
  * top-right corner is the home grid's exit X, and a double tap there must not
@@ -267,6 +273,7 @@ void draw_usage_bar(Framebuffer *fb, int x, int y, int width,
 static void bar_configure(const CpPage *page) {
     bar.has_back = page != NULL;
     bar.has_exit = page == NULL;
+    bar.title_extra = 0;
     top_bar_layout(&bar);
 }
 
@@ -275,9 +282,30 @@ static void create_page_bar(const AppState *state) {
     top_bar_receipt(&bar, "control_panel");   /* how much of the bar is pressable */
 }
 
+/* The open page's title drop-down (cp_page.h header hook), NULL when the page
+ * has none or its status line is up — the line takes the title's place, so there
+ * is no header to press.  Lays the bar out with the page's title and room for
+ * the arrow, and writes the pressable header to *head. */
+static TopPick *page_header(AppState *state, UiRect *head) {
+    const char *title = NULL;
+    if (!state->page || !state->page->header || state->status_msg[0]) return NULL;
+    TopPick *tp = state->page->header(&title);
+    bar.title = title;
+    bar.title_color = COLOR_WHITE;
+    bar.title_scale = 3;
+    bar.title_cut = false;
+    bar.title_extra = TP_GAP + TP_ARROW;
+    top_bar_layout(&bar);
+    TpExt te = pick_ext();
+    *head = tp_head_rect(bar.L.title_x, bar.L.title_w, bar.L.top, bar.L.bottom, &te, true);
+    return tp;
+}
+
 /* Drawn over an open page only: BACK, and the page's name — which is also its
  * tile's label — or the page's status line while one shows. */
 static void draw_page_bar(Framebuffer *fb, AppState *state) {
+    UiRect head;
+    bool arrow = page_header(state, &head) != NULL;
     if (state->status_msg[0]) {
         /* A page's status line takes the title's place while it shows: the
          * page owns the whole content rect, so the bar is the one spot that is
@@ -287,13 +315,16 @@ static void draw_page_bar(Framebuffer *fb, AppState *state) {
         bar.title_color = state->status_ok ? COLOR_GREEN : COLOR_ORANGE;
         bar.title_scale = 2;
         bar.title_cut = true;
-    } else {
+    } else if (!arrow) {
         bar.title = state->page->name;
         bar.title_color = COLOR_WHITE;
         bar.title_scale = 3;
         bar.title_cut = false;
     }
+    if (!arrow) bar.title_extra = 0;
     top_bar_draw(fb, &bar);
+    if (arrow)   /* the drop-down arrow after the title: the header opens the list */
+        tp_draw_arrow(fb, bar.L.title_x, bar.L.title_w, bar.L.top, bar.L.h);
 }
 
 /* The one place a view changes — page NULL is the home grid — so entering and
@@ -457,6 +488,8 @@ static int focus_collect(AppState *state, UiRect *out, const void **ctx,
         *ctx = state->page;
         out[0] = top_bar_ring_rect(&bar.L, TB_BACK);
         n = 1;
+        UiRect head;
+        if (page_header(state, &head)) out[n++] = head;   /* the title drop-down, after BACK */
         focus_page_base = n;
         if (state->page->focusables)
             n += state->page->focusables(out + n, FOCUS_MAX - n);
@@ -951,6 +984,8 @@ int main(int argc, char *argv[]) {
     pointer_init(&g_pointer);   /* after touch_init: SCREEN_SAFE_* */
 
     bool needs_redraw = true;  /* first frame always draws */
+    bool pick_up = false;      /* a title drop-down's popup is open: it owns every input */
+    bool pick_swallow = false; /* the finger that closed it stays unseen until it lifts */
 
     while (running) {
         uint32_t now = get_time_ms();
@@ -981,6 +1016,9 @@ int main(int argc, char *argv[]) {
             if (state.page) {
                 draw_page_bar(&fb, &state);
                 state.page->draw(&fb);
+                UiRect hd;
+                TopPick *htp = page_header(&state, &hd);
+                if (htp) tp_draw(&fb, htp);     /* the open drop-down, over the page */
             } else {
                 draw_home(&fb, &state);
             }
@@ -993,7 +1031,7 @@ int main(int argc, char *argv[]) {
              * over the dialog, which highlights its focused button itself.
              * The bar's < and X draw their own ring; the rest take the tile ring. */
             if (focus_shown && focus_idx >= 0 &&
-                state.confirm_action == CONFIRM_NONE) {
+                state.confirm_action == CONFIRM_NONE && !pick_up) {
                 if (focus_bar != TB_NONE)
                     top_bar_draw_focus(&fb, &bar.L, focus_bar);
                 else
@@ -1052,6 +1090,16 @@ int main(int argc, char *argv[]) {
         int tx = ts.x, ty = ts.y;
         bool touching = ts.pressed || ts.held;
 
+        /* A title drop-down's popup (cp_page.h header hook) takes all input
+         * while it is up: the keys that would leave the page, move the ring or
+         * activate it are the popup's instead. */
+        UiRect pick_head;
+        TopPick *pick = state.confirm_action == CONFIRM_NONE ? page_header(&state, &pick_head) : NULL;
+        pick_up = pick && pick->up;
+        if (pick_up) { key_back = false; key_dir = -1; key_act = false; }
+        if (!(ts.pressed || ts.held)) pick_swallow = false;
+        if (pick_swallow) { touching = false; tx = ty = 0; }
+
         /* Esc/Backspace: CANCEL on the dialog, BACK on a page, and on home
          * leave, as the exit X does. */
         if (key_back && state.confirm_action != CONFIRM_NONE) {
@@ -1080,6 +1128,16 @@ int main(int argc, char *argv[]) {
                 confirm_on_ok = NULL;
                 state.confirm_action = CONFIRM_NONE;
             }
+        } else if (pick_up) {
+            TpEvent ev = tp_input(pick, &ts, &g_pad_in, now);
+            if ((ev == TP_PICKED || ev == TP_CLOSED) && (ts.pressed || ts.held))
+                pick_swallow = true;
+            state.page_dirty = true;
+            pick_up = pick->up;
+            if (!pick_up) {                 /* closed: let the page take a pick now */
+                CpPageResult r = state.page->input(&state.cfg, 0, 0, false, now);
+                if (r != CP_PAGE_IDLE) state.page_dirty = true;
+            }
         } else if (!state.page) {
             handle_home_input(&state, &ts);
         } else {
@@ -1088,6 +1146,13 @@ int main(int argc, char *argv[]) {
              * A page's visual state is its own, so it says when it changed; a
              * queued full-screen run repaints too. */
             if (state.page) {
+                if (pick && !pick_swallow) {
+                    TpExt te = pick_ext();
+                    if (tp_head_input(pick, pick_head, &te, &ts, &g_pad_in) == TP_OPENED) {
+                        state.page_dirty = true;
+                        pick_up = true;
+                    }
+                }
                 CpPageResult r = state.page->input(&state.cfg, tx, ty,
                                                    touching, now);
                 if (r == CP_PAGE_FULLSCREEN) state.page_fullscreen = true;
