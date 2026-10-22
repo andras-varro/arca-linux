@@ -188,6 +188,7 @@ typedef enum {
     JF_CMD_PURGE_LOCAL,  /* delete the saved queue file and the art cache (disk and memory tiles): the queue belonged to another server or user, or the user signed out */
     JF_CMD_EXIT
 } JfCmdType;
+typedef enum { JF_IDS_QUEUE = 0, JF_IDS_PICK } JfIdsSrc;
 
 typedef struct {
     JfCmdType type;
@@ -206,6 +207,8 @@ typedef struct {
     int user_mdb;
     char name[96];       /* SAVE: the playlist name */
     int n;               /* SAVE: how many queue ids */
+    char method[8];      /* WRITE: "POST" or "DELETE" */
+    int ids_src;         /* SAVE: JF_IDS_QUEUE (app->queue[]) or JF_IDS_PICK (app->pick_ids[]) */
 } JfCmd;
 
 typedef struct {
@@ -283,6 +286,8 @@ typedef struct {
     JfItem queue[JF_QUEUE_MAX];
     int queue_n;
     int queue_cur;           /* index of the track playing / last played; valid when queue_n > 0 */
+    char pick_ids[JF_SAVE_IDS_MAX][33];   /* ADD TO PLAYLIST: the ids being added (a track, or a list's first JF_SAVE_IDS_MAX) */
+    int pick_n;
     int volume_step;         /* 0..JF_VOLUME_MAX; 0 = mute (also in .login.volume_step) */
     int start_ms;            /* where the live stream started (0, or a seek / resume offset): shown elapsed = start_ms + time since START_AUDIO */
     int pos_ms;              /* PAUSED: the held position */
