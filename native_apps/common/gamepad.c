@@ -284,6 +284,9 @@ static void seed_latched_levels(GamepadManager *gm) {
                 { BTN_ID_ACTION, m->btn_action },
                 { BTN_ID_PAUSE,  m->btn_pause  },
                 { BTN_ID_BACK,   m->btn_back   },
+                { BTN_ID_NEXT,   BTN_TR        },   /* RB / LB: fixed codes, not in the config file */
+                { BTN_ID_PREV,   BTN_TL        },
+                { BTN_ID_CANCEL, m->btn_run    },   /* B also latches RUN: the pad_btns walk sets both */
             };
             for (int raw = 0; raw <= KEY_MAX; raw++) {
                 if (!input_caps_test(keys, raw)) continue;
@@ -830,13 +833,17 @@ static bool poll_gamepad(GamepadManager *gm, int p) {
             if (code == m->btn_jump)
                 latched[BTN_ID_JUMP] = down;
             else if (code == m->btn_run)
-                latched[BTN_ID_RUN] = down;
+                { latched[BTN_ID_RUN] = down; latched[BTN_ID_CANCEL] = down; }
             else if (code == m->btn_action)
                 latched[BTN_ID_ACTION] = down;
             else if (code == m->btn_pause)
                 latched[BTN_ID_PAUSE] = down;
             else if (code == m->btn_back)
                 latched[BTN_ID_BACK] = down;
+            else if (code == BTN_TR)
+                latched[BTN_ID_NEXT] = down;
+            else if (code == BTN_TL)
+                latched[BTN_ID_PREV] = down;
         }
     }
     if (read_gone(r)) {
@@ -939,6 +946,9 @@ static void latch_key(bool *latched, int code, bool down) {
             break;
         case KEY_HOME:
             latched[BTN_ID_HOME] = down;
+            break;
+        case KEY_TAB:
+            latched[BTN_ID_NEXT] = down;
             break;
         case KEY_END:
             latched[BTN_ID_END] = down;

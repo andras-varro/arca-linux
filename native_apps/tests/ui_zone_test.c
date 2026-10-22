@@ -253,6 +253,209 @@ int main(void) {
     uz_input(&f, z, 3, &in, false, &o);
     CHECK(f.zone == 0 && f.id == 0 && o.left == -1);
 
+    /* ---- Cycle mode: Tab / LB-RB change pane, arrows never leave it ---- */
+
+    /* 13. NEXT cycles bar -> list -> row -> bar (wraps); Shift+Tab (NEXT with RUN held) and PREV go back. */
+    set_list(&lv, 5, 2);
+    screen(z, &lv, true);
+    uz_begin_cycle(&f, 0);
+    in = key(BTN_ID_NEXT);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 1 && o.moved && f.shown);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 2 && f.id == 10);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 0 && f.id == 0);                       /* wrapped */
+    in = key(BTN_ID_NEXT);
+    in.buttons[BTN_ID_RUN].held = true;                    /* Shift+Tab */
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 2);                                    /* wrapped backwards */
+    in = key(BTN_ID_PREV);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 1 && lv.cursor == 2);
+
+    /* 14. An absent pane is skipped, in both directions; a lone pane does not move. */
+    set_list(&lv, 5, 0);
+    screen(z, &lv, true);
+    z[1].lv = NULL;
+    uz_begin_cycle(&f, 0);
+    in = key(BTN_ID_NEXT);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 2);
+    in = key(BTN_ID_PREV);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 0);
+    z[2].n = 0;
+    in = key(BTN_ID_NEXT);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 0 && !o.moved);
+
+    /* 15. Down at the last list row and Up at row 0 stay in the list: no zone change, cursor untouched, the list gets the key. */
+    set_list(&lv, 5, 4);
+    screen(z, &lv, true);
+    uz_begin_cycle(&f, 1);
+    in = key(BTN_ID_DOWN);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 1 && lv.cursor == 4 && o.list_in != NULL && o.list_in->buttons[BTN_ID_DOWN].pressed);
+    set_list(&lv, 5, 0);
+    in = key(BTN_ID_UP);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 1 && lv.cursor == 0 && o.list_in != NULL);
+    set_list(&lv, 0, -1);                                  /* an empty list too */
+    in = key(BTN_ID_DOWN);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 1);
+
+    /* 16. Button row: Left/Right move inside it and WRAP (Right at the last button lands on the first); Up/Down never leave. */
+    set_list(&lv, 5, 0);
+    screen(z, &lv, true);
+    uz_begin_cycle(&f, 2);
+    in = key(BTN_ID_RIGHT);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 2 && f.id == 11);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 2 && f.id == 10);                      /* wrapped inside the row */
+    in = key(BTN_ID_DOWN);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 2 && f.id == 10 && !o.moved && o.left == -1);
+    in = key(BTN_ID_UP);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 2 && f.id == 10 && !o.moved);
+    uz_begin_cycle(&f, 0);                                 /* the bar: Down does not reach the list either */
+    in = key(BTN_ID_DOWN);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 0);
+
+    /* 17. A wrapped two-row pane: Up/Down step between its rows, and stay at the outer edges. */
+    memset(z, 0, 3 * sizeof(UiZone));
+    btn(&z[0], 10, 100, 0);
+    btn(&z[0], 200, 100, 1);
+    btn(&z[0], 10, 160, 2);
+    uz_begin_cycle(&f, 0);
+    uz_input(&f, z, 3, NULL, false, &o);
+    in = key(BTN_ID_DOWN);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 0 && f.id == 2);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 0 && f.id == 2 && !o.moved);
+    in = key(BTN_ID_UP);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.id == 0);
+
+    /* 18. A UZ_TRAP pane is an ordinary pane: Down finds no neighbour and reports nothing; Tab leaves it. */
+    set_list(&lv, 5, 0);
+    screen(z, &lv, true);
+    z[2].flags = UZ_TRAP;
+    uz_begin_cycle(&f, 2);
+    in = key(BTN_ID_DOWN);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 2 && o.left == -1);
+    in = key(BTN_ID_NEXT);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 0);
+
+    /* 19. ACTION and JUMP: a button pane reports its id; a list pane reports the cursor row and hands the list no ACTION/JUMP. */
+    set_list(&lv, 5, 3);
+    screen(z, &lv, true);
+    uz_begin_cycle(&f, 2);
+    in = key(BTN_ID_ACTION);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(o.activate == 10 && o.activate_row == -1);
+    in = key(BTN_ID_JUMP);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(o.activate == 10);
+    uz_begin_cycle(&f, 1);
+    in = key(BTN_ID_JUMP);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(o.activate_row == 3 && o.activate == -1 && f.zone == 1);
+    CHECK(o.list_in != NULL && !o.list_in->buttons[BTN_ID_JUMP].pressed && !o.list_in->buttons[BTN_ID_ACTION].pressed);
+    in = key(BTN_ID_ACTION);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(o.activate_row == 3 && !o.list_in->buttons[BTN_ID_ACTION].pressed);
+    in = key(BTN_ID_DOWN);
+    set_list(&lv, 5, 1);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(o.activate_row == -1);
+    set_list(&lv, 0, -1);
+    in = key(BTN_ID_ACTION);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(o.activate_row == -1);                           /* nothing to activate */
+
+    /* 20. BACK: Esc (PAUSE), Backspace (BACK) and pad B (CANCEL) in any pane; Shift alone (RUN) is not back. */
+    set_list(&lv, 5, 0);
+    screen(z, &lv, true);
+    for (int zone = 0; zone < 3; zone++) {
+        uz_begin_cycle(&f, zone);
+        in = key(BTN_ID_PAUSE);
+        uz_input(&f, z, 3, &in, false, &o);
+        CHECK(o.back);
+        in = key(BTN_ID_BACK);
+        uz_input(&f, z, 3, &in, false, &o);
+        CHECK(o.back);
+        in = key(BTN_ID_CANCEL);
+        uz_input(&f, z, 3, &in, false, &o);
+        CHECK(o.back);
+        in = key(BTN_ID_RUN);
+        uz_input(&f, z, 3, &in, false, &o);
+        CHECK(!o.back);
+    }
+    in = key(-1);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(!o.back);
+
+    /* 21. Each pane remembers its focused button across a round trip. */
+    uz_begin_cycle(&f, 2);
+    in = key(BTN_ID_RIGHT);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.id == 11);
+    in = key(BTN_ID_NEXT);
+    uz_input(&f, z, 3, &in, false, &o);                    /* row -> bar */
+    uz_input(&f, z, 3, &in, false, &o);                    /* bar -> list */
+    uz_input(&f, z, 3, &in, false, &o);                    /* list -> row */
+    CHECK(f.zone == 2 && f.id == 11);
+
+    /* 22. A UZ_SLIDER pane reports Left/Right and moves nothing; Up/Down do nothing; ACTION still activates. */
+    memset(z, 0, 3 * sizeof(UiZone));
+    btn(&z[0], 10, 5, 0);
+    btn(&z[1], 100, 200, 20);
+    btn(&z[1], 300, 200, 21);
+    z[1].flags = UZ_SLIDER;
+    uz_begin_cycle(&f, 1);
+    in = key(BTN_ID_RIGHT);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(o.left_right == +1 && f.zone == 1 && f.id == 20);
+    in = key(BTN_ID_LEFT);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(o.left_right == -1 && f.id == 20);
+    in = key(BTN_ID_DOWN);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(o.left_right == 0 && f.zone == 1);
+    in = key(BTN_ID_ACTION);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(o.activate == 20);
+
+    /* 23. Old mode is untouched by the new keys: Tab does not move, Esc is not back, no slider/row output. */
+    set_list(&lv, 5, 4);
+    screen(z, &lv, true);
+    uz_begin(&f, 1);
+    in = key(BTN_ID_NEXT);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 1 && !o.back && o.activate_row == -1 && o.left_right == 0);
+    in = key(BTN_ID_PAUSE);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 1 && !o.back);
+    in = key(BTN_ID_DOWN);                                 /* the edge crossing is still there */
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.zone == 2);
+
+    /* 24. A touch hides the ring in cycle mode as before and moves nothing. */
+    uz_begin_cycle(&f, 2);
+    in = key(BTN_ID_RIGHT);
+    uz_input(&f, z, 3, &in, false, &o);
+    CHECK(f.shown);
+    uz_input(&f, z, 3, NULL, true, &o);
+    CHECK(!f.shown && o.moved);
+
     printf("%d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;
 }

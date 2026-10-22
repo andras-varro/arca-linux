@@ -97,6 +97,9 @@ typedef enum {
     BTN_ID_PGDN,      /* Keyboard Page Down */
     BTN_ID_HOME,      /* Keyboard Home */
     BTN_ID_END,       /* Keyboard End */
+    BTN_ID_NEXT,      /* Keyboard Tab, Gamepad RB (BTN_TR): next pane; Shift+Tab (RUN held) = previous */
+    BTN_ID_PREV,      /* Gamepad LB (BTN_TL): previous pane */
+    BTN_ID_CANCEL,    /* Gamepad B only (the pad sets RUN too; Keyboard Shift sets RUN alone): back in ui_zone cycle mode */
     BTN_ID_COUNT
 } ButtonId;
 
