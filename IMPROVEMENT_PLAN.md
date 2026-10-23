@@ -315,6 +315,16 @@ range-read of the file's tags on track change, behind an opt-in per-server setti
 that answers 200 instead of 206 is cut off at the cap, remembered, switched off for and logged once. **Done when** each
 is on the panel.
 
+### F157. Physical keyboard and mouse input in the on-screen keyboard — open, operator request 2026-10-22
+
+`keyboard_enter` (`common/keyboard.c`) now accepts typed letters from a physical keyboard (`kb_apply_key`, `gamepad_text_entry` /
+`gamepad_take_keys`), but it is **host-tested only**. **Panel result, 2026-10-22:** with the operator's Bluetooth keyboard that has an
+integrated touchpad, the arrows move the on-screen focus but typed letters are not picked up. **Hypothesis, unverified:** the combo
+device is classified as a mouse/pointer (`mouse_is_keyboard` in `gamepad.c` decides this), so its letter keys never reach the
+typed-key queue; check the device's evdev nodes and which node the letters arrive on before changing code. The on-screen keyboard
+also has **no mouse support** (no pointer click on a key). **Done when** typing on that Bluetooth keyboard and on a plain USB
+keyboard enters letters, and a mouse click presses an on-screen key, at the panel.
+
 ### F156. Log page: a Follow setting — open, operator request 2026-10-22, not designed
 
 The Control Panel's Log page (`control_panel/log_page.c`) shows the selected log read-only. Add a **Follow** setting, true or
