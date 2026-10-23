@@ -32,8 +32,10 @@
 
 /* ── Data source ────────────────────────────────────────────────────────── */
 
-/* NONE draws a placeholder box; BLANK draws nothing (the icon column stays empty). */
-typedef enum { LV_GLYPH_NONE, LV_GLYPH_FILE, LV_GLYPH_FOLDER, LV_GLYPH_UP, LV_GLYPH_BLANK } LvGlyph;
+/* NONE draws a placeholder box; BLANK draws nothing (the icon column stays empty).
+ * PLAYING is a green play triangle (apex right), the now-playing mark. */
+typedef enum { LV_GLYPH_NONE, LV_GLYPH_FILE, LV_GLYPH_FOLDER, LV_GLYPH_UP, LV_GLYPH_BLANK,
+               LV_GLYPH_PLAYING } LvGlyph;
 
 /* A caller-owned XRGB8888 tile (a thumbnail, album art); drawn scaled to fit
  * the icon square.  Must outlive the draw call. */

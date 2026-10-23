@@ -1,7 +1,6 @@
 /* Host-side regression for common/list_view.c — the pure half of the list widget.
  *
- * Runs on the DEV MACHINE with native gcc; no framebuffer is opened (lv_draw is
- * linked but never called).  Build and run:
+ * Runs on the DEV MACHINE with native gcc; no panel is opened.  Build and run:
  *
  *   cd native_apps && gcc -Wall -Wextra -Wno-unused-parameter -I common \
  *       -o build/list_view_test tests/list_view_test.c common/list_view.c \
@@ -9,11 +8,11 @@
  *
  * Groups: 1 page and clamp arithmetic, 2 cursor keys, 3 hit test, 4 scroll
  * thumb, 5 title fit, 6 drag gesture, 7 marks and re-count, 8 lv_input over
- * TouchState / InputState (tap, second tap, drag, keys, auto-repeat).
+ * TouchState / InputState (tap, second tap, drag, keys, auto-repeat), 9 the
+ * PLAYING glyph drawn by lv_draw into an in-memory surface.
  *
- * What it cannot see: the drawing (colours, glyphs, the scroll bar on the
- * panel) and whether a real finger stays inside LV_DRAG_DEADZONE during a
- * tap.  Both are the panel's to judge.
+ * What it cannot see: the look of the glyph on the panel and whether a real
+ * finger stays inside LV_DRAG_DEADZONE during a tap.  Both are the panel's to judge.
  */
 #include "list_view.h"
 #include "utf8.h"
@@ -28,6 +27,36 @@ static int fails, checks;
 static int g_count;
 static int src_count(void *ctx) { (void)ctx; return g_count; }
 static void src_row(void *ctx, int i, LvRow *out) { (void)ctx; (void)i; out->title = "x"; }
+
+/* Group 9 draws one row into a 200x60 XRGB8888 surface in memory. */
+#define PW 200
+#define PH 60
+static uint32_t pix[PW * PH];
+static LvGlyph g_glyph;
+static void src_glyph(void *ctx, int i, LvRow *out) {
+    (void)ctx; (void)i; out->title = ""; out->glyph = g_glyph;
+}
+static int green_in(int x0, int y0, int x1, int y1) {   /* pixels exactly RGB(0,200,80) */
+    int n = 0;
+    for (int y = y0; y <= y1; y++)
+        for (int x = x0; x <= x1; x++)
+            if (x >= 0 && y >= 0 && x < PW && y < PH && pix[y * PW + x] == RGB(0, 200, 80)) n++;
+    return n;
+}
+static void draw_one_glyph(LvGlyph g) {
+    memset(pix, 0, sizeof pix);
+    g_glyph = g; g_count = 1;
+    Framebuffer fb; memset(&fb, 0, sizeof fb);
+    fb.width = PW; fb.height = PH; fb.bytes_per_pixel = 4; fb.line_length = PW * 4;
+    fb.buffer = pix; fb.back_buffer = pix;
+    LvSource s = { src_count, src_glyph, NULL };
+    UiRect r = { 0, 0, PW, 42 };                       /* one visible row of 40 px */
+    ListView lv;
+    lv_init(&lv, s, r, 40);
+    lv.cursor = -1;                                    /* no cursor fill or edge in the way */
+    lv_draw(&fb, &lv, NULL);
+    lv_free(&lv);
+}
 
 static void make(ListView *lv, int count, int rect_h, int row_h) {
     g_count = count;
@@ -477,6 +506,20 @@ int main(void) {
         CHECK(lv_input(&q, &a, NULL, 120) == LV_EV_ACTIVATE);
         CHECK(lv_input(&q, NULL, &in, 130) == LV_EV_CHANGED && q.cursor == 3);
         lv_free(&q);
+    }
+
+    /* 9 the PLAYING glyph, drawn by lv_draw into memory.  The icon square is
+     * x 9..40, y 5..36 (row at x 1, y 2, row_h 40: isz 32, centred in 38 px). */
+    {
+        draw_one_glyph(LV_GLYPH_PLAYING);
+        int all = green_in(0, 0, PW - 1, PH - 1);
+        CHECK(all > 0);                                         /* drawn at all */
+        CHECK(all == green_in(9, 5, 40, 36));                   /* and only inside the square */
+        CHECK(green_in(0, 4, PW - 1, 4) == 0 && green_in(0, 37, PW - 1, 37) == 0);
+        CHECK(green_in(18, 21, 18, 21) == 1);                   /* left edge, middle row */
+        CHECK(green_in(34, 21, 34, 21) == 1);                   /* apex, right of middle */
+        CHECK(green_in(38, 6, 40, 6) == 0);                     /* top-right corner empty */
+        CHECK(green_in(38, 35, 40, 35) == 0);                   /* bottom-right corner empty */
     }
 
     printf("%d checks, %d failed\n", checks, fails);

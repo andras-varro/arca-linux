@@ -481,6 +481,16 @@ static void draw_glyph(Framebuffer *fb, LvGlyph g, int x, int y, int s) {
         fb_fill_rect(fb, x + half - s / 8, y + half, s / 4, s - half, c);  /* stem */
         break;
     }
+    case LV_GLYPH_PLAYING: {
+        uint32_t c = RGB(0, 200, 80);
+        int xa = x + s / 4, span = (x + s - s / 8 - 1) - xa, half = s / 2;
+        for (int d = 0; d < half; d++) {                                   /* rows d from the middle */
+            int w = span * (half - d) / half + 1;
+            fb_fill_rect(fb, xa, y + half - 1 - d, w, 1, c);
+            fb_fill_rect(fb, xa, y + half + d, w, 1, c);
+        }
+        break;
+    }
     case LV_GLYPH_BLANK:
         break;
     default:
