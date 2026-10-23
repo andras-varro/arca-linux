@@ -958,6 +958,60 @@ static void latch_key(bool *latched, int code, bool down) {
     }
 }
 
+/* Keys that are text in a text field.  W A S D and Space are the ones that also
+ * latch a button; with text_entry on they must not (see gamepad_text_entry). */
+static bool text_shadowed_key(int code) {
+    return code == KEY_W || code == KEY_A || code == KEY_S || code == KEY_D ||
+           code == KEY_SPACE;
+}
+
+/* Keys the queue never carries: they are buttons, or modifiers, and their
+ * latch is what the on-screen keyboard reads.  Enter and Backspace ARE queued:
+ * Backspace for its autorepeat, which an edge never sees, and Enter so the
+ * keyboard can tell it from a pad's A button (both latch ACTION). */
+static bool text_queue_skips(int code) {
+    switch (code) {
+    case KEY_UP: case KEY_DOWN: case KEY_LEFT: case KEY_RIGHT:
+    case KEY_ESC: case KEY_TAB:
+    case KEY_PAGEUP: case KEY_PAGEDOWN: case KEY_HOME: case KEY_END:
+    case KEY_LEFTSHIFT: case KEY_RIGHTSHIFT: case KEY_LEFTCTRL: case KEY_RIGHTCTRL:
+    case KEY_LEFTALT: case KEY_RIGHTALT: case KEY_CAPSLOCK:
+        return true;
+    default:
+        return code >= BTN_MISC;
+    }
+}
+
+/* Shift / Caps tracking and the typed-key queue, from one keyboard EV_KEY. */
+static void note_typed_key(GamepadManager *gm, int code, int value) {
+    if (code == KEY_LEFTSHIFT || code == KEY_RIGHTSHIFT) {
+        if (value == 1) gm->shift_held++;
+        else if (value == 0 && gm->shift_held > 0) gm->shift_held--;
+        return;
+    }
+    if (code == KEY_CAPSLOCK && value == 1) { gm->caps_on = !gm->caps_on; return; }
+    if (!gm->text_entry || value == 0 || text_queue_skips(code)) return;
+    if (gm->key_q_n >= GAMEPAD_KEYQ_MAX) return;
+    GamepadKeyEv *k = &gm->key_q[gm->key_q_n++];
+    k->code   = code;
+    k->shift  = gm->shift_held > 0;
+    k->caps   = gm->caps_on;
+    k->repeat = (value == 2);
+}
+
+void gamepad_text_entry(GamepadManager *gm, bool on) {
+    gm->text_entry = on;
+    gm->key_q_n = 0;
+}
+
+int gamepad_take_keys(GamepadManager *gm, GamepadKeyEv *out, int cap) {
+    int n = gm->key_q_n < cap ? gm->key_q_n : cap;
+    for (int i = 0; i < n; i++) out[i] = gm->key_q[i];
+    for (int i = n; i < gm->key_q_n; i++) gm->key_q[i - n] = gm->key_q[i];
+    gm->key_q_n -= n;
+    return n;
+}
+
 /* True: SYN_DROPPED, the latches may be stale (see poll_gamepad). */
 static bool poll_keyboard_fd(GamepadManager *gm, int *fd, bool *latched) {
     struct input_event ev;
@@ -968,7 +1022,12 @@ static bool poll_keyboard_fd(GamepadManager *gm, int *fd, bool *latched) {
         if (ev.type == EV_KEY) {
             if (ev.value == 1 && hw_blank_note_activity()) continue;
             hw_blank_keepalive();
-            latch_key(latched, ev.code, ev.value != 0);
+            note_typed_key(gm, ev.code, ev.value);
+            /* In text entry a W/A/S/D/Space press is a character, not a button;
+             * its release still goes through, so a key held across the switch
+             * does not stay latched. */
+            if (!(gm->text_entry && ev.value != 0 && text_shadowed_key(ev.code)))
+                latch_key(latched, ev.code, ev.value != 0);
         }
     }
     if (read_gone(r)) {

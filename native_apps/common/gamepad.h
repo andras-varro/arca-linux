@@ -175,6 +175,16 @@ typedef struct {
     ButtonId button;
 } TouchRegion;
 
+/* One typed key, as gamepad_take_keys() hands it over: the evdev code with the
+ * Shift and Caps Lock state at the press.  `repeat` is the autorepeat value 2. */
+#define GAMEPAD_KEYQ_MAX 16
+typedef struct {
+    int  code;
+    bool shift;
+    bool caps;
+    bool repeat;
+} GamepadKeyEv;
+
 /* Gamepad manager (holds evdev fds and internal state) */
 typedef struct {
     /* Up to GAMEPAD_MAX_PADS pads, in event-node order.  Each pad, and each
@@ -303,6 +313,15 @@ typedef struct {
     /* The file the pins are read from and written to: CONFIG_FILE_PATH from
      * gamepad_init(), or the path last given to gamepad_load_slot_pins(). */
     char slot_config_path[128];
+
+    /* Typed-key capture for the on-screen keyboard (gamepad_text_entry).  The
+     * Shift and Caps state is tracked always, so a Shift held while the
+     * keyboard opens still counts; the queue is filled only while text_entry. */
+    bool text_entry;
+    int  shift_held;              /* Shift keys currently down */
+    bool caps_on;                 /* Caps Lock toggled by its press */
+    GamepadKeyEv key_q[GAMEPAD_KEYQ_MAX];
+    int  key_q_n;
 } GamepadManager;
 
 /* One connected pad or keyboard, as gamepad_devices() lists it. */
@@ -426,6 +445,19 @@ void gamepad_rescan(GamepadManager *gm);
  * unchanged set of nodes is never closed and reopened.
  */
 void gamepad_tick(GamepadManager *gm, uint32_t now_ms);
+
+/* Text entry (the on-screen keyboard).  While on, a physical keyboard's key
+ * presses are queued for gamepad_take_keys() AND the keys that double as
+ * buttons for a text field (W A S D and Space: Space would press the focused
+ * key as well as type a space) stop latching, so typing 'w' types 'w' and does
+ * not move the focus.  Arrows, Enter, Esc, Backspace, Tab, Shift still latch.
+ * Off by default, and turning it on or off clears the queue, so no other app
+ * sees any change. */
+void gamepad_text_entry(GamepadManager *gm, bool on);
+
+/* Move up to `cap` queued key presses (oldest first) into `out`; returns how
+ * many.  Always 0 unless gamepad_text_entry(gm, true) is in force. */
+int gamepad_take_keys(GamepadManager *gm, GamepadKeyEv *out, int cap);
 
 /**
  * Configure touch button regions for virtual controls.

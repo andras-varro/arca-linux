@@ -7,6 +7,7 @@
 
 #include "keyboard.h"
 #include "common.h"
+#include "term_keymap.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -198,6 +199,49 @@ static void kb_focus_move(const char **keys, KeyboardLayout layout, int rows, in
         if (best < 0 || d < best_d) { best = c; best_d = d; }
     }
     if (best >= 0) { *fr = nr; *fc = best; }
+}
+
+/* ── Physical keyboard ───────────────────────────────────────────────────── */
+
+/* The character a typed key adds to a field of this layout, or 0.  The key code
+ * becomes text in term_keymap.h (the one US table); this only filters it to
+ * what the on-screen pages could have produced and folds the case the pages
+ * fold: ALPHA and ALPHANUM have upper-case letters only, NUMERIC the digits and
+ * its two marks, FULL any printable ASCII (its pages together hold them all). */
+static char kb_typed_char(KeyboardLayout layout, const GamepadKeyEv *k) {
+    TermKeyOut o = term_keymap(k->code, k->shift ? TMOD_SHIFT : 0, k->caps);
+    if (o.kind != TK_CHAR || o.ch < 0x20 || o.ch > 0x7e) return 0;
+    char c = (char)o.ch;
+    switch (layout) {
+    case KB_LAYOUT_NUMERIC:
+        return (c >= '0' && c <= '9') || c == '.' || c == ':' ? c : 0;
+    case KB_LAYOUT_ALPHA:
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        return (c >= 'A' && c <= 'Z') || c == ' ' ? c : 0;
+    case KB_LAYOUT_ALPHANUM:
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || strchr(".-_ ", c) ? c : 0;
+    case KB_LAYOUT_FULL:
+        return c;
+    }
+    return 0;
+}
+
+/* Apply one typed key to the working text.  Returns true when it changed.  A
+ * Backspace press itself arrives as the BACK button edge, so only its
+ * autorepeat is handled here; a character past max_len is dropped. */
+static bool kb_apply_key(KeyboardLayout layout, char *work, int *cursor, int max_len,
+                         const GamepadKeyEv *k) {
+    if (k->code == KEY_BACKSPACE) {
+        if (!k->repeat || *cursor <= 0) return false;
+        work[--*cursor] = '\0';
+        return true;
+    }
+    char c = kb_typed_char(layout, k);
+    if (!c || *cursor >= max_len) return false;
+    work[(*cursor)++] = c;
+    work[*cursor] = '\0';
+    return true;
 }
 
 enum { KA_DEL, KA_CLEAR, KA_SHIFT, KA_SYM, KA_SPACE, KA_CANCEL, KA_OK, KA_ORDER };
@@ -435,7 +479,7 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
                 int hy = action_y + btn_h + 8;
                 if (hy + 10 <= SCREEN_VISIBLE_BOTTOM)
                     fb_draw_text(fb, safe_l, hy,
-                                 "ARROWS MOVE  A/SPACE/ENTER KEY  SELECT/BKSP DEL  START/ESC OK",
+                                 "TYPE OR ARROWS+ENTER  BKSP DEL  ENTER/ESC OK",
                                  RGB(120, 120, 120), 1);
             }
 
@@ -484,6 +528,21 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
             InputState in;
             memset(&in, 0, sizeof(in));
             gamepad_poll(gm, &in, 0, 0, false);
+
+            /* Typed keys.  A character goes straight into the field and hides
+             * the focus frame (the next arrow shows it again).  Enter with no
+             * focus shown is OK; with it shown, Enter is the ACTION edge below
+             * and presses the focused key, as before. */
+            GamepadKeyEv typed[GAMEPAD_KEYQ_MAX];
+            int nt = gamepad_take_keys(gm, typed, GAMEPAD_KEYQ_MAX);
+            for (int t = 0; t < nt; t++) {
+                if (typed[t].code == KEY_ENTER) {
+                    if (!typed[t].repeat && !focus_shown) pick_a = KA_OK;
+                } else if (kb_apply_key(layout, work, &cursor, max_len, &typed[t])) {
+                    focus_shown = false;
+                    dirty = true;
+                }
+            }
             bool edge[BTN_ID_COUNT];
             for (int b = 0; b < BTN_ID_COUNT; b++) {
                 bool held = in.buttons[b].held;
@@ -570,12 +629,23 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
     }
 }
 
+/* Text entry on for the life of the screen: a physical keyboard types into the
+ * field (see gamepad_text_entry), and every other app is untouched. */
+static int kb_run_typed(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
+                        const char *title, char *buf, int max_len, KeyboardLayout layout,
+                        bool mask) {
+    if (gm) gamepad_text_entry(gm, true);
+    int r = kb_run(fb, touch, gm, title, buf, max_len, layout, mask);
+    if (gm) gamepad_text_entry(gm, false);
+    return r;
+}
+
 int keyboard_enter(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
                    const char *title, char *buf, int max_len, KeyboardLayout layout) {
-    return kb_run(fb, touch, gm, title, buf, max_len, layout, false);
+    return kb_run_typed(fb, touch, gm, title, buf, max_len, layout, false);
 }
 
 int keyboard_enter_masked(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
                           const char *title, char *buf, int max_len, KeyboardLayout layout) {
-    return kb_run(fb, touch, gm, title, buf, max_len, layout, true);
+    return kb_run_typed(fb, touch, gm, title, buf, max_len, layout, true);
 }

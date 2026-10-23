@@ -1,7 +1,7 @@
-/* Host regression for the terminal app's key map (terminal/term_keymap.c).
+/* Host regression for the terminal app's key map (common/term_keymap.h).
  *
- *   cd native_apps && gcc -Wall -Wextra -I. -o build/term_keymap_test \
- *       tests/term_keymap_test.c terminal/term_keymap.c && ./build/term_keymap_test
+ *   cd native_apps && gcc -Wall -Wextra -I common -o build/term_keymap_test \
+ *       tests/term_keymap_test.c && ./build/term_keymap_test
  *
  * What it asserts:
  *   A  letters and digits come out lower case, Shift gives the upper-case
@@ -17,7 +17,7 @@
  *   F  modifiers, lock keys and unmapped codes give TK_NONE.
  * "Failing before" = compile against a stub whose term_keymap returns TK_NONE
  * for everything: every check in A-D fails, and E-F are the only ones left. */
-#include "terminal/term_keymap.h"
+#include "term_keymap.h"
 
 #include <linux/input.h>
 #include <stdio.h>

@@ -347,10 +347,10 @@ step "32/35" "arcamond"
 $CC "${WARN[@]}" -O2 -I. sysmon/arcamond.c sysmon/mon_ring.c control_panel/cpu_load.c control_panel/soc_temp.c common/hardware.c common/config.c -o build/arcamond
 
 # The terminal: /bin/login in a pty, drawn with libvterm.  The one binary with
-# VTERM_CFLAGS / VTERM_LIBS; term_keymap.c is its pure key table (host test
+# VTERM_CFLAGS / VTERM_LIBS; common/term_keymap.h is its pure key table (host test
 # tests/term_keymap_test.c).  -lvterm goes after the objects that need it.
 step "33/35" "terminal"
-$CC "${WARN[@]}" -O2 -I. "${VTERM_CFLAGS[@]}" terminal/terminal.c terminal/term_keymap.c control_panel/sys_settings.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/terminal -lm "${VTERM_LIBS[@]}" "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. "${VTERM_CFLAGS[@]}" terminal/terminal.c control_panel/sys_settings.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/terminal -lm "${VTERM_LIBS[@]}" "${AUDIO_LIBS[@]}"
 
 # The file manager: two list_view panes over the data, games, audio and USB roots.
 # fm_core.c is its screen-free half (host test tests/file_manager_test.c); the top

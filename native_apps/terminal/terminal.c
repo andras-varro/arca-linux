@@ -12,7 +12,7 @@
  *
  * Input, three sources into one pty:
  *   - a USB / Bluetooth keyboard, read here from its evdev nodes (gamepad.c
- *     reduces a keyboard to nine buttons and has no letters); term_keymap.c turns
+ *     reduces a keyboard to nine buttons and has no letters); common/term_keymap.h turns
  *     a key code into the character or special key, libvterm into its bytes;
  *   - the toolbar along the bottom edge (touch): EXIT, KBD (the on-screen
  *     keyboard, one line at a time), CTRL (sticky, applies to the next key),
@@ -51,7 +51,7 @@
 #include "../common/keyboard.h"
 #include "../common/touch_input.h"
 #include "control_panel/sys_settings.h"
-#include "terminal/term_keymap.h"
+#include "../common/term_keymap.h"
 
 #define MAX_ROWS   100
 #define MAX_COLS   200
