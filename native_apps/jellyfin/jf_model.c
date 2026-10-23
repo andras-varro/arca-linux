@@ -1,6 +1,7 @@
 /* jf_model.c — see jf_model.h. */
 
 #include <limits.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include "jf_model.h"
@@ -71,6 +72,10 @@ static void read_item(const char *s, const JsonTok *t, int n, int o, JfItem *it)
     int i, e;
 
     sfield(s, t, n, o, "Name", it->name, sizeof it->name);
+    if (sfield(s, t, n, o, "Container", it->container, sizeof it->container)) {
+        char *comma = strchr(it->container, ',');
+        if (comma) *comma = '\0';
+    }
 
     i = json_obj_get(s, t, n, o, "IndexNumber");
     if (i >= 0 && json_i64(s, &t[i], &v)) it->index = clamp_i(v, 0, INT_MAX);
@@ -317,4 +322,97 @@ void jf_row_detail(const JfItem *it, bool show_artist, char *out, int n)
         int tl = snprintf(t, sizeof t, "%s%d:%02d", w > 0 ? "  " : "", m, s);
         if (tl > 0 && w + tl < n) { memcpy(out + w, t, (size_t)tl + 1); }
     }
+}
+
+/* ── the source file's format ──────────────────────────────────────────── */
+
+/* A non-negative integer field of obj into *dst; absent, null or not a number leaves it 0. */
+static void ifield(const char *s, const JsonTok *t, int n, int obj, const char *key, int *dst)
+{
+    long long v;
+    int i = json_obj_get(s, t, n, obj, key);
+    *dst = (i >= 0 && json_i64(s, &t[i], &v)) ? clamp_i(v, 0, INT_MAX) : 0;
+}
+
+/* A container string keeps its first name: "mov,mp4,m4a" is "mov". */
+static void first_name(char *s)
+{
+    char *comma = strchr(s, ',');
+    if (comma) *comma = '\0';
+}
+
+int jf_parse_format(const char *body, size_t len, JsonTok *toks, int ntoks, JfFormat *out)
+{
+    if (!out) return JF_PARSE_BAD;
+    memset(out, 0, sizeof *out);
+    int n = json_parse(body, len, toks, ntoks);
+    if (n < 0) return map_err(n);
+    if (toks[0].type != JSON_OBJECT) return JF_PARSE_BAD;
+    int ms = json_obj_get(body, toks, n, 0, "MediaSources");
+    int src = ms >= 0 && toks[ms].type == JSON_ARRAY ? json_arr_first(toks, n, ms) : -1;
+    if (src < 0 || toks[src].type != JSON_OBJECT) return JF_PARSE_OK;
+    out->have = true;
+    sfield(body, toks, n, src, "Container", out->container, sizeof out->container);
+    first_name(out->container);
+    int src_bitrate;
+    ifield(body, toks, n, src, "Bitrate", &src_bitrate);
+    int st = json_obj_get(body, toks, n, src, "MediaStreams");
+    if (st >= 0 && toks[st].type == JSON_ARRAY) {
+        for (int e = json_arr_first(toks, n, st); e >= 0; e = json_arr_next(toks, n, st, e)) {
+            char ty[16];
+            if (toks[e].type != JSON_OBJECT || !sfield(body, toks, n, e, "Type", ty, sizeof ty) || strcmp(ty, "Audio")) continue;
+            sfield(body, toks, n, e, "Codec", out->codec, sizeof out->codec);
+            ifield(body, toks, n, e, "BitDepth", &out->bit_depth);
+            ifield(body, toks, n, e, "SampleRate", &out->sample_rate);
+            ifield(body, toks, n, e, "Channels", &out->channels);
+            ifield(body, toks, n, e, "BitRate", &out->bitrate);
+            break;   /* the first Audio stream; an embedded cover is a "Video"/"EmbeddedImage" stream and is skipped */
+        }
+    }
+    if (out->bitrate <= 0) out->bitrate = src_bitrate;
+    return JF_PARSE_OK;
+}
+
+/* Append two spaces and the formatted text to out, upper-cased. */
+static void put_part(char *out, size_t cap, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
+static void put_part(char *out, size_t cap, const char *fmt, ...)
+{
+    size_t l = strlen(out);
+    if (l + 3 >= cap) return;
+    memcpy(out + l, "  ", 3);
+    l += 2;
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(out + l, cap - l, fmt, ap);
+    va_end(ap);
+    for (char *p = out + l; *p; p++) if (*p >= 'a' && *p <= 'z') *p = (char)(*p - 'a' + 'A');
+}
+
+void jf_format_text(char *out, size_t cap, const char *list_container, const JfFormat *f)
+{
+    if (cap == 0) return;
+    out[0] = '\0';
+    const char *name = f && f->have && f->container[0] ? f->container : f && f->have && f->codec[0] ? f->codec : list_container;
+    if (!f || !f->have) {
+        if (name && name[0]) {
+            snprintf(out, cap, "SOURCE");
+            put_part(out, cap, "%s", name);
+        }
+        return;
+    }
+    snprintf(out, cap, "SOURCE");
+    if (name && name[0]) {
+        if (f->codec[0] && f->container[0] && !ieq(f->codec, f->container)) put_part(out, cap, "%s (%s)", name, f->codec);
+        else put_part(out, cap, "%s", name);
+    }
+    if (f->bit_depth > 0) put_part(out, cap, "%d-bit", f->bit_depth);
+    if (f->sample_rate > 0) {
+        int tenths = (f->sample_rate + 50) / 100;   /* kHz to one decimal, dropped when .0 */
+        if (tenths % 10) put_part(out, cap, "%d.%d kHz", tenths / 10, tenths % 10);
+        else put_part(out, cap, "%d kHz", tenths / 10);
+    }
+    if (f->channels == 1) put_part(out, cap, "mono");
+    else if (f->channels == 2) put_part(out, cap, "stereo");
+    else if (f->channels > 0) put_part(out, cap, "%d ch", f->channels);
+    if (f->bitrate > 0) put_part(out, cap, "%d kbps", (f->bitrate + 500) / 1000);
 }

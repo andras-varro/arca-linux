@@ -34,7 +34,7 @@ static void copy_str(char *dst, size_t cap, const char *s)
 static const char *kind_name(JfKind k)
 {
     return k == JF_KIND_AUTH ? "auth" : k == JF_KIND_LIST ? "list" : k == JF_KIND_STREAM ? "stream" : k == JF_KIND_WRITE ? "write" : k == JF_KIND_USER ? "user"
-         : k == JF_KIND_SAVE ? "save" : k == JF_KIND_TAGS ? "tags" : "none";
+         : k == JF_KIND_SAVE ? "save" : k == JF_KIND_TAGS ? "tags" : k == JF_KIND_FORMAT ? "format" : "none";
 }
 
 /* ── pure: the error table ─────────────────────────────────────────────── */
@@ -135,7 +135,7 @@ static int enqueue(JfApi *a, JfKind kind, unsigned tag, const char *path, JfList
 {
     size_t pl = path ? strlen(path) : 0;
     if (pl == 0 || pl >= JF_API_PATH_MAX || body_len > JF_API_POST_BYTES) return -1;
-    if (kind == JF_KIND_LIST || kind == JF_KIND_STREAM || kind == JF_KIND_TAGS) jf_api_cancel_kind(a, kind);   /* supersede */
+    if (kind == JF_KIND_LIST || kind == JF_KIND_STREAM || kind == JF_KIND_TAGS || kind == JF_KIND_FORMAT) jf_api_cancel_kind(a, kind);   /* supersede */
     if (kind != JF_KIND_TAGS && a->cur.kind == JF_KIND_TAGS) drop_current(a);   /* a tag read never makes anything wait */
     for (int i = 0; i < JF_API_SLOTS; i++) {
         JfSlot *s = &a->ring[i];
@@ -194,6 +194,11 @@ int jf_api_enqueue_write(JfApi *a, unsigned tag, const char *method, const char 
 int jf_api_enqueue_user(JfApi *a, unsigned tag, const char *path)
 {
     return enqueue(a, JF_KIND_USER, tag, path, NULL, NULL, 0, NULL);
+}
+
+int jf_api_enqueue_format(JfApi *a, unsigned tag, const char *path)
+{
+    return enqueue(a, JF_KIND_FORMAT, tag, path, NULL, NULL, 0, NULL);
 }
 
 int jf_api_enqueue_tags(JfApi *a, unsigned tag, const char *path, int range)
@@ -266,7 +271,7 @@ static void begin_current(JfApi *a)
         snprintf(rh, sizeof rh, "Range: bytes=0-%d\r\n", c->range - 1);
         if (hl + (int)strlen(rh) < (int)sizeof(hdr)) strcpy(hdr + hl, rh);
         http_begin(&a->req, a->host, a->port, a->tls, "GET", c->path, hdr, NULL, 0, HTTP_BUFFER, a->body, (size_t)c->range + 1);
-    } else if (c->kind == JF_KIND_LIST || c->kind == JF_KIND_USER)
+    } else if (c->kind == JF_KIND_LIST || c->kind == JF_KIND_USER || c->kind == JF_KIND_FORMAT)
         http_begin(&a->req, a->host, a->port, a->tls, "GET", c->path, hdr, NULL, 0,
                    HTTP_BUFFER, a->body, JF_API_BODY_BYTES);
     else
@@ -306,6 +311,9 @@ static void finish(JfApi *a, JfResult *out, int status, const char *herr, int fd
             out->err = JF_ERR_BADREPLY;
     } else if (out->err == JF_ERR_NONE && c->kind == JF_KIND_USER) {
         if (jf_parse_user_policy(http_body(&a->req), http_body_len(&a->req), a->toks, JF_TOKENS_PAGE, &out->policy) != JF_PARSE_OK)
+            out->err = JF_ERR_BADREPLY;
+    } else if (out->err == JF_ERR_NONE && c->kind == JF_KIND_FORMAT) {
+        if (jf_parse_format(http_body(&a->req), http_body_len(&a->req), a->toks, JF_TOKENS_PAGE, &out->format) != JF_PARSE_OK)
             out->err = JF_ERR_BADREPLY;
     } else if (c->kind == JF_KIND_STREAM) {
         if (out->err == JF_ERR_NONE && fd >= 0) out->fd = fd;

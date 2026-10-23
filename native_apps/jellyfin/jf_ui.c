@@ -98,6 +98,7 @@ void jf_ui_layout(JfLayout *L, const JfExtents *e)
     L->info = rect_of(sl, top + 6, sw, 120);
     L->progress = rect_of(sl + 20, top + 6 + 120 + 10, sw - 40, 14);
     L->seek = rect_of(L->progress.x, L->progress.y - 10, L->progress.w, 34);
+    L->source = rect_of(L->info.x + 4, L->info.y + 110, L->info.w - 8, FONT_ROWS);   /* under the state line (y 94..108), above the seek bar (info bottom + 6) */
     /* the file-tag band: from under the time row to above the transport row, on the seek bar's margins */
     int np_top = L->np[0].y;
     for (int i = 1; i < JF_UI_NP; i++) if (L->np[i].y < np_top) np_top = L->np[i].y;
@@ -247,7 +248,7 @@ static void src_row(void *ctx, int index, LvRow *out)
     out->title = it->name;
     out->detail = d;
     out->glyph = it->type == JF_ITEM_TRACK ? LV_GLYPH_FILE : LV_GLYPH_FOLDER;
-    if (app->screen == JF_SCR_QUEUE && index == app->queue_cur) out->glyph = LV_GLYPH_UP;
+    if (app->screen == JF_SCR_QUEUE && index == app->queue_cur) out->glyph = LV_GLYPH_PLAYING;
 }
 
 /* ── Setup ─────────────────────────────────────────────────────────────── */
@@ -992,6 +993,7 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     }
     if (app->banner_seq != ui->seen_banner) { ui->seen_banner = app->banner_seq; ui->dirty = true; }
     if (app->tags_seq != ui->seen_tags) { ui->seen_tags = app->tags_seq; if (app->screen == JF_SCR_NOWPLAYING) ui->dirty = true; }
+    if (app->fmt_seq != ui->seen_fmt) { ui->seen_fmt = app->fmt_seq; if (app->screen == JF_SCR_NOWPLAYING) ui->dirty = true; }
 
     if (app->overlay) {
         overlay_input(ui, ts, in, now, out, &n, max);
@@ -1670,6 +1672,14 @@ static void draw_nowplaying(JfUi *ui)
     const JfTags *tg = jf_now_tags(app);
     if (it && (tg || app->login.tags_on)) draw_tags(ui, it, tg);
     if (state[0]) fb_draw_text(fb, tx, in.y + 94, state, RING, 2);
+    if (it) {   /* the source file's format, in the strip under the state line; the container alone until the item read arrives */
+        char src[128];
+        jf_format_text(src, sizeof src, it->container, jf_now_format(app));
+        if (src[0]) {
+            lv_fit(buf, sizeof buf, src, tw, TAG_FONT);
+            fb_draw_text(fb, tx, ui->L.source.y, buf, DIM, TAG_FONT);
+        }
+    }
 
     UiRect p = ui->L.progress;
     int total = it ? it->runtime_s : 0;

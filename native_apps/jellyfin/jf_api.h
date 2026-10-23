@@ -2,7 +2,7 @@
  * jf_api.h — the Jellyfin client's request queue: one HTTP request in flight at
  * a time over a four-slot ring, polled once per frame, never blocking.
  *
- * Six kinds.  AUTH is a POST (sign-in).  WRITE is a DELETE or an empty-body POST whose status is the result (as SAVE,
+ * Seven kinds.  FORMAT is a GET of one item, its source format parsed into the result (priority, retry and supersession as LIST).  AUTH is a POST (sign-in).  WRITE is a DELETE or an empty-body POST whose status is the result (as SAVE,
  * never retried).  USER is a GET of one user object, its Policy parsed into the result.  SAVE is a POST of a JSON body (create a playlist) whose
  * reply body is ignored: the status is the result.  LIST is a GET whose body is parsed
  * with jf_parse_items() into a caller-given JfList.  STREAM is a GET in
@@ -56,6 +56,7 @@
 typedef enum { JF_KIND_NONE = 0, JF_KIND_AUTH, JF_KIND_LIST, JF_KIND_STREAM, JF_KIND_SAVE,
                JF_KIND_WRITE,   /* DELETE or POST with an empty body: the status is the result, never retried */
                JF_KIND_USER,    /* GET /Users/<uid>: one user object, its Policy in JfResult.policy */
+               JF_KIND_FORMAT,  /* GET /Users/<uid>/Items/<id>: one item, its source format parsed into JfResult.format; a new one supersedes any older */
                JF_KIND_TAGS     /* GET of a file with a Range header (bytes 0..range-1): 206 (or a 200 that fits) parsed into JfResult.tags; lowest priority, never retried, dropped when anything else is enqueued */
              } JfKind;
 
@@ -82,6 +83,7 @@ typedef struct {
     int      fd;          /**< STREAM: the socket on success, else -1             */
     JfTags   tags;        /**< TAGS: the parsed head of the file (tags.have false = no covered tag) */
     bool     tags_rejected; /**< TAGS: the server answered 200 with a body past the range: it ignores Range, the read was cut off at the cap */
+    JfFormat format;      /**< FORMAT: the source file's format (have false = the reply named no MediaSources) */
 } JfResult;
 
 typedef struct {
@@ -144,6 +146,8 @@ int  jf_api_enqueue_save(JfApi *a, unsigned tag, const char *name, const char *u
 int  jf_api_enqueue_write(JfApi *a, unsigned tag, const char *method, const char *path);
 /** GET of `path` (/Users/<uid>), parsed into JfResult.policy. */
 int  jf_api_enqueue_user(JfApi *a, unsigned tag, const char *path);
+/** GET of `path` (/Users/<uid>/Items/<id>), parsed into JfResult.format.  A new FORMAT request replaces any queued or in-flight one. */
+int  jf_api_enqueue_format(JfApi *a, unsigned tag, const char *path);
 /** GET of `path` with Range bytes=0-(range-1), range 1..JF_TAGS_HARD, else -1.  A new TAGS request replaces any queued or in-flight one. */
 int  jf_api_enqueue_tags(JfApi *a, unsigned tag, const char *path, int range);
 

@@ -60,6 +60,8 @@ int jf_path_genre_tracks(char *out, size_t cap, const char *uid, const char *gen
 int jf_path_instant_mix(char *out, size_t cap, const char *uid, const char *track_id, int limit);
 /** One item by id as a one-row list (Ids=): the seed of a MIX, with Genres, ProductionYear and ArtistItems. */
 int jf_path_item_by_id(char *out, size_t cap, const char *uid, const char *id);
+/** One item by id as a single object (GET /Users/<uid>/Items/<id>): its MediaSources come without asking (~5 KB); for the NOW PLAYING source line. */
+int jf_path_item_detail(char *out, size_t cap, const char *uid, const char *id);
 /** The genre index with SongCount (Fields=ItemCounts; the plain list has none): 100 per page is ~38 KB and ~3700 tokens. */
 int jf_path_genre_index(char *out, size_t cap, const char *uid, int start, int limit);
 /** GET /Users/<uid>/Views: the user's libraries (jf_parse_items keeps the music ones as JF_ITEM_LIBRARY). */

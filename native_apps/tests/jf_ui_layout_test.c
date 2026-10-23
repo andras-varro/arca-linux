@@ -46,6 +46,21 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
           "T: tag band %d..%d is not between the time row (ends %d) and the transport row (starts %d)",
           L.tags.y, L.tags.y + L.tags.h, L.progress.y + L.progress.h + 8 + 18, L.np[0].y);
     CHECK(L.tags.x == L.progress.x && L.tags.w == L.progress.w, "T: tag band is not on the seek bar's margins");
+    /* NOW PLAYING's source line: inside the info block, under the state line (y +94..+108), clear of the seek bar, the time row, the tag band and the transport row,
+     * and the widest line a source gives fits beside the cover */
+    {
+        UiRect time_row = { L.progress.x, L.progress.y + L.progress.h + 8, L.progress.w, 16 };
+        CHECK(L.source.h > 0 && L.source.y >= L.info.y + 108 && L.source.y + L.source.h <= L.info.y + L.info.h &&
+              L.source.x >= L.info.x && L.source.x + L.source.w <= L.info.x + L.info.w, "S: source line %d..%d is outside the info block / state line", L.source.y, L.source.y + L.source.h);
+        CHECK(disjoint(L.source, L.seek) && disjoint(L.source, L.progress) && disjoint(L.source, time_row) && disjoint(L.source, L.tags),
+              "S: source line overlaps the seek bar, time row or tag band (tag band %d..%d at maximum fill)", L.tags.y, L.tags.y + L.tags.h);
+        for (int i = 0; i < JF_UI_NP; i++) CHECK(disjoint(L.source, L.np[i]), "S: source line overlaps transport button %d", i);
+        JfFormat wide = { true, "wav", "pcm_s16le", 24, 44100, 6, 1411200 };
+        char st[160];
+        jf_format_text(st, sizeof st, "", &wide);
+        CHECK(text_measure_width(st, 1) <= L.source.w - JF_UI_ART - 12 - 4, "S: the widest source line (%d px) does not fit beside the cover (%d px)",
+              text_measure_width(st, 1), L.source.w - JF_UI_ART - 16);
+    }
     UiRect press[64];
 
     int n = 0;

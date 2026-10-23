@@ -46,6 +46,7 @@ typedef struct {
     int count;              /**< SongCount (a genre, Fields=ItemCounts), else ChildCount (a playlist's tracks), 0 if absent */
     char artist_id[33];     /**< ArtistItems[0].Id of a track, empty if absent */
     char genres[JF_GENRES_BYTES];  /**< a track's Genres (Fields=Genres): each name whole, each ended by a newline; one that does not fit is dropped */
+    char container[12];     /**< a track's Container (the first of a comma list) as the server sends it; empty if absent (a restored queue has none) */
 } JfItem;
 
 typedef struct {
@@ -94,6 +95,26 @@ int jf_parse_auth(const char *body, size_t len, JsonTok *toks, int ntoks,
 /** GET /Users/<uid> reply (one user object) -> its Policy.  Any non-OK return leaves `out` zeroed. */
 int jf_parse_user_policy(const char *body, size_t len, JsonTok *toks, int ntoks, JfPolicy *out);
 
+/** The source file's format, from a single-item reply (GET /Users/<uid>/Items/<id>): MediaSources[0] and its first Audio stream. */
+typedef struct {
+    bool have;             /**< a MediaSources entry was found */
+    char container[16];    /**< MediaSources[0].Container (first of a comma list), as sent */
+    char codec[24];        /**< the Audio stream's Codec, "" if absent */
+    int  bit_depth;        /**< BitDepth, 0 when absent or null (lossy) */
+    int  sample_rate;      /**< Hz, 0 if absent */
+    int  channels;         /**< 0 if absent */
+    int  bitrate;          /**< bits/s: the Audio stream's BitRate, else the source's Bitrate, 0 if neither */
+} JfFormat;
+
+/** A single-item reply -> `out`.  Any non-OK return leaves `out` zeroed; a reply with no MediaSources is JF_PARSE_OK with have false. */
+int jf_parse_format(const char *body, size_t len, JsonTok *toks, int ntoks, JfFormat *out);
+
+/**
+ * The NOW PLAYING source line, upper case: "SOURCE  FLAC  16-BIT  44.1 KHZ  STEREO  918 KBPS".  The codec follows the container
+ * in brackets when it differs ("WAV (PCM_S16LE)"); a part that is missing is left out.  `f` NULL (not read yet, or failed) shows
+ * just `list_container` ("SOURCE  FLAC"); with neither, out is "".  Always NUL-terminated within `cap`.
+ */
+void jf_format_text(char *out, size_t cap, const char *list_container, const JfFormat *f);
 
 /** Characters of an artist name a list row's detail text shows; longer is cut to JF_ROW_ARTIST_CHARS-2 characters + "..". */
 #define JF_ROW_ARTIST_CHARS 22

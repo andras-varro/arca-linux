@@ -446,6 +446,12 @@ static void test_mix_paths(void)
     CHECK(jf_path_item_by_id(b, sizeof(b), UID, "../x") == -1, "bad item id accepted");
     CHECK(jf_path_item_by_id(b, sizeof(b), UID, NULL) == -1, "NULL item id accepted");
     CAP_EDGE("item by id", jf_path_item_by_id(b_, cap, UID, ART));
+    n = jf_path_item_detail(b, sizeof(b), UID, ART);
+    EXPECT("item detail", n, b, "/Users/" UID "/Items/" ART);
+    CHECK(jf_path_item_detail(b, sizeof(b), "short", ART) == -1, "detail: bad uid accepted");
+    CHECK(jf_path_item_detail(b, sizeof(b), UID, "../x") == -1, "detail: bad item id accepted");
+    CHECK(jf_path_item_detail(b, sizeof(b), UID, NULL) == -1, "detail: NULL item id accepted");
+    CAP_EDGE("item detail", jf_path_item_detail(b_, cap, UID, ART));
 
     n = jf_path_genre_index(b, sizeof(b), UID, 200, 100);
     EXPECT("genre index", n, b, "/MusicGenres?userId=" UID "&StartIndex=200&Limit=100&Fields=ItemCounts&EnableImages=false&EnableUserData=false");

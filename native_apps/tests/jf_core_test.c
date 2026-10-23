@@ -25,10 +25,21 @@ static int max_cmds;     /* the most commands one step emitted since the test th
 
 static bool test_session(char out[33]) { snprintf(out, 33, "%032u", ++sess_n); return true; }
 
+/* The FORMAT read is sent at the end of any step that shows a new track; every older assertion counts the other commands, so it is
+ * taken out of cm here and kept in fmt_cmd / fmt_sent for the tests about it. */
+static JfCmd fmt_cmd;
+static int fmt_sent;
+
 static void step_ev(const JfEvent *ev)
 {
     jf_step(&app, ev, &cm);
     CHECK(!cm.overflow, "command overflow on event %d", ev->type);
+    int w = 0;
+    for (int k = 0; k < cm.n; k++) {
+        if (cm.c[k].type == JF_CMD_REQUEST && cm.c[k].kind == JF_KIND_FORMAT) { fmt_cmd = cm.c[k]; fmt_sent++; continue; }
+        cm.c[w++] = cm.c[k];
+    }
+    cm.n = w;
     if (ev->type != JF_EV_START && cm.n > max_cmds) max_cmds = cm.n;   /* START is the session set-up, not a step of a flow under test */
 }
 static void send(JfEventType t, int i)
@@ -2799,10 +2810,66 @@ static void test_search_flatten(void)
           "cap: 100 ids, the banner, no request for the second album (n %d)", app.pick_n);
 }
 
+/* ── source format: one single-item read per track, also for a queue restored paused ── */
+
+static void format_reply(unsigned tag, JfErr e, int bitrate)
+{
+    JfResult r; memset(&r, 0, sizeof r);
+    r.kind = JF_KIND_FORMAT; r.tag = tag; r.fd = -1; r.err = e; r.status = e == JF_ERR_NONE ? 200 : 0;
+    if (e == JF_ERR_NONE) { r.format.have = true; snprintf(r.format.container, sizeof r.format.container, "flac"); r.format.bitrate = bitrate; }
+    send_result(&r);
+}
+static void test_format(void)
+{
+    char want[JF_PATH_MAX];
+
+    in_tracks(4, 4);
+    fmt_sent = 0;
+    send(JF_EV_ACTIVATE, 0);
+    jf_path_item_detail(want, sizeof want, app.login.user_id, app.queue[0].id);
+    CHECK(fmt_sent == 1 && fmt_cmd.kind == JF_KIND_FORMAT && !strcmp(fmt_cmd.path, want), "a track start sends one FORMAT read for its item (%s)", fmt_cmd.path);
+    unsigned t0 = fmt_cmd.tag;
+    CHECK(!jf_now_format(&app), "nothing shown before the reply");
+    now_playing();
+    CHECK(fmt_sent == 1, "the stream starting does not send a second read");
+    format_reply(t0 + 5, JF_ERR_NONE, 111000);
+    CHECK(!jf_now_format(&app), "a result with another tag is ignored");
+    unsigned seq = app.fmt_seq;
+    format_reply(t0, JF_ERR_NONE, 918000);
+    CHECK(jf_now_format(&app) && jf_now_format(&app)->bitrate == 918000 && app.fmt_seq != seq, "the matching result is stored and read through jf_now_format");
+
+    send(JF_EV_NEXT, 0);
+    CHECK(fmt_sent == 2 && fmt_cmd.tag != t0 && !jf_now_format(&app), "the next track asks again and shows nothing of the old one");
+    unsigned t1 = fmt_cmd.tag;
+    format_reply(t0, JF_ERR_NONE, 1);
+    CHECK(!jf_now_format(&app), "a late result of the earlier track is ignored");
+    format_reply(t1, JF_ERR_UNREACHABLE, 0);
+    send(JF_EV_VOL_UP, 0); send(JF_EV_PAUSE, 0);
+    CHECK(fmt_sent == 2 && !jf_now_format(&app), "a failed read is not repeated for that track");
+
+    /* a queue restored paused asks as soon as the first step runs, without PLAY */
+    static JfItem saved[3];
+    memset(saved, 0, sizeof saved);
+    for (int k = 0; k < 3; k++) { snprintf(saved[k].id, sizeof saved[k].id, "%032x", ++serial); snprintf(saved[k].name, sizeof saved[k].name, "r%d", k); saved[k].type = JF_ITEM_TRACK; }
+    jf_queue_restore(&app, saved, 3, 1, 4000);
+    send(JF_EV_VOL_UP, 0);
+    jf_path_item_detail(want, sizeof want, app.login.user_id, saved[1].id);
+    CHECK(app.play_state == JF_PLAY_PAUSED && fmt_sent == 3 && !strcmp(fmt_cmd.path, want), "a restored paused track sends its FORMAT read on the next step (%d, %s)", fmt_sent, fmt_cmd.path);
+
+    /* signed out: nothing is sent */
+    char tok[sizeof app.login.token];
+    memcpy(tok, app.login.token, sizeof tok);
+    app.login.token[0] = '\0';
+    jf_queue_restore(&app, saved, 3, 2, 0);
+    send(JF_EV_VOL_UP, 0);
+    CHECK(fmt_sent == 3, "no token: no FORMAT read");
+    memcpy(app.login.token, tok, sizeof tok);
+}
+
 int main(void)
 {
     test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue(); test_sink_channels();
-    test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit(); test_categories(); test_category_pick(); test_settings(); test_tags(); test_signout();
+    test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit(); test_categories(); test_category_pick(); test_settings(); test_tags(); test_format(); test_signout();
     test_action_bar(); test_queue_insert(); test_mix(); test_mix_seed_and_ticks(); test_mix_flow(); test_mix_choice(); test_mix_stops();
     test_mix_cancel_and_errors(); test_mix_nowplaying(); test_save();
     test_queue_clear(); test_queue_restore();

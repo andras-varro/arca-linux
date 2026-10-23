@@ -349,6 +349,42 @@ static void on_tags_result(JfApp *app, const JfResult *r, JfCmds *out)
     }
 }
 
+/* ── source format: one single-item read per track (playing or restored paused), sent from the end of jf_step ── */
+
+const JfFormat *jf_now_format(const JfApp *app)
+{
+    const JfItem *it = jf_now(app);
+    return it && app->fmt.have && !strcmp(app->fmt_id, it->id) ? &app->fmt : NULL;
+}
+
+/* The track now showing has had no FORMAT read yet: send one.  The id is noted as tried when the request goes out, so a failed read
+ * is not repeated for that track; a full command list leaves it for the next step. */
+static void request_format(JfApp *app, JfCmds *out)
+{
+    const JfItem *it = jf_now(app);
+    if (!it || !have_token(app) || !app->login.user_id[0]) return;
+    if (app->play_state != JF_PLAY_PLAYING && app->play_state != JF_PLAY_PAUSED && app->play_state != JF_PLAY_FETCHING) return;
+    if (!strcmp(app->fmt_id, it->id) || out->n >= JF_CMDS_MAX) return;
+    char path[JF_PATH_MAX];
+    if (jf_path_item_detail(path, sizeof path, app->login.user_id, it->id) < 0) return;
+    if (app->fmt.have) { memset(&app->fmt, 0, sizeof app->fmt); app->fmt_seq++; }
+    JfCmd *c = emit(out, JF_CMD_REQUEST);
+    c->kind = JF_KIND_FORMAT;
+    c->tag = ++app->fmt_tag;
+    memcpy(c->path, path, strlen(path) + 1);
+    copy(app->fmt_id, sizeof(app->fmt_id), it->id);
+    app->fmt_pending = true;
+}
+
+static void on_format_result(JfApp *app, const JfResult *r)
+{
+    if (!app->fmt_pending || r->tag != app->fmt_tag) return;   /* an earlier track's */
+    app->fmt_pending = false;
+    if (r->err != JF_ERR_NONE || !r->format.have) return;
+    app->fmt = r->format;
+    app->fmt_seq++;
+}
+
 static void fail_stop(JfApp *app, JfCmds *out)
 {
     app->play_state = JF_PLAY_IDLE;
@@ -1636,6 +1672,7 @@ static void on_result(JfApp *app, const JfResult *r, JfCmds *out)
     case JF_KIND_WRITE:  on_write_result(app, r, out); break;
     case JF_KIND_USER:   on_user_result(app, r); break;
     case JF_KIND_TAGS:   on_tags_result(app, r, out); break;
+    case JF_KIND_FORMAT: on_format_result(app, r); break;
     default: break;
     }
 }
@@ -2198,5 +2235,6 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
     default: break;
     }
 done:
+    request_format(app, out);
     refresh(app);
 }

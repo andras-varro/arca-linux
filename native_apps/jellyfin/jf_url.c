@@ -461,3 +461,9 @@ int jf_path_download(char *out, size_t cap, const char *id)
     if (!jf_id_valid(id)) return -1;
     return fin(snprintf(out, cap, "/Items/%s/Download", id), cap);
 }
+
+int jf_path_item_detail(char *out, size_t cap, const char *uid, const char *id)
+{
+    if (!jf_id_valid(uid) || !jf_id_valid(id)) return -1;
+    return fin(snprintf(out, cap, "/Users/%s/Items/%s", uid, id), cap);
+}

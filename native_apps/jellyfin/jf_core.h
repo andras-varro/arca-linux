@@ -371,6 +371,10 @@ typedef struct {
     bool auth_pending, save_pending;
     bool tags_pending, tags_extended;    /* a TAGS read is in flight / the one extension read of this track was sent */
     unsigned tags_tag;                   /* numbers every TAGS request, so a late result of an earlier track is ignored */
+    JfFormat fmt;                        /* the source format of the track fmt_id (have false = none read); read it through jf_now_format() */
+    char fmt_id[33];                     /* the track a FORMAT read was last sent for: one try per track, a failure is not repeated */
+    bool fmt_pending;
+    unsigned fmt_tag, fmt_seq;           /* numbers every FORMAT request; fmt_seq bumps whenever `fmt` changes, so the UI redraws only then */
     bool delete_pending, user_pending;   /* a DELETE / the policy fetch is in flight */
     unsigned delete_tag, user_tag;
     char del_name[96];                   /* the playlist being deleted, for the banner */
@@ -442,6 +446,9 @@ const JfItem *jf_now(const JfApp *app);
 
 /** The file tags of the track playing, or NULL when none were read (setting off, not arrived, no covered format, server cut off). */
 const JfTags *jf_now_tags(const JfApp *app);
+
+/** The source format of the track playing, or NULL when it has not arrived (or the read failed) for that track. */
+const JfFormat *jf_now_format(const JfApp *app);
 
 /** True when file tags are on but this server answered a range read with a whole file: reads to it are off until the setting is switched off and on. */
 bool jf_tags_blocked(const JfApp *app);

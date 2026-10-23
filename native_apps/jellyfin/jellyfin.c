@@ -137,8 +137,9 @@ static void execute(const JfCmds *cmds, uint32_t now)
                     push(&e);
                 }
                 jf_wipe((void *)c->password, sizeof c->password);
-            } else if (c->kind == JF_KIND_WRITE || c->kind == JF_KIND_USER) {
+            } else if (c->kind == JF_KIND_WRITE || c->kind == JF_KIND_USER || c->kind == JF_KIND_FORMAT) {
                 int rc = c->kind == JF_KIND_WRITE ? jf_api_enqueue_write(&api, c->tag, c->method, c->path)
+                                                  : c->kind == JF_KIND_FORMAT ? jf_api_enqueue_format(&api, c->tag, c->path)
                                                   : jf_api_enqueue_user(&api, c->tag, c->path);
                 if (rc < 0) {
                     JfEvent e;

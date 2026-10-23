@@ -31,7 +31,7 @@ static int checks, failed;
 #define CHECK(c) do { checks++; if (!(c)) { failed++; \
     printf("FAIL line %d: %s\n", __LINE__, #c); } } while (0)
 
-enum { A_ITEMS, A_AUTH, A_STATUS, A_SILENT, A_STREAM, A_USER, A_PART, A_WHOLE_SMALL, A_WHOLE_BIG };
+enum { A_ITEMS, A_AUTH, A_STATUS, A_SILENT, A_STREAM, A_USER, A_PART, A_WHOLE_SMALL, A_WHOLE_BIG, A_FORMAT };
 typedef struct { int kind; int status; } Act;
 
 #define ID1 "0123456789abcdef0123456789abcdef"
@@ -99,6 +99,7 @@ static void serve(int ls, int hpipe, const Act *script, int nscript)
         case A_STATUS: reply(c, a.status, "nope", 4); break;
         case A_STREAM: reply(c, a.status ? a.status : 200, "0123456789", 10); break;
         case A_USER:   reply(c, 200, USER_BODY, strlen(USER_BODY)); break;
+        case A_FORMAT: { static const char fb[] = "{\"MediaSources\":[{\"Container\":\"flac\",\"Bitrate\":958879,\"MediaStreams\":[{\"Type\":\"EmbeddedImage\",\"BitDepth\":8},{\"Type\":\"Audio\",\"Codec\":\"flac\",\"BitRate\":917580,\"SampleRate\":44100,\"BitDepth\":16,\"Channels\":2}]}]}"; reply(c, 200, fb, strlen(fb)); } break;
         case A_PART:        { static char b[2000]; memset(b, 'x', sizeof b); reply(c, 206, b, sizeof b); } break;
         case A_WHOLE_SMALL: { static char b[2000]; memset(b, 'x', sizeof b); reply(c, 200, b, sizeof b); } break;
         case A_WHOLE_BIG:   { static char b[9000]; memset(b, 'x', sizeof b); reply(c, 200, b, sizeof b); } break;
@@ -569,6 +570,31 @@ static void test_write_and_user(void)
     CHECK(r[0].list == NULL && r[0].fd == -1);
     CHECK(r[0].policy.is_admin && r[0].policy.content_deletion && r[0].policy.deletion_folders_n == 2);
     CHECK(strstr(heads(s), "GET /Users/" ID1 " HTTP/1.0\r\n") != NULL);
+    jf_api_free(&a);
+    srv_stop(s);
+
+    /* FORMAT: GET /Users/<uid>/Items/<id>; a second request supersedes the first (one result, the newer tag), the first Audio stream lands in the result */
+    Act fs[] = {{A_FORMAT, 0}};
+    s = srv_start(fs, 1);
+    setup(&a, s);
+    snprintf(path, sizeof path, "/Users/%s/Items/%s", ID1, ID2);
+    CHECK(jf_api_enqueue_format(&a, 61, path) == 0);
+    CHECK(jf_api_enqueue_format(&a, 62, path) == 0);
+    CHECK(jf_api_enqueue_format(&a, 62, "") == -1);
+    CHECK(pump(&a, r, 4, 3000) == 1);
+    CHECK(r[0].kind == JF_KIND_FORMAT && r[0].tag == 62 && r[0].err == JF_ERR_NONE && r[0].status == 200);
+    CHECK(r[0].format.have && !strcmp(r[0].format.container, "flac") && r[0].format.bit_depth == 16 && r[0].format.sample_rate == 44100 &&
+          r[0].format.channels == 2 && r[0].format.bitrate == 917580);
+    CHECK(strstr(heads(s), "GET /Users/" ID1 "/Items/" ID2 " HTTP/1.0\r\n") != NULL && count_str(heads(s), "GET /Users/") == 1);
+    jf_api_free(&a);
+    srv_stop(s);
+
+    /* FORMAT: a 200 that is not JSON is a bad reply, not a format */
+    Act fb[] = {{A_STATUS, 200}};
+    s = srv_start(fb, 1);
+    setup(&a, s);
+    CHECK(jf_api_enqueue_format(&a, 63, path) == 0);
+    CHECK(pump(&a, r, 4, 3000) == 1 && r[0].kind == JF_KIND_FORMAT && r[0].err == JF_ERR_BADREPLY && !r[0].format.have);
     jf_api_free(&a);
     srv_stop(s);
 }

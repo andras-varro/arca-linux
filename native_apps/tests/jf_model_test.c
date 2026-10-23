@@ -635,9 +635,72 @@ static void test_playlist_count(void)
           "genre SongCount no longer read");
 }
 
+/* ── the source format: MediaSources[0] and its first Audio stream; the Container of a list item ── */
+
+/* Trimmed from a single-item reply (fake id and path); the embedded cover stream comes FIRST and must be skipped. */
+#define FMT_FLAC "{\"Name\":\"T\",\"Id\":\"" ID1 "\",\"MediaSources\":[{\"Protocol\":\"File\",\"Container\":\"flac\",\"Size\":31226094,\"Bitrate\":958879," \
+    "\"MediaStreams\":[{\"Codec\":\"mjpeg\",\"Type\":\"EmbeddedImage\",\"BitDepth\":8,\"Width\":500}," \
+    "{\"Codec\":\"flac\",\"Type\":\"Audio\",\"BitRate\":917580,\"SampleRate\":44100,\"BitDepth\":16,\"Channels\":2,\"ChannelLayout\":\"stereo\"}]}]}"
+#define FMT_MP3 "{\"MediaSources\":[{\"Container\":\"mp3\",\"Bitrate\":209980,\"MediaStreams\":[{\"Type\":\"Audio\",\"Codec\":\"mp3\"," \
+    "\"BitRate\":197197,\"SampleRate\":44100,\"BitDepth\":null,\"Channels\":2}]}]}"
+#define FMT_WAV "{\"MediaSources\":[{\"Container\":\"wav\",\"MediaStreams\":[{\"Type\":\"Audio\",\"Codec\":\"pcm_s16le\"," \
+    "\"BitRate\":1411200,\"SampleRate\":48000,\"BitDepth\":24,\"Channels\":6}]}]}"
+
+static void fmt_text(const char *body, const char *list_container, char *out, size_t cap)
+{
+    JfFormat f;
+    int rc = jf_parse_format(body, strlen(body), toks, JF_TOKENS_PAGE, &f);
+    CHECK(rc == JF_PARSE_OK, "format parse rc %d", rc);
+    jf_format_text(out, cap, list_container, &f);
+}
+
+static void test_format(void)
+{
+    JfFormat f;
+    char t[160];
+    int rc = jf_parse_format(FMT_FLAC, strlen(FMT_FLAC), toks, JF_TOKENS_PAGE, &f);
+    CHECK(rc == JF_PARSE_OK && f.have && !strcmp(f.container, "flac") && !strcmp(f.codec, "flac") && f.bit_depth == 16 &&
+          f.sample_rate == 44100 && f.channels == 2 && f.bitrate == 917580,
+          "flac: rc %d have %d cont %s codec %s depth %d rate %d ch %d br %d", rc, f.have, f.container, f.codec, f.bit_depth, f.sample_rate, f.channels, f.bitrate);
+    fmt_text(FMT_FLAC, "flac", t, sizeof t);
+    CHECK(!strcmp(t, "SOURCE  FLAC  16-BIT  44.1 KHZ  STEREO  918 KBPS"), "flac text: %s", t);
+    fmt_text(FMT_MP3, "mp3", t, sizeof t);
+    CHECK(!strcmp(t, "SOURCE  MP3  44.1 KHZ  STEREO  197 KBPS"), "mp3 text (no depth, the stream's bitrate): %s", t);
+    fmt_text(FMT_WAV, "", t, sizeof t);
+    CHECK(!strcmp(t, "SOURCE  WAV (PCM_S16LE)  24-BIT  48 KHZ  6 CH  1411 KBPS"), "wav text (codec differs, whole kHz, 6 ch): %s", t);
+    fmt_text("{\"MediaSources\":[{\"Container\":\"mov,mp4,m4a,3gp\",\"Bitrate\":128000,\"MediaStreams\":[{\"Type\":\"Audio\",\"Codec\":\"aac\"," \
+             "\"SampleRate\":22050,\"Channels\":1}]}]}", "", t, sizeof t);
+    CHECK(!strcmp(t, "SOURCE  MOV (AAC)  22.1 KHZ  MONO  128 KBPS"), "comma container, mono, source bitrate fallback: %s", t);
+
+    jf_format_text(t, sizeof t, "flac", NULL);
+    CHECK(!strcmp(t, "SOURCE  FLAC"), "pending: the list container only: %s", t);
+    jf_format_text(t, sizeof t, "", NULL);
+    CHECK(t[0] == '\0', "pending, no container: nothing: %s", t);
+    jf_format_text(t, 12, "flac", &f);
+    CHECK(strlen(t) < 12, "a small buffer stays terminated: %zu", strlen(t));
+
+    const char *none = "{\"Name\":\"T\"}";
+    rc = jf_parse_format(none, strlen(none), toks, JF_TOKENS_PAGE, &f);
+    CHECK(rc == JF_PARSE_OK && !f.have, "no MediaSources: ok, have false (rc %d)", rc);
+    rc = jf_parse_format("[1", 2, toks, JF_TOKENS_PAGE, &f);
+    CHECK(rc != JF_PARSE_OK && !f.have, "not an object: refused (rc %d)", rc);
+    const char *noaud = "{\"MediaSources\":[{\"Container\":\"flac\",\"Bitrate\":5000,\"MediaStreams\":[{\"Type\":\"EmbeddedImage\",\"BitDepth\":8}]}]}";
+    rc = jf_parse_format(noaud, strlen(noaud), toks, JF_TOKENS_PAGE, &f);
+    CHECK(rc == JF_PARSE_OK && f.have && f.bit_depth == 0 && f.bitrate == 5000, "no Audio stream: depth not taken from the cover (%d)", f.bit_depth);
+
+    /* a list item carries its Container without MediaSources */
+    const char *lst = "{\"Items\":[{\"Id\":\"" ID1 "\",\"Name\":\"A\",\"Type\":\"Audio\",\"Container\":\"flac\"},"
+                      "{\"Id\":\"" ID2 "\",\"Name\":\"B\",\"Type\":\"Audio\"}],\"TotalRecordCount\":2}";
+    static JfItem store[4];
+    JfList l; jf_list_init(&l, store, 4);
+    rc = jf_parse_items(lst, strlen(lst), toks, JF_TOKENS_PAGE, &l);
+    CHECK(rc == JF_PARSE_OK && l.n == 2 && !strcmp(l.items[0].container, "flac") && l.items[1].container[0] == '\0', "list item Container (rc %d)", rc);
+}
+
 int main(void)
 {
     test_pool_page_budget();
+    test_format();
     test_views();
     test_artist_rule();
     test_row_detail();

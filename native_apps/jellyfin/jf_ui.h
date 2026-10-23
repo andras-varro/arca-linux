@@ -68,6 +68,7 @@ typedef struct {
     UiRect progress;                /* now playing bar, drawn only */
     UiRect info;                    /* now playing text block, drawn only */
     UiRect tags;                    /* now playing: the file-tag band, between the time row and the transport row, drawn only */
+    UiRect source;                  /* now playing: the one-line source format, in the info block under the state line (small font), drawn only */
 } JfLayout;
 
 void jf_ui_layout(JfLayout *L, const JfExtents *e);
@@ -141,6 +142,7 @@ typedef struct {
     bool info_dirty;                     /* only the bar's CPU / clock text changed: a rect repaint, not a frame (jf_ui_take_info) */
     unsigned seen_banner;
     unsigned seen_tags;      /* JfApp.tags_seq as last drawn: a change redraws the now-playing info */
+    unsigned seen_fmt;       /* JfApp.fmt_seq as last drawn */
     unsigned seen_restore;               /* the core's restore_seq as of the last frame */
     bool restore_pend;                   /* a BACK came: put the list view back once the rows are loaded */
     EqPanel eq;                          /* the equaliser panel (common/eq_panel.h), full screen while eq_up */
