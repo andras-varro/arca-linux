@@ -79,7 +79,7 @@ In every game, pause EXIT / BACK / an on-screen exit return to the start menu; o
 all other content but before `fb_swap()` → `modal_dialog_update()` returns `MODAL_ACTION_BTN0..BTN3` or
 `-1`. Two buttons render side-by-side; 1, 3 or 4 stack. While a dialog is active, route **all** input to it
 and skip every other handler. **Pad and keyboard enter through `modal_dialog_input(dlg, &in, cancel)`**
-(before `modal_dialog_update()`, after `modal_dialog_set_focus(dlg, 0)` on open; test `tests/modal_dialog_input_test.c`).
+(before `modal_dialog_update()`, after `modal_dialog_set_focus(dlg, 0)` on open; test `tests/modal_dialog_input_test.c`). **Geometry is the pure `modal_dialog_layout()` (`common/common.c`), which `modal_dialog_draw()` uses: the message area never overlaps a button (a 3+ button dialog grows); host test `tests/modal_dialog_layout_test.c` pins it.**
 
 ## App lifecycle
 

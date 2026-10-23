@@ -301,20 +301,6 @@ follow its shape. Navigation stays as it is: the pages' `*_page_focusables` rect
 from, or a draw callback owned by the widget. **Done when** buttons, toggles, sliders, launcher tiles, dialog buttons and the bar draw
 focus through one mechanism, and the Control Panel's generic ring is gone.
 
-### F152. Ludfin (the Jellyfin music client): remaining features — open, operator requests 2026-10-22
-
-The app plays, searches, queues and saves playlists, and plays stereo through a USB or Bluetooth sink. Open, each agreed
-with the operator but not built: (1) the duplicate dialog on a multi-track add to a playlist gets **SKIP EXISTING** beside
-ADD ANYWAY and CANCEL, shown only when some but not all tracks are already in it (the core needs a per-id duplicate flag,
-not a count); (2) a **3-way tap-action setting** (REPLACE QUEUE / ADD AND PLAY / ADD ONLY), one setting because two
-booleans have a meaningless combination; (3) **ADD ALL TO PLAYLIST** on search results, over the track set PLAY ALL plays;
-(4) a **genre** lists tracks whose own genre matches (probe `/Items?GenreIds=<id>&IncludeItemTypes=Audio&Recursive=true`
-first), with PLAY ALL and ADD ALL TO PLAYLIST, where today it lists albums; (5) **more NOW PLAYING metadata** (artist,
-album artist unless equal or Various Artists, conductor, performers with roles, work, year, up to five genres) by a
-range-read of the file's tags on track change, behind an opt-in per-server setting, default off, with failsafes: a server
-that answers 200 instead of 206 is cut off at the cap, remembered, switched off for and logged once. **Done when** each
-is on the panel.
-
 ### F157. Physical keyboard and mouse input in the on-screen keyboard — open, operator request 2026-10-22
 
 `keyboard_enter` (`common/keyboard.c`) now accepts typed letters from a physical keyboard (`kb_apply_key`, `gamepad_text_entry` /
