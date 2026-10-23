@@ -316,12 +316,18 @@ keyboard enters letters, and a mouse click presses an on-screen key, at the pane
 Movies, series → seasons → episodes, search by name/person/genre, a details page (overview, cast, similar), audio and subtitle choice
 before playback. **A separate app** beside Ludfin (`native_apps/jellyfin/`), both linking one shared Jellyfin layer: `jf_api`,
 `jf_art`, `jf_login` (one sign-in: `/opt/ludfin/ludfin.conf`), the auth/session half of `jf_url`, the BaseItem half of `jf_model`.
-Decode cost is measured and fits ([Display](SYSTEM_ANALYSIS.md#32-display)). Stream: `container=ts&videoCodec=mpeg1video&audioCodec=mp2&audioChannels=1&audioSampleRate=44100&maxWidth=400&maxHeight=240&videoBitRate=800000`
-→ 326×240. ⚠️ **pl_mpeg reads no TS** (0 frames; the same stream remuxed to PS decodes fully), so a TS demuxer goes in front of it.
-**Phase 0, before any app code — de-risk end to end:** (a) server, by curl + ffprobe: `AudioStreamIndex`, `SubtitleStreamIndex`
-burned in, `StartTimeTicks` seek, a fresh `PlaySessionId`; (b) a TS demuxer feeding pl_mpeg, host-tested on a real capture;
-(c) on `.115`: live HTTP stream → demux → decode → `fb0` with MP2 into the mix bus, A/V sync on the audio clock, CPU share and
-late frames over a full episode. Then: shared-layer extraction (Ludfin unchanged, its host tests green), browse UI, player.
+Decode cost is measured and fits ([Display](SYSTEM_ANALYSIS.md#32-display)). **Stream (measured on `.115`, Jellyfin 12.1):** `stream.mpg?container=mpeg&videoCodec=mpeg1video&audioCodec=mp2&audioChannels=1&audioSampleRate=44100&maxWidth=400&maxHeight=240&videoBitRate=800000`
+→ MPEG-PS at 400×216, which pl_mpeg reads natively through a `plm_buffer` load callback (`container=ts` it does not read). Live end to end
+(1920×1040 h264 source, 300 s): ~0.9 Mbit/s, RSS 2.2 MB, A-V mean 5.5 ms / max 42 ms on the audio clock (bytes written minus
+`SNDCTL_DSP_GETODELAY`), no drift; CPU 52 % at 16bpp, 54 % at 32bpp, yet 0.5 % / 1.4 % frames dropped with half the CPU idle → **decode
+ahead into a frame queue**, not on demand. **Decided (operator):** 32bpp (16bpp bands on skin), 2× pixel doubling, audio through the shared mix bus Ludfin uses (the internal speaker is poor; USB/Bluetooth outputs must work), never straight to `/dev/dsp`.
+**Audio:** `AudioStreamIndex=<n>`; `IsDefault` is set on several tracks of one item, so pick by a preferred-language setting, else the first.
+**Subtitles:** burn-in (`SubtitleMethod=Encode`) switches the output to mpeg2video, which pl_mpeg cannot decode, so render SRT on the device
+(`/Videos/<id>/<mediaSourceId>/Subtitles/<index>/0/Stream.srt`, UTF-8, Hungarian ő ű; font coverage of Latin Extended-A unchecked). The first
+fetch per item took 110 s (the server extracts every embedded track), later ones 0.05 s: fetch asynchronously, start without subtitles.
+**Seek:** restart with `StartTimeTicks` and a fresh `PlaySessionId` (a reused one returns the old job), first byte ~1.1 s. **Stop:**
+`DELETE /Videos/ActiveEncodings?deviceId=..&playSessionId=..` → 204.
+**Phase 0 left:** one full-length run (a 63-minute episode) for stability and memory. Then: shared-layer extraction (Ludfin unchanged, its host tests green), browse UI, player.
 **Done when** a movie and an episode play with the chosen audio track and subtitles at the panel.
 
 ### F156. Log page: a Follow setting — open, operator request 2026-10-22, not designed
