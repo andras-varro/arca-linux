@@ -10,6 +10,7 @@
 
 #include "icons.h"
 #include "jf_art.h"
+#include "jf_fmt_icon.h"
 #include "keyboard.h"
 #include "font.h"
 
@@ -248,7 +249,10 @@ static void src_row(void *ctx, int index, LvRow *out)
     out->title = it->name;
     out->detail = d;
     out->glyph = it->type == JF_ITEM_TRACK ? LV_GLYPH_FILE : LV_GLYPH_FOLDER;
+    /* a track shows its format (FLAC, MP3, ...) when an icon file exists for its container; the
+     * queue's current row keeps the play triangle instead */
     if (app->screen == JF_SCR_QUEUE && index == app->queue_cur) out->glyph = LV_GLYPH_PLAYING;
+    else if (it->type == JF_ITEM_TRACK) out->icon = jf_fmt_icon_get(it->container);
 }
 
 /* ── Setup ─────────────────────────────────────────────────────────────── */

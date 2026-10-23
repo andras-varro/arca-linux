@@ -14,14 +14,18 @@
   *   M  MIX tick rows carry no bracket text or checkbox glyph; ticks draw as the ListView mark (mix_ticks).
  *   S  SETTINGS: the root row is SEARCH, NOW PLAYING, SETTINGS; settings and library rows hit-test and pad-navigate to their events (settings_ui).
  *   Z  browse lists and the queue as a ui_zone stack: the pad reaches strip and button row, touch never moves the pad focus (zone_stack_browse).
+ *   X  the track rows show a format icon when its file exists, else the page glyph; the queue's current row keeps the play triangle (fmt_rows).
  *
  * Build (from native_apps/, one line; run under setarch -R):
- *   gcc -Wall -Wextra -Wno-unused-parameter -fsanitize=undefined -I. -I common -I jellyfin -o build/jf_ui_layout_test tests/jf_ui_layout_test.c jellyfin/jf_ui.c common/eq_panel.c jellyfin/jf_art.c common/icons.c common/jf_img.c common/logger.c common/ui_focus.c jellyfin/jf_core.c jellyfin/jf_url.c jellyfin/jf_model.c jellyfin/jf_login.c common/json.c common/http.c common/list_view.c common/ui_zone.c common/top_bar.c common/icon_grid.c common/ppm.c common/pointer.c common/status_line.c control_panel/cpu_load.c common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c -lssl -lcrypto -lm
+ *   gcc -Wall -Wextra -Wno-unused-parameter -fsanitize=undefined -I. -I common -I jellyfin -o build/jf_ui_layout_test tests/jf_ui_layout_test.c jellyfin/jf_ui.c common/eq_panel.c jellyfin/jf_art.c jellyfin/jf_fmt_icon.c common/icons.c common/jf_img.c common/logger.c common/ui_focus.c jellyfin/jf_core.c jellyfin/jf_url.c jellyfin/jf_model.c jellyfin/jf_login.c common/json.c common/http.c common/list_view.c common/ui_zone.c common/top_bar.c common/icon_grid.c common/ppm.c common/pointer.c common/status_line.c control_panel/cpu_load.c common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c -lssl -lcrypto -lm
  */
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include "jf_ui.h"
 #include "jf_tags.h"
+#include "jf_fmt_icon.h"
 
 static int fails;
 #define CHECK(c, ...) do { if (!(c)) { fails++; printf("FAIL: " __VA_ARGS__); printf("\n"); } } while (0)
@@ -1762,6 +1766,64 @@ static void tag_lines(void)
     CHECK(n == 2, "T: a 20 px band gave %d lines (want 2)", n);
 }
 
+/* X  the track rows' format icon: a container with an icon file shows it (the file's own size), one without keeps the page
+ *    glyph, a restored queue's empty container too, and the queue's current row keeps the play triangle (fmt_rows). */
+static void fmt_rows(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    static JfApp app;
+    static JfUi ui;
+    JfEvent ev[MINI_MAX];
+    LvRow r;
+    char dir[] = "/tmp/jf_fmtrows_XXXXXX";
+    char path[96];
+
+    if (!mkdtemp(dir)) { CHECK(0, "X: no temp dir"); return; }
+    snprintf(path, sizeof path, "%s/ludfin-fmt-flac.ppm", dir);
+    FILE *f = fopen(path, "wb");
+    if (!f) { CHECK(0, "X: cannot write %s", path); rmdir(dir); return; }
+    fputs("P6\n4 4\n255\n", f);
+    for (int i = 0; i < 4 * 4 * 3; i++) fputc(100 + i, f);
+    fclose(f);
+    jf_fmt_icon_set_dir(dir);
+
+    tk_setup(&app, JF_SCR_TRACKS, false);
+    strcpy(app.list->items[0].container, "flac");
+    strcpy(app.list->items[1].container, "xyz");     /* no file */
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    memset(&r, 0, sizeof r);
+    ui.lv.src.row(ui.lv.src.ctx, 0, &r);
+    CHECK(r.icon && r.icon->w == 4 && r.icon->h == 4 && r.icon->pixels, "X: a flac track row has no 4x4 format icon");
+    memset(&r, 0, sizeof r);
+    ui.lv.src.row(ui.lv.src.ctx, 1, &r);
+    CHECK(!r.icon && r.glyph == LV_GLYPH_FILE, "X: a track with no icon file does not keep the page glyph");
+    memset(&r, 0, sizeof r);
+    ui.lv.src.row(ui.lv.src.ctx, 2, &r);      /* container empty */
+    CHECK(!r.icon && r.glyph == LV_GLYPH_FILE, "X: a track with an empty container does not keep the page glyph");
+    jf_ui_free(&ui);
+
+    jf_app_init(&app);
+    app.screen = JF_SCR_QUEUE;
+    app.queue_n = 3;
+    app.queue_cur = 1;
+    for (int i = 0; i < 3; i++) { app.queue[i].type = JF_ITEM_TRACK; strcpy(app.queue[i].container, "flac"); }
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    memset(&r, 0, sizeof r);
+    ui.lv.src.row(ui.lv.src.ctx, 1, &r);
+    CHECK(!r.icon && r.glyph == LV_GLYPH_PLAYING, "X: the queue's current row lost the play triangle (icon %p, glyph %d)", (const void *)r.icon, (int)r.glyph);
+    memset(&r, 0, sizeof r);
+    ui.lv.src.row(ui.lv.src.ctx, 0, &r);
+    CHECK(r.icon != NULL, "X: a queued track that is not current has no format icon");
+    jf_ui_free(&ui);
+
+    jf_fmt_icon_set_dir(NULL);
+    unlink(path);
+    rmdir(dir);
+}
+
 int main(void)
 {
     add_to_playlist();
@@ -1795,6 +1857,7 @@ int main(void)
     nav_cycle();
     info_only();
     tag_lines();
+    fmt_rows();
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");
     return 0;
