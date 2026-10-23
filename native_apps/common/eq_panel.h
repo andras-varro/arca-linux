@@ -16,9 +16,11 @@
  *
  * Touch: press or drag on a column sets that band from the finger's height; tap a
  * preset or a button.  Pad / keyboard: Left / Right pick the band, Up / Down move it
- * 1 dB; Space / Enter / pad A / X on a band goes down to the presets; Shift / pad B
- * and PgDn move to the next row (sliders, presets, buttons), PgUp the previous one;
- * on the presets Left / Right pick and Enter applies; on the buttons Left / Right
+ * 1 dB; Space / Enter / pad A / X on a band goes down to the presets; Tab / pad RB
+ * moves to the next pane (sliders, presets, buttons), Shift+Tab / pad LB to the previous
+ * one, wrapping; Up / Down never leave a pane (on the presets and buttons they do
+ * nothing; on the sliders they change the value); PgDn / PgUp step like Tab / Shift+Tab.
+ * On the presets Left / Right pick and Enter applies; on the buttons Left / Right
  * pick and Enter acts; Esc / Backspace cancel.  The focused item is outlined in
  * yellow; the preset that equals the gains is filled yellow (none when custom).
  *

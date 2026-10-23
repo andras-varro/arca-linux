@@ -67,8 +67,8 @@ int main(void)
     CHECK(eq_panel_key(&P, EQK_ACT) == EQP_CHANGED, "apply preset");
     CHECK(eq_panel_preset(&P) == 1 && memcmp(P.gains, eq_preset_gains(1), 5 * sizeof(int)) == 0, "BASS matches");
     CHECK(eq_panel_key(&P, EQK_ACT) == EQP_NONE, "applying the same preset again is no change");
-    eq_panel_key(&P, EQK_UP);
-    CHECK(P.zone == EQP_ZONE_SLIDERS, "up leaves presets");
+    eq_panel_key(&P, EQK_PREV);
+    CHECK(P.zone == EQP_ZONE_SLIDERS, "prev leaves presets");
     eq_panel_key(&P, EQK_UP);
     CHECK(eq_panel_preset(&P) == -1, "editing a band leaves the preset (custom)");
     /* zones and buttons */
@@ -78,6 +78,51 @@ int main(void)
     CHECK(P.zone == EQP_ZONE_SLIDERS, "next wraps");
     eq_panel_key(&P, EQK_PREV);
     CHECK(P.zone == EQP_ZONE_BUTTONS, "prev wraps back");
+    /* pane cycle, as the pad and keyboard reach it: Tab / RB = next, Shift+Tab / LB = previous, RUN alone is nothing */
+    {
+        InputState I;
+        uint32_t tnow = 2000;
+#define PRESS(id) do { memset(&I, 0, sizeof I); I.buttons[id].pressed = true; I.buttons[id].held = true; tnow += 10; eq_panel_input(&P, NULL, &I, tnow); } while (0)
+        open_flat();
+        PRESS(BTN_ID_NEXT);
+        CHECK(P.zone == EQP_ZONE_PRESETS, "pad NEXT: sliders -> presets, got %d", P.zone);
+        PRESS(BTN_ID_NEXT); PRESS(BTN_ID_NEXT);
+        CHECK(P.zone == EQP_ZONE_SLIDERS, "pad NEXT wraps buttons -> sliders, got %d", P.zone);
+        PRESS(BTN_ID_PREV);
+        CHECK(P.zone == EQP_ZONE_BUTTONS, "pad PREV: sliders -> buttons (wrap), got %d", P.zone);
+        PRESS(BTN_ID_PREV);
+        CHECK(P.zone == EQP_ZONE_PRESETS, "pad PREV: buttons -> presets, got %d", P.zone);
+        /* Shift+Tab: NEXT pressed while RUN is held counts as PREV (as ui_zone.c does) */
+        open_flat();
+        memset(&I, 0, sizeof I); I.buttons[BTN_ID_RUN].held = true; I.buttons[BTN_ID_NEXT].pressed = I.buttons[BTN_ID_NEXT].held = true;
+        eq_panel_input(&P, NULL, &I, tnow += 10);
+        CHECK(P.zone == EQP_ZONE_BUTTONS, "Shift+Tab goes backward (sliders -> buttons), got %d", P.zone);
+        memset(&I, 0, sizeof I); I.buttons[BTN_ID_RUN].held = true; I.buttons[BTN_ID_NEXT].pressed = I.buttons[BTN_ID_NEXT].held = true;
+        eq_panel_input(&P, NULL, &I, tnow += 10);
+        CHECK(P.zone == EQP_ZONE_PRESETS, "Shift+Tab again: buttons -> presets, got %d", P.zone);
+        /* RUN (Shift) alone changes nothing, pressed or held */
+        open_flat();
+        PRESS(BTN_ID_RUN);
+        CHECK(P.zone == EQP_ZONE_SLIDERS, "RUN pressed alone does not change pane, got %d", P.zone);
+        memset(&I, 0, sizeof I); I.buttons[BTN_ID_RUN].held = true; eq_panel_input(&P, NULL, &I, tnow += 10);
+        CHECK(P.zone == EQP_ZONE_SLIDERS, "RUN held alone does not change pane, got %d", P.zone);
+        PRESS(BTN_ID_PGDN);
+        CHECK(P.zone == EQP_ZONE_PRESETS, "PgDn still steps forward, got %d", P.zone);
+#undef PRESS
+    }
+    /* arrows never leave a pane: Up at the top edge of presets, Down at its bottom edge, Up / Down on the buttons */
+    open_flat();
+    P.zone = EQP_ZONE_PRESETS;
+    CHECK(eq_panel_key(&P, EQK_UP) == EQP_NONE && P.zone == EQP_ZONE_PRESETS, "Up on presets stays in presets, got %d", P.zone);
+    CHECK(eq_panel_key(&P, EQK_DOWN) == EQP_NONE && P.zone == EQP_ZONE_PRESETS, "Down on presets stays in presets, got %d", P.zone);
+    P.zone = EQP_ZONE_BUTTONS;
+    eq_panel_key(&P, EQK_UP);
+    CHECK(P.zone == EQP_ZONE_BUTTONS, "Up on buttons stays in buttons, got %d", P.zone);
+    eq_panel_key(&P, EQK_DOWN);
+    CHECK(P.zone == EQP_ZONE_BUTTONS, "Down on buttons stays in buttons, got %d", P.zone);
+    P.zone = EQP_ZONE_SLIDERS;
+    eq_panel_key(&P, EQK_DOWN);
+    CHECK(P.zone == EQP_ZONE_SLIDERS && P.gains[0] == -1, "Down on sliders edits the band, zone kept, got %d", P.zone);
     /* cancel restores what the panel opened with */
     int g0[5] = { 3, -2, 0, 5, 1 };
     eq_panel_open(&P, g0, 0, 0, 800, 480, 1000);
@@ -221,8 +266,8 @@ int main(void)
         CHECK(eq_panel_key(&P, EQK_ACT) == EQP_CHANGED && P.enh.on == 0, "toggle off");
         eq_panel_key(&P, EQK_RIGHT);
         CHECK(P.preset_focus == 0 && P.zone == EQP_ZONE_PRESETS, "left/right do nothing on the toggle");
-        eq_panel_key(&P, EQK_UP);
-        CHECK(P.zone == EQP_ZONE_SLIDERS, "up from the toggle");
+        eq_panel_key(&P, EQK_PREV);
+        CHECK(P.zone == EQP_ZONE_SLIDERS, "prev from the toggle");
 
         /* CANCEL restores both, by BACK and by the CANCEL button */
         AudioEnh o = { 1, 10, 20, 30, 40, 50, 60 };

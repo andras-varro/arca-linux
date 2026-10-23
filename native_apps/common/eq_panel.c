@@ -150,6 +150,8 @@ static void restore(EqPanel *p)
     p->enh = p->enh_orig;
 }
 
+/* Pane cycle: EQK_NEXT / EQK_PREV move to the next / previous pane (sliders, presets, buttons), wrapping.
+ * Up / Down / Left / Right stay inside the pane; the sliders use Up / Down for their value. */
 EqPanelEvent eq_panel_key(EqPanel *p, EqPanelKey k)
 {
     p->dirty = true;
@@ -178,16 +180,12 @@ EqPanelEvent eq_panel_key(EqPanel *p, EqPanelKey k)
         }
         break;
     case EQP_ZONE_PRESETS:
-        if (enh) {   /* the ON/OFF bar is the one item of this row */
-            if (k == EQK_UP)   p->zone = EQP_ZONE_SLIDERS;
-            if (k == EQK_DOWN) p->zone = EQP_ZONE_BUTTONS;
+        if (enh) {   /* the ON/OFF bar is the one item of this row; Up / Down do not leave the row */
             if (k == EQK_ACT) { p->enh.on = !p->enh.on; return EQP_CHANGED; }
             break;
         }
         if (k == EQK_LEFT)  p->preset_focus = clampi(p->preset_focus - 1, 0, EQP_PRESETS - 1);
         if (k == EQK_RIGHT) p->preset_focus = clampi(p->preset_focus + 1, 0, EQP_PRESETS - 1);
-        if (k == EQK_UP)    p->zone = EQP_ZONE_SLIDERS;
-        if (k == EQK_DOWN)  p->zone = EQP_ZONE_BUTTONS;
         if (k == EQK_ACT && p->preset_focus < eq_preset_count()) {
             const int *g = eq_preset_gains(p->preset_focus);
             bool ch = !same(p->gains, g);
@@ -199,7 +197,6 @@ EqPanelEvent eq_panel_key(EqPanel *p, EqPanelKey k)
     default:
         if (k == EQK_LEFT)  p->btn_focus = clampi(p->btn_focus - 1, 0, EQP_BTNS - 1);
         if (k == EQK_RIGHT) p->btn_focus = clampi(p->btn_focus + 1, 0, EQP_BTNS - 1);
-        if (k == EQK_UP)    p->zone = EQP_ZONE_PRESETS;
         if (k == EQK_ACT) {
             if (p->btn_focus == EQP_BTN_DONE) return EQP_DONE;
             if (p->btn_focus == EQP_BTN_PAGE) { eq_panel_set_page(p, enh ? EQP_PAGE_EQ : EQP_PAGE_ENH); return EQP_NONE; }
@@ -317,15 +314,19 @@ EqPanelEvent eq_panel_input(EqPanel *p, const TouchState *ts, const InputState *
         memset(&gated, 0, sizeof gated);
         ts = &gated;
     }
+    /* Pane cycle, as ui_zone.c reads it: Tab / RB = next pane; NEXT while RUN (Shift) is held = previous.  RUN alone is nothing.
+     * PgDn / PgUp step the same way.  Up / Down / Left / Right never leave a pane (see eq_panel_key). */
     EqPanelEvent ev = EQP_NONE;
     static const struct { int id; EqPanelKey k; } map[] = {
         { BTN_ID_UP, EQK_UP }, { BTN_ID_DOWN, EQK_DOWN }, { BTN_ID_LEFT, EQK_LEFT }, { BTN_ID_RIGHT, EQK_RIGHT },
-        { BTN_ID_ACTION, EQK_ACT }, { BTN_ID_JUMP, EQK_ACT }, { BTN_ID_RUN, EQK_NEXT }, { BTN_ID_PGDN, EQK_NEXT },
-        { BTN_ID_PGUP, EQK_PREV }, { BTN_ID_BACK, EQK_BACK }, { BTN_ID_PAUSE, EQK_BACK },
+        { BTN_ID_ACTION, EQK_ACT }, { BTN_ID_JUMP, EQK_ACT }, { BTN_ID_NEXT, EQK_NEXT }, { BTN_ID_PGDN, EQK_NEXT },
+        { BTN_ID_PREV, EQK_PREV }, { BTN_ID_PGUP, EQK_PREV }, { BTN_ID_BACK, EQK_BACK }, { BTN_ID_PAUSE, EQK_BACK }, { BTN_ID_CANCEL, EQK_BACK },
     };
     for (unsigned i = 0; i < sizeof map / sizeof map[0]; i++)
         if (bp(in, map[i].id)) {
-            EqPanelEvent e = eq_panel_key(p, map[i].k);
+            EqPanelKey k = map[i].k;
+            if (map[i].id == BTN_ID_NEXT && in->buttons[BTN_ID_RUN].held) k = EQK_PREV;
+            EqPanelEvent e = eq_panel_key(p, k);
             if (e == EQP_DONE || e == EQP_CANCEL) return e;
             if (e != EQP_NONE) ev = e;
         }
