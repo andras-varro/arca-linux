@@ -285,6 +285,66 @@ static void refresh(JfApp *app)
 static void play_track_at(JfApp *app, int idx, int start_ms, bool stop_first, JfCmds *out);
 static void play_track(JfApp *app, int idx, bool stop_first, JfCmds *out) { play_track_at(app, idx, 0, stop_first, out); }
 
+/* ── file tags: one range read of the playing track's file head, when the setting is on and the server has not refused ── */
+
+bool jf_tags_blocked(const JfApp *app)
+{
+    return app->login.tags_on && app->login.tags_cut[0] && !strcmp(app->login.tags_cut, app->login.server);
+}
+
+const JfTags *jf_now_tags(const JfApp *app)
+{
+    const JfItem *it = jf_now(app);
+    return it && app->tags.have && !strcmp(app->tags_id, it->id) ? &app->tags : NULL;
+}
+
+static void clear_tags(JfApp *app)
+{
+    memset(&app->tags, 0, sizeof(app->tags));
+    app->tags_id[0] = '\0';
+    app->tags_extended = false;
+    app->tags_seq++;
+}
+
+/* Ask for the first `range` bytes of queue entry idx's file.  A new read supersedes any in flight (the api drops the older one). */
+static void request_tags(JfApp *app, int idx, int range, JfCmds *out)
+{
+    if (range == JF_TAGS_CAP) {   /* a first read: the old track's tags go; the extension keeps the partial ones */
+        if (app->login.tags_on && !strcmp(app->tags_id, app->queue[idx].id) && (app->tags.have || app->tags_pending))
+            return;   /* a seek or resume of the same track: what is shown or on its way stands */
+        clear_tags(app);
+    }
+    app->tags_pending = false;
+    if (!app->login.tags_on || jf_tags_blocked(app) || out->n >= JF_CMDS_MAX) return;
+    JfCmd *c = emit(out, JF_CMD_REQUEST);
+    c->kind = JF_KIND_TAGS;
+    c->tag = ++app->tags_tag;
+    c->range = range;
+    if (jf_path_download(c->path, sizeof(c->path), app->queue[idx].id) < 0) { out->n--; return; }
+    copy(app->tags_id, sizeof(app->tags_id), app->queue[idx].id);
+    app->tags_pending = true;
+}
+
+static void on_tags_result(JfApp *app, const JfResult *r, JfCmds *out)
+{
+    const JfItem *it = jf_now(app);
+    if (!app->tags_pending || r->tag != app->tags_tag || !it || strcmp(it->id, app->tags_id)) return;   /* an earlier track's */
+    app->tags_pending = false;
+    if (r->tags_rejected) {   /* the server sent the whole file for a range: never ask it again */
+        copy(app->login.tags_cut, sizeof(app->login.tags_cut), app->login.server);
+        clear_tags(app);
+        emit(out, JF_CMD_SAVE_LOGIN);
+        return;
+    }
+    if (r->err != JF_ERR_NONE || !r->tags.have) return;
+    app->tags = r->tags;
+    app->tags_seq++;
+    if (r->tags.truncated && r->tags.need > (size_t)JF_TAGS_CAP && r->tags.need <= (size_t)JF_TAGS_HARD && !app->tags_extended) {
+        app->tags_extended = true;
+        request_tags(app, app->queue_cur, (int)r->tags.need, out);   /* the partial fields stay shown meanwhile */
+    }
+}
+
 static void fail_stop(JfApp *app, JfCmds *out)
 {
     app->play_state = JF_PLAY_IDLE;
@@ -327,7 +387,9 @@ static void play_track_at(JfApp *app, int idx, int start_ms, bool stop_first, Jf
                            app->stream_channels) < 0) {
         out->n--;
         track_failed(app, out);
+        return;
     }
+    request_tags(app, idx, JF_TAGS_CAP, out);
 }
 
 /* Fill the queue from list `lid` starting at row `from` (tracks only) and start it. */
@@ -479,6 +541,7 @@ int jf_settings_rows(const JfApp *app, int ids[JF_SET_COUNT])
     int n = 0;
     if (app->lib_n >= 2) ids[n++] = JF_SET_LIBRARY;   /* absent, not greyed, with 0 or 1 music library */
     ids[n++] = JF_SET_TAP;
+    ids[n++] = JF_SET_TAGS;
     ids[n++] = JF_SET_SIGNOUT;
     return n;
 }
@@ -526,6 +589,21 @@ static void on_setting_activate(JfApp *app, int id, JfCmds *out)
         else if (id == JF_SET_SIGNOUT) app->confirm = JF_CONFIRM_SIGN_OUT;
         else if (id == JF_SET_TAP) {   /* a three-way choice: each activation steps to the next, and the choice is saved */
             app->login.tap_action = (app->login.tap_action + 1) % JF_TAP_COUNT;
+            emit(out, JF_CMD_SAVE_LOGIN);
+        } else if (id == JF_SET_TAGS) {   /* on: forget a cut-off and read the playing track's tags; off: drop the read and what it found */
+            app->login.tags_on = !app->login.tags_on;
+            if (app->login.tags_on) {
+                app->login.tags_cut[0] = '\0';
+                const JfItem *it = jf_now(app);
+                if (it && (app->play_state == JF_PLAY_PLAYING || app->play_state == JF_PLAY_PAUSED || app->play_state == JF_PLAY_FETCHING)) {
+                    clear_tags(app);
+                    request_tags(app, app->queue_cur, JF_TAGS_CAP, out);
+                }
+            } else {
+                if (app->tags_pending) emit(out, JF_CMD_CANCEL)->kind = JF_KIND_TAGS;
+                app->tags_pending = false;
+                clear_tags(app);
+            }
             emit(out, JF_CMD_SAVE_LOGIN);
         }
         return;
@@ -1454,6 +1532,7 @@ static void on_result(JfApp *app, const JfResult *r, JfCmds *out)
     case JF_KIND_SAVE:   on_save_result(app, r, out); break;
     case JF_KIND_WRITE:  on_write_result(app, r, out); break;
     case JF_KIND_USER:   on_user_result(app, r); break;
+    case JF_KIND_TAGS:   on_tags_result(app, r, out); break;
     default: break;
     }
 }

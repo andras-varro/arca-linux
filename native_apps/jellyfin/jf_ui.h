@@ -80,6 +80,8 @@ void jf_ui_dup_title(const JfApp *app, char *buf, size_t cap);
 
 /** The SETTINGS tap-action row: "TAP: REPLACE QUEUE", "TAP: ADD AND PLAY" or "TAP: ADD ONLY". */
 void jf_ui_tap_label(const JfApp *app, char *buf, size_t cap);
+/** The file-tags settings row: "FILE TAGS: OFF" / "FILE TAGS: ON" / "FILE TAGS: SERVER REFUSED" (on, but this server answered a range read with the whole file). */
+void jf_ui_tags_label(const JfApp *app, char *buf, size_t cap);
 /** The SETTINGS sign-out row: "SIGN OUT FROM <HOST>" from the address typed at sign-in, "SIGN OUT" when there is none or it does not parse. */
 void jf_ui_signout_label(const JfApp *app, char *buf, size_t cap);
 /** The header count under the bar (without the LOADING mark): the artist folder counts its rows by type ("6 ALBUMS, 1 TRACK",
@@ -131,6 +133,7 @@ typedef struct {
     bool dirty;
     bool info_dirty;                     /* only the bar's CPU / clock text changed: a rect repaint, not a frame (jf_ui_take_info) */
     unsigned seen_banner;
+    unsigned seen_tags;      /* JfApp.tags_seq as last drawn: a change redraws the now-playing info */
     unsigned seen_restore;               /* the core's restore_seq as of the last frame */
     bool restore_pend;                   /* a BACK came: put the list view back once the rows are loaded */
     EqPanel eq;                          /* the equaliser panel (common/eq_panel.h), full screen while eq_up */

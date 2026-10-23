@@ -105,6 +105,8 @@ int jf_settings_load(JfLogin *l, const char *path)
     l->library[0] = l->library_name[0] = '\0';
     l->volume_step = JF_VOLUME_DEFAULT;
     l->tap_action = JF_TAP_REPLACE;
+    l->tags_on = 0;
+    l->tags_cut[0] = '\0';
 
     config_init_path(&cfg, path);
     int rc = config_load(&cfg) == 0 ? 0 : -1;
@@ -118,6 +120,8 @@ int jf_settings_load(JfLogin *l, const char *path)
         l->volume_step = v < 0 ? 0 : v > JF_VOLUME_MAX ? JF_VOLUME_MAX : v;
         int ta = config_get_int(&cfg, "tap_action", JF_TAP_REPLACE);
         l->tap_action = ta >= 0 && ta < JF_TAP_COUNT ? ta : JF_TAP_REPLACE;
+        l->tags_on = config_get_int(&cfg, "tags_read", 0) == 1;
+        copy(l->tags_cut, sizeof l->tags_cut, config_get(&cfg, "tags_cut", ""));
     }
     return rc;
 }
@@ -134,6 +138,8 @@ int jf_settings_save(const JfLogin *l, const char *path)
     }
     config_set_int(&cfg, "volume_step", vs);
     config_set_int(&cfg, "tap_action", l->tap_action >= 0 && l->tap_action < JF_TAP_COUNT ? l->tap_action : JF_TAP_REPLACE);
+    config_set_int(&cfg, "tags_read", l->tags_on ? 1 : 0);
+    if (l->tags_cut[0]) config_set(&cfg, "tags_cut", l->tags_cut);
 
     mkdir_parents(path);
     int rc = config_save(&cfg);

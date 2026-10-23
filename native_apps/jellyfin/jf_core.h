@@ -118,7 +118,7 @@ typedef enum { JF_CONFIRM_NONE = 0, JF_CONFIRM_INSTANT_MIX, JF_CONFIRM_CLEAR_QUE
 
 /* The settings view is a table of rows (the extension point: a new setting is one JfSettingId and one line in
  * jf_settings_rows()).  Page MAIN lists the rows; page LIBRARY lists ALL LIBRARIES then each lists[JF_LIST_LIBS] item. */
-typedef enum { JF_SET_LIBRARY = 0, JF_SET_SIGNOUT, JF_SET_TAP, JF_SET_COUNT } JfSettingId;   /* rows show in the order LIBRARY, TAP, SIGN OUT; TAP steps login.tap_action and saves */
+typedef enum { JF_SET_LIBRARY = 0, JF_SET_SIGNOUT, JF_SET_TAP, JF_SET_TAGS, JF_SET_COUNT } JfSettingId;   /* rows show in the order LIBRARY, TAP, FILE TAGS, SIGN OUT; TAP steps login.tap_action and saves; TAGS toggles login.tags_on and saves */
 typedef enum { JF_SETPAGE_MAIN = 0, JF_SETPAGE_LIBRARY } JfSettingsPage;
 
 /* Buttons of the error overlay (JfApp.overlay_buttons). */
@@ -215,7 +215,9 @@ typedef enum {
                           *   POST, never retried (no app->retry)
                           * .kind WRITE: jf_api_enqueue_write(.tag, .method, .path): DELETE, or POST with an empty body;
                           *   never retried, the result is the status
-                          * .kind USER: jf_api_enqueue_user(.tag, .path): GET of one user object, its Policy in the result */
+                          * .kind USER: jf_api_enqueue_user(.tag, .path): GET of one user object, its Policy in the result
+                          * .kind TAGS: jf_api_enqueue_tags(.tag, .path, .range): the head of the playing file; a failure to enqueue
+                          *   is pushed back as a BADREPLY result (the core then simply shows no file tags) */
     JF_CMD_CANCEL,       /* jf_api_cancel_kind(.kind) */
     JF_CMD_PLAY_STREAM,  /* jf_api_enqueue_stream(.tag, .path); .norm_mdb/.user_mdb repeat the gain */
     JF_CMD_START_AUDIO,  /* audio_music_start_fd(.fd), then audio_music_set_gain(.norm_mdb, .user_mdb);
@@ -249,6 +251,7 @@ typedef struct {
     int n;               /* SAVE: how many queue ids */
     char method[8];      /* WRITE: "POST" or "DELETE" */
     int ids_src;         /* SAVE: JF_IDS_QUEUE (app->queue[]) or JF_IDS_PICK (app->pick_ids[]) */
+    int range;           /* REQUEST kind TAGS: bytes to read from the start of the file (jf_api_enqueue_tags) */
 } JfCmd;
 
 typedef struct {
@@ -345,6 +348,9 @@ typedef struct {
     JfPolicy policy;         /* what the server lets this user delete, from the sign-in reply or the one USER fetch of a restored session; read it through jf_can_delete() */
     bool policy_known;       /* policy has been answered since sign-in (until then DELETE is not offered) */
     bool delete_denied;      /* the server refused a DELETE this session (401/403 although the policy allowed it): DELETE is not offered again */
+    JfTags tags;             /* the file tags of the track tags_id (have false = none read); read it through jf_now_tags() */
+    char tags_id[JF_ID_LEN + 1];   /* the track `tags` belongs to */
+    unsigned tags_seq;       /* bumps whenever `tags` is replaced or cleared, so the UI redraws only then */
 
     /* ── private to jf_core.c ──────────────────────────────────────────── */
     JfList lists[JF_LIST_COUNT];
@@ -361,6 +367,8 @@ typedef struct {
     JfCmd retry;
     unsigned auth_tag, stream_tag, save_tag;
     bool auth_pending, save_pending;
+    bool tags_pending, tags_extended;    /* a TAGS read is in flight / the one extension read of this track was sent */
+    unsigned tags_tag;                   /* numbers every TAGS request, so a late result of an earlier track is ignored */
     bool delete_pending, user_pending;   /* a DELETE / the policy fetch is in flight */
     unsigned delete_tag, user_tag;
     char del_name[96];                   /* the playlist being deleted, for the banner */
@@ -421,6 +429,12 @@ int jf_volume_mdb(int step);
 
 /** The queue entry playing (or last played); NULL when the queue is empty. */
 const JfItem *jf_now(const JfApp *app);
+
+/** The file tags of the track playing, or NULL when none were read (setting off, not arrived, no covered format, server cut off). */
+const JfTags *jf_now_tags(const JfApp *app);
+
+/** True when file tags are on but this server answered a range read with a whole file: reads to it are off until the setting is switched off and on. */
+bool jf_tags_blocked(const JfApp *app);
 
 /** Position to show: PAUSED pos_ms; PLAYING start_ms + elapsed_ms (since START_AUDIO; 0 when no stream is live); FETCHING start_ms; else 0.  Clamped to the runtime. */
 int jf_position_ms(const JfApp *app, int elapsed_ms);

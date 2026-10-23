@@ -327,10 +327,10 @@ static void settings_ui(void)
     snprintf(app.lists[JF_LIST_LIBS].items[1].name, sizeof app.lists[0].items[1].name, "JAZZ");
     int ids[JF_SET_COUNT];
     int cnt = jf_settings_rows(&app, ids);
-    CHECK(cnt == 3 && ids[0] == JF_SET_LIBRARY && ids[1] == JF_SET_TAP && ids[2] == JF_SET_SIGNOUT, "S: settings rows %d", cnt);
+    CHECK(cnt == 4 && ids[0] == JF_SET_LIBRARY && ids[1] == JF_SET_TAP && ids[2] == JF_SET_TAGS && ids[3] == JF_SET_SIGNOUT, "S: settings rows %d", cnt);
     jf_ui_init(&ui, &fb, &touch, NULL, &app);
     feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
-    CHECK(ui.lv.count == 3, "S: settings list has %d rows, want 3", ui.lv.count);
+    CHECK(ui.lv.count == 4, "S: settings list has %d rows, want 4", ui.lv.count);
     for (int r = 0; r < cnt; r++) {
         int y = ui.lv.rect.y + LV_BORDER + 40 * r + 20;
         n = tap_at(&ui, ui.lv.rect.x + ui.lv.rect.w / 2, y, 2000u + 1000u * (uint32_t)r, ev);
@@ -378,7 +378,7 @@ static void settings_ui(void)
     cnt = jf_settings_rows(&app, ids);
     jf_ui_init(&ui, &fb, &touch, NULL, &app);
     feed(&ui, 0, 0, false, false, false, 40000, ev, MINI_MAX);
-    CHECK(cnt == 2 && ids[0] == JF_SET_TAP && ids[1] == JF_SET_SIGNOUT && ui.lv.count == 2, "S: with one library the list has %d rows (want TAP and SIGN OUT)", ui.lv.count);
+    CHECK(cnt == 3 && ids[0] == JF_SET_TAP && ids[1] == JF_SET_TAGS && ids[2] == JF_SET_SIGNOUT && ui.lv.count == 3, "S: with one library the list has %d rows (want TAP, FILE TAGS and SIGN OUT)", ui.lv.count);
     jf_ui_free(&ui);
 }
 

@@ -31,7 +31,7 @@ static int checks, failed;
 #define CHECK(c) do { checks++; if (!(c)) { failed++; \
     printf("FAIL line %d: %s\n", __LINE__, #c); } } while (0)
 
-enum { A_ITEMS, A_AUTH, A_STATUS, A_SILENT, A_STREAM, A_USER };
+enum { A_ITEMS, A_AUTH, A_STATUS, A_SILENT, A_STREAM, A_USER, A_PART, A_WHOLE_SMALL, A_WHOLE_BIG };
 typedef struct { int kind; int status; } Act;
 
 #define ID1 "0123456789abcdef0123456789abcdef"
@@ -99,6 +99,9 @@ static void serve(int ls, int hpipe, const Act *script, int nscript)
         case A_STATUS: reply(c, a.status, "nope", 4); break;
         case A_STREAM: reply(c, a.status ? a.status : 200, "0123456789", 10); break;
         case A_USER:   reply(c, 200, USER_BODY, strlen(USER_BODY)); break;
+        case A_PART:        { static char b[2000]; memset(b, 'x', sizeof b); reply(c, 206, b, sizeof b); } break;
+        case A_WHOLE_SMALL: { static char b[2000]; memset(b, 'x', sizeof b); reply(c, 200, b, sizeof b); } break;
+        case A_WHOLE_BIG:   { static char b[9000]; memset(b, 'x', sizeof b); reply(c, 200, b, sizeof b); } break;
         case A_SILENT: continue;                 /* keep the connection open, say nothing */
         }
         close(c);
@@ -570,6 +573,37 @@ static void test_write_and_user(void)
     srv_stop(s);
 }
 
+/* TAGS: a range read; 206 and a 200 that fits are accepted, a 200 past the range marks the server as ignoring Range */
+static void test_tags(void)
+{
+    JfApi a;
+    JfResult r[4];
+    char path[128];
+    snprintf(path, sizeof path, "/Items/%s/Download", ID1);
+    static const struct { int kind; bool rejected; const char *what; } cases[] = {
+        { A_PART, false, "206" }, { A_WHOLE_SMALL, false, "200 that fits" }, { A_WHOLE_BIG, true, "200 past the range" } };
+    for (int k = 0; k < 3; k++) {
+        Act sc[] = {{cases[k].kind, 0}};
+        Srv *s = srv_start(sc, 1);
+        setup(&a, s);
+        CHECK(jf_api_enqueue_tags(&a, 51, path, 4096) == 0);
+        CHECK(jf_api_enqueue_tags(&a, 51, path, 0) == -1);
+        CHECK(jf_api_enqueue_tags(&a, 51, path, JF_TAGS_HARD + 1) == -1);
+        int n = pump(&a, r, 4, 3000);
+        CHECK(n == 1);
+        if (n == 1) {
+            if (r[0].kind != JF_KIND_TAGS || r[0].tag != 51 || r[0].tags_rejected != cases[k].rejected) printf("case: %s\n", cases[k].what);
+            CHECK(r[0].kind == JF_KIND_TAGS && r[0].tag == 51);
+            CHECK(r[0].tags_rejected == cases[k].rejected);
+            CHECK(r[0].tags.have == false);   /* the body is filler: no tag in it */
+        }
+        CHECK(strstr(heads(s), "Range: bytes=0-4095\r\n") != NULL);
+        CHECK(strstr(heads(s), "GET /Items/" ID1 "/Download") != NULL);
+        jf_api_free(&a);
+        srv_stop(s);
+    }
+}
+
 static void test_classify(void)
 {
     CHECK(jf_api_classify(200, "") == JF_ERR_NONE);
@@ -605,6 +639,7 @@ int main(void)
     test_stream();
     test_save();
     test_write_and_user();
+    test_tags();
     printf("jf_api_test: %d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;
 }

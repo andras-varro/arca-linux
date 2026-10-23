@@ -111,6 +111,8 @@ int jf_path_playlist_add(char *out, size_t cap, const char *uid, const char *pla
 int jf_path_playlist_ids(char *out, size_t cap, const char *uid, const char *playlist_id, int start, int limit);
 /** GET /Users/<uid>: one user object, whose Policy says what the user may delete. */
 int jf_path_user(char *out, size_t cap, const char *uid);
+/** GET /Items/<id>/Download: the original file bytes, honours Range (measured: 206 with Content-Range). -1 on a bad id or when it does not fit. */
+int jf_path_download(char *out, size_t cap, const char *id);
 /** An artist's albums (AlbumArtistIds: the albums the artist is the album artist of). */
 int jf_path_artist_albums(char *out, size_t cap, const char *uid, const char *artist_id, int start, int limit);
 /** An artist's tracks, in album order (ArtistIds: every track the artist performs on, compilations included). */

@@ -455,3 +455,9 @@ int jf_path_scope(char *path, size_t cap, const char *lib)
     if (!jf_id_valid(lib)) return -1;
     return fin(snprintf(path + n, cap - n, "&ParentId=%s", lib), cap - n) < 0 ? -1 : (int)strlen(path);
 }
+
+int jf_path_download(char *out, size_t cap, const char *id)
+{
+    if (!jf_id_valid(id)) return -1;
+    return fin(snprintf(out, cap, "/Items/%s/Download", id), cap);
+}

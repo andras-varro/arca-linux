@@ -223,6 +223,32 @@ static void test_library(void)
     b.tap_action = JF_TAP_ADD_ONLY;
     jf_settings_load(&b, spath);
     CHECK(b.tap_action == JF_TAP_REPLACE, "a missing tap_action resets to the default (%d)", b.tap_action);
+
+    /* tags_read / tags_cut: default off and no cut-off; round trip; a stale value is reset by a file without the keys */
+    memset(&b, 0, sizeof b);
+    remove(spath);
+    jf_settings_load(&b, spath);
+    CHECK(b.tags_on == 0 && b.tags_cut[0] == 0, "tag reads default OFF with no cut-off (%d '%s')", b.tags_on, b.tags_cut);
+    memset(&a, 0, sizeof a);
+    a.tags_on = 1;
+    snprintf(a.tags_cut, sizeof a.tags_cut, "192.168.50.54:8096");
+    jf_settings_save(&a, spath);
+    b.tags_on = 0; b.tags_cut[0] = 0;
+    jf_settings_load(&b, spath);
+    CHECK(b.tags_on == 1 && strcmp(b.tags_cut, "192.168.50.54:8096") == 0, "tags_read and tags_cut round trip (%d '%s')", b.tags_on, b.tags_cut);
+    a.tags_cut[0] = 0;
+    jf_settings_save(&a, spath);
+    jf_settings_load(&b, spath);
+    CHECK(b.tags_on == 1 && b.tags_cut[0] == 0, "a cleared cut-off is not written back (%d '%s')", b.tags_on, b.tags_cut);
+    f = fopen(spath, "w");
+    fputs("tags_read=7\n", f); fclose(f);
+    jf_settings_load(&b, spath);
+    CHECK(b.tags_on == 0, "an out-of-range tags_read is OFF (%d)", b.tags_on);
+    f = fopen(spath, "w");
+    fputs("volume_step=3\n", f); fclose(f);
+    b.tags_on = 1; snprintf(b.tags_cut, sizeof b.tags_cut, "x");
+    jf_settings_load(&b, spath);
+    CHECK(b.tags_on == 0 && b.tags_cut[0] == 0, "missing keys reset tags_on / tags_cut");
 }
 
 /* The split itself: the login file never names a settings key, the settings file never names a token, and an

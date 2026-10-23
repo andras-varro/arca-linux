@@ -1732,11 +1732,115 @@ static void libs_open(int n)
     for (int k = 0; k < n; k++) { memset(&it[k], 0, sizeof it[k]); it[k].type = JF_ITEM_LIBRARY; snprintf(it[k].id, 33, "%032x", 0xa00 + k); snprintf(it[k].name, 96, "LIB%d", k); }
     if (c) reply_items(c, it, n, n);
 }
+/* ── file tags: a range read of the playing file, when the setting is on and the server has not refused ── */
+
+static const JfCmd *tags_req(void)
+{
+    for (int k = 0; k < cm.n; k++) if (cm.c[k].type == JF_CMD_REQUEST && cm.c[k].kind == JF_KIND_TAGS) return &cm.c[k];
+    return NULL;
+}
+static int tags_reqs(void)
+{
+    int n = 0;
+    for (int k = 0; k < cm.n; k++) if (cm.c[k].type == JF_CMD_REQUEST && cm.c[k].kind == JF_KIND_TAGS) n++;
+    return n;
+}
+static void tags_reply(unsigned tag, bool have, bool trunc, size_t need, bool rejected, const char *cond)
+{
+    JfResult r; memset(&r, 0, sizeof(r));
+    r.kind = JF_KIND_TAGS; r.tag = tag; r.fd = -1; r.err = JF_ERR_NONE; r.status = 206;
+    r.tags.have = have; r.tags.truncated = trunc; r.tags.need = need; r.tags_rejected = rejected;
+    snprintf(r.tags.conductor, sizeof r.tags.conductor, "%s", cond);
+    send_result(&r);
+}
+/* the track at queue index is playing: the stream answered */
+static void now_playing(void)
+{
+    reply_stream(app.stream_tag, JF_ERR_NONE, 40);
+    send(JF_EV_STREAM_STARTED, 0);
+}
+static void test_tags(void)
+{
+    char want[JF_PATH_MAX];
+
+    in_tracks(3, 3);
+    send(JF_EV_ACTIVATE, 0);
+    CHECK(tags_req() == NULL && !jf_now_tags(&app), "setting off: a track starts with no tags request");
+
+    in_tracks(8, 8);
+    app.login.tags_on = 1;
+    send(JF_EV_ACTIVATE, 0);
+    const JfCmd *tr = tags_req();
+    jf_path_download(want, sizeof want, app.queue[0].id);
+    CHECK(tr && tags_reqs() == 1 && tr->range == JF_TAGS_CAP && !strcmp(tr->path, want) && find(JF_CMD_PLAY_STREAM),
+          "setting on: one TAGS request for the file, range %d (%s)", tr ? tr->range : -1, tr ? tr->path : "(none)");
+    unsigned t0 = tr ? tr->tag : 0;
+    now_playing();
+    tags_reply(t0 + 7, true, false, 0, false, "STALE");
+    CHECK(!jf_now_tags(&app), "a result with another tag is ignored");
+    tags_reply(t0, true, false, 0, false, "Abbado");
+    CHECK(jf_now_tags(&app) && !strcmp(jf_now_tags(&app)->conductor, "Abbado"), "the matching result is stored and read through jf_now_tags");
+
+    send(JF_EV_NEXT, 0);
+    tr = tags_req();
+    CHECK(tr && tr->tag != t0 && !jf_now_tags(&app), "the next track drops the old tags and asks again");
+    unsigned t1 = tr ? tr->tag : 0;
+    tags_reply(t0, true, false, 0, false, "LATE");
+    CHECK(!jf_now_tags(&app), "the earlier track's late result is ignored");
+    now_playing();
+
+    /* a tag longer than the first read: exactly one extension, to `need` */
+    tags_reply(t1, true, true, 90000, false, "Part");
+    tr = tags_req();
+    CHECK(tr && tags_reqs() == 1 && tr->range == 90000 && jf_now_tags(&app), "truncated, need 90000: one more request with range = need, partial fields kept");
+    unsigned t2 = tr ? tr->tag : 0;
+    tags_reply(t2, true, true, 100000, false, "Whole");
+    CHECK(tags_req() == NULL && jf_now_tags(&app) && !strcmp(jf_now_tags(&app)->conductor, "Whole"), "a second truncation is not chased");
+
+    send(JF_EV_NEXT, 0);
+    tr = tags_req();
+    tags_reply(tr ? tr->tag : 0, true, true, JF_TAGS_HARD + 1, false, "Big");
+    CHECK(tags_req() == NULL, "need past JF_TAGS_HARD: no extension");
+
+    /* a server that answers a range with the whole file: cut off, stored, no more requests */
+    send(JF_EV_NEXT, 0);
+    tr = tags_req();
+    CHECK(tr != NULL, "next track asks");
+    tags_reply(tr ? tr->tag : 0, false, false, 0, true, "");
+    CHECK(!strcmp(app.login.tags_cut, "10.0.0.1:8096") && has(JF_CMD_SAVE_LOGIN) && jf_tags_blocked(&app) && !jf_now_tags(&app),
+          "rejected: server marked, login saved, blocked (cut '%s')", app.login.tags_cut);
+    send(JF_EV_PREV, 0);
+    CHECK(tags_req() == NULL && find(JF_CMD_PLAY_STREAM), "blocked server: tracks still play, no TAGS request");
+    now_playing();
+
+    /* another server is not blocked */
+    snprintf(app.login.server, sizeof app.login.server, "other.example:8096");
+    CHECK(!jf_tags_blocked(&app), "a different server string is not blocked");
+    send(JF_EV_NEXT, 0);
+    CHECK(tags_req() != NULL, "and its tracks are read");
+    snprintf(app.login.server, sizeof app.login.server, "10.0.0.1:8096");
+    now_playing();
+
+    /* the settings row: off cancels and clears, on clears the cut-off and reads the playing track */
+    app.screen = JF_SCR_SETTINGS; app.settings_page = JF_SETPAGE_MAIN;
+    send(JF_EV_SETTING_ACTIVATE, JF_SET_TAGS);
+    CHECK(!app.login.tags_on && has(JF_CMD_SAVE_LOGIN) && !tags_req() && !jf_now_tags(&app) &&
+          (find(JF_CMD_CANCEL) ? find(JF_CMD_CANCEL)->kind == JF_KIND_TAGS : true), "row off: saved, no request, tags cleared");
+    CHECK(!jf_tags_blocked(&app), "off is never shown as refused");
+    send(JF_EV_SETTING_ACTIVATE, JF_SET_TAGS);
+    CHECK(app.login.tags_on && !app.login.tags_cut[0] && has(JF_CMD_SAVE_LOGIN) && tags_req() && tags_reqs() == 1 && !jf_tags_blocked(&app),
+          "row on: cut-off cleared, saved, the playing track is read");
+    app.login.tags_on = 0;
+    snprintf(app.login.tags_cut, sizeof app.login.tags_cut, "10.0.0.1:8096");
+    app.login.tags_on = 1;
+    CHECK(jf_tags_blocked(&app), "on with this server cut off reads as blocked");
+}
+
 static void test_settings(void)
 {
     int rows[JF_SET_COUNT];
     libs_open(2);
-    CHECK(app.lib_n == 2 && jf_settings_rows(&app, rows) == 3 && rows[0] == JF_SET_LIBRARY && rows[1] == JF_SET_TAP && rows[2] == JF_SET_SIGNOUT, "2 libraries: LIBRARY + TAP + SIGN OUT rows");
+    CHECK(app.lib_n == 2 && jf_settings_rows(&app, rows) == 4 && rows[0] == JF_SET_LIBRARY && rows[1] == JF_SET_TAP && rows[2] == JF_SET_TAGS && rows[3] == JF_SET_SIGNOUT, "2 libraries: LIBRARY + TAP + FILE TAGS + SIGN OUT rows");
     send(JF_EV_SETTING_ACTIVATE, JF_SET_LIBRARY);
     CHECK(app.settings_page == JF_SETPAGE_LIBRARY, "LIBRARY page");
     send(JF_EV_BACK, 0);
@@ -1761,7 +1865,7 @@ static void test_settings(void)
     send(JF_EV_LIBRARY_SET, -1);
     CHECK(!app.login.library[0] && has(JF_CMD_SAVE_LOGIN), "ALL LIBRARIES clears the choice");
     libs_open(1);
-    CHECK(jf_settings_rows(&app, rows) == 2 && rows[0] == JF_SET_TAP && rows[1] == JF_SET_SIGNOUT, "1 library: LIBRARY row absent");
+    CHECK(jf_settings_rows(&app, rows) == 3 && rows[0] == JF_SET_TAP && rows[1] == JF_SET_TAGS && rows[2] == JF_SET_SIGNOUT, "1 library: LIBRARY row absent");
     send(JF_EV_SETTING_ACTIVATE, JF_SET_LIBRARY);
     CHECK(app.settings_page == JF_SETPAGE_MAIN, "an absent row cannot be activated");
 }
@@ -2581,7 +2685,7 @@ static void test_f152(void)
 int main(void)
 {
     test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue(); test_sink_channels();
-    test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit(); test_categories(); test_category_pick(); test_settings(); test_signout();
+    test_failures(); test_expiry(); test_volume(); test_search(); test_retry(); test_quit(); test_categories(); test_category_pick(); test_settings(); test_tags(); test_signout();
     test_action_bar(); test_queue_insert(); test_mix(); test_mix_seed_and_ticks(); test_mix_flow(); test_mix_choice(); test_mix_stops();
     test_mix_cancel_and_errors(); test_mix_nowplaying(); test_save();
     test_queue_clear(); test_queue_restore();

@@ -206,6 +206,7 @@ static void src_row(void *ctx, int index, LvRow *out)
         if (index < 0 || index >= cnt) return;
         if (ids[index] == JF_SET_SIGNOUT) jf_ui_signout_label(app, t, sizeof ui->rowtxt[0]);
         else if (ids[index] == JF_SET_TAP) jf_ui_tap_label(app, t, sizeof ui->rowtxt[0]);
+        else if (ids[index] == JF_SET_TAGS) jf_ui_tags_label(app, t, sizeof ui->rowtxt[0]);
         else {
             int r = chosen_lib_row(app);
             if (r == 0) snprintf(t, sizeof ui->rowtxt[0], "ALL LIBRARIES");
@@ -517,6 +518,10 @@ void jf_ui_tap_label(const JfApp *app, char *buf, size_t cap)
     snprintf(buf, cap, "TAP: %s", nm[t >= 0 && t < JF_TAP_COUNT ? t : JF_TAP_REPLACE]);
 }
 
+void jf_ui_tags_label(const JfApp *app, char *buf, size_t cap)
+{
+    snprintf(buf, cap, "FILE TAGS: %s", jf_tags_blocked(app) ? "SERVER REFUSED" : app->login.tags_on ? "ON" : "OFF");
+}
 
 /* The sign-out row: "SIGN OUT FROM <host>", the host of the address typed at sign-in, upcased.  The list view cuts a long row
  * with "..." at its width, so the host (the tail) is what gives way.  No usable address: plain "SIGN OUT". */
@@ -977,6 +982,7 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         ui->dirty = true;
     }
     if (app->banner_seq != ui->seen_banner) { ui->seen_banner = app->banner_seq; ui->dirty = true; }
+    if (app->tags_seq != ui->seen_tags) { ui->seen_tags = app->tags_seq; if (app->screen == JF_SCR_NOWPLAYING) ui->dirty = true; }
 
     if (app->overlay) {
         overlay_input(ui, ts, in, now, out, &n, max);
@@ -1490,7 +1496,47 @@ static void draw_nowplaying(JfUi *ui)
     const char *state = app->play_state == JF_PLAY_FETCHING ? "LOADING..." : app->play_state == JF_PLAY_PAUSED ? "PAUSED"
                       : app->play_state == JF_PLAY_STOPPED ? "STOPPED"
                       : app->play_state == JF_PLAY_END ? "END OF QUEUE" : "";
-    if (state[0]) fb_draw_text(fb, tx, in.y + 94, state, RING, 2);
+    const JfTags *tg = jf_now_tags(app);
+    int sw = state[0] ? text_measure_width(state, 2) + 8 : 0;
+    if (it && (tg || app->login.tags_on)) {
+        /* up to four small lines under the album: conductor, work, performers, and the item's own album artist / year / genres.
+         * The state word moves to the right edge, so the lines stop short of it. */
+        char ln[4][160] = { "", "", "", "" };
+        char g[JF_GENRES_BYTES + 8];
+        int nl = 0;
+        if (tg && tg->conductor[0]) snprintf(ln[nl++], sizeof ln[0], "CONDUCTOR: %s", tg->conductor);
+        if (tg && tg->work[0]) snprintf(ln[nl++], sizeof ln[0], "WORK: %s", tg->work);
+        if (tg && tg->perf_n > 0) {
+            size_t o = (size_t)snprintf(ln[nl], sizeof ln[0], "WITH: ");
+            for (int k = 0; k < tg->perf_n && o < sizeof ln[0] - 1; k++)
+                o += (size_t)snprintf(ln[nl] + o, sizeof ln[0] - o, tg->perf[k].role[0] ? "%s%s (%s)" : "%s%s", k ? ", " : "", tg->perf[k].name, tg->perf[k].role);
+            nl++;
+        }
+        size_t o = 0;
+        char api[160] = "";
+        if (jf_tags_show_album_artist(it->artist, it->album_artist))
+            o += (size_t)snprintf(api + o, sizeof api - o, "ALBUM ARTIST: %s", it->album_artist);
+        if (it->year > 0 && o < sizeof api - 1) o += (size_t)snprintf(api + o, sizeof api - o, "%s%d", o ? "   " : "", it->year);
+        if (it->genres[0] && o < sizeof api - 1) {
+            size_t gi = 0;
+            for (const char *s = it->genres; *s && gi + 3 < sizeof g; s++) {
+                if (*s == '\n') { if (s[1]) { g[gi++] = ','; g[gi++] = ' '; } }
+                else g[gi++] = *s;
+            }
+            g[gi] = '\0';
+            o += (size_t)snprintf(api + o, sizeof api - o, "%s%s", o ? "   " : "", g);
+        }
+        if (api[0]) snprintf(ln[nl++], sizeof ln[0], "%s", api);
+        for (int k = 0; k < nl; k++) {
+            int pos = in.y + 84 + k * 10;
+            lv_fit(buf, sizeof buf, ln[k], pos + 8 > in.y + 100 ? tw - sw : tw, 1);   /* lines that reach the state word's rows stop short of it */
+            fb_draw_text(fb, tx, pos, buf, DIM, 1);
+        }
+    }
+    if (state[0]) {
+        if (it && (tg || app->login.tags_on)) fb_draw_text(fb, in.x + in.w - sw + 4, in.y + 100, state, RING, 2);
+        else fb_draw_text(fb, tx, in.y + 94, state, RING, 2);
+    }
 
     UiRect p = ui->L.progress;
     int total = it ? it->runtime_s : 0;

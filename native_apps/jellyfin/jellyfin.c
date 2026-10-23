@@ -147,6 +147,14 @@ static void execute(const JfCmds *cmds, uint32_t now)
                     e.res.kind = c->kind; e.res.tag = c->tag; e.res.err = JF_ERR_BADREPLY; e.res.fd = -1;
                     push(&e);
                 }
+            } else if (c->kind == JF_KIND_TAGS) {
+                if (jf_api_enqueue_tags(&api, c->tag, c->path, c->range) < 0) {
+                    JfEvent e;
+                    memset(&e, 0, sizeof e);
+                    e.type = JF_EV_RESULT;
+                    e.res.kind = JF_KIND_TAGS; e.res.tag = c->tag; e.res.err = JF_ERR_BADREPLY; e.res.fd = -1;
+                    push(&e);
+                }
             } else if (c->kind == JF_KIND_SAVE) {
                 /* the ids are the queue's first c->n, or the picked ids; the core does not change either until this step ends */
                 const char *ids[JF_SAVE_IDS_MAX];

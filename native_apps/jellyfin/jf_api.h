@@ -42,6 +42,7 @@
 #include "json.h"
 #include "jf_model.h"
 #include "jf_url.h"
+#include "jf_tags.h"
 #include "logger.h"
 
 #define JF_API_SLOTS      4
@@ -54,7 +55,8 @@
 
 typedef enum { JF_KIND_NONE = 0, JF_KIND_AUTH, JF_KIND_LIST, JF_KIND_STREAM, JF_KIND_SAVE,
                JF_KIND_WRITE,   /* DELETE or POST with an empty body: the status is the result, never retried */
-               JF_KIND_USER     /* GET /Users/<uid>: one user object, its Policy in JfResult.policy */
+               JF_KIND_USER,    /* GET /Users/<uid>: one user object, its Policy in JfResult.policy */
+               JF_KIND_TAGS     /* GET of a file with a Range header (bytes 0..range-1): 206 (or a 200 that fits) parsed into JfResult.tags; lowest priority, never retried, dropped when anything else is enqueued */
              } JfKind;
 
 typedef enum {
@@ -78,6 +80,8 @@ typedef struct {
     char     user_id[JF_ID_LEN + 1];    /**< AUTH: User.Id; caller wipes          */
     JfPolicy policy;                    /**< AUTH: User.Policy; USER: the user's Policy; zero otherwise */
     int      fd;          /**< STREAM: the socket on success, else -1             */
+    JfTags   tags;        /**< TAGS: the parsed head of the file (tags.have false = no covered tag) */
+    bool     tags_rejected; /**< TAGS: the server answered 200 with a body past the range: it ignores Range, the read was cut off at the cap */
 } JfResult;
 
 typedef struct {
@@ -89,6 +93,7 @@ typedef struct {
     char     method[8];                /**< WRITE: "POST" or "DELETE" */
     char     body[JF_API_POST_BYTES];   /**< AUTH and SAVE only; wiped when the request ends */
     size_t   body_len;
+    int      range;                     /**< TAGS: bytes asked for (Range: bytes=0-range-1) */
 } JfSlot;
 
 typedef struct {
@@ -111,6 +116,7 @@ typedef struct {
     unsigned next_seq;
     JfSlot   cur;                       /**< the in-flight request (kind NONE = idle) */
     bool     retried, waiting;
+    bool     tags_overrun;              /**< the TAGS reply in flight was a 200 longer than its range */
     long long retry_at, began_ms;
     HttpReq  req;
     char    *body;                      /**< heap, JF_API_BODY_BYTES              */
@@ -138,6 +144,8 @@ int  jf_api_enqueue_save(JfApi *a, unsigned tag, const char *name, const char *u
 int  jf_api_enqueue_write(JfApi *a, unsigned tag, const char *method, const char *path);
 /** GET of `path` (/Users/<uid>), parsed into JfResult.policy. */
 int  jf_api_enqueue_user(JfApi *a, unsigned tag, const char *path);
+/** GET of `path` with Range bytes=0-(range-1), range 1..JF_TAGS_HARD, else -1.  A new TAGS request replaces any queued or in-flight one. */
+int  jf_api_enqueue_tags(JfApi *a, unsigned tag, const char *path, int range);
 
 /** Drop every queued and in-flight request of `kind`; no result is delivered. */
 void jf_api_cancel_kind(JfApi *a, JfKind kind);

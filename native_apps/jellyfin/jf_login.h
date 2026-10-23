@@ -34,6 +34,8 @@ typedef struct {
     char device_id[64];
     int volume_step;
     int tap_action;          /* JfTapAction; an unknown or missing value is JF_TAP_REPLACE */
+    int tags_on;             /* 1 = read each playing track's file tags by a range request (default 0); persisted as tags_read */
+    char tags_cut[64];       /* the `server` string a 200-instead-of-206 answer switched tag reads off for (persisted as tags_cut); "" = none */
     char library[33];        /* chosen music library id; empty = all libraries */
     char library_name[64];
 } JfLogin;
