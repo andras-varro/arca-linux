@@ -327,7 +327,7 @@ ahead into a frame queue**, not on demand. **Decided (operator):** 32bpp (16bpp 
 fetch per item took 110 s (the server extracts every embedded track), later ones 0.05 s: fetch asynchronously, start without subtitles.
 **Seek:** restart with `StartTimeTicks` and a fresh `PlaySessionId` (a reused one returns the old job), first byte ~1.1 s. **Stop:**
 `DELETE /Videos/ActiveEncodings?deviceId=..&playSessionId=..` → 204.
-**Phase 0 left:** one full-length run (a 63-minute episode) for stability and memory. Then: shared-layer extraction (Ludfin unchanged, its host tests green), browse UI, player.
+**Next:** shared-layer extraction (Ludfin unchanged, its host tests green), browse UI, player. The player also levels the audio (AGC plus limiter: the server's 5.1→mono downmix peaks near −18 dBFS and the operator found dialogue barely audible) and takes an adjustable A/V offset (operator unsure whether lip sync is off).
 **Done when** a movie and an episode play with the chosen audio track and subtitles at the panel.
 
 ### F156. Log page: a Follow setting — open, operator request 2026-10-22, not designed
