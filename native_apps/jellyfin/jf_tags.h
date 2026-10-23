@@ -22,7 +22,7 @@
 #define JF_TAGS_HARD       131072   /**< the most a track's tags are ever read (one extension, no more) */
 #define JF_TAGS_PERF_MAX   6
 #define JF_TAGS_GENRE_MAX  5
-#define JF_TAGS_NAME_MAX   96
+#define JF_TAGS_NAME_MAX   256
 
 typedef struct {
     bool have;               /**< a supported tag was found and read (fields may still be empty) */

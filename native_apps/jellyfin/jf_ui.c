@@ -11,6 +11,7 @@
 #include "icons.h"
 #include "jf_art.h"
 #include "keyboard.h"
+#include "font.h"
 
 #define BG        RGB(16, 18, 26)
 #define PANEL     RGB(30, 36, 52)
@@ -22,10 +23,14 @@
 #define BANNER_H  18
 #define GAP        6
 #define FIELD_H   52
-#define TAG_LINE_H   18   /* a scale-2 line: 9 rows of 2 px */
-#define TAG_PITCH    22   /* line to line in the file-tag band */
+#define TAG_LINE_H   18   /* the band's top offset in jf_ui_layout: kept at the old scale-2 height so the band rect does not move */
+#define TAG_FONT     1    /* the file-tag band is set in the small font */
+#define TAG_LINE1_H  FONT_ROWS  /* a scale-1 line: its glyph rows */
+#define TAG_PITCH    10   /* line to line in the file-tag band: one row of air under the glyphs */
+#define TAG_WORK_MAX 2    /* most lines the WORK part wraps onto */
 #define TAG_WITH_MAX 3    /* most lines the WITH (performers) part wraps onto */
-#define TAG_ROWS_MAX 6    /* conductor, work, up to three WITH lines, the album artist line */
+#define TAG_AA_MAX   2    /* most lines the ALBUM ARTIST part wraps onto */
+#define TAG_ROWS_MAX JF_TAG_LINES_MAX  /* conductor, work, performers, album artist, year and genres */
 #define NP_MIN_W  72   /* narrowest now-playing button; 10 of them fit one row at 774 px or more */
 #define QR_MIN_W  56   /* narrowest queue-view button; 11 of them fit one row at 676 px or more (65 px each on the unit's 780) */
 #define NP_ICON    22   /* the now-playing glyphs: a square box in the button's middle */
@@ -1476,7 +1481,7 @@ static void perf_text(const JfTags *tg, int k, char *out, size_t cap)
     else snprintf(out, cap, "%s", tg->perf[k].name);
 }
 
-/* WITH: the performers, word-wrapped into at most `lines` lines of `w` px (scale 2).  A line breaks only between
+/* WITH: the performers, word-wrapped into at most `lines` lines of `w` px (the file-tag font).  A line breaks only between
  * performers; one wider than a line is cut to it.  The last allowed line takes everything that is left, with an ellipsis.
  * Returns the number of lines written. */
 static int wrap_with(const JfTags *tg, int lines, int w, char out[][160])
@@ -1492,7 +1497,7 @@ static int wrap_with(const JfTags *tg, int lines, int w, char out[][160])
                 perf_text(tg, j, ent, sizeof ent);
                 o += (size_t)snprintf(rest + o, sizeof rest - o, "%s%s", j > k ? ", " : "", ent);
             }
-            lv_fit(out[nl], 160, rest, w, 2);
+            lv_fit(out[nl], 160, rest, w, TAG_FONT);
             return nl + 1;
         }
         char ln[160];
@@ -1502,7 +1507,7 @@ static int wrap_with(const JfTags *tg, int lines, int w, char out[][160])
             char ent[160], cand[160];
             perf_text(tg, k, ent, sizeof ent);
             snprintf(cand, sizeof cand, "%s%s%s", ln, taken ? ", " : "", ent);
-            if (text_measure_width(cand, 2) > w) break;
+            if (text_measure_width(cand, TAG_FONT) > w) break;
             snprintf(ln, sizeof ln, "%s", cand);
             taken++;
         }
@@ -1510,7 +1515,7 @@ static int wrap_with(const JfTags *tg, int lines, int w, char out[][160])
             char ent[160], cand[160];
             perf_text(tg, k, ent, sizeof ent);
             snprintf(cand, sizeof cand, "%s%s", prefix, ent);
-            lv_fit(ln, sizeof ln, cand, w, 2);
+            lv_fit(ln, sizeof ln, cand, w, TAG_FONT);
             k++;
         }
         snprintf(out[nl], 160, "%s", ln);
@@ -1519,47 +1524,114 @@ static int wrap_with(const JfTags *tg, int lines, int w, char out[][160])
     return nl;
 }
 
-/* The file-tag lines of NOW PLAYING, drawn in the band ui->L.tags: CONDUCTOR, WORK, WITH (wrapped), then the album
- * artist / year / genres line.  A line that does not fit the band's height is not drawn. */
-static void draw_tags(JfUi *ui, const JfItem *it, const JfTags *tg)
+/* Does the span s[0..n) fit in w px at the file-tag font?  A span of 160 bytes or more never does. */
+static bool span_fits(const char *s, size_t n, int w)
 {
-    Framebuffer *fb = ui->fb;
-    UiRect r = ui->L.tags;
-    char ln[TAG_ROWS_MAX][160];
-    char buf[160];
-    int avail = r.h >= TAG_LINE_H ? (r.h - TAG_LINE_H) / TAG_PITCH + 1 : 0;
+    char tmp[160];
+    if (n >= sizeof tmp) return false;
+    memcpy(tmp, s, n);
+    tmp[n] = '\0';
+    return text_measure_width(tmp, TAG_FONT) <= w;
+}
+
+/* A text word-wrapped into at most `lines` lines of `w` px (the file-tag font).  A line breaks only at a space; a word
+ * wider than a line is cut to it.  The last allowed line takes everything that is left, with an ellipsis.  Returns the
+ * number of lines written. */
+static int wrap_words(const char *text, int lines, int w, char out[][160])
+{
+    const char *p = text;
+    int nl = 0;
+    while (*p == ' ') p++;
+    while (*p && nl < lines) {
+        if (nl == lines - 1) {
+            lv_fit(out[nl], 160, p, w, TAG_FONT);
+            return nl + 1;
+        }
+        const char *cut = NULL, *q = p;
+        while (*q) {
+            const char *we = q;
+            while (*we && *we != ' ') we++;
+            if (!span_fits(p, (size_t)(we - p), w)) break;
+            cut = we;
+            q = we;
+            while (*q == ' ') q++;
+        }
+        if (cut) {
+            size_t n = (size_t)(cut - p);
+            memcpy(out[nl], p, n);
+            out[nl][n] = '\0';
+            p = cut;
+        } else {                                     /* one word wider than a line: cut it */
+            const char *we = p;
+            while (*we && *we != ' ') we++;
+            char word[160];
+            size_t n = (size_t)(we - p) < sizeof word ? (size_t)(we - p) : sizeof word - 1;
+            memcpy(word, p, n);
+            word[n] = '\0';
+            lv_fit(out[nl], 160, word, w, TAG_FONT);
+            p = we;
+        }
+        nl++;
+        while (*p == ' ') p++;
+    }
+    return nl;
+}
+
+/* The file-tag lines of NOW PLAYING for a band `w` px wide and `h` px high: CONDUCTOR (1 line), WORK (up to 2), WITH
+ * (up to 3), ALBUM ARTIST (up to 2), then the year / genres line.  An empty field is skipped without a gap.  Lines that
+ * would fall below the band are left out.  Writes into ln (JF_TAG_LINES_MAX rows) and returns the count. */
+int jf_ui_tag_lines(const JfItem *it, const JfTags *tg, int w, int h, char ln[][160])
+{
+    int avail = h >= TAG_LINE1_H ? (h - TAG_LINE1_H) / TAG_PITCH + 1 : 0;
     int nl = 0;
     bool has_c = tg && tg->conductor[0], has_w = tg && tg->work[0], has_p = tg && tg->perf_n > 0;
+    bool has_a = jf_tags_show_album_artist(it->artist, it->album_artist);
 
-    /* the album artist / year / genres line: the item's own fields (not the file's) */
-    char api[160] = "", g[JF_GENRES_BYTES + 8];
+    if (has_c) snprintf(ln[nl++], 160, "CONDUCTOR: %s", tg->conductor);
+    if (has_w) {
+        char wt[160 + JF_TAGS_NAME_MAX];
+        snprintf(wt, sizeof wt, "WORK: %s", tg->work);
+        nl += wrap_words(wt, TAG_WORK_MAX, w, &ln[nl]);
+    }
+    if (has_p) nl += wrap_with(tg, TAG_WITH_MAX, w, &ln[nl]);
+    if (has_a) {
+        char at[160 + 64];
+        snprintf(at, sizeof at, "ALBUM ARTIST: %s", it->album_artist);
+        nl += wrap_words(at, TAG_AA_MAX, w, &ln[nl]);
+    }
+
+    /* the year / genres line: the item's own fields (not the file's) */
+    char yg[160] = "", g[JF_GENRES_BYTES + 8];
     size_t o = 0;
-    if (jf_tags_show_album_artist(it->artist, it->album_artist))
-        o += (size_t)snprintf(api + o, sizeof api - o, "ALBUM ARTIST: %s", it->album_artist);
-    if (it->year > 0 && o < sizeof api - 1) o += (size_t)snprintf(api + o, sizeof api - o, "%s%d", o ? "   " : "", it->year);
-    if (it->genres[0] && o < sizeof api - 1) {
+    if (it->year > 0) o += (size_t)snprintf(yg + o, sizeof yg - o, "%d", it->year);
+    if (it->genres[0] && o < sizeof yg - 1) {
         size_t gi = 0;
         for (const char *s = it->genres; *s && gi + 3 < sizeof g; s++) {
             if (*s == '\n') { if (s[1]) { g[gi++] = ','; g[gi++] = ' '; } }
             else g[gi++] = *s;
         }
         g[gi] = '\0';
-        o += (size_t)snprintf(api + o, sizeof api - o, "%s%s", o ? "   " : "", g);
+        snprintf(yg + o, sizeof yg - o, "%s%s", o ? "   " : "", g);
     }
-    bool has_a = api[0] != '\0';
+    if (yg[0]) {
+        lv_fit(ln[nl], 160, yg, w, TAG_FONT);
+        nl++;
+    }
 
-    if (has_c) snprintf(ln[nl++], sizeof ln[0], "CONDUCTOR: %s", tg->conductor);
-    if (has_w) snprintf(ln[nl++], sizeof ln[0], "WORK: %s", tg->work);
-    if (has_p) {
-        int with_lines = avail - nl - (has_a ? 1 : 0);
-        if (with_lines < 1) with_lines = 1;
-        if (with_lines > TAG_WITH_MAX) with_lines = TAG_WITH_MAX;
-        nl += wrap_with(tg, with_lines, r.w, &ln[nl]);
-    }
-    if (has_a) snprintf(ln[nl++], sizeof ln[0], "%s", api);
-    for (int k = 0; k < nl && k < avail; k++) {
-        lv_fit(buf, sizeof buf, ln[k], r.w, 2);
-        fb_draw_text(fb, r.x, r.y + k * TAG_PITCH, buf, DIM, 2);
+    return nl < avail ? nl : avail;
+}
+
+/* The file-tag lines of NOW PLAYING, drawn in the band ui->L.tags; see jf_ui_tag_lines. */
+static void draw_tags(JfUi *ui, const JfItem *it, const JfTags *tg)
+{
+    Framebuffer *fb = ui->fb;
+    UiRect r = ui->L.tags;
+    char ln[TAG_ROWS_MAX][160];
+    char buf[160];
+    int nl = jf_ui_tag_lines(it, tg, r.w, r.h, ln);
+    for (int k = 0; k < nl; k++) {
+        lv_fit(buf, sizeof buf, ln[k], r.w, TAG_FONT);
+        fb_draw_text(fb, r.x, r.y + k * TAG_PITCH, buf, DIM, TAG_FONT);
     }
 }
 

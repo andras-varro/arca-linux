@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "jf_ui.h"
+#include "jf_tags.h"
 
 static int fails;
 #define CHECK(c, ...) do { if (!(c)) { fails++; printf("FAIL: " __VA_ARGS__); printf("\n"); } } while (0)
@@ -1658,6 +1659,94 @@ static void modal_tick(void)
     jf_ui_free(&ui);
 }
 
+static bool ends_dots(const char *s)
+{
+    size_t n = strlen(s);
+    return n >= 3 && strcmp(s + n - 3, "...") == 0;
+}
+
+/* T  the NOW PLAYING file-tag band, small font: WORK wraps to 2 lines, the performers to 3, the album artist to 2, the
+ *    year and genres are one line; an empty field adds no line; the lines fit the band (jf_ui_tag_lines).  The width
+ *    arguments are narrow (about 33 characters) to force the budgets; the band itself is 760 px, where a 95-character
+ *    WORK is one line. */
+static void tag_lines(void)
+{
+    JfExtents e = { 0, 0, 800, 480, 0, 0, 800, 480 };
+    JfLayout L;
+    jf_ui_layout(&L, &e);
+    CHECK(L.tags.w > 0 && L.tags.h > 0, "T: tag band is empty (%dx%d)", L.tags.w, L.tags.h);
+    int bw = L.tags.w, bh = L.tags.h;
+    char ln[JF_TAG_LINES_MAX][160];
+    JfItem it;
+    JfTags tg;
+    int n;
+
+    /* WORK alone, long: exactly two lines, the second ends in an ellipsis, each fits the width */
+    memset(&it, 0, sizeof it);
+    memset(&tg, 0, sizeof tg);
+    snprintf(tg.work, sizeof tg.work, "%s", "Symphony No. 9 in D minor, Op. 125 Choral: IV. Presto, with a long subtitle on and on");
+    n = jf_ui_tag_lines(&it, &tg, 200, 200, ln);
+    CHECK(n == 2, "T: a long WORK in a 200 px band gave %d lines (want 2)", n);
+    CHECK(n == 2 && strncmp(ln[0], "WORK: ", 6) == 0 && ends_dots(ln[1]), "T: WORK lines are not 'WORK:..' then '...': [%s] [%s]", ln[0], n > 1 ? ln[1] : "");
+    for (int k = 0; k < n; k++) CHECK(text_measure_width(ln[k], 1) <= 200, "T: WORK line %d is wider than 200 px", k);
+
+    /* the same WORK at the real band width: 95 characters is one line, no ellipsis */
+    n = jf_ui_tag_lines(&it, &tg, bw, bh, ln);
+    CHECK(n == 1 && !ends_dots(ln[0]), "T: a WORK at band width %d gave %d lines (want 1, no ellipsis)", bw, n);
+
+    /* performers, six long ones: exactly three lines, the last ends in an ellipsis */
+    memset(&tg, 0, sizeof tg);
+    for (int k = 0; k < JF_TAGS_PERF_MAX; k++) {
+        snprintf(tg.perf[k].name, sizeof tg.perf[k].name, "Ensemble Member Number %02d", k + 1);
+        snprintf(tg.perf[k].role, sizeof tg.perf[k].role, "%s", "violin");
+    }
+    tg.perf_n = JF_TAGS_PERF_MAX;
+    n = jf_ui_tag_lines(&it, &tg, 200, 200, ln);
+    CHECK(n == 3, "T: six performers in a 200 px band gave %d lines (want 3)", n);
+    CHECK(n == 3 && strncmp(ln[0], "WITH: ", 6) == 0 && strncmp(ln[1], "WITH", 4) != 0 && ends_dots(ln[2]),
+          "T: WITH lines are not 'WITH:', continuation, '...'");
+
+    /* album artist, long (the artist differs): exactly two lines, the second ends in an ellipsis */
+    memset(&tg, 0, sizeof tg);
+    memset(&it, 0, sizeof it);
+    snprintf(it.artist, sizeof it.artist, "%s", "Conductor");
+    snprintf(it.album_artist, sizeof it.album_artist, "%s",
+             "The Orchestra of the Very Long Named Institution of the Region");
+    n = jf_ui_tag_lines(&it, &tg, 200, 200, ln);
+    CHECK(n == 2 && ends_dots(ln[1]), "T: a long ALBUM ARTIST gave %d lines (want 2, ellipsis on the last)", n);
+
+    /* year and genres: one line, no gap for the empty conductor, work and performers */
+    memset(&it, 0, sizeof it);
+    it.year = 1987;
+    snprintf(it.genres, sizeof it.genres, "%s", "Classical\nBaroque\n");
+    n = jf_ui_tag_lines(&it, &tg, 200, 200, ln);
+    CHECK(n == 1 && strcmp(ln[0], "1987   Classical, Baroque") == 0, "T: year and genres gave %d lines [%s]", n, n ? ln[0] : "");
+
+    /* every field at once, long: the budgets sum to nine lines; the band takes them all, and the count fits the height */
+    memset(&it, 0, sizeof it);
+    memset(&tg, 0, sizeof tg);
+    snprintf(tg.conductor, sizeof tg.conductor, "%s", "Sir Someone");
+    snprintf(tg.work, sizeof tg.work, "%s", "Symphony No. 9 in D minor, Op. 125 Choral: IV. Presto, with a long subtitle on and on");
+    for (int k = 0; k < JF_TAGS_PERF_MAX; k++) {
+        snprintf(tg.perf[k].name, sizeof tg.perf[k].name, "Ensemble Member Number %02d", k + 1);
+        snprintf(tg.perf[k].role, sizeof tg.perf[k].role, "%s", "violin");
+    }
+    tg.perf_n = JF_TAGS_PERF_MAX;
+    snprintf(it.artist, sizeof it.artist, "%s", "Conductor");
+    snprintf(it.album_artist, sizeof it.album_artist, "%s",
+             "The Orchestra of the Very Long Named Institution of the Region");
+    it.year = 1987;
+    snprintf(it.genres, sizeof it.genres, "%s", "Classical\nBaroque\n");
+    n = jf_ui_tag_lines(&it, &tg, 200, bh, ln);
+    CHECK(n == 9, "T: every field at once gave %d lines (want 9)", n);
+    CHECK(n >= 1 && (n - 1) * 10 + 9 <= bh, "T: %d lines at pitch 10 overrun the %d px band", n, bh);
+    CHECK(n >= 1 && strncmp(ln[0], "CONDUCTOR: ", 11) == 0, "T: the first line is not CONDUCTOR");
+
+    /* a band too short for the stack: only the lines that fit are returned (two at 20 px) */
+    n = jf_ui_tag_lines(&it, &tg, 200, 20, ln);
+    CHECK(n == 2, "T: a 20 px band gave %d lines (want 2)", n);
+}
+
 int main(void)
 {
     add_to_playlist();
@@ -1690,6 +1779,7 @@ int main(void)
     pg_seek();
     nav_cycle();
     info_only();
+    tag_lines();
     if (fails) { printf("jf_ui_layout_test: %d FAILED\n", fails); return 1; }
     printf("jf_ui_layout_test: all passed\n");
     return 0;

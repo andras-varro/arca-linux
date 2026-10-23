@@ -83,6 +83,12 @@ void jf_ui_dup_title(const JfApp *app, char *buf, size_t cap);
 void jf_ui_tap_label(const JfApp *app, char *buf, size_t cap);
 /** The file-tags settings row: "FILE TAGS: OFF" / "FILE TAGS: ON" / "FILE TAGS: SERVER REFUSED" (on, but this server answered a range read with the whole file). */
 void jf_ui_tags_label(const JfApp *app, char *buf, size_t cap);
+
+/** The file-tag lines of NOW PLAYING for a band w x h px (the small font): CONDUCTOR, WORK, WITH, ALBUM ARTIST, year and
+ *  genres, each part wrapped to its line budget and clipped to the lines that fit the band.  Writes into ln, which holds
+ *  JF_TAG_LINES_MAX rows of 160 bytes; returns the number of lines. */
+#define JF_TAG_LINES_MAX 9
+int jf_ui_tag_lines(const JfItem *it, const JfTags *tg, int w, int h, char ln[][160]);
 /** The SETTINGS sign-out row: "SIGN OUT FROM <HOST>" from the address typed at sign-in, "SIGN OUT" when there is none or it does not parse. */
 void jf_ui_signout_label(const JfApp *app, char *buf, size_t cap);
 /** The header count under the bar (without the LOADING mark): the artist folder counts its rows by type ("6 ALBUMS, 1 TRACK",

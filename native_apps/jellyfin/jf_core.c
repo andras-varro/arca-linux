@@ -1391,11 +1391,22 @@ static bool eq_ci(const char *a, size_t an, const char *b)
     return true;
 }
 
-/* The inline fetch is done: its rows replace the artist row's place in the search list. */
+/* The inline fetch is done: its rows replace the artist row's place in the search list.  A row the search already holds
+ * (the artist's own album, or a track, that the term matched by itself) is not spliced a second time: each id is listed
+ * once, at the position the search gave it, so the rows and what PLAY ALL queues from them agree. */
 static void inl_finish(JfApp *app)
 {
     JfList *a = &app->lists[JF_LIST_ARTINL], *s = &app->lists[JF_LIST_SEARCH];
-    int p = app->inl_pos, take = a->n < s->cap - s->n ? a->n : s->cap - s->n;
+    int p = app->inl_pos, w = 0;
+    for (int k = 0; k < a->n; k++) {
+        bool dup = false;
+        for (int j = 0; !dup && j < s->n; j++) dup = strcmp(s->items[j].id, a->items[k].id) == 0;
+        if (dup) continue;
+        if (w != k) a->items[w] = a->items[k];
+        w++;
+    }
+    a->n = w;
+    int take = a->n < s->cap - s->n ? a->n : s->cap - s->n;
     app->inl_on = false;
     if (take < a->n) s->full = true;
     memmove(&s->items[p + take], &s->items[p], (size_t)(s->n - p) * sizeof(JfItem));

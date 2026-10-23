@@ -2546,6 +2546,23 @@ static void test_search_inline(void)
           sl->items[3].type == JF_ITEM_TRACK && sl->items[4].type == JF_ITEM_TRACK && strcmp(sl->items[5].id, tr_after) == 0 && !app.busy && cm.n == 0,
           "its rows are spliced in where it was (n %d)", sl->n);
 
+    /* search_inline_no_duplicate_rows: an album the search itself returned is also one of the artist's albums; a
+     * track hit can likewise be one of the artist's tracks.  Each id is listed once, at its first position. */
+    search_page1("miles davis", 1, "Miles Davis");
+    { JfCmd a = *list_req(); JfList *al = a.list;
+      fill(al, JF_ITEM_ALBUM, 2, 2);
+      sl->items[0].type = JF_ITEM_ALBUM;
+      snprintf(sl->items[0].id, sizeof sl->items[0].id, "%s", al->items[1].id);   /* search hit == artist's 2nd album */
+      reply_raw(&a, JF_ERR_NONE); }
+    { JfCmd t = *list_req(); JfList *tl = t.list;
+      fill_trk(tl, 2, 2, "Other", OTHER_ALB);
+      snprintf(tl->items[tl->n - 1].id, sizeof tl->items[0].id, "%s", sl->items[sl->n - 1].id);   /* last search hit == artist's track */
+      reply_raw(&t, JF_ERR_NONE); }
+    { int dups = 0;
+      for (int i = 0; i < sl->n; i++) for (int j = i + 1; j < sl->n; j++) if (strcmp(sl->items[i].id, sl->items[j].id) == 0) dups++;
+      CHECK(dups == 0 && sl->n == 4 && sl->items[0].type == JF_ITEM_ALBUM && !app.busy,
+            "a hit repeated by the inlined artist is listed once (n %d, duplicate pairs %d)", sl->n, dups); }
+
     /* search_inline_case_insensitive */
     search_page1("  MILES davis ", 1, "Miles Davis");
     CHECK(list_req() && list_req()->list == &app.lists[JF_LIST_ARTINL], "the term matches whatever its case or padding");
