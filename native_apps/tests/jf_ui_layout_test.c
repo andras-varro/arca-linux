@@ -40,7 +40,13 @@ static void run(int inset_t, int inset_b, int inset_l, int inset_r)
     JfExtents e = { 0, 0, 800, 480, inset_l, inset_t, 800 - inset_r, 480 - inset_b };
     JfLayout L;
     jf_ui_layout(&L, &e);
+    /* NOW PLAYING's file-tag band: below the time row under the seek bar, above the transport row, on the seek bar's margins */
+    CHECK(L.tags.h > 0 && L.tags.y >= L.progress.y + L.progress.h + 8 + 18 && L.tags.y + L.tags.h <= L.np[0].y,
+          "T: tag band %d..%d is not between the time row (ends %d) and the transport row (starts %d)",
+          L.tags.y, L.tags.y + L.tags.h, L.progress.y + L.progress.h + 8 + 18, L.np[0].y);
+    CHECK(L.tags.x == L.progress.x && L.tags.w == L.progress.w, "T: tag band is not on the seek bar's margins");
     UiRect press[64];
+
     int n = 0;
     for (int i = 0; i < JF_UI_ROW3; i++) press[n++] = L.row3[i];
     for (int i = 0; i < JF_UI_ROW4; i++) {   /* the TRACKS screens' four-button row: pressable, clear of the list and of each other */
@@ -981,15 +987,15 @@ static void add_to_playlist(void)
         }
     }
 
-    /* ADD ALL TO PLAYLIST on a search that holds a track: the fourth button sends PICK_OPEN -1; none without a track */
+    /* ADD ALL TO PLAYLIST on a search that holds a track, an album or an artist: the fourth button sends PICK_OPEN -1; none over playlists alone */
     for (int with = 0; with < 2; with++) {
         jf_app_init(&app);
         app.screen = JF_SCR_SEARCH;
         app.nav_n = 1;
         JfList *sl = &app.lists[JF_LIST_SEARCH];
         sl->n = 2;
-        sl->items[0].type = JF_ITEM_ARTIST;
-        sl->items[1].type = with ? JF_ITEM_TRACK : JF_ITEM_ALBUM;
+        sl->items[0].type = with ? JF_ITEM_ARTIST : JF_ITEM_PLAYLIST;
+        sl->items[1].type = with ? JF_ITEM_ALBUM : JF_ITEM_PLAYLIST;
         jf_ui_init(&ui, &fb, &touch, NULL, &app);
         feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
         UiRect r4 = ui.L.row4[3];

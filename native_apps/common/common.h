@@ -632,6 +632,26 @@ void modal_dialog_set_focus(ModalDialog *dlg, int index);
 // Does nothing while no focus is set.
 void modal_dialog_focus_step(ModalDialog *dlg, UiDir d);
 
+// Geometry of a dialog on a fb_w x fb_h screen, in screen pixels.  Pure: no
+// framebuffer.  modal_dialog_draw() uses it and writes the button rects into
+// dlg->buttons, which modal_dialog_update() hit-tests.  A zero w or h means the
+// part is absent (no title, no message).
+typedef struct {
+    int x, y, w, h;
+} ModalRect;
+
+typedef struct {
+    ModalRect dialog;
+    ModalRect title;          /* title text box */
+    ModalRect message;        /* bounding box of every message line */
+    int title_cy;             /* centre y of the title text */
+    int message_cy;           /* centre y of the first message line */
+    ModalRect button[MODAL_MAX_BUTTONS];
+} ModalDialogLayout;
+
+void modal_dialog_layout(const ModalDialog *dlg, int fb_w, int fb_h,
+                         ModalDialogLayout *out);
+
 // Draw the dialog overlay and contents
 void modal_dialog_draw(ModalDialog *dlg, Framebuffer *fb);
 

@@ -472,7 +472,8 @@ static void test_search(void)
     CHECK(app.queue_n == 2 && strcmp(app.queue[0].id, sl->items[2].id) == 0 && strcmp(app.queue[1].id, sl->items[4].id) == 0 &&
           has(JF_CMD_PLAY_STREAM), "track in search plays with the following tracks only (n %d)", app.queue_n);
     send(JF_EV_PLAY_ALL, 0);
-    CHECK(app.queue_n == 2 && strcmp(app.queue[0].id, sl->items[2].id) == 0, "PLAY ALL on search starts at the first track");
+    CHECK(app.queue_n == 2 && has(JF_CMD_REQUEST) && find(JF_CMD_REQUEST)->list == &app.lists[JF_LIST_ARTALL] &&
+          strstr(find(JF_CMD_REQUEST)->path, sl->items[0].id), "PLAY ALL on search starts by expanding the first hit (an album)");
 
     /* the albums list re-aimed by a later visit is aimed back on BACK */
     signed_in(); artists_loaded(3, 3);
@@ -2664,11 +2665,10 @@ static void test_f152(void)
     send_text(JF_EV_SEARCH, "blue");
     JfCmd sr = *find(JF_CMD_REQUEST);
     JfList *sl = &app.lists[JF_LIST_SEARCH];
-    fill(sl, JF_ITEM_ALBUM, 1, 5); fill(sl, JF_ITEM_ARTIST, 1, 5); fill(sl, JF_ITEM_TRACK, 2, 5);
-    fill(sl, JF_ITEM_ALBUM, 1, 5);
+    fill(sl, JF_ITEM_TRACK, 2, 2);
     reply_raw(&sr, JF_ERR_NONE);
     send(JF_EV_PICK_OPEN, -1);
-    CHECK(app.screen == JF_SCR_PLPICK && app.pick_n == 2 && !strcmp(app.pick_ids[0], sl->items[2].id) && !strcmp(app.pick_ids[1], sl->items[3].id) &&
+    CHECK(app.screen == JF_SCR_PLPICK && app.pick_n == 2 && !strcmp(app.pick_ids[0], sl->items[0].id) && !strcmp(app.pick_ids[1], sl->items[1].id) &&
           list_req() && list_req()->list == &app.lists[JF_LIST_PLPICK], "PICK_OPEN -1 on SEARCH collects exactly its tracks (screen %d, n %d)", app.screen, app.pick_n);
     send(JF_EV_BACK, 0);
     CHECK(app.screen == JF_SCR_SEARCH, "BACK returns to the search results");
@@ -2677,11 +2677,111 @@ static void test_f152(void)
     signed_in(); artists_loaded(3, 3);
     send_text(JF_EV_SEARCH, "none");
     sr = *find(JF_CMD_REQUEST);
-    fill(&app.lists[JF_LIST_SEARCH], JF_ITEM_ARTIST, 2, 2);
+    fill(&app.lists[JF_LIST_SEARCH], JF_ITEM_PLAYLIST, 2, 2);
     reply_raw(&sr, JF_ERR_NONE);
     send(JF_EV_PICK_OPEN, -1);
-    CHECK(app.screen == JF_SCR_SEARCH && app.pick_n == 0, "no tracks in the results: nothing to add");
+    CHECK(app.screen == JF_SCR_SEARCH && app.pick_n == 0 && cm.n == 0 && !jf_search_playable(&app), "no playable hit in the results: nothing to add");
 }
+/* ── PLAY ALL / ADD ALL TO PLAYLIST flatten every search hit ──────────── */
+
+static char fids[400][33];
+static int fid_n;
+
+/* the search results: one type letter per hit (T track, A album, R artist), term chosen not to match an artist name */
+static void flat_search(const char *kinds)
+{
+    signed_in(); artists_loaded(3, 3);
+    send_text(JF_EV_SEARCH, "zzz");
+    JfCmd sr = *find(JF_CMD_REQUEST);
+    JfList *sl = &app.lists[JF_LIST_SEARCH];
+    for (const char *p = kinds; *p; p++) fill(sl, *p == 'T' ? JF_ITEM_TRACK : *p == 'A' ? JF_ITEM_ALBUM : JF_ITEM_ARTIST, 1, (int)strlen(kinds));
+    reply_raw(&sr, JF_ERR_NONE);
+    fid_n = 0;
+}
+
+static bool is_expansion(const JfCmd *c, const char *id)
+{
+    return c && c->type == JF_CMD_REQUEST && c->kind == JF_KIND_LIST && c->list == &app.lists[JF_LIST_ARTALL] && strstr(c->path, id);
+}
+
+/* answer the expansion request in flight with `count` tracks (total `total`), recording their ids */
+static void expand_reply(int count, int total)
+{
+    const JfCmd *rq = list_req();
+    if (!rq) { CHECK(false, "an expansion request was in flight"); return; }
+    JfCmd c = *rq;
+    int from = c.list->n;
+    JfList *l = c.list;
+    fill(l, JF_ITEM_TRACK, count, total);
+    for (int k = from; k < l->n; k++) snprintf(fids[fid_n++], sizeof fids[0], "%s", l->items[k].id);
+    reply_raw(&c, JF_ERR_NONE);
+}
+
+static void test_search_flatten(void)
+{
+    JfList *sl = &app.lists[JF_LIST_SEARCH];
+
+    /* all containers: the button exists, one request per hit, results concatenated in hit order */
+    flat_search("ARA");
+    CHECK(jf_search_playable(&app), "a search of only albums and artists is playable");
+    send(JF_EV_PICK_OPEN, -1);
+    CHECK(is_expansion(list_req(), sl->items[0].id) && strstr(list_req()->path, "ParentId="), "all-folder: the first album is expanded by its tracks");
+    expand_reply(2, 2);
+    CHECK(is_expansion(list_req(), sl->items[1].id) && strstr(list_req()->path, "ArtistIds="), "then the artist, by its audio");
+    expand_reply(2, 2);
+    CHECK(is_expansion(list_req(), sl->items[2].id), "then the last album");
+    CHECK(app.screen == JF_SCR_SEARCH, "the picker waits for the last answer");
+    expand_reply(2, 2);
+    CHECK(app.screen == JF_SCR_PLPICK && app.pick_n == 6, "all-folder: six tracks reach the picker (n %d)", app.pick_n);
+    bool ordered = app.pick_n == 6;
+    for (int k = 0; ordered && k < 6; k++) ordered = !strcmp(app.pick_ids[k], fids[k]);
+    CHECK(ordered, "in hit order");
+
+    /* mixed: tracks and expanded containers interleaved, PLAY ALL */
+    flat_search("TATA");
+    snprintf(fids[fid_n++], sizeof fids[0], "%s", sl->items[0].id);
+    send(JF_EV_PLAY_ALL, 0);
+    CHECK(is_expansion(list_req(), sl->items[1].id) && app.queue_n == 0, "mixed: the first container asks before anything plays");
+    expand_reply(2, 2);
+    snprintf(fids[fid_n++], sizeof fids[0], "%s", sl->items[2].id);
+    CHECK(is_expansion(list_req(), sl->items[3].id), "the walk resumes after the track between them");
+    expand_reply(1, 1);
+    bool ok = app.queue_n == 5 && has(JF_CMD_PLAY_STREAM);
+    for (int k = 0; ok && k < 5; k++) ok = !strcmp(app.queue[k].id, fids[k]);
+    CHECK(ok, "mixed: queue is t, a-tracks, t, a-tracks in hit order (n %d)", app.queue_n);
+
+    /* a duplicate id is dropped, wherever it comes from */
+    flat_search("AT");
+    send(JF_EV_PICK_OPEN, -1);
+    if (list_req()) {   /* the album's second track is the very track that is the next hit */
+        JfCmd c = *list_req();
+        fill(c.list, JF_ITEM_TRACK, 2, 2);
+        snprintf(c.list->items[1].id, sizeof c.list->items[1].id, "%s", sl->items[1].id);
+        reply_raw(&c, JF_ERR_NONE);
+    }
+    CHECK(app.screen == JF_SCR_PLPICK && app.pick_n == 2 && !strcmp(app.pick_ids[1], sl->items[1].id), "dup: the repeated id is taken once (n %d)", app.pick_n);
+
+    /* a reply for a walk the user left is ignored */
+    flat_search("AA");
+    send(JF_EV_PLAY_ALL, 0);
+    if (!list_req()) { CHECK(false, "stale: an expansion was asked for"); return; }
+    JfCmd c1 = *list_req();
+    send(JF_EV_BACK, 0);
+    fill(c1.list, JF_ITEM_TRACK, 2, 2);
+    reply_raw(&c1, JF_ERR_NONE);
+    CHECK(app.queue_n == 0 && !has(JF_CMD_PLAY_STREAM) && !list_req() && app.screen != JF_SCR_PLPICK, "stale: nothing plays, nothing more is asked");
+
+    /* the cap: ADD ALL stops at 100 and says so; the second album is not even asked for */
+    flat_search("AA");
+    send(JF_EV_PICK_OPEN, -1);
+    expand_reply(JF_PAGE_ARTALL, 150);
+    CHECK(list_req() && list_req()->list == &app.lists[JF_LIST_ARTALL] && app.screen == JF_SCR_SEARCH, "cap: the album pages on");
+    expand_reply(JF_PAGE_ARTALL, 150);
+    expand_reply(JF_PAGE_ARTALL, 150);
+    CHECK(app.screen == JF_SCR_PLPICK && app.pick_n == JF_SAVE_IDS_MAX && strncmp(app.banner, "FIRST 100", 9) == 0 && list_req() && list_req()->list == &app.lists[JF_LIST_PLPICK],
+          "cap: 100 ids, the banner, no request for the second album (n %d)", app.pick_n);
+}
+
 int main(void)
 {
     test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue(); test_sink_channels();
@@ -2691,6 +2791,7 @@ int main(void)
     test_queue_clear(); test_queue_restore();
     test_pause_stop_seek(); test_instant_confirm(); test_back_restores_view(); test_prev(); test_queue_edit(); test_queue_remove();
     test_playlist_delete(); test_playlist_policy(); test_pick(); test_f152(); test_artist(); test_search_inline();
+    test_search_flatten();
     printf("jf_core_test: %d checks, %d failures\n", checks, fails);
     return fails ? 1 : 0;
 }

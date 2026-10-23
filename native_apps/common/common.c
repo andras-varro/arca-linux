@@ -597,12 +597,108 @@ void modal_dialog_focus_step(ModalDialog *dlg, UiDir d) {
         dlg->focus = dlg->focus + 1 < n ? dlg->focus + 1 : 0;
 }
 
+/* Scale a message line is drawn at: 2, or 1 when it would overrun the box.
+ * A line too wide for the box drops to scale 1 rather than spilling over its
+ * edges; the 10 px each side is the frame. */
+static int modal_line_scale(const char *line, int dw) {
+    return (text_measure_width(line, 2) <= dw - 20) ? 2 : 1;
+}
+
+/* Clear space between the last message line and the buttons. */
+#define MODAL_MSG_GAP 4
+
+void modal_dialog_layout(const ModalDialog *dlg, int fb_w, int fb_h,
+                         ModalDialogLayout *out) {
+    int dw = dlg->dialog_width;
+    int n  = dlg->button_count;
+
+    /* Message block, relative to the dialog top.  The first line is centred
+     * on 90 (a one-line message sits there) and moves up 11 px per extra line,
+     * but never above 69: the title's text ends at 56. */
+    int lines = 0, msg_cy_rel = 0, msg_bot_rel = 0;
+    if (dlg->message[0]) {
+        lines = 1;
+        for (const char *p = dlg->message; *p; p++) if (*p == '\n') lines++;
+        msg_cy_rel = 90 - (lines - 1) * 11;
+        if (msg_cy_rel < 69) msg_cy_rel = 69;
+        msg_bot_rel = msg_cy_rel + (lines - 1) * 22 + text_measure_height(2) / 2;
+    }
+
+    /* Buttons: a row of two, or a column of 1, 3 or 4 */
+    int btn_w, btn_h, btn_gap, block_h, bottom_pad;
+    if (n == 2) {
+        btn_w = 150; btn_h = 50; btn_gap = 30;
+        block_h = btn_h;
+        bottom_pad = 25;
+    } else {
+        btn_w = 200; btn_h = 44; btn_gap = 8;
+        block_h = n * btn_h + (n - 1) * btn_gap;
+        bottom_pad = 20;
+    }
+
+    /* The dialog keeps its base height unless the message and the buttons
+     * would meet, then it grows to leave MODAL_MSG_GAP between them. */
+    int dh = dlg->dialog_height;
+    int need = msg_bot_rel + MODAL_MSG_GAP + block_h + bottom_pad;
+    if (lines > 0 && need > dh) dh = need;
+
+    int dx = (fb_w - dw) / 2;
+    int dy = (fb_h - dh) / 2;
+
+    memset(out, 0, sizeof(*out));
+    out->dialog = (ModalRect){ dx, dy, dw, dh };
+
+    if (dlg->title[0]) {
+        int tw = text_measure_width(dlg->title, 3);
+        int th = text_measure_height(3);
+        out->title_cy = dy + 45;
+        out->title = (ModalRect){ fb_w / 2 - tw / 2, out->title_cy - th / 2, tw, th };
+    }
+
+    if (lines > 0) {
+        out->message_cy = dy + msg_cy_rel;
+        int x0 = fb_w, x1 = 0;
+        const char *line = dlg->message;
+        while (line) {
+            const char *nl = strchr(line, '\n');
+            char buf[sizeof(dlg->message)];
+            size_t len = nl ? (size_t)(nl - line) : strlen(line);
+            memcpy(buf, line, len);
+            buf[len] = '\0';
+            int w = text_measure_width(buf, modal_line_scale(buf, dw));
+            int x = fb_w / 2 - w / 2;
+            if (x < x0) x0 = x;
+            if (x + w > x1) x1 = x + w;
+            line = nl ? nl + 1 : NULL;
+        }
+        out->message = (ModalRect){ x0, out->message_cy - text_measure_height(2) / 2,
+                                    x1 - x0,
+                                    (lines - 1) * 22 + text_measure_height(2) };
+    }
+
+    if (n == 2) {
+        /* Side-by-side row (preserves original 2-button look) */
+        int total_btn_w = btn_w * 2 + btn_gap;
+        int btn_x = (fb_w - total_btn_w) / 2;
+        int btn_y = dy + dh - btn_h - bottom_pad;
+
+        out->button[0] = (ModalRect){ btn_x, btn_y, btn_w, btn_h };
+        out->button[1] = (ModalRect){ btn_x + btn_w + btn_gap, btn_y, btn_w, btn_h };
+    } else {
+        /* Vertically stacked column (1, 3, or 4 buttons), bottom-aligned */
+        int btn_x = (fb_w - btn_w) / 2;
+        int btn_y_start = dy + dh - block_h - bottom_pad;
+
+        for (int i = 0; i < n; i++)
+            out->button[i] = (ModalRect){ btn_x, btn_y_start + i * (btn_h + btn_gap),
+                                          btn_w, btn_h };
+    }
+}
+
 void modal_dialog_draw(ModalDialog *dlg, Framebuffer *fb) {
     if (!dlg->active) return;
 
-    int dw = dlg->dialog_width;
-    int dh = dlg->dialog_height;
-    int n  = dlg->button_count;
+    int n = dlg->button_count;
 
     /* Semi-transparent overlay */
     if (dlg->overlay_alpha > 0) {
@@ -610,74 +706,43 @@ void modal_dialog_draw(ModalDialog *dlg, Framebuffer *fb) {
                            COLOR_BLACK, dlg->overlay_alpha);
     }
 
-    /* Centered dialog box */
-    int dx = (fb->width - dw) / 2;
-    int dy = (fb->height - dh) / 2;
+    ModalDialogLayout lay;
+    modal_dialog_layout(dlg, fb->width, fb->height, &lay);
+    const ModalRect *dr = &lay.dialog;
 
-    fb_fill_rect(fb, dx, dy, dw, dh, dlg->bg_color);
-    fb_draw_rect(fb, dx, dy, dw, dh, dlg->border_color);
+    fb_fill_rect(fb, dr->x, dr->y, dr->w, dr->h, dlg->bg_color);
+    fb_draw_rect(fb, dr->x, dr->y, dr->w, dr->h, dlg->border_color);
 
     /* Title text — centered, scale 3 */
     if (dlg->title[0]) {
-        text_draw_centered(fb, fb->width / 2, dy + 45, dlg->title,
+        text_draw_centered(fb, fb->width / 2, lay.title_cy, dlg->title,
                            dlg->title_color, 3);
     }
 
     /* Message text — centered, scale 2.  fb_draw_text() does not break on
-     * '\n', so each line is drawn here, the block centred on dy + 90 (a
-     * one-line message lands exactly where it always did), 22 px apart. */
+     * '\n', so each line is drawn here, 22 px apart from the layout's first. */
     if (dlg->message[0]) {
-        int lines = 1;
-        for (const char *p = dlg->message; *p; p++) if (*p == '\n') lines++;
-        int y = dy + 90 - (lines - 1) * 11;
+        int y = lay.message_cy;
         const char *line = dlg->message;
         while (line) {
             const char *nl = strchr(line, '\n');
             char buf[sizeof(dlg->message)];
-            size_t n = nl ? (size_t)(nl - line) : strlen(line);
-            memcpy(buf, line, n);
-            buf[n] = '\0';
-            /* A line too wide for the box drops to scale 1 rather than
-             * spilling over its edges; the 10 px each side is the frame. */
-            int ms = (text_measure_width(buf, 2) <= dw - 20) ? 2 : 1;
-            text_draw_centered(fb, fb->width / 2, y, buf, dlg->message_color, ms);
+            size_t len = nl ? (size_t)(nl - line) : strlen(line);
+            memcpy(buf, line, len);
+            buf[len] = '\0';
+            text_draw_centered(fb, fb->width / 2, y, buf, dlg->message_color,
+                               modal_line_scale(buf, dr->w));
             y += 22;
             line = nl ? nl + 1 : NULL;
         }
     }
 
-    /* Position and draw buttons */
-    if (n == 2) {
-        /* Side-by-side layout (preserves original 2-button look) */
-        int btn_w = 150, btn_h = 50;
-        int btn_gap = 30;
-        int total_btn_w = btn_w * 2 + btn_gap;
-        int btn_x = (fb->width - total_btn_w) / 2;
-        int btn_y = dy + dh - btn_h - 25;
-
-        dlg->buttons[0].x = btn_x;
-        dlg->buttons[0].y = btn_y;
-        dlg->buttons[0].width = btn_w;
-        dlg->buttons[0].height = btn_h;
-
-        dlg->buttons[1].x = btn_x + btn_w + btn_gap;
-        dlg->buttons[1].y = btn_y;
-        dlg->buttons[1].width = btn_w;
-        dlg->buttons[1].height = btn_h;
-    } else {
-        /* Vertically stacked layout (1, 3, or 4 buttons) */
-        int btn_w = 200, btn_h = 44;
-        int btn_gap = 8;
-        int total_h = n * btn_h + (n - 1) * btn_gap;
-        int btn_x = (fb->width - btn_w) / 2;
-        int btn_y_start = dy + dh - total_h - 20;
-
-        for (int i = 0; i < n; i++) {
-            dlg->buttons[i].x = btn_x;
-            dlg->buttons[i].y = btn_y_start + i * (btn_h + btn_gap);
-            dlg->buttons[i].width = btn_w;
-            dlg->buttons[i].height = btn_h;
-        }
+    /* Buttons: the rects the layout chose are what modal_dialog_update() hits */
+    for (int i = 0; i < n; i++) {
+        dlg->buttons[i].x = lay.button[i].x;
+        dlg->buttons[i].y = lay.button[i].y;
+        dlg->buttons[i].width = lay.button[i].w;
+        dlg->buttons[i].height = lay.button[i].h;
     }
 
     /* The focused button — the one Enter presses — is drawn highlighted on a

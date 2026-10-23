@@ -67,6 +67,7 @@ typedef struct {
     UiRect signin, signexit;        /* sign-in buttons, pressable */
     UiRect progress;                /* now playing bar, drawn only */
     UiRect info;                    /* now playing text block, drawn only */
+    UiRect tags;                    /* now playing: the file-tag band, between the time row and the transport row, drawn only */
 } JfLayout;
 
 void jf_ui_layout(JfLayout *L, const JfExtents *e);

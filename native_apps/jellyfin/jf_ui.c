@@ -22,6 +22,10 @@
 #define BANNER_H  18
 #define GAP        6
 #define FIELD_H   52
+#define TAG_LINE_H   18   /* a scale-2 line: 9 rows of 2 px */
+#define TAG_PITCH    22   /* line to line in the file-tag band */
+#define TAG_WITH_MAX 3    /* most lines the WITH (performers) part wraps onto */
+#define TAG_ROWS_MAX 6    /* conductor, work, up to three WITH lines, the album artist line */
 #define NP_MIN_W  72   /* narrowest now-playing button; 10 of them fit one row at 774 px or more */
 #define QR_MIN_W  56   /* narrowest queue-view button; 11 of them fit one row at 676 px or more (65 px each on the unit's 780) */
 #define NP_ICON    22   /* the now-playing glyphs: a square box in the button's middle */
@@ -89,6 +93,11 @@ void jf_ui_layout(JfLayout *L, const JfExtents *e)
     L->info = rect_of(sl, top + 6, sw, 120);
     L->progress = rect_of(sl + 20, top + 6 + 120 + 10, sw - 40, 14);
     L->seek = rect_of(L->progress.x, L->progress.y - 10, L->progress.w, 34);
+    /* the file-tag band: from under the time row to above the transport row, on the seek bar's margins */
+    int np_top = L->np[0].y;
+    for (int i = 1; i < JF_UI_NP; i++) if (L->np[i].y < np_top) np_top = L->np[i].y;
+    int tag_y = L->progress.y + L->progress.h + 8 + TAG_LINE_H + GAP;
+    L->tags = rect_of(L->progress.x, tag_y, L->progress.w, np_top - GAP - tag_y);
 
     /* mini player: a strip right above the button row; the lists shrink by its height + a gap */
     int mini_y = rowy - 4 - JF_UI_MINI_H;
@@ -614,16 +623,11 @@ static bool at_root(const JfApp *app) { return app->screen == JF_SCR_ARTISTS; }
 
 /* The artist folder (albums, then tracks of other albums): the core queues its whole discography for PLAY ALL. */
 static bool artist_folder(const JfApp *app) { return app->screen == JF_SCR_ALBUMS && app->ctx[JF_LIST_ALBUMS].sub == JF_SUB_PLAIN; }
-
+/* A search result list that holds a track, an album or an artist: what PLAY ALL plays and ADD ALL TO PLAYLIST adds, albums and artists expanded to their tracks. */
 /* A search result list that holds a track: the rows PLAY ALL plays and ADD ALL TO PLAYLIST adds. */
-static bool search_has_tracks(const JfApp *app)
-{
-    const JfList *l = &app->lists[JF_LIST_SEARCH];
-    for (int k = 0; k < l->n; k++) if (l->items[k].type == JF_ITEM_TRACK) return true;
-    return false;
-}
+static bool search_has_tracks(const JfApp *app) { return jf_search_playable(app); }
 
-/* An album's, a playlist's or a genre's tracks carry a fourth button, + PLAYLIST, and a search with a track in it ADD ALL TO PLAYLIST; an artist's albums do not. */
+/* An album's, a playlist's or a genre's tracks carry a fourth button, + PLAYLIST, and a search with a track, an album or an artist in it ADD ALL TO PLAYLIST; an artist's albums do not. */
 static bool tracks4(const JfApp *app)
 {
     if (app->screen == JF_SCR_SEARCH) return search_has_tracks(app);   /* ADD ALL TO PLAYLIST, over the tracks PLAY ALL plays */
@@ -1465,7 +1469,102 @@ static void transport_icon(JfUi *ui, int i, UiRect r)
     icon_draw(ui->fb, k, r.x + (r.w - NP_ICON) / 2, r.y + (r.h - NP_ICON) / 2, NP_ICON, COLOR_WHITE);
 }
 
+/* One performer as it is shown: "name (role)", or the name alone. */
+static void perf_text(const JfTags *tg, int k, char *out, size_t cap)
+{
+    if (tg->perf[k].role[0]) snprintf(out, cap, "%s (%s)", tg->perf[k].name, tg->perf[k].role);
+    else snprintf(out, cap, "%s", tg->perf[k].name);
+}
+
+/* WITH: the performers, word-wrapped into at most `lines` lines of `w` px (scale 2).  A line breaks only between
+ * performers; one wider than a line is cut to it.  The last allowed line takes everything that is left, with an ellipsis.
+ * Returns the number of lines written. */
+static int wrap_with(const JfTags *tg, int lines, int w, char out[][160])
+{
+    int k = 0, nl = 0;
+    while (k < tg->perf_n && nl < lines) {
+        const char *prefix = nl == 0 ? "WITH: " : "";
+        if (nl == lines - 1) {
+            char rest[800];
+            size_t o = (size_t)snprintf(rest, sizeof rest, "%s", prefix);
+            for (int j = k; j < tg->perf_n && o < sizeof rest - 1; j++) {
+                char ent[160];
+                perf_text(tg, j, ent, sizeof ent);
+                o += (size_t)snprintf(rest + o, sizeof rest - o, "%s%s", j > k ? ", " : "", ent);
+            }
+            lv_fit(out[nl], 160, rest, w, 2);
+            return nl + 1;
+        }
+        char ln[160];
+        snprintf(ln, sizeof ln, "%s", prefix);
+        int taken = 0;
+        for (; k < tg->perf_n; k++) {
+            char ent[160], cand[160];
+            perf_text(tg, k, ent, sizeof ent);
+            snprintf(cand, sizeof cand, "%s%s%s", ln, taken ? ", " : "", ent);
+            if (text_measure_width(cand, 2) > w) break;
+            snprintf(ln, sizeof ln, "%s", cand);
+            taken++;
+        }
+        if (taken == 0) {                            /* one performer wider than the line: cut it */
+            char ent[160], cand[160];
+            perf_text(tg, k, ent, sizeof ent);
+            snprintf(cand, sizeof cand, "%s%s", prefix, ent);
+            lv_fit(ln, sizeof ln, cand, w, 2);
+            k++;
+        }
+        snprintf(out[nl], 160, "%s", ln);
+        nl++;
+    }
+    return nl;
+}
+
+/* The file-tag lines of NOW PLAYING, drawn in the band ui->L.tags: CONDUCTOR, WORK, WITH (wrapped), then the album
+ * artist / year / genres line.  A line that does not fit the band's height is not drawn. */
+static void draw_tags(JfUi *ui, const JfItem *it, const JfTags *tg)
+{
+    Framebuffer *fb = ui->fb;
+    UiRect r = ui->L.tags;
+    char ln[TAG_ROWS_MAX][160];
+    char buf[160];
+    int avail = r.h >= TAG_LINE_H ? (r.h - TAG_LINE_H) / TAG_PITCH + 1 : 0;
+    int nl = 0;
+    bool has_c = tg && tg->conductor[0], has_w = tg && tg->work[0], has_p = tg && tg->perf_n > 0;
+
+    /* the album artist / year / genres line: the item's own fields (not the file's) */
+    char api[160] = "", g[JF_GENRES_BYTES + 8];
+    size_t o = 0;
+    if (jf_tags_show_album_artist(it->artist, it->album_artist))
+        o += (size_t)snprintf(api + o, sizeof api - o, "ALBUM ARTIST: %s", it->album_artist);
+    if (it->year > 0 && o < sizeof api - 1) o += (size_t)snprintf(api + o, sizeof api - o, "%s%d", o ? "   " : "", it->year);
+    if (it->genres[0] && o < sizeof api - 1) {
+        size_t gi = 0;
+        for (const char *s = it->genres; *s && gi + 3 < sizeof g; s++) {
+            if (*s == '\n') { if (s[1]) { g[gi++] = ','; g[gi++] = ' '; } }
+            else g[gi++] = *s;
+        }
+        g[gi] = '\0';
+        o += (size_t)snprintf(api + o, sizeof api - o, "%s%s", o ? "   " : "", g);
+    }
+    bool has_a = api[0] != '\0';
+
+    if (has_c) snprintf(ln[nl++], sizeof ln[0], "CONDUCTOR: %s", tg->conductor);
+    if (has_w) snprintf(ln[nl++], sizeof ln[0], "WORK: %s", tg->work);
+    if (has_p) {
+        int with_lines = avail - nl - (has_a ? 1 : 0);
+        if (with_lines < 1) with_lines = 1;
+        if (with_lines > TAG_WITH_MAX) with_lines = TAG_WITH_MAX;
+        nl += wrap_with(tg, with_lines, r.w, &ln[nl]);
+    }
+    if (has_a) snprintf(ln[nl++], sizeof ln[0], "%s", api);
+    for (int k = 0; k < nl && k < avail; k++) {
+        lv_fit(buf, sizeof buf, ln[k], r.w, 2);
+        fb_draw_text(fb, r.x, r.y + k * TAG_PITCH, buf, DIM, 2);
+    }
+}
+
 static void draw_nowplaying(JfUi *ui)
+
 {
     const JfApp *app = ui->app;
     Framebuffer *fb = ui->fb;
@@ -1497,46 +1596,8 @@ static void draw_nowplaying(JfUi *ui)
                       : app->play_state == JF_PLAY_STOPPED ? "STOPPED"
                       : app->play_state == JF_PLAY_END ? "END OF QUEUE" : "";
     const JfTags *tg = jf_now_tags(app);
-    int sw = state[0] ? text_measure_width(state, 2) + 8 : 0;
-    if (it && (tg || app->login.tags_on)) {
-        /* up to four small lines under the album: conductor, work, performers, and the item's own album artist / year / genres.
-         * The state word moves to the right edge, so the lines stop short of it. */
-        char ln[4][160] = { "", "", "", "" };
-        char g[JF_GENRES_BYTES + 8];
-        int nl = 0;
-        if (tg && tg->conductor[0]) snprintf(ln[nl++], sizeof ln[0], "CONDUCTOR: %s", tg->conductor);
-        if (tg && tg->work[0]) snprintf(ln[nl++], sizeof ln[0], "WORK: %s", tg->work);
-        if (tg && tg->perf_n > 0) {
-            size_t o = (size_t)snprintf(ln[nl], sizeof ln[0], "WITH: ");
-            for (int k = 0; k < tg->perf_n && o < sizeof ln[0] - 1; k++)
-                o += (size_t)snprintf(ln[nl] + o, sizeof ln[0] - o, tg->perf[k].role[0] ? "%s%s (%s)" : "%s%s", k ? ", " : "", tg->perf[k].name, tg->perf[k].role);
-            nl++;
-        }
-        size_t o = 0;
-        char api[160] = "";
-        if (jf_tags_show_album_artist(it->artist, it->album_artist))
-            o += (size_t)snprintf(api + o, sizeof api - o, "ALBUM ARTIST: %s", it->album_artist);
-        if (it->year > 0 && o < sizeof api - 1) o += (size_t)snprintf(api + o, sizeof api - o, "%s%d", o ? "   " : "", it->year);
-        if (it->genres[0] && o < sizeof api - 1) {
-            size_t gi = 0;
-            for (const char *s = it->genres; *s && gi + 3 < sizeof g; s++) {
-                if (*s == '\n') { if (s[1]) { g[gi++] = ','; g[gi++] = ' '; } }
-                else g[gi++] = *s;
-            }
-            g[gi] = '\0';
-            o += (size_t)snprintf(api + o, sizeof api - o, "%s%s", o ? "   " : "", g);
-        }
-        if (api[0]) snprintf(ln[nl++], sizeof ln[0], "%s", api);
-        for (int k = 0; k < nl; k++) {
-            int pos = in.y + 84 + k * 10;
-            lv_fit(buf, sizeof buf, ln[k], pos + 8 > in.y + 100 ? tw - sw : tw, 1);   /* lines that reach the state word's rows stop short of it */
-            fb_draw_text(fb, tx, pos, buf, DIM, 1);
-        }
-    }
-    if (state[0]) {
-        if (it && (tg || app->login.tags_on)) fb_draw_text(fb, in.x + in.w - sw + 4, in.y + 100, state, RING, 2);
-        else fb_draw_text(fb, tx, in.y + 94, state, RING, 2);
-    }
+    if (it && (tg || app->login.tags_on)) draw_tags(ui, it, tg);
+    if (state[0]) fb_draw_text(fb, tx, in.y + 94, state, RING, 2);
 
     UiRect p = ui->L.progress;
     int total = it ? it->runtime_s : 0;

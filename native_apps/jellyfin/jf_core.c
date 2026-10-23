@@ -102,7 +102,9 @@ static int build_path_raw(const JfApp *app, int lid, int start, char *out, size_
     case JF_LIST_ARTINL:
         return app->art[1].phase == 1 ? jf_path_artist_tracks(out, cap, uid, id, start, lim)
                                       : jf_path_artist_albums(out, cap, uid, id, start, lim);
-    case JF_LIST_ARTALL:  return jf_path_artist_all(out, cap, uid, id, start, lim);
+    case JF_LIST_ARTALL:
+        if (sub == JF_SUB_ALBUM) return jf_path_tracks(out, cap, uid, id, start, lim);
+        return jf_path_artist_all(out, cap, uid, id, start, lim);
     case JF_LIST_TRACKS:
         if (sub == JF_SUB_GENRE) return jf_path_genre_tracks(out, cap, uid, id, start, lim);
         return sub == JF_SUB_PLAYLIST ? jf_path_playlist_items(out, cap, uid, id, start, lim)
@@ -131,7 +133,7 @@ static int build_path(const JfApp *app, int lid, int start, char *out, size_t ca
     int n = build_path_raw(app, lid, start, out, cap);
     if (n < 0) return n;
     bool scoped = lid == JF_LIST_ALBUMS || lid == JF_LIST_SEARCH || lid == JF_LIST_GENRES || lid == JF_LIST_POOL ||
-                  lid == JF_LIST_ARTALL || lid == JF_LIST_ARTINL ||
+                  (lid == JF_LIST_ARTALL && app->ctx[lid].sub != JF_SUB_ALBUM) || lid == JF_LIST_ARTINL ||   /* an album's children do not need the library, and ParentId can name only one */
                   (lid == JF_LIST_TRACKS && app->ctx[lid].sub == JF_SUB_GENRE) ||   /* a genre spans libraries; an album's own children do not */
                   (lid == JF_LIST_ARTISTS && app->cat != JF_CAT_PLAYLISTS);
     return scoped ? jf_path_scope(out, cap, app->login.library) : n;
@@ -162,6 +164,7 @@ static void inl_abort(JfApp *app, bool restore)
 static bool request_page(JfApp *app, int lid, int start, JfCmds *out)
 {
     if (lid != JF_LIST_ARTINL) inl_abort(app, true);
+    if (lid != JF_LIST_ARTALL) app->flat_mode = JF_FLAT_OFF;   /* any other list request supersedes the expansion in flight */
     JfCmd *c = emit(out, JF_CMD_REQUEST);
     c->kind = JF_KIND_LIST;
     c->list = &app->lists[lid];
@@ -230,6 +233,7 @@ static void pop(JfApp *app, JfCmds *out)
 {
     JfNavEntry e = app->nav[--app->nav_n];
     inl_abort(app, false);
+    app->flat_mode = JF_FLAT_OFF;
     app->pick_wait = false;
     app->play_wait = false;
     app->screen = e.screen;
@@ -1018,6 +1022,7 @@ static void session_expired(JfApp *app, JfCmds *out)
 {
     app->save_pending = false;
     app->add_pending = app->dup_scan = app->pick_wait = false;
+    app->flat_mode = JF_FLAT_OFF;
     app->delete_pending = false;     /* the policy belongs to the user who is gone; the next sign-in answers it again */
     app->user_pending = false;
     app->policy_known = app->delete_denied = false;
@@ -1070,14 +1075,98 @@ static void pick_enter(JfApp *app, JfCmds *out)
     enter(app, JF_SCR_PLPICK, "", "ADD TO PLAYLIST", JF_SUB_PLAIN, out);
 }
 
+/* ── flattening the search hits (PLAY ALL, ADD ALL TO PLAYLIST) ─────────────
+ * Every hit in result order becomes tracks: a track is itself, an album or an artist (the container types the search asks for)
+ * is read through JF_LIST_ARTALL, page after page, and its tracks follow.  Duplicates by id are dropped; the cap of the mode
+ * ends the walk.  A search of tracks only finishes at once, with no request. */
+
+static bool flat_container(const JfItem *it) { return it->type == JF_ITEM_ALBUM || it->type == JF_ITEM_ARTIST; }
+
+bool jf_search_playable(const JfApp *app)
+{
+    const JfList *l = &app->lists[JF_LIST_SEARCH];
+    for (int k = 0; k < l->n; k++) if (l->items[k].type == JF_ITEM_TRACK || flat_container(&l->items[k])) return true;
+    return false;
+}
+
+static int flat_cap(const JfApp *app) { return app->flat_mode == JF_FLAT_PICK ? JF_SAVE_IDS_MAX : JF_QUEUE_MAX; }
+
+static void flat_add(JfApp *app, const JfItem *it)
+{
+    if (it->type != JF_ITEM_TRACK) return;
+    for (int k = 0; k < app->flat_n; k++) if (!strcmp(app->flat[k].id, it->id)) return;
+    if (app->flat_n >= flat_cap(app)) { app->flat_cut = true; return; }
+    app->flat[app->flat_n++] = *it;
+}
+
+static void flat_finish(JfApp *app, JfCmds *out)
+{
+    int mode = app->flat_mode;
+    app->flat_mode = JF_FLAT_OFF;
+    if (app->flat_n == 0) return;
+    if (mode == JF_FLAT_PLAY) {
+        char nm[96];
+        snprintf(nm, sizeof nm, "Queue: %.80s", app->flat[0].name);
+        start_items(app, app->flat, app->flat_n, nm, out);
+        if (app->flat_cut) set_banner(app, "FIRST 200 QUEUED");
+        return;
+    }
+    for (int k = 0; k < app->flat_n; k++) copy(app->pick_ids[k], sizeof(app->pick_ids[0]), app->flat[k].id);
+    app->pick_n = app->flat_n;
+    pick_enter(app, out);
+    if (app->flat_cut) set_banner(app, "FIRST 100 TRACKS ONLY");
+}
+
+/* Walk the search rows from flat_hit: tracks are taken, the first container starts its request and the walk resumes from its reply. */
+static void flat_step(JfApp *app, JfCmds *out)
+{
+    const JfList *s = &app->lists[JF_LIST_SEARCH];
+    while (app->flat_hit < s->n) {
+        const JfItem *it = &s->items[app->flat_hit++];
+        if (it->type == JF_ITEM_TRACK) { flat_add(app, it); continue; }
+        if (!flat_container(it)) continue;
+        if (app->flat_n >= flat_cap(app)) { app->flat_cut = true; break; }
+        char id[sizeof(it->id)], name[sizeof(it->name)];
+        copy(id, sizeof id, it->id);
+        copy(name, sizeof name, it->name);
+        app->flat_seen = 0;
+        retarget(app, JF_LIST_ARTALL, id, name, it->type == JF_ITEM_ALBUM ? JF_SUB_ALBUM : JF_SUB_PLAIN, out);
+        if (app->lists[JF_LIST_ARTALL].pending) return;
+    }
+    flat_finish(app, out);
+}
+
+static void flat_begin(JfApp *app, int mode, JfCmds *out)
+{
+    if (!jf_search_playable(app)) return;
+    app->pick_wait = app->play_wait = false;
+    app->flat_mode = mode;
+    app->flat_hit = app->flat_n = app->flat_seen = 0;
+    app->flat_cut = false;
+    flat_step(app, out);
+}
+
+/* A page of the container being expanded is in: take its tracks, ask for the next page while the cap allows, else walk on. */
+static void flat_reply(JfApp *app, JfCmds *out)
+{
+    JfList *l = &app->lists[JF_LIST_ARTALL];
+    for (int k = app->flat_seen; k < l->n; k++) flat_add(app, &l->items[k]);
+    app->flat_seen = l->n;
+    if (l->loaded < l->total && l->n < l->cap && !l->full && app->flat_n < flat_cap(app)) {
+        request_page(app, JF_LIST_ARTALL, l->loaded, out);
+        return;
+    }
+    flat_step(app, out);
+}
+
 /* PICK_OPEN -1: every track of the TRACKS list, or its first JF_SAVE_IDS_MAX.  Like PLAY ALL it needs the rows, so missing pages
- * are fetched first (on_list calls this again after each one); it stops fetching once 100 tracks are in, since no more can be used. */
+ * are fetched first (on_list calls this again after each one); it stops fetching once 100 tracks are in, since no more can be used.
+ * On the search screen the loaded hits are flattened instead (flat_begin). */
 static void pick_all(JfApp *app, JfCmds *out)
 {
-    bool search = app->screen == JF_SCR_SEARCH;   /* PLAY ALL there plays the rows loaded and fetches none: so does this */
-    JfList *l = &app->lists[search ? JF_LIST_SEARCH : JF_LIST_TRACKS];
+    JfList *l = &app->lists[JF_LIST_TRACKS];
     int tn = track_rows(l);
-    if (!search && tn < JF_SAVE_IDS_MAX && l->loaded < l->total && !l->full) {
+    if (tn < JF_SAVE_IDS_MAX && l->loaded < l->total && !l->full) {
         app->pick_wait = true;
         if (!l->pending) request_page(app, JF_LIST_TRACKS, l->loaded, out);
         return;
@@ -1099,7 +1188,8 @@ static void on_pick_open(JfApp *app, int i, JfCmds *out)
 {
     if (!have_token(app) || app->add_pending || app->dup_scan || app->save_pending) return;   /* pick_ids is in use */
     if (i < 0) {
-        if (app->screen == JF_SCR_TRACKS || app->screen == JF_SCR_SEARCH) pick_all(app, out);
+        if (app->screen == JF_SCR_SEARCH) flat_begin(app, JF_FLAT_PICK, out);
+        else if (app->screen == JF_SCR_TRACKS) pick_all(app, out);
         return;
     }
     int lid = cur_list(app);
@@ -1398,6 +1488,7 @@ static void on_list(JfApp *app, const JfResult *r, JfCmds *out)
     if (e != JF_ERR_NONE) {
         if (lid == JF_LIST_PLCHK) { dup_finish(app, true, out); return; }   /* cannot tell: ask rather than overlay */
         app->pick_wait = false;
+        app->flat_mode = JF_FLAT_OFF;
         bool mixl = lid == JF_LIST_SEED || lid == JF_LIST_GENRES || lid == JF_LIST_POOL;
         if (mixl) app->mix.phase = app->mix.phase == JF_MIX_SEED ? JF_MIX_OFF : JF_MIX_TICKS;   /* CLOSE only: a retry would not know the phase */
         bool again = !mixl && (e == JF_ERR_UNREACHABLE || e == JF_ERR_SERVER);
@@ -1416,6 +1507,7 @@ static void on_list(JfApp *app, const JfResult *r, JfCmds *out)
     if (lid == JF_LIST_GENRES) { on_genres_reply(app, out); return; }
     if (lid == JF_LIST_POOL) { on_pool_reply(app, out); return; }
     if (lid == JF_LIST_ARTALL) {
+        if (app->flat_mode) { flat_reply(app, out); return; }
         if (!app->play_wait) return;
         if (l->loaded < l->total && l->n < l->cap && !l->full) { request_page(app, lid, l->loaded, out); return; }
         app->play_wait = false;
@@ -1652,7 +1744,8 @@ static void on_play_all(JfApp *app, JfCmds *out)
         app->play_wait_from = 0;
         return;
     }
-    if (lid != JF_LIST_TRACKS && lid != JF_LIST_SEARCH) return;
+    if (lid == JF_LIST_SEARCH) { if (have_token(app)) flat_begin(app, JF_FLAT_PLAY, out); return; }
+    if (lid != JF_LIST_TRACKS) return;
     const JfList *l = &app->lists[lid];
     for (int k = 0; k < l->n; k++)
         if (l->items[k].type == JF_ITEM_TRACK) { play_from(app, lid, k, out); return; }

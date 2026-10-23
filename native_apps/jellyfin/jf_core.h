@@ -105,7 +105,9 @@ JfCat jf_cat_step(JfCat c, int dir);
 
 /* What a TRACKS list is the child of: an album (plain), a genre (the tracks whose own genre matches) or a playlist.
  * An ALBUMS list is an artist's (plain). */
-typedef enum { JF_SUB_PLAIN = 0, JF_SUB_GENRE, JF_SUB_PLAYLIST } JfSub;
+typedef enum { JF_SUB_PLAIN = 0, JF_SUB_GENRE, JF_SUB_PLAYLIST,
+               JF_SUB_ALBUM   /* JF_LIST_ARTALL only: the id is an album, its tracks in disc / track order (PLAIN = an artist's tracks) */ } JfSub;
+enum { JF_FLAT_OFF = 0, JF_FLAT_PLAY, JF_FLAT_PICK };
 
 /* PAUSED: audio stopped, position held in JfApp.pos_ms (resume restarts the stream there).  STOPPED: stopped by the user, queue and
  * queue_cur kept; PAUSE then restarts the current track from 0. */
@@ -383,6 +385,11 @@ typedef struct {
     char pick_find[96];                  /* a created playlist's name: select its row when the reloaded list shows it */
     bool play_wait;
     int play_wait_from;
+    int flat_mode;                       /* JF_FLAT_*: PLAY ALL / ADD ALL on the search list is expanding its album and artist hits through JF_LIST_ARTALL */
+    int flat_hit;                        /* the next search row to flatten */
+    int flat_n, flat_seen;               /* tracks collected / rows of the ARTALL list already taken */
+    bool flat_cut;                       /* a track did not fit the cap */
+    JfItem flat[JF_QUEUE_MAX];           /* the tracks collected so far, in hit order, duplicates by id dropped */
     int fail_streak;
     JfSessionFn session_fn;
     JfSinkChannelsFn sink_channels_fn;   /* NULL = mono */
@@ -402,6 +409,9 @@ typedef struct {
     JfItem store_artinl[JF_CAP_ARTINL];
     char id_server[64], id_user[64];   /* the server and user the saved queue and art belong to (set at start, kept by a sign-in) */
 } JfApp;
+
+/** True when the search list holds a hit PLAY ALL / ADD ALL TO PLAYLIST can use: a track, or an album / artist that is expanded to its tracks. */
+bool jf_search_playable(const JfApp *app);
 
 /** The settings rows to show, in order (JfSettingId values; returns the count).  An unavailable row is absent: LIBRARY needs 2 or more music libraries. */
 int jf_settings_rows(const JfApp *app, int ids[JF_SET_COUNT]);
