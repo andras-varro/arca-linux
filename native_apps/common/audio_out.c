@@ -153,14 +153,26 @@ static AudioWritePolicy blocking_policy(int rate, long frames, int wait_us)
     return p;
 }
 
+/** The requested lead in ms; 0 = AUDIO_PUMP_LEAD_MS.  Process-wide on purpose:
+ *  audio_out_open() zeroes the struct, one AudioOut is live per process, and
+ *  audio_init() opens it internally, so an app has no handle to set a field on
+ *  before the prefill sizes itself.  See audio_out_set_lead_ms(). */
+static int g_lead_ms_req = 0;
+
+void audio_out_set_lead_ms(int ms)
+{
+    g_lead_ms_req = (ms > 0) ? ms : 0;
+}
+
 /** The lead is a MEASUREMENT taken from the device's own period, so it is
  *  re-derived from every geometry read rather than cached from the request. */
 static void derive_geometry(AudioOut *out, const AudioOutSpace *sp)
 {
+    int lead_ms = (g_lead_ms_req > 0) ? g_lead_ms_req : AUDIO_PUMP_LEAD_MS;
     out->period_frames = sp->period_frames;
     out->ring_frames   = sp->ring_frames;
     out->lead_frames   = audio_pump_lead_frames(
-                             audio_frames_for_ms(out->rate, AUDIO_PUMP_LEAD_MS),
+                             audio_frames_for_ms(out->rate, lead_ms),
                              sp->period_frames, AUDIO_PUMP_LEAD_PERIODS,
                              sp->ring_frames);
 }

@@ -272,6 +272,11 @@ int main(int argc, char *argv[])
     Pointer ptr;
     pointer_init(&ptr);
 
+    /* A deeper cushion than the games' ~139 ms against UI frames that stall the
+     * loop: 350 ms asks for 8 periods of 2048, which the ring cap (half of 16
+     * periods) grants exactly at 44100 Hz (~372 ms).  The price is that pause,
+     * seek, volume and EQ are heard that much later: queued audio plays out. */
+    audio_out_set_lead_ms(350);
     audio_ok = audio_init(&audio) == 0;
     audio_set_fd_io(&audio, &stream_io);   /* https streams read through the TLS layer */
     if (!audio_ok) fprintf(stderr, JF_APP_BIN ": no audio output\n");

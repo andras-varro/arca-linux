@@ -723,7 +723,19 @@ int  audio_out_channels(const AudioOut *out);
 int  audio_out_bits(const AudioOut *out);
 bool audio_out_is_open(const AudioOut *out);
 
-/** The lead the last service TARGETED, in frames, and the device period it was
+/** Ask for a deeper (or shallower) lead than AUDIO_PUMP_LEAD_MS, in ms; 0 restores
+ *  the default.  PROCESS-WIDE and read by the next geometry derivation, so call it
+ *  BEFORE the open (the prefill is sized from it) — a stream already open picks it
+ *  up at its next service, without a re-prefill.  The result still goes through
+ *  audio_pump_lead_frames(): floored at AUDIO_PUMP_LEAD_PERIODS periods, rounded UP
+ *  to a whole period, capped at half the ring the device granted — read the
+ *  outcome from audio_out_lead(), never from this figure.  The price of a deep lead
+ *  is latency: audio already queued plays out, so a volume, EQ or track change is
+ *  heard one lead late.  Only Ludfin sets it; every other client keeps today's. */
+void audio_out_set_lead_ms(int ms);
+
+/** The lead the last service TARGETED (the EFFECTIVE value, override included),
+ *  in frames, and the device period it was
  *  rounded up to.  Both 0 until measured — "not yet measured" and "the constant"
  *  are different claims, and a diagnostic that printed
  *  `AUDIO_PUMP_LEAD_MS` once displayed 80 ms while the library held ~139. */

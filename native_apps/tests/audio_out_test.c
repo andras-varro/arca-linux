@@ -530,6 +530,60 @@ int main(void)
               "C5 a small ring caps the lead at half of it, so the stream is not "
               "asked for more cushion than the device can hold");
         audio_out_close(&out);
+
+        /* The per-process lead override (Ludfin's deeper cushion).  The default
+         * (checked above) must be unchanged by a set(0). */
+        audio_out_set_lead_ms(0);
+        fake_reset(&f);
+        audio_out_open(&out, &FAKE_DEV, &f, RATE, 2);
+        check(audio_out_lead(&out) == 3 * 2048,
+              "C6 set_lead_ms(0) leaves the default: still 3 periods = 6144 frames");
+        audio_out_close(&out);
+
+        /* 200 ms = 8820 frames, between 4 and 5 periods: rounds UP to 5 = 10240,
+         * under the 16384 cap.  A stream opened AFTER the set takes it, and the
+         * open prefills that lead (not the default's). */
+        audio_out_set_lead_ms(200);
+        fake_reset(&f);
+        audio_out_open(&out, &FAKE_DEV, &f, RATE, 2);
+        check(audio_out_lead(&out) == 5 * 2048,
+              "C7 set_lead_ms(200) is rounded UP to whole periods: 10240 frames");
+        check(f.len == audio_out_lead(&out) * f.fb,
+              "C7b and the open prefilled that deeper lead with silence");
+        audio_out_close(&out);
+
+        /* 350 ms (Ludfin) wants 15435 frames -> 8 periods = 16384 = the cap. */
+        audio_out_set_lead_ms(350);
+        fake_reset(&f);
+        audio_out_open(&out, &FAKE_DEV, &f, RATE, 2);
+        check(audio_out_lead(&out) == 8 * 2048,
+              "C8 set_lead_ms(350) on the 32768-frame ring grants 16384 frames (~372 ms)");
+        audio_out_close(&out);
+
+        /* Far beyond the ring: clamped at half of it, never more. */
+        audio_out_set_lead_ms(5000);
+        fake_reset(&f);
+        audio_out_open(&out, &FAKE_DEV, &f, RATE, 2);
+        check(audio_out_lead(&out) == f.ring / 2,
+              "C9 an absurd request is clamped to half the ring");
+        audio_out_close(&out);
+
+        /* A small ring caps it even lower. */
+        audio_out_set_lead_ms(350);
+        fake_reset(&f);
+        f.period = 256; f.ring = 1024;
+        audio_out_open(&out, &FAKE_DEV, &f, RATE, 2);
+        check(audio_out_lead(&out) == 512,
+              "C10 the cap also holds on a small ring with the override set");
+        audio_out_close(&out);
+
+        /* Back to 0 restores the default for the next open. */
+        audio_out_set_lead_ms(0);
+        fake_reset(&f);
+        audio_out_open(&out, &FAKE_DEV, &f, RATE, 2);
+        check(audio_out_lead(&out) == 3 * 2048,
+              "C11 set_lead_ms(0) after an override restores the default");
+        audio_out_close(&out);
     }
 
     printf("\n=== D. mode 1: serviced, and it targets a LEAD ===\n");

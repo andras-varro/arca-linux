@@ -435,7 +435,8 @@ uint32_t audio_pump_lost(const Audio *audio);
  *  rounded up to — both 0 until a pump call has read the period off the device.
  *
  * ⚠️ **A diagnostic must report what the library did, not what the header asked
- * for.**  `AUDIO_PUMP_LEAD_MS` is a *request*: `audio_pump_lead_frames()` floors
+ * for.**  `AUDIO_PUMP_LEAD_MS` (or an `audio_out_set_lead_ms()` override) is a
+ * *request*: `audio_pump_lead_frames()` floors
  * it at AUDIO_PUMP_LEAD_PERIODS whole periods and rounds up, which on the OSS
  * shim's 46 ms period makes the effective lead ~139 ms rather than 80.
  * `tests/audio_mix_test` printed the constant and so displayed `lead 80 ms` while
