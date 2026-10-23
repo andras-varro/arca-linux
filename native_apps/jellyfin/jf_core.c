@@ -97,7 +97,6 @@ static int build_path_raw(const JfApp *app, int lid, int start, char *out, size_
         default:               return jf_path_artists(out, cap, uid, start, lim);
         }
     case JF_LIST_ALBUMS:
-        if (sub == JF_SUB_GENRE) return jf_path_genre_albums(out, cap, uid, id, start, lim);
         return app->art[0].phase == 1 ? jf_path_artist_tracks(out, cap, uid, id, start, lim)
                                       : jf_path_artist_albums(out, cap, uid, id, start, lim);
     case JF_LIST_ARTINL:
@@ -105,6 +104,7 @@ static int build_path_raw(const JfApp *app, int lid, int start, char *out, size_
                                       : jf_path_artist_albums(out, cap, uid, id, start, lim);
     case JF_LIST_ARTALL:  return jf_path_artist_all(out, cap, uid, id, start, lim);
     case JF_LIST_TRACKS:
+        if (sub == JF_SUB_GENRE) return jf_path_genre_tracks(out, cap, uid, id, start, lim);
         return sub == JF_SUB_PLAYLIST ? jf_path_playlist_items(out, cap, uid, id, start, lim)
                                       : jf_path_tracks(out, cap, uid, id, start, lim);
     case JF_LIST_MIX:     return jf_path_instant_mix(out, cap, uid, id, JF_MIX_LIMIT);
@@ -132,6 +132,7 @@ static int build_path(const JfApp *app, int lid, int start, char *out, size_t ca
     if (n < 0) return n;
     bool scoped = lid == JF_LIST_ALBUMS || lid == JF_LIST_SEARCH || lid == JF_LIST_GENRES || lid == JF_LIST_POOL ||
                   lid == JF_LIST_ARTALL || lid == JF_LIST_ARTINL ||
+                  (lid == JF_LIST_TRACKS && app->ctx[lid].sub == JF_SUB_GENRE) ||   /* a genre spans libraries; an album's own children do not */
                   (lid == JF_LIST_ARTISTS && app->cat != JF_CAT_PLAYLISTS);
     return scoped ? jf_path_scope(out, cap, app->login.library) : n;
 }
@@ -1541,7 +1542,7 @@ static void on_activate(JfApp *app, int i, JfCmds *out)
     const JfItem *it = &app->lists[lid].items[i];
     switch (it->type) {
     case JF_ITEM_ARTIST:   enter(app, JF_SCR_ALBUMS, it->id, it->name, JF_SUB_PLAIN, out); break;
-    case JF_ITEM_GENRE:    enter(app, JF_SCR_ALBUMS, it->id, it->name, JF_SUB_GENRE, out); break;
+    case JF_ITEM_GENRE:    enter(app, JF_SCR_TRACKS, it->id, it->name, JF_SUB_GENRE, out); break;
     case JF_ITEM_ALBUM:    enter(app, JF_SCR_TRACKS, it->id, it->name, JF_SUB_PLAIN, out); break;
     case JF_ITEM_PLAYLIST: enter(app, JF_SCR_TRACKS, it->id, it->name, JF_SUB_PLAYLIST, out); break;
     case JF_ITEM_TRACK:  tap_track(app, lid, i, out); break;

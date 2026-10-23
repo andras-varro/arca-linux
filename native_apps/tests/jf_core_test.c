@@ -620,21 +620,34 @@ static void test_categories(void)
     reply_list(&genres, JF_ITEM_GENRE, 2, 1120);
     CHECK(app.lists[JF_LIST_ARTISTS].n == 2 && app.lists[JF_LIST_ARTISTS].total == 1120 && !app.busy, "genres shown");
 
-    /* genre -> its albums -> tracks, BACK walks home without reloading the root */
+    /* genre -> the tracks whose own genre matches (paged like TRACKS), BACK returns without reloading the root */
     send(JF_EV_ACTIVATE, 1);
-    jf_path_genre_albums(want, sizeof(want), UID, app.lists[JF_LIST_ARTISTS].items[1].id, 0, JF_PAGE_ALBUMS);
-    CHECK(app.screen == JF_SCR_ALBUMS && strcmp(find(JF_CMD_REQUEST)->path, want) == 0, "genre opens its albums");
+    jf_path_genre_tracks(want, sizeof(want), UID, app.lists[JF_LIST_ARTISTS].items[1].id, 0, JF_PAGE_TRACKS);
+    CHECK(app.screen == JF_SCR_TRACKS && strcmp(find(JF_CMD_REQUEST)->path, want) == 0, "genre opens its tracks");
+    CHECK(app.ctx[JF_LIST_TRACKS].sub == JF_SUB_GENRE, "the tracks list is the genre's");
     CHECK(strcmp(app.crumb, app.lists[JF_LIST_ARTISTS].items[1].name) == 0, "crumb = genre name");
     JfCmd alb = *find(JF_CMD_REQUEST);
     send(JF_EV_CATEGORY, 1);
-    CHECK(app.cat == JF_CAT_GENRES && app.screen == JF_SCR_ALBUMS && cm.n == 0, "no category switch below the root");
-    reply_list(&alb, JF_ITEM_ALBUM, 2, 2);
-    send(JF_EV_ACTIVATE, 0);
-    jf_path_tracks(want, sizeof(want), UID, app.lists[JF_LIST_ALBUMS].items[0].id, 0, JF_PAGE_TRACKS);
-    CHECK(app.screen == JF_SCR_TRACKS && strcmp(find(JF_CMD_REQUEST)->path, want) == 0, "a genre's album opens as a plain album");
-    send(JF_EV_BACK, 0); send(JF_EV_BACK, 0);
+    CHECK(app.cat == JF_CAT_GENRES && app.screen == JF_SCR_TRACKS && cm.n == 0, "no category switch below the root");
+    reply_list(&alb, JF_ITEM_TRACK, 2, 90);
+    CHECK(app.lists[JF_LIST_TRACKS].n == 2 && app.lists[JF_LIST_TRACKS].total == 90, "genre tracks listed, total from the server");
+    /* PLAY ALL and ADD ALL TO PLAYLIST reuse the TRACKS paging: the next page is the genre path from the rows loaded (library-scoped) */
+    snprintf(app.login.library, 33, "%032x", 0xa01);
+    send(JF_EV_PLAY_ALL, 0);
+    jf_path_genre_tracks(want, sizeof(want), UID, app.lists[JF_LIST_ARTISTS].items[1].id, 2, JF_PAGE_TRACKS);
+    strcat(want, "&ParentId=00000000000000000000000000000a01");
+    const JfCmd *pg = find(JF_CMD_REQUEST);
+    CHECK(app.play_wait && pg && strcmp(pg->path, want) == 0, "PLAY ALL on a genre fetches the next genre page: %s", pg ? pg->path : "(none)");
+    app.play_wait = false;
+    app.lists[JF_LIST_TRACKS].pending = false;
+    send(JF_EV_PICK_OPEN, -1);
+    pg = find(JF_CMD_REQUEST);
+    CHECK(app.pick_wait && pg && strcmp(pg->path, want) == 0, "ADD ALL TO PLAYLIST on a genre fetches the next genre page");
+    app.pick_wait = false;
+    app.login.library[0] = 0;
+    send(JF_EV_BACK, 0);
     CHECK(app.screen == JF_SCR_ARTISTS && app.cat == JF_CAT_GENRES && app.lists[JF_LIST_ARTISTS].n == 2 && !has(JF_CMD_REQUEST),
-          "BACK x2 returns to the genre list, not reloaded");
+          "BACK returns to the genre list, not reloaded");
     send(JF_EV_BACK, 0);
     CHECK(has(JF_CMD_EXIT), "BACK at the root leaves");
 

@@ -868,9 +868,9 @@ static void add_to_playlist(void)
     CHECK(has_event(ev, n, JF_EV_PICK_OPEN), "T: abar_plus_playlist_emits_pick_open: five Rights then Enter is not + PLAYLIST (%d events)", n);
     jf_ui_free(&ui);
 
-    /* row3_plus_playlist_on_album_tracks_only: an album's or playlist's tracks only, not an artist's albums, search or a genre's tracks */
+    /* row3_plus_playlist_on_album_tracks_only: an album's, playlist's or genre's tracks, not an artist's albums or search without tracks */
     static const struct { JfScreen sc; bool genre; bool want; const char *name; } rc[4] = {
-        { JF_SCR_TRACKS, false, true, "tracks" }, { JF_SCR_TRACKS, true, false, "genre tracks" },
+        { JF_SCR_TRACKS, false, true, "tracks" }, { JF_SCR_TRACKS, true, true, "genre tracks" },
         { JF_SCR_ALBUMS, false, false, "albums" }, { JF_SCR_SEARCH, false, false, "search" } };
     for (int k = 0; k < 4; k++) {
         tk_setup(&app, rc[k].sc, false);

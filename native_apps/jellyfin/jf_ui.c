@@ -607,7 +607,7 @@ static void settings_sync(JfUi *ui)
  * PLAY ALL.  The root's categories are picked from the header drop-down. */
 static bool at_root(const JfApp *app) { return app->screen == JF_SCR_ARTISTS; }
 
-/* The artist folder (albums, then tracks of other albums): the core queues its whole discography for PLAY ALL; a genre's albums have no such handler. */
+/* The artist folder (albums, then tracks of other albums): the core queues its whole discography for PLAY ALL. */
 static bool artist_folder(const JfApp *app) { return app->screen == JF_SCR_ALBUMS && app->ctx[JF_LIST_ALBUMS].sub == JF_SUB_PLAIN; }
 
 /* A search result list that holds a track: the rows PLAY ALL plays and ADD ALL TO PLAYLIST adds. */
@@ -618,11 +618,11 @@ static bool search_has_tracks(const JfApp *app)
     return false;
 }
 
-/* An album's or a playlist's tracks carry a fourth button, + PLAYLIST, and a search with a track in it ADD ALL TO PLAYLIST; a genre's track list and an artist's albums do not. */
+/* An album's, a playlist's or a genre's tracks carry a fourth button, + PLAYLIST, and a search with a track in it ADD ALL TO PLAYLIST; an artist's albums do not. */
 static bool tracks4(const JfApp *app)
 {
     if (app->screen == JF_SCR_SEARCH) return search_has_tracks(app);   /* ADD ALL TO PLAYLIST, over the tracks PLAY ALL plays */
-    return app->screen == JF_SCR_TRACKS && app->ctx[JF_LIST_TRACKS].sub != JF_SUB_GENRE;
+    return app->screen == JF_SCR_TRACKS;
 }
 
 static int row_n(const JfApp *app) { return tracks4(app) ? JF_UI_ROW4 : JF_UI_ROW3; }

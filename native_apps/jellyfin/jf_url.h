@@ -54,8 +54,8 @@ int jf_path_genres(char *out, size_t cap, const char *uid, int start, int limit)
 int jf_path_songs(char *out, size_t cap, const char *uid, int start, int limit);
 /** A playlist's tracks, in playlist order. */
 int jf_path_playlist_items(char *out, size_t cap, const char *uid, const char *playlist_id, int start, int limit);
-/** The albums of one genre. */
-int jf_path_genre_albums(char *out, size_t cap, const char *uid, const char *genre_id, int start, int limit);
+/** The tracks whose own genre is `genre_id` (GenreIds on Audio: measured to match the track's Genres, TotalRecordCount is the track count). */
+int jf_path_genre_tracks(char *out, size_t cap, const char *uid, const char *genre_id, int start, int limit);
 /** An instant mix seeded by one track: Audio items, the seed first, parsed like any list; images and user data left out (-30% bytes). */
 int jf_path_instant_mix(char *out, size_t cap, const char *uid, const char *track_id, int limit);
 /** One item by id as a one-row list (Ids=): the seed of a MIX, with Genres, ProductionYear and ArtistItems. */

@@ -183,11 +183,11 @@ int jf_path_playlist_items(char *out, size_t cap, const char *uid, const char *p
                         playlist_id, uid, start, limit), cap);
 }
 
-int jf_path_genre_albums(char *out, size_t cap, const char *uid, const char *genre_id, int start, int limit)
+int jf_path_genre_tracks(char *out, size_t cap, const char *uid, const char *genre_id, int start, int limit)
 {
-    if (!jf_id_valid(uid) || !jf_id_valid(genre_id)) return -1;
+    if (!jf_id_valid(uid) || !jf_id_valid(genre_id)) return -1;   /* an empty GenreIds= lists the whole library */
     return fin(snprintf(out, cap,
-                        "/Items?userId=%s&GenreIds=%s&IncludeItemTypes=MusicAlbum&Recursive=true"
+                        "/Items?userId=%s&GenreIds=%s&IncludeItemTypes=Audio&Recursive=true"
                         "&SortBy=SortName&StartIndex=%d&Limit=%d", uid, genre_id, start, limit), cap);
 }
 

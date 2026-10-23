@@ -106,10 +106,10 @@ static void test_builders(void)
     EXPECT("playlist_items", n, b, "/Playlists/" ALB "/Items?userId=" UID "&StartIndex=0&Limit=25");
     CAP_EDGE("playlist_items", jf_path_playlist_items(b_, cap, UID, ALB, 0, 25));
 
-    n = jf_path_genre_albums(b, sizeof(b), UID, ART, 0, 30);
-    EXPECT("genre_albums", n, b, "/Items?userId=" UID "&GenreIds=" ART
-           "&IncludeItemTypes=MusicAlbum&Recursive=true&SortBy=SortName&StartIndex=0&Limit=30");
-    CAP_EDGE("genre_albums", jf_path_genre_albums(b_, cap, UID, ART, 0, 30));
+    n = jf_path_genre_tracks(b, sizeof(b), UID, ART, 0, 30);
+    EXPECT("genre_tracks", n, b, "/Items?userId=" UID "&GenreIds=" ART
+           "&IncludeItemTypes=Audio&Recursive=true&SortBy=SortName&StartIndex=0&Limit=30");
+    CAP_EDGE("genre_tracks", jf_path_genre_tracks(b_, cap, UID, ART, 0, 30));
 
     n = jf_path_stream(b, sizeof(b), ALB, SES, 1);
     EXPECT("stream", n, b, "/Audio/" ALB "/stream?static=false&container=wav&audioCodec=pcm_s16le"
@@ -171,7 +171,8 @@ static void test_ids(void)
     CHECK(jf_path_search(b, sizeof(b), short_id, "x", 0, 1) == -1, "search: bad uid");
     CHECK(jf_path_search(b, sizeof(b), UID, NULL, 0, 1) == -1, "search: NULL term");
     CHECK(jf_path_playlist_items(b, sizeof(b), UID, "", 0, 1) == -1, "playlist_items: bad id");
-    CHECK(jf_path_genre_albums(b, sizeof(b), UID, long_id, 0, 1) == -1, "genre_albums: bad id");
+    CHECK(jf_path_genre_tracks(b, sizeof(b), UID, long_id, 0, 1) == -1, "genre_tracks: bad id");
+    CHECK(jf_path_genre_tracks(b, sizeof(b), UID, "", 0, 1) == -1, "genre_tracks: an empty genre id is refused (the server would list the whole library)");
     CHECK(jf_path_genres(b, sizeof(b), short_id, 0, 1) == -1, "genres: bad uid");
     CHECK(jf_path_songs(b, sizeof(b), short_id, 0, 1) == -1, "songs: bad uid");
     CHECK(jf_path_albums_all(b, sizeof(b), short_id, 0, 1) == -1, "albums_all: bad uid");

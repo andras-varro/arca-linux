@@ -103,8 +103,8 @@ const char *jf_cat_name(JfCat c);
 /** The neighbouring category in enum order, wrapping at both ends: dir > 0 the next, otherwise the previous. */
 JfCat jf_cat_step(JfCat c, int dir);
 
-/* What an ALBUMS or TRACKS list is the child of: ALBUMS of an artist (plain) or of a genre,
- * TRACKS of an album (plain) or of a playlist. */
+/* What a TRACKS list is the child of: an album (plain), a genre (the tracks whose own genre matches) or a playlist.
+ * An ALBUMS list is an artist's (plain). */
 typedef enum { JF_SUB_PLAIN = 0, JF_SUB_GENRE, JF_SUB_PLAYLIST } JfSub;
 
 /* PAUSED: audio stopped, position held in JfApp.pos_ms (resume restarts the stream there).  STOPPED: stopped by the user, queue and
