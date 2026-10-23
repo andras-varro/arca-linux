@@ -311,6 +311,19 @@ typed-key queue; check the device's evdev nodes and which node the letters arriv
 also has **no mouse support** (no pointer click on a key). **Done when** typing on that Bluetooth keyboard and on a plain USB
 keyboard enters letters, and a mouse click presses an on-screen key, at the panel.
 
+### F158. Jellyfin video client — open, operator wish 2026-10-23
+
+Movies, series → seasons → episodes, search by name/person/genre, a details page (overview, cast, similar), audio and subtitle choice
+before playback. **A separate app** beside Ludfin (`native_apps/jellyfin/`), both linking one shared Jellyfin layer: `jf_api`,
+`jf_art`, `jf_login` (one sign-in: `/opt/ludfin/ludfin.conf`), the auth/session half of `jf_url`, the BaseItem half of `jf_model`.
+Decode cost is measured and fits ([Display](SYSTEM_ANALYSIS.md#32-display)). Stream: `container=ts&videoCodec=mpeg1video&audioCodec=mp2&audioChannels=1&audioSampleRate=44100&maxWidth=400&maxHeight=240&videoBitRate=800000`
+→ 326×240. ⚠️ **pl_mpeg reads no TS** (0 frames; the same stream remuxed to PS decodes fully), so a TS demuxer goes in front of it.
+**Phase 0, before any app code — de-risk end to end:** (a) server, by curl + ffprobe: `AudioStreamIndex`, `SubtitleStreamIndex`
+burned in, `StartTimeTicks` seek, a fresh `PlaySessionId`; (b) a TS demuxer feeding pl_mpeg, host-tested on a real capture;
+(c) on `.115`: live HTTP stream → demux → decode → `fb0` with MP2 into the mix bus, A/V sync on the audio clock, CPU share and
+late frames over a full episode. Then: shared-layer extraction (Ludfin unchanged, its host tests green), browse UI, player.
+**Done when** a movie and an episode play with the chosen audio track and subtitles at the panel.
+
 ### F156. Log page: a Follow setting — open, operator request 2026-10-22, not designed
 
 The Control Panel's Log page (`control_panel/log_page.c`) shows the selected log read-only. Add a **Follow** setting, true or

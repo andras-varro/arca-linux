@@ -368,9 +368,9 @@ all-identity 8-phase table in `dss/dispc_coefs.c`; it would also need `NUM_FBS=3
 real frame by PPM; `fb_to_game_ppm.py` inverts the software upscale off an `fb0` grab. The `vid1` state before any
 funding is `enabled=0`, `fb1/size` 0, and `overlay1` has no `trans_key*` attribute of its own.
 
-`/dev/video0` (`omap_vout`) is the V4L2 *output* path, which accepts **YUV with hardware colour-space
-conversion**, and is untried. **[inferred]** it is what would make a video player conceivable on a part
-that could never software-decode one, and the DMA-channel error above may be what blocks it.
+`/dev/video0` (`omap_vout`, V4L2 output, YUV with hardware colour-space conversion) is untried and **not needed: the CPU decodes
+video in software** — MPEG-1 326×240 + MP2 mono (pl_mpeg), YUV→RGB565 at 2× into mmapped `fb0`, paced at 23.976 fps: **48 % CPU,
+3 late of 1439 frames** (32bpp 50 %, 0 late), measured on `.115` 2026-10-23; video 8.6, MP2 8.1 ms/frame on `.73`.
 
 > ⚠️ This is a **legacy omapdss sysfs** interface. It does not exist under `omapdrm`. Anything
 > built on it is cheap today and would need rewriting as DRM atomic plane programming after a
