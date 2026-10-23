@@ -943,9 +943,13 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     }
     restore_view(ui);
     if (top_bar_info_due(&ui->bar, now) && top_bar_info_sample(&ui->bar)) {   /* the bar's CPU and clock, once a second */
-        /* Only the bar's text changed: repaint just it, unless something sits over the bar. */
-        if (ui->eq_up || app->overlay || app->confirm != JF_CONFIRM_NONE || ui->dlg_up || ui->cdlg_up || ui->pick.up) ui->dirty = true;
-        else ui->info_dirty = true;
+        /* Only the bar's text changed: repaint just it.  While a dialog is up (EQ panel, error overlay, confirm, the
+         * modal dialogs) the tick asks for nothing: a full frame under the dialog's backdrop blend takes 50-65 ms and
+         * starves the audio feed, so the music breaks up once a second.  The sample is still taken, and the close path
+         * sets dirty, so the bar shows fresh values once the dialog is gone.  The header picker's popup starts below
+         * the bar's rule (top_pick.c tp_popup_rect), so it never covers the info rect: the bar patch is still right. */
+        if (!(ui->eq_up || app->overlay || app->confirm != JF_CONFIRM_NONE || ui->dlg_up || ui->cdlg_up))
+            ui->info_dirty = true;   /* no dialog up: the bar patch; under a dialog the bar waits for its close */
     }
     /* a queue can start or empty on an open screen: the list makes room for the strip, or takes it back */
     if (is_list_screen(app->screen) && mini_wanted(app) != ui->mini_on) {

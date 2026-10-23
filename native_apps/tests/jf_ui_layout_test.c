@@ -1447,11 +1447,11 @@ static void info_only(void)
     feed(&ui, 0, 0, false, false, false, 5100, ev, MINI_MAX);
     CHECK(jf_ui_take_dirty(&ui), "R: a banner change did not ask for a full frame");
 
-    ui.dlg_up = true;   /* something over the bar */
+    ui.dlg_up = true;   /* something over the bar: the tick is frozen (a full frame under the backdrop starves audio) */
     strcpy(ui.bar.right_buf, "CPU 0%  00:00");
     ui.bar.info_next_ms = 0;
     feed(&ui, 0, 0, false, false, false, 9000, ev, MINI_MAX);
-    CHECK(jf_ui_take_dirty(&ui) && !ui.info_dirty, "R: a text change under a dialog did not ask for a full frame");
+    CHECK(!jf_ui_take_dirty(&ui) && !ui.info_dirty, "R: a text change under a dialog asked for a frame (the tick must stay frozen)");
     jf_ui_free(&ui);
 }
 
@@ -1536,6 +1536,74 @@ static void nav_cycle(void)
     jf_ui_free(&ui);
 }
 
+/* M  the bar's 1 Hz tick under a modal.  A full frame under a dialog's backdrop blend starves the audio feed, so a tick
+ * with a dialog up sets neither dirty nor info_dirty, yet still samples (info_next_ms moves on).  With no dialog the
+ * tick patches just the bar (info_dirty).  The tick is forced due by zeroing info_next_ms, and forced to change the text
+ * by clearing right_buf (top_bar_info_sample reports a change only when the text differs). */
+static void tick_once(JfUi *ui, uint32_t now, JfEvent *ev)
+{
+    ui->bar.info_next_ms = 0;
+    ui->bar.right_buf[0] = '\0';
+    feed(ui, 0, 0, false, false, false, now, ev, MINI_MAX);
+}
+
+static void modal_tick(void)
+{
+    static Framebuffer fb;
+    static TouchInput touch;
+    JfApp app;
+    JfUi ui;
+    JfEvent ev[MINI_MAX];
+
+    /* confirm dialog (cdlg) up */
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_ALBUMS;
+    app.confirm = JF_CONFIRM_SIGN_OUT;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);   /* settle: the dialog is drawn */
+    ui.dirty = false; ui.info_dirty = false; button_take_dirty();
+    tick_once(&ui, 2000, ev);
+    CHECK(!ui.dirty && !ui.info_dirty, "M: a tick under the confirm dialog set dirty %d / info_dirty %d", ui.dirty, ui.info_dirty);
+    CHECK(ui.bar.right_buf[0] != '\0' && ui.bar.info_next_ms > 2000, "M: the tick under the confirm dialog did not sample");
+    jf_ui_free(&ui);
+
+    /* error overlay (dlg) up */
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_ALBUMS;
+    app.overlay = true;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    ui.dirty = false; ui.info_dirty = false; button_take_dirty();
+    tick_once(&ui, 2000, ev);
+    CHECK(!ui.dirty && !ui.info_dirty, "M: a tick under the error overlay set dirty %d / info_dirty %d", ui.dirty, ui.info_dirty);
+    jf_ui_free(&ui);
+
+    /* negative control: no dialog, the tick patches the bar */
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_ALBUMS;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    ui.dirty = false; ui.info_dirty = false; button_take_dirty();
+    tick_once(&ui, 2000, ev);
+    CHECK(ui.info_dirty, "M: a tick with no dialog did not ask for the bar patch (info_dirty %d)", ui.info_dirty);
+    jf_ui_free(&ui);
+
+    /* the header picker is up over ARTISTS: its popup starts below the bar, so the bar patch is still right */
+    memset(&app, 0, sizeof app);
+    app.screen = JF_SCR_ARTISTS;
+    app.cat = JF_CAT_ARTISTS;
+    jf_ui_init(&ui, &fb, &touch, NULL, &app);
+    feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+    ui.bar.title = "LUDFIN";
+    UiRect h = { ui.bar.L.title_x, ui.bar.L.top, ui.bar.L.title_w, ui.bar.L.h };
+    tap_at(&ui, h.x + h.w / 2, h.y + h.h / 2, 2000, ev);
+    CHECK(ui.pick.up, "M: the header tap did not open the picker");
+    ui.dirty = false; ui.info_dirty = false; button_take_dirty();
+    tick_once(&ui, 3000, ev);
+    CHECK(ui.info_dirty && !ui.dirty, "M: a tick under the open picker set dirty %d / info_dirty %d (want the bar patch only)", ui.dirty, ui.info_dirty);
+    jf_ui_free(&ui);
+}
+
 int main(void)
 {
     add_to_playlist();
@@ -1550,6 +1618,7 @@ int main(void)
     mini_flip(JF_SCR_ARTISTS, "artists");
     mix_ticks();
     root_picker();
+    modal_tick();
     settings_ui();
     queue_shuffle_cursor();
     queue_row();
