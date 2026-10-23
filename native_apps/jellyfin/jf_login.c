@@ -104,6 +104,7 @@ int jf_settings_load(JfLogin *l, const char *path)
     Config cfg;
     l->library[0] = l->library_name[0] = '\0';
     l->volume_step = JF_VOLUME_DEFAULT;
+    l->tap_action = JF_TAP_REPLACE;
 
     config_init_path(&cfg, path);
     int rc = config_load(&cfg) == 0 ? 0 : -1;
@@ -115,6 +116,8 @@ int jf_settings_load(JfLogin *l, const char *path)
         }
         int v = config_get_int(&cfg, "volume_step", JF_VOLUME_DEFAULT);
         l->volume_step = v < 0 ? 0 : v > JF_VOLUME_MAX ? JF_VOLUME_MAX : v;
+        int ta = config_get_int(&cfg, "tap_action", JF_TAP_REPLACE);
+        l->tap_action = ta >= 0 && ta < JF_TAP_COUNT ? ta : JF_TAP_REPLACE;
     }
     return rc;
 }
@@ -130,6 +133,7 @@ int jf_settings_save(const JfLogin *l, const char *path)
         config_set(&cfg, "library_name", l->library_name);
     }
     config_set_int(&cfg, "volume_step", vs);
+    config_set_int(&cfg, "tap_action", l->tap_action >= 0 && l->tap_action < JF_TAP_COUNT ? l->tap_action : JF_TAP_REPLACE);
 
     mkdir_parents(path);
     int rc = config_save(&cfg);

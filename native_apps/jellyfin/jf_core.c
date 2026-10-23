@@ -477,6 +477,7 @@ int jf_settings_rows(const JfApp *app, int ids[JF_SET_COUNT])
 {
     int n = 0;
     if (app->lib_n >= 2) ids[n++] = JF_SET_LIBRARY;   /* absent, not greyed, with 0 or 1 music library */
+    ids[n++] = JF_SET_TAP;
     ids[n++] = JF_SET_SIGNOUT;
     return n;
 }
@@ -513,7 +514,7 @@ static void on_libs_reply(JfApp *app, JfCmds *out)
     retarget(app, JF_LIST_ARTISTS, "", CAT_NAME[app->cat], JF_SUB_PLAIN, out);
 }
 
-static void on_setting_activate(JfApp *app, int id)
+static void on_setting_activate(JfApp *app, int id, JfCmds *out)
 {
     if (app->screen != JF_SCR_SETTINGS || app->settings_page != JF_SETPAGE_MAIN) return;
     int rows[JF_SET_COUNT];
@@ -522,6 +523,10 @@ static void on_setting_activate(JfApp *app, int id)
         if (rows[k] != id) continue;
         if (id == JF_SET_LIBRARY) app->settings_page = JF_SETPAGE_LIBRARY;
         else if (id == JF_SET_SIGNOUT) app->confirm = JF_CONFIRM_SIGN_OUT;
+        else if (id == JF_SET_TAP) {   /* a three-way choice: each activation steps to the next, and the choice is saved */
+            app->login.tap_action = (app->login.tap_action + 1) % JF_TAP_COUNT;
+            emit(out, JF_CMD_SAVE_LOGIN);
+        }
         return;
     }
 }
@@ -990,9 +995,10 @@ static void pick_enter(JfApp *app, JfCmds *out)
  * are fetched first (on_list calls this again after each one); it stops fetching once 100 tracks are in, since no more can be used. */
 static void pick_all(JfApp *app, JfCmds *out)
 {
-    JfList *l = &app->lists[JF_LIST_TRACKS];
+    bool search = app->screen == JF_SCR_SEARCH;   /* PLAY ALL there plays the rows loaded and fetches none: so does this */
+    JfList *l = &app->lists[search ? JF_LIST_SEARCH : JF_LIST_TRACKS];
     int tn = track_rows(l);
-    if (tn < JF_SAVE_IDS_MAX && l->loaded < l->total && !l->full) {
+    if (!search && tn < JF_SAVE_IDS_MAX && l->loaded < l->total && !l->full) {
         app->pick_wait = true;
         if (!l->pending) request_page(app, JF_LIST_TRACKS, l->loaded, out);
         return;
@@ -1014,7 +1020,7 @@ static void on_pick_open(JfApp *app, int i, JfCmds *out)
 {
     if (!have_token(app) || app->add_pending || app->dup_scan || app->save_pending) return;   /* pick_ids is in use */
     if (i < 0) {
-        if (app->screen == JF_SCR_TRACKS) pick_all(app, out);
+        if (app->screen == JF_SCR_TRACKS || app->screen == JF_SCR_SEARCH) pick_all(app, out);
         return;
     }
     int lid = cur_list(app);
@@ -1094,6 +1100,28 @@ static void dup_cancel(JfApp *app)
     app->dup_scan = false;
     l->pending = false;
     l->generation++;     /* a page already on its way is stale */
+}
+
+bool jf_dup_can_skip(const JfApp *app)
+{
+    return app->confirm == JF_CONFIRM_ADD_DUP && !app->dup_unknown && app->dup_hits > 0 && app->dup_hits < app->pick_n;
+}
+
+/* SKIP EXISTING: keep only the ids the scan did not find in the playlist, then add them.  Nothing to skip (all in, none in, unknown) is ignored. */
+static void on_confirm_skip(JfApp *app, JfCmds *out)
+{
+    if (!jf_dup_can_skip(app)) return;
+    app->confirm = JF_CONFIRM_NONE;
+    int n = 0;
+    for (int k = 0; k < app->pick_n; k++)
+        if (!app->pick_dup[k]) {
+            if (n != k) copy(app->pick_ids[n], sizeof(app->pick_ids[0]), app->pick_ids[k]);
+            n++;
+        }
+    app->pick_n = n;
+    memset(app->pick_dup, 0, sizeof(app->pick_dup));
+    app->dup_hits = 0;
+    if (have_token(app) && !app->add_pending && n > 0) add_start(app, out);
 }
 
 static void on_pick_add(JfApp *app, JfCmds *out)
@@ -1485,6 +1513,26 @@ static void on_signin(JfApp *app, const JfEvent *ev, JfCmds *out)
     app->auth_pending = true;
 }
 
+/* What PLAY on a track row does, by the tap-action setting: REPLACE QUEUE (the default; the rest of the list becomes the queue),
+ * ADD AND PLAY (the one track joins the queue's end and plays now) or ADD ONLY (as the ADD QUEUE button does). */
+static void tap_track(JfApp *app, int lid, int i, JfCmds *out)
+{
+    if (app->login.tap_action == JF_TAP_ADD_ONLY) { on_add_queue(app, i, out); return; }
+    if (app->login.tap_action != JF_TAP_ADD_PLAY) { play_from(app, lid, i, out); return; }
+    JfItem it;
+    if (!seed_item(app, i, &it) || !have_token(app)) return;
+    if (app->queue_n == 0) {
+        char nm[96];
+        snprintf(nm, sizeof nm, "Queue: %.80s", it.name);
+        start_items(app, &it, 1, nm, out);
+        return;
+    }
+    if (app->queue_n >= JF_QUEUE_MAX) { set_banner(app, "QUEUE FULL"); return; }
+    app->queue[app->queue_n++] = it;
+    app->fail_streak = 0;
+    play_track(app, app->queue_n - 1, !nothing_plays(app), out);
+}
+
 static void on_activate(JfApp *app, int i, JfCmds *out)
 {
     int lid = cur_list(app);
@@ -1496,7 +1544,7 @@ static void on_activate(JfApp *app, int i, JfCmds *out)
     case JF_ITEM_GENRE:    enter(app, JF_SCR_ALBUMS, it->id, it->name, JF_SUB_GENRE, out); break;
     case JF_ITEM_ALBUM:    enter(app, JF_SCR_TRACKS, it->id, it->name, JF_SUB_PLAIN, out); break;
     case JF_ITEM_PLAYLIST: enter(app, JF_SCR_TRACKS, it->id, it->name, JF_SUB_PLAYLIST, out); break;
-    case JF_ITEM_TRACK:  play_from(app, lid, i, out); break;
+    case JF_ITEM_TRACK:  tap_track(app, lid, i, out); break;
     default: break;
     }
 }
@@ -1899,7 +1947,7 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
     /* A pending question lives for one gesture too: CONFIRM acts on it, BACK / DISMISS drop it (BACK is then spent), any other
      * intent but the passive ones drops it and acts as usual. */
     bool confirm_was = app->confirm != JF_CONFIRM_NONE;
-    if (confirm_was && ev->type != JF_EV_CONFIRM && ev->type != JF_EV_NEED_MORE && ev->type != JF_EV_VOL_UP && ev->type != JF_EV_VOL_DOWN)
+    if (confirm_was && ev->type != JF_EV_CONFIRM && ev->type != JF_EV_CONFIRM_SKIP && ev->type != JF_EV_NEED_MORE && ev->type != JF_EV_VOL_UP && ev->type != JF_EV_VOL_DOWN)
         app->confirm = JF_CONFIRM_NONE;
     bool bar_was = app->action_bar;
     if (ev->type != JF_EV_NEED_MORE && ev->type != JF_EV_SELECT && ev->type != JF_EV_VOL_UP && ev->type != JF_EV_VOL_DOWN)
@@ -1948,7 +1996,8 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out)
     case JF_EV_CATEGORY: on_category(app, ev->i, out); break;
     case JF_EV_CATEGORY_SET: on_category_set(app, ev->i, out); break;
     case JF_EV_SETTINGS_OPEN: on_settings_open(app, out); break;
-    case JF_EV_SETTING_ACTIVATE: on_setting_activate(app, ev->i); break;
+    case JF_EV_SETTING_ACTIVATE: on_setting_activate(app, ev->i, out); break;
+    case JF_EV_CONFIRM_SKIP: on_confirm_skip(app, out); break;
     case JF_EV_LIBRARY_SET: on_library_set(app, ev->i, out); break;
     case JF_EV_OPEN_NOWPLAYING:
         if (cur_list(app) >= 0 && app->queue_n > 0) { nav_push(app); app->screen = JF_SCR_NOWPLAYING; }

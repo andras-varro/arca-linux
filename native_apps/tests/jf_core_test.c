@@ -1723,7 +1723,7 @@ static void test_settings(void)
 {
     int rows[JF_SET_COUNT];
     libs_open(2);
-    CHECK(app.lib_n == 2 && jf_settings_rows(&app, rows) == 2 && rows[0] == JF_SET_LIBRARY && rows[1] == JF_SET_SIGNOUT, "2 libraries: LIBRARY + SIGN OUT rows");
+    CHECK(app.lib_n == 2 && jf_settings_rows(&app, rows) == 3 && rows[0] == JF_SET_LIBRARY && rows[1] == JF_SET_TAP && rows[2] == JF_SET_SIGNOUT, "2 libraries: LIBRARY + TAP + SIGN OUT rows");
     send(JF_EV_SETTING_ACTIVATE, JF_SET_LIBRARY);
     CHECK(app.settings_page == JF_SETPAGE_LIBRARY, "LIBRARY page");
     send(JF_EV_BACK, 0);
@@ -1748,7 +1748,7 @@ static void test_settings(void)
     send(JF_EV_LIBRARY_SET, -1);
     CHECK(!app.login.library[0] && has(JF_CMD_SAVE_LOGIN), "ALL LIBRARIES clears the choice");
     libs_open(1);
-    CHECK(jf_settings_rows(&app, rows) == 1 && rows[0] == JF_SET_SIGNOUT, "1 library: LIBRARY row absent");
+    CHECK(jf_settings_rows(&app, rows) == 2 && rows[0] == JF_SET_TAP && rows[1] == JF_SET_SIGNOUT, "1 library: LIBRARY row absent");
     send(JF_EV_SETTING_ACTIVATE, JF_SET_LIBRARY);
     CHECK(app.settings_page == JF_SETPAGE_MAIN, "an absent row cannot be activated");
 }
@@ -2455,6 +2455,116 @@ static void test_search_inline(void)
 
     CHECK(max_cmds <= 2, "no step of the search flow emitted more than 2 commands (max %d)", max_cmds);
 }
+
+/* SKIP EXISTING, the tap action and ADD ALL on search results */
+static void test_f152(void)
+{
+    char want[JF_PATH_MAX];
+
+    /* skip: some but not all already in -> JF_EV_CONFIRM_SKIP adds only the others */
+    picker_open(4, 4, 2);
+    char id[4][33];
+    for (int k = 0; k < 4; k++) snprintf(id[k], sizeof id[k], "%s", app.pick_ids[k]);
+    send(JF_EV_PICK_SELECT, 1); send(JF_EV_PICK_ADD, 0);
+    { const char *h[2] = { id[0], id[2] }; JfCmd c = *list_req(); reply_ids(&c, h, 2, 0, 2); }
+    CHECK(app.confirm == JF_CONFIRM_ADD_DUP && app.dup_hits == 2 && app.pick_dup[0] && !app.pick_dup[1] && app.pick_dup[2] && !app.pick_dup[3] &&
+          jf_dup_can_skip(&app), "2 of 4 in: the dialog offers SKIP (hits %d)", app.dup_hits);
+    send(JF_EV_CONFIRM_SKIP, 0);
+    { const char *rest[2] = { id[1], id[3] };
+      jf_path_playlist_add(want, sizeof want, UID, app.lists[JF_LIST_PLPICK].items[1].id, rest, 2); }
+    const JfCmd *w = the_write();
+    CHECK(w && cm.n == 1 && strcmp(w->path, want) == 0 && app.confirm == JF_CONFIRM_NONE && app.pick_n == 2,
+          "SKIP EXISTING adds only the two not in it (pick_n %d)", app.pick_n);
+
+    /* all already in: no skip, today's dialog; a stray CONFIRM_SKIP does nothing */
+    picker_open(3, 3, 2);
+    for (int k = 0; k < 3; k++) snprintf(id[k], sizeof id[k], "%s", app.pick_ids[k]);
+    send(JF_EV_PICK_SELECT, 1); send(JF_EV_PICK_ADD, 0);
+    { const char *h[3] = { id[0], id[1], id[2] }; JfCmd c = *list_req(); reply_ids(&c, h, 3, 0, 3); }
+    CHECK(app.confirm == JF_CONFIRM_ADD_DUP && app.dup_hits == 3 && !jf_dup_can_skip(&app), "all 3 in: no SKIP");
+    send(JF_EV_CONFIRM_SKIP, 0);
+    CHECK(app.confirm == JF_CONFIRM_ADD_DUP && !the_write() && cm.n == 0, "CONFIRM_SKIP with all in sends nothing and leaves the question up");
+
+    /* a single track already in: no skip either; unknown: no skip */
+    in_tracks(4, 4);
+    send(JF_EV_SELECT, 1); send(JF_EV_PICK_OPEN, 1);
+    { JfCmd c = *list_req(); reply_list(&c, JF_ITEM_PLAYLIST, 2, 2); }
+    send(JF_EV_PICK_SELECT, 1); send(JF_EV_PICK_ADD, 0);
+    { const char *one[1] = { app.pick_ids[0] }; JfCmd c = *list_req(); reply_ids(&c, one, 1, 0, 1); }
+    CHECK(app.confirm == JF_CONFIRM_ADD_DUP && !jf_dup_can_skip(&app), "1 of 1 in: no SKIP");
+    picker_open(3, 3, 2);
+    send(JF_EV_PICK_SELECT, 0); send(JF_EV_PICK_ADD, 0);
+    { int pages = 0; while (list_req() && pages < 60) { JfCmd c = *list_req(); pages++; reply_ids(&c, NULL, 0, 50, 5000); } }
+    CHECK(app.confirm == JF_CONFIRM_ADD_DUP && app.dup_unknown && !jf_dup_can_skip(&app), "could not check: no SKIP");
+    send(JF_EV_CONFIRM_SKIP, 0);
+    CHECK(!the_write(), "CONFIRM_SKIP when unknown sends nothing");
+
+    /* none in: no dialog (the skip path is not involved) */
+    picker_open(3, 3, 2);
+    send(JF_EV_PICK_SELECT, 1); send(JF_EV_PICK_ADD, 0); scan_clean();
+    CHECK(app.confirm == JF_CONFIRM_NONE && the_write(), "none in: no dialog, the add goes");
+
+    /* the tap action */
+    CHECK(app.login.tap_action == JF_TAP_REPLACE, "default tap action is REPLACE");
+    in_tracks(5, 5);
+    send(JF_EV_ACTIVATE, 1);
+    CHECK(app.queue_n == 4 && app.queue_cur == 0 && has(JF_CMD_PLAY_STREAM), "REPLACE: the rest of the list becomes the queue (n %d)", app.queue_n);
+    app.login.tap_action = JF_TAP_ADD_ONLY;
+    send(JF_EV_ACTIVATE, 0);
+    CHECK(app.queue_n == 5 && app.queue_cur == 0 && !has(JF_CMD_PLAY_STREAM) && strcmp(app.queue[4].id, app.lists[JF_LIST_TRACKS].items[0].id) == 0,
+          "ADD ONLY: appended, playing track undisturbed (n %d cur %d)", app.queue_n, app.queue_cur);
+    app.login.tap_action = JF_TAP_ADD_PLAY;
+    send(JF_EV_ACTIVATE, 3);
+    CHECK(app.queue_n == 6 && app.queue_cur == 5 && has(JF_CMD_PLAY_STREAM) && strcmp(app.queue[5].id, app.lists[JF_LIST_TRACKS].items[3].id) == 0,
+          "ADD AND PLAY: appended and played (n %d cur %d)", app.queue_n, app.queue_cur);
+    in_tracks(5, 5);      /* nothing queued: ADD AND PLAY plays the one track */
+    app.login.tap_action = JF_TAP_ADD_PLAY;
+    send(JF_EV_ACTIVATE, 2);
+    CHECK(app.queue_n == 1 && has(JF_CMD_PLAY_STREAM), "ADD AND PLAY on an empty queue plays that track (n %d)", app.queue_n);
+    in_tracks(5, 5);
+    app.login.tap_action = JF_TAP_ADD_ONLY;
+    send(JF_EV_PLAY_ALL, 0);
+    CHECK(app.queue_n == 5 && has(JF_CMD_PLAY_STREAM), "PLAY ALL ignores the tap action");
+
+    /* the settings row */
+    in_tracks(2, 2);
+    send(JF_EV_BACK, 0); send(JF_EV_BACK, 0);
+    app.login.tap_action = JF_TAP_REPLACE;
+    send(JF_EV_SETTINGS_OPEN, 0);
+    int rows[JF_SET_COUNT];
+    int nr = jf_settings_rows(&app, rows);
+    bool hasrow = false;
+    for (int k = 0; k < nr; k++) hasrow = hasrow || rows[k] == JF_SET_TAP;
+    CHECK(app.screen == JF_SCR_SETTINGS && hasrow && rows[nr - 1] == JF_SET_SIGNOUT, "the settings list has a TAP row before SIGN OUT (%d rows)", nr);
+    send(JF_EV_SETTING_ACTIVATE, JF_SET_TAP);
+    CHECK(app.login.tap_action == JF_TAP_ADD_PLAY && has(JF_CMD_SAVE_LOGIN), "activating the row steps REPLACE -> ADD AND PLAY and saves");
+    send(JF_EV_SETTING_ACTIVATE, JF_SET_TAP);
+    send(JF_EV_SETTING_ACTIVATE, JF_SET_TAP);
+    CHECK(app.login.tap_action == JF_TAP_REPLACE, "and round to REPLACE after three steps (%d)", app.login.tap_action);
+
+    /* ADD ALL TO PLAYLIST on search results: the track set PLAY ALL plays */
+    signed_in(); artists_loaded(3, 3);
+    send_text(JF_EV_SEARCH, "blue");
+    JfCmd sr = *find(JF_CMD_REQUEST);
+    JfList *sl = &app.lists[JF_LIST_SEARCH];
+    fill(sl, JF_ITEM_ALBUM, 1, 5); fill(sl, JF_ITEM_ARTIST, 1, 5); fill(sl, JF_ITEM_TRACK, 2, 5);
+    fill(sl, JF_ITEM_ALBUM, 1, 5);
+    reply_raw(&sr, JF_ERR_NONE);
+    send(JF_EV_PICK_OPEN, -1);
+    CHECK(app.screen == JF_SCR_PLPICK && app.pick_n == 2 && !strcmp(app.pick_ids[0], sl->items[2].id) && !strcmp(app.pick_ids[1], sl->items[3].id) &&
+          list_req() && list_req()->list == &app.lists[JF_LIST_PLPICK], "PICK_OPEN -1 on SEARCH collects exactly its tracks (screen %d, n %d)", app.screen, app.pick_n);
+    send(JF_EV_BACK, 0);
+    CHECK(app.screen == JF_SCR_SEARCH, "BACK returns to the search results");
+    send(JF_EV_PLAY_ALL, 0);
+    CHECK(app.queue_n == app.pick_n, "PLAY ALL queues the same count (%d vs %d)", app.queue_n, app.pick_n);
+    signed_in(); artists_loaded(3, 3);
+    send_text(JF_EV_SEARCH, "none");
+    sr = *find(JF_CMD_REQUEST);
+    fill(&app.lists[JF_LIST_SEARCH], JF_ITEM_ARTIST, 2, 2);
+    reply_raw(&sr, JF_ERR_NONE);
+    send(JF_EV_PICK_OPEN, -1);
+    CHECK(app.screen == JF_SCR_SEARCH && app.pick_n == 0, "no tracks in the results: nothing to add");
+}
 int main(void)
 {
     test_start(); test_signin(); test_nav_paging(); test_stale(); test_queue(); test_sink_channels();
@@ -2463,7 +2573,7 @@ int main(void)
     test_mix_cancel_and_errors(); test_mix_nowplaying(); test_save();
     test_queue_clear(); test_queue_restore();
     test_pause_stop_seek(); test_instant_confirm(); test_back_restores_view(); test_prev(); test_queue_edit(); test_queue_remove();
-    test_playlist_delete(); test_playlist_policy(); test_pick(); test_artist(); test_search_inline();
+    test_playlist_delete(); test_playlist_policy(); test_pick(); test_f152(); test_artist(); test_search_inline();
     printf("jf_core_test: %d checks, %d failures\n", checks, fails);
     return fails ? 1 : 0;
 }

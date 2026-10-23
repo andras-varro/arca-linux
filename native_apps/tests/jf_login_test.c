@@ -197,6 +197,32 @@ static void test_library(void)
     fputs("library=notahexid\nlibrary_name=X\n", f); fclose(f);
     jf_settings_load(&b, spath);
     CHECK(!b.library[0] && !b.library_name[0], "an invalid library id is dropped on load");
+
+    /* tap_action: default REPLACE, round trip, unknown / missing falls back to the default */
+    memset(&b, 0, sizeof b);
+    remove(spath);
+    jf_settings_load(&b, spath);
+    CHECK(b.tap_action == JF_TAP_REPLACE, "tap_action defaults to REPLACE with no file (%d)", b.tap_action);
+    for (int t = 0; t < JF_TAP_COUNT; t++) {
+        a.tap_action = t;
+        jf_settings_save(&a, spath);
+        b.tap_action = -7;
+        jf_settings_load(&b, spath);
+        CHECK(b.tap_action == t, "tap_action %d round trip (got %d)", t, b.tap_action);
+    }
+    f = fopen(spath, "w");
+    fputs("tap_action=9\n", f); fclose(f);
+    jf_settings_load(&b, spath);
+    CHECK(b.tap_action == JF_TAP_REPLACE, "an unknown tap_action falls back (%d)", b.tap_action);
+    f = fopen(spath, "w");
+    fputs("tap_action=junk\nvolume_step=3\n", f); fclose(f);
+    jf_settings_load(&b, spath);
+    CHECK(b.tap_action == JF_TAP_REPLACE && b.volume_step == 3, "a non-number tap_action falls back (%d)", b.tap_action);
+    f = fopen(spath, "w");
+    fputs("volume_step=3\n", f); fclose(f);
+    b.tap_action = JF_TAP_ADD_ONLY;
+    jf_settings_load(&b, spath);
+    CHECK(b.tap_action == JF_TAP_REPLACE, "a missing tap_action resets to the default (%d)", b.tap_action);
 }
 
 /* The split itself: the login file never names a settings key, the settings file never names a token, and an

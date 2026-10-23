@@ -118,7 +118,7 @@ typedef enum { JF_CONFIRM_NONE = 0, JF_CONFIRM_INSTANT_MIX, JF_CONFIRM_CLEAR_QUE
 
 /* The settings view is a table of rows (the extension point: a new setting is one JfSettingId and one line in
  * jf_settings_rows()).  Page MAIN lists the rows; page LIBRARY lists ALL LIBRARIES then each lists[JF_LIST_LIBS] item. */
-typedef enum { JF_SET_LIBRARY = 0, JF_SET_SIGNOUT, JF_SET_COUNT } JfSettingId;
+typedef enum { JF_SET_LIBRARY = 0, JF_SET_SIGNOUT, JF_SET_TAP, JF_SET_COUNT } JfSettingId;   /* rows show in the order LIBRARY, TAP, SIGN OUT; TAP steps login.tap_action and saves */
 typedef enum { JF_SETPAGE_MAIN = 0, JF_SETPAGE_LIBRARY } JfSettingsPage;
 
 /* Buttons of the error overlay (JfApp.overlay_buttons). */
@@ -168,6 +168,7 @@ typedef enum {
     JF_EV_STOP,          /* playback ends, queue and queue_cur stay (STOPPED) */
     JF_EV_SEEK,          /* .i: target position in ms (clamped to [0, runtime)); restarts the stream there, or only moves pos_ms while PAUSED */
     JF_EV_CONFIRM,       /* proceed with app->confirm */
+    JF_EV_CONFIRM_SKIP,  /* JF_CONFIRM_ADD_DUP only, and only when jf_dup_can_skip(): add the pick_ids not already in the playlist (pick_ids is compacted); otherwise ignored */
     JF_EV_VOL_UP,
     JF_EV_VOL_DOWN,
     JF_EV_SEARCH,        /* .term; empty = cancel any search in flight */
@@ -396,6 +397,9 @@ typedef struct {
 
 /** The settings rows to show, in order (JfSettingId values; returns the count).  An unavailable row is absent: LIBRARY needs 2 or more music libraries. */
 int jf_settings_rows(const JfApp *app, int ids[JF_SET_COUNT]);
+
+/** True when the duplicate question offers SKIP EXISTING: the scan finished (not dup_unknown) and some but not all of pick_ids are in the playlist. */
+bool jf_dup_can_skip(const JfApp *app);
 
 /** True when DELETE may be offered on a playlist: the policy is known, the server has not refused a delete this session, and the user is an
  *  administrator, has EnableContentDeletion, or has delete-from-folders entries.  The server can still refuse (a non-admin with

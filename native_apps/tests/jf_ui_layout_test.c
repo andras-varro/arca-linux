@@ -327,10 +327,10 @@ static void settings_ui(void)
     snprintf(app.lists[JF_LIST_LIBS].items[1].name, sizeof app.lists[0].items[1].name, "JAZZ");
     int ids[JF_SET_COUNT];
     int cnt = jf_settings_rows(&app, ids);
-    CHECK(cnt == 2 && ids[0] == JF_SET_LIBRARY && ids[1] == JF_SET_SIGNOUT, "S: settings rows %d", cnt);
+    CHECK(cnt == 3 && ids[0] == JF_SET_LIBRARY && ids[1] == JF_SET_TAP && ids[2] == JF_SET_SIGNOUT, "S: settings rows %d", cnt);
     jf_ui_init(&ui, &fb, &touch, NULL, &app);
     feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
-    CHECK(ui.lv.count == 2, "S: settings list has %d rows, want 2", ui.lv.count);
+    CHECK(ui.lv.count == 3, "S: settings list has %d rows, want 3", ui.lv.count);
     for (int r = 0; r < cnt; r++) {
         int y = ui.lv.rect.y + LV_BORDER + 40 * r + 20;
         n = tap_at(&ui, ui.lv.rect.x + ui.lv.rect.w / 2, y, 2000u + 1000u * (uint32_t)r, ev);
@@ -378,7 +378,7 @@ static void settings_ui(void)
     cnt = jf_settings_rows(&app, ids);
     jf_ui_init(&ui, &fb, &touch, NULL, &app);
     feed(&ui, 0, 0, false, false, false, 40000, ev, MINI_MAX);
-    CHECK(cnt == 1 && ids[0] == JF_SET_SIGNOUT && ui.lv.count == 1, "S: with one library the list has %d rows (want only SIGN OUT)", ui.lv.count);
+    CHECK(cnt == 2 && ids[0] == JF_SET_TAP && ids[1] == JF_SET_SIGNOUT && ui.lv.count == 2, "S: with one library the list has %d rows (want TAP and SIGN OUT)", ui.lv.count);
     jf_ui_free(&ui);
 }
 
@@ -951,6 +951,54 @@ static void add_to_playlist(void)
     app.dup_unknown = true;
     jf_ui_dup_title(&app, t, sizeof t);
     CHECK(strcmp(t, "COULD NOT CHECK DUPLICATES - ADD?") == 0, "T: dup_confirm_titles: unknown is \"%s\"", t);
+
+    /* tap-action row label */
+    jf_app_init(&app);
+    for (int tp = 0; tp < JF_TAP_COUNT; tp++) {
+        static const char *const want_t[JF_TAP_COUNT] = { "TAP: REPLACE QUEUE", "TAP: ADD AND PLAY", "TAP: ADD ONLY" };
+        app.login.tap_action = tp;
+        jf_ui_tap_label(&app, t, sizeof t);
+        CHECK(strcmp(t, want_t[tp]) == 0, "T: tap label %d is \"%s\"", tp, t);
+    }
+
+    /* the duplicate dialog: three buttons (ADD ANYWAY, SKIP EXISTING, CANCEL) when some but not all are in, two otherwise */
+    for (int three = 0; three < 2; three++) {
+        for (int step = 0; step < 3; step++) {
+            jf_app_init(&app);
+            app.screen = JF_SCR_PLPICK;
+            app.confirm = JF_CONFIRM_ADD_DUP;
+            app.pick_n = 3; app.dup_hits = three ? 1 : 3; app.dup_unknown = false;
+            jf_ui_init(&ui, &fb, &touch, NULL, &app);
+            feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+            int lefts = step;   /* 0: the CANCEL default, 1: one step left, 2: two */
+            for (int k = 0; k < lefts; k++) feed_btn(&ui, BTN_ID_LEFT, 2000u + 100u * (uint32_t)k, ev, MINI_MAX);
+            n = feed_btn(&ui, BTN_ID_ACTION, 3000, ev, MINI_MAX);
+            JfEventType want_e = JF_EV_NONE;
+            if (three) want_e = step == 0 ? JF_EV_BACK : step == 1 ? JF_EV_CONFIRM_SKIP : JF_EV_CONFIRM;
+            else want_e = step == 1 ? JF_EV_CONFIRM : JF_EV_BACK;   /* two buttons: a second Left wraps back to CANCEL */
+            CHECK(n >= 1 && ev[0].type == want_e, "T: dup dialog (%s) after %d Lefts sent %d, want %d", three ? "some in" : "all in", lefts, n ? (int)ev[0].type : -1, (int)want_e);
+            jf_ui_free(&ui);
+        }
+    }
+
+    /* ADD ALL TO PLAYLIST on a search that holds a track: the fourth button sends PICK_OPEN -1; none without a track */
+    for (int with = 0; with < 2; with++) {
+        jf_app_init(&app);
+        app.screen = JF_SCR_SEARCH;
+        app.nav_n = 1;
+        JfList *sl = &app.lists[JF_LIST_SEARCH];
+        sl->n = 2;
+        sl->items[0].type = JF_ITEM_ARTIST;
+        sl->items[1].type = with ? JF_ITEM_TRACK : JF_ITEM_ALBUM;
+        jf_ui_init(&ui, &fb, &touch, NULL, &app);
+        feed(&ui, 0, 0, false, false, false, 1000, ev, MINI_MAX);
+        UiRect r4 = ui.L.row4[3];
+        n = tap_at(&ui, r4.x + r4.w / 2, r4.y + r4.h / 2, 2000, ev);
+        bool got = false;
+        for (int k = 0; k < n; k++) got = got || (ev[k].type == JF_EV_PICK_OPEN && ev[k].i == -1);
+        CHECK(got == (with != 0), "T: search ADD ALL button (tracks %d) sent PICK_OPEN -1: %d", with, got);
+        jf_ui_free(&ui);
+    }
 
     /* signout_label: the host of the typed server address, upcased; plain SIGN OUT when there is none */
     snprintf(app.login.server, sizeof app.login.server, "https://music.example.lan:8096/");

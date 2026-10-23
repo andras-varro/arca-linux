@@ -23,6 +23,8 @@
 #define JF_SETTINGS_PATH JF_DATA_DIR "/settings.conf"
 #define JF_VOLUME_MAX    14   /**< volume_step runs 0..JF_VOLUME_MAX */
 #define JF_VOLUME_DEFAULT 10
+/** What a tap on a track row (the PLAY button of its bar) does; one setting, persisted as tap_action. */
+typedef enum { JF_TAP_REPLACE = 0, JF_TAP_ADD_PLAY, JF_TAP_ADD_ONLY, JF_TAP_COUNT } JfTapAction;
 
 typedef struct {
     char server[64];
@@ -31,6 +33,7 @@ typedef struct {
     char token[64];
     char device_id[64];
     int volume_step;
+    int tap_action;          /* JfTapAction; an unknown or missing value is JF_TAP_REPLACE */
     char library[33];        /* chosen music library id; empty = all libraries */
     char library_name[64];
 } JfLogin;

@@ -205,6 +205,7 @@ static void src_row(void *ctx, int index, LvRow *out)
         int cnt = jf_settings_rows(app, ids);
         if (index < 0 || index >= cnt) return;
         if (ids[index] == JF_SET_SIGNOUT) jf_ui_signout_label(app, t, sizeof ui->rowtxt[0]);
+        else if (ids[index] == JF_SET_TAP) jf_ui_tap_label(app, t, sizeof ui->rowtxt[0]);
         else {
             int r = chosen_lib_row(app);
             if (r == 0) snprintf(t, sizeof ui->rowtxt[0], "ALL LIBRARIES");
@@ -508,6 +509,14 @@ void jf_ui_dup_title(const JfApp *app, char *buf, size_t cap)
     if (app->dup_hits >= app->pick_n) snprintf(buf, cap, "ALREADY IN %s", nm);
     else snprintf(buf, cap, "%d OF %d ALREADY IN %s", app->dup_hits, app->pick_n, nm);
 }
+/* The tap-action settings row. */
+void jf_ui_tap_label(const JfApp *app, char *buf, size_t cap)
+{
+    static const char *const nm[JF_TAP_COUNT] = { "REPLACE QUEUE", "ADD AND PLAY", "ADD ONLY" };
+    int t = app->login.tap_action;
+    snprintf(buf, cap, "TAP: %s", nm[t >= 0 && t < JF_TAP_COUNT ? t : JF_TAP_REPLACE]);
+}
+
 
 /* The sign-out row: "SIGN OUT FROM <host>", the host of the address typed at sign-in, upcased.  The list view cuts a long row
  * with "..." at its width, so the host (the tail) is what gives way.  No usable address: plain "SIGN OUT". */
@@ -601,9 +610,18 @@ static bool at_root(const JfApp *app) { return app->screen == JF_SCR_ARTISTS; }
 /* The artist folder (albums, then tracks of other albums): the core queues its whole discography for PLAY ALL; a genre's albums have no such handler. */
 static bool artist_folder(const JfApp *app) { return app->screen == JF_SCR_ALBUMS && app->ctx[JF_LIST_ALBUMS].sub == JF_SUB_PLAIN; }
 
-/* An album's or a playlist's tracks carry a fourth button, + PLAYLIST; a genre's track list, search and an artist's albums do not. */
+/* A search result list that holds a track: the rows PLAY ALL plays and ADD ALL TO PLAYLIST adds. */
+static bool search_has_tracks(const JfApp *app)
+{
+    const JfList *l = &app->lists[JF_LIST_SEARCH];
+    for (int k = 0; k < l->n; k++) if (l->items[k].type == JF_ITEM_TRACK) return true;
+    return false;
+}
+
+/* An album's or a playlist's tracks carry a fourth button, + PLAYLIST, and a search with a track in it ADD ALL TO PLAYLIST; a genre's track list and an artist's albums do not. */
 static bool tracks4(const JfApp *app)
 {
+    if (app->screen == JF_SCR_SEARCH) return search_has_tracks(app);   /* ADD ALL TO PLAYLIST, over the tracks PLAY ALL plays */
     return app->screen == JF_SCR_TRACKS && app->ctx[JF_LIST_TRACKS].sub != JF_SUB_GENRE;
 }
 
@@ -970,6 +988,7 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     if (app->confirm != JF_CONFIRM_NONE) {
         if (!ui->cdlg_up) {
             char msg[128], nm[64];
+            ui->cdlg_skip = false;
             if (app->confirm == JF_CONFIRM_CLEAR_QUEUE) {
                 snprintf(msg, sizeof msg, "CLEAR %d TRACKS?", app->queue_n);
                 modal_dialog_init(&ui->cdlg, "QUEUE", msg, 2);
@@ -985,9 +1004,11 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
                 modal_dialog_set_button(&ui->cdlg, 1, "CANCEL", RGB(90, 40, 40), COLOR_WHITE);
             } else if (app->confirm == JF_CONFIRM_ADD_DUP) {
                 jf_ui_dup_title(app, msg, sizeof msg);
-                modal_dialog_init(&ui->cdlg, "ADD TO PLAYLIST", msg, 2);
+                ui->cdlg_skip = jf_dup_can_skip(app);   /* some but not all already in: SKIP EXISTING sits between */
+                modal_dialog_init(&ui->cdlg, "ADD TO PLAYLIST", msg, ui->cdlg_skip ? 3 : 2);
                 modal_dialog_set_button(&ui->cdlg, 0, "ADD ANYWAY", BTN_BG, COLOR_WHITE);
-                modal_dialog_set_button(&ui->cdlg, 1, "CANCEL", RGB(90, 40, 40), COLOR_WHITE);
+                if (ui->cdlg_skip) modal_dialog_set_button(&ui->cdlg, 1, "SKIP EXISTING", BTN_BG, COLOR_WHITE);
+                modal_dialog_set_button(&ui->cdlg, ui->cdlg_skip ? 2 : 1, "CANCEL", RGB(90, 40, 40), COLOR_WHITE);
             } else if (app->confirm == JF_CONFIRM_DELETE_PLAYLIST) {
                 jf_ui_delete_msg(app, msg, sizeof msg);
                 modal_dialog_init(&ui->cdlg, "DELETE PLAYLIST", msg, 2);
@@ -1000,7 +1021,7 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
             modal_dialog_set_button(&ui->cdlg, 0, "OK", BTN_BG, COLOR_WHITE);
             modal_dialog_set_button(&ui->cdlg, 1, "CANCEL", RGB(90, 40, 40), COLOR_WHITE);
             }
-            modal_dialog_set_focus(&ui->cdlg, 1);
+            modal_dialog_set_focus(&ui->cdlg, ui->cdlg_skip ? 2 : 1);
             modal_dialog_show(&ui->cdlg);
             ui->cdlg_up = true;
             ui->dirty = true;
@@ -1010,7 +1031,7 @@ int jf_ui_input(JfUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         if (ts->pressed || ts->released || bp(in, BTN_ID_LEFT) || bp(in, BTN_ID_RIGHT) || bp(in, BTN_ID_UP) ||
             bp(in, BTN_ID_DOWN)) ui->dirty = true;
         if (a >= 0) {
-            emit(out, &n, max, a == 0 ? JF_EV_CONFIRM : JF_EV_BACK);
+            emit(out, &n, max, a == 0 ? JF_EV_CONFIRM : (a == 1 && ui->cdlg_skip) ? JF_EV_CONFIRM_SKIP : JF_EV_BACK);
             ui->cdlg_up = false;
             ui->dirty = true;
         }
@@ -1416,6 +1437,11 @@ static void draw_row3(JfUi *ui)
     }
     bool t4 = tracks4(ui->app);
     Button *rb = t4 ? ui->row4 : ui->row3;
+    if (t4) {   /* the fourth button's label by screen; at scale 2 the long one would overrun its button */
+        bool srch = ui->app->screen == JF_SCR_SEARCH;
+        snprintf(ui->row4[3].text, sizeof ui->row4[3].text, "%s", srch ? "ADD ALL TO PLAYLIST" : "+ PLAYLIST");
+        ui->row4[3].text_scale = srch ? 1 : (6 * 10 * 2 <= ui->L.row4[3].w - 12 ? 2 : 1);
+    }
     if (at_root(ui->app)) snprintf(ui->row3[2].text, sizeof ui->row3[2].text, "SETTINGS");
     else snprintf(ui->row3[2].text, sizeof ui->row3[2].text, "PLAY ALL");
     for (int i = 0; i < row_n(ui->app); i++) {
