@@ -985,12 +985,52 @@ void fb_draw_pixel_alpha(Framebuffer *fb, int x, int y, uint32_t color, uint8_t 
     fb_store(target, idx, (r << 16) | (g << 8) | b, is16);
 }
 
-/* -- Alpha-blended filled rect ------------------------------------------ */
+/* One channel-triple of fb_draw_pixel_alpha, with the source terms already
+ * multiplied by alpha (sa_* = s * a) and ia = 255 - a.  Same expression and
+ * same /255 as the per-pixel path, so the output is identical. */
+static inline uint32_t fb_blend_px(uint32_t dst, uint32_t sar, uint32_t sag,
+                                   uint32_t sab, uint32_t ia) {
+    uint32_t dr = (dst >> 16) & 0xFF, dg = (dst >> 8) & 0xFF, db = dst & 0xFF;
+    uint32_t r = (sar + dr * ia) / 255;
+    uint32_t g = (sag + dg * ia) / 255;
+    uint32_t b = (sab + db * ia) / 255;
+    return (r << 16) | (g << 8) | b;
+}
+
+/* Clip once, then blend row by row.  Per pixel this does the same work as
+ * fb_draw_pixel_alpha (unpack, blend, repack) with no call, bounds check or
+ * target lookup in the loop. */
 void fb_fill_rect_alpha(Framebuffer *fb, int x, int y, int w, int h,
                         uint32_t color, uint8_t alpha) {
-    for (int j = 0; j < h; j++)
-        for (int i = 0; i < w; i++)
-            fb_draw_pixel_alpha(fb, x + i, y + j, color, alpha);
+    if (w <= 0 || h <= 0) return;
+    x += fb->draw_offset_x;
+    y += fb->draw_offset_y;
+    int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+    int x1 = x + w, y1 = y + h;
+    if (x1 > (int)fb->width)  x1 = (int)fb->width;
+    if (y1 > (int)fb->height) y1 = (int)fb->height;
+    if (x0 >= x1 || y0 >= y1) return;
+
+    void *target = fb_target(fb);
+    const uint32_t a = alpha, ia = 255 - alpha;
+    const uint32_t sar = ((color >> 16) & 0xFF) * a;
+    const uint32_t sag = ((color >>  8) & 0xFF) * a;
+    const uint32_t sab = (color & 0xFF) * a;
+    const size_t stride = fb->width;
+
+    if (FB_IS_16BPP(fb)) {
+        for (int py = y0; py < y1; py++) {
+            uint16_t *row = (uint16_t *)target + (size_t)py * stride;
+            for (int px = x0; px < x1; px++)
+                row[px] = fb_pack565(fb_blend_px(fb_unpack565(row[px]), sar, sag, sab, ia));
+        }
+    } else {
+        for (int py = y0; py < y1; py++) {
+            uint32_t *row = (uint32_t *)target + (size_t)py * stride;
+            for (int px = x0; px < x1; px++)
+                row[px] = fb_blend_px(row[px] & 0x00FFFFFF, sar, sag, sab, ia);
+        }
+    }
 }
 
 /* -- Vertical gradient filled rect -------------------------------------- */
