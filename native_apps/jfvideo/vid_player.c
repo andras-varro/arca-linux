@@ -46,8 +46,10 @@ struct VidPlayer {
     VidDec *dec; VidDecInfo info; VidFrameRing fr; VidPcmRing pr; VidLevel lvl;
     int16_t vbuf[VBUF_FRAMES * 2]; int slot; uint32_t gen; bool voice, fill_on, base_set; double base_pts;
     long long padded; unsigned underruns;
-    VidClock clk; bool clk_on; double first_pts; bool first_set; double mono0; double wait_s;
+    VidClock clk; bool clk_on; double first_pts; bool first_set; double mono0; double wait_s; bool wait_set;
     double frozen_pos; bool has_pos; double buf_since;
+    bool dry_seen;                           /* a tick found the frame ring empty since the last frame left it */
+    long drop_late, drop_starved, empty_ticks, last_late, last_starved, last_empty;
     uint32_t *line; uint8_t clampt[1024];
     int16_t yy[256], crr[256], cbb[256], crg[256], cbg[256];
     int px0, py0, pw, ph;                    /* picture rectangle, logical coordinates */
@@ -328,7 +330,8 @@ int vid_player_start(VidPlayer *p, int fd, const VidPlayerCfg *cfg)
     atomic_store(&p->stop, 0); atomic_store(&p->ready, 0); atomic_store(&p->done, 0); atomic_store(&p->result, -1);
     p->voice = p->fill_on = p->base_set = p->clk_on = p->first_set = p->paused = p->has_pos = false;
     p->shown = p->dropped = p->last_shown = p->last_dropped = 0; p->err_sum = p->err_max = 0; p->err_n = 0;
-    p->underruns = 0; p->wait_s = 0; p->stats_next = mono_s() + STATS_MS / 1000.0; p->buf_since = 0;
+    p->dry_seen = false; p->drop_late = p->drop_starved = p->empty_ticks = 0; p->last_late = p->last_starved = p->last_empty = 0;
+    p->underruns = 0; p->wait_s = 0; p->wait_set = false; p->stats_next = mono_s() + STATS_MS / 1000.0; p->buf_since = 0;
     p->on = true;
     if (cfg->tls) {
         int pf[2];
@@ -376,9 +379,10 @@ void vid_player_pause(VidPlayer *p, bool paused)
 
 int vid_player_wait_us(const VidPlayer *p, int max_us)
 {
-    if (!p->on || p->wait_s <= 0) return max_us;
-    int us = (int)(p->wait_s * 1e6) - 1000;
-    return us < 1000 ? 1000 : us > max_us ? max_us : us;
+    if (!p->on || !p->wait_set) return max_us;
+    /* wake 2 ms ahead of the due time: a frame up to VC_EARLY (4 ms) early is shown, and usleep overshoots */
+    int us = (int)(p->wait_s * 1e6) - 2000;
+    return us < 500 ? 500 : us > max_us ? max_us : us;
 }
 
 void vid_player_sub_clear(VidPlayer *p) { subs_reset(&p->sub, true); }
@@ -445,19 +449,28 @@ int vid_player_tick(VidPlayer *p, unsigned long long now_ms)
 
     double t = audio ? vid_clock_now(&p->clk, mono) : mono - p->mono0;
     double period = p->info.fps > 1.0 ? 1.0 / p->info.fps : 0.04;
-    p->wait_s = 0;
+    p->wait_set = false;
+    if (fq == 0 && !done) { p->dry_seen = true; p->empty_ticks++; }
     for (int i = 0; i < 4; i++) {
         const VidFrame *f = vid_fring_peek(&p->fr);
         if (!f) break;
         int d = vid_clock_decide(&p->clk, f->pts, t, period);
-        if (d == VID_CLK_WAIT) { p->wait_s = f->pts + p->clk.offset - t; break; }
-        if (d == VID_CLK_DROP) { vid_fring_release(&p->fr); p->dropped++; continue; }
+        if (d == VID_CLK_WAIT) break;
+        if (d == VID_CLK_DROP) {
+            /* starved: the ring ran dry before this frame arrived (decoder late); late: it was queued in time and this loop missed it */
+            if (p->dry_seen) p->drop_starved++; else p->drop_late++;
+            p->dry_seen = false;
+            vid_fring_release(&p->fr); p->dropped++; continue;
+        }
         present(p, f);
-        double e = f->pts + p->clk.offset - t;
+        /* error as the viewer gets it: the clock read after the picture is on the panel, not at the start of the tick */
+        double tp = audio ? vid_clock_now(&p->clk, mono_s()) : mono_s() - p->mono0;
+        double e = f->pts + p->clk.offset - tp;
         if (e < 0) e = -e;
         p->err_sum += e; p->err_n++;
         if (e > p->err_max) p->err_max = e;
         vid_fring_release(&p->fr);
+        p->dry_seen = false;
         p->shown++;
         Subs *s = &p->sub;
         if (s->parsed) {
@@ -472,12 +485,22 @@ int vid_player_tick(VidPlayer *p, unsigned long long now_ms)
         break;
     }
     if (done && vid_fring_count(&p->fr) == 0 && vid_pring_fill(&p->pr) == 0) return finish(p, 1, "eof");
+    /* When to come back: at the next frame's due time, measured from NOW (the present above took milliseconds,
+     * and a fixed sleep after it put every following frame later until one was dropped), or soon if none is queued. */
+    {
+        double tn = audio ? vid_clock_now(&p->clk, mono_s()) : mono_s() - p->mono0;
+        const VidFrame *nf = vid_fring_peek(&p->fr);
+        p->wait_s = nf ? nf->pts + p->clk.offset - tn : 0.004;
+        p->wait_set = true;
+    }
     if (mono >= p->stats_next && p->log) {
         const VidDecStats *st = vid_dec_stats(p->dec);
-        LOG_INFO(p->log, "player: decoded %ld shown %ld dropped %ld underruns %u av-err mean %.1f max %.1f ms",
-                 atomic_load(&st->frames), p->shown - p->last_shown, p->dropped - p->last_dropped, p->underruns,
+        LOG_INFO(p->log, "player: decoded %ld shown %ld dropped %ld (late %ld starved %ld) empty-ticks %ld underruns %u av-err mean %.1f max %.1f ms",
+                 atomic_load(&st->frames), p->shown - p->last_shown, p->dropped - p->last_dropped,
+                 p->drop_late - p->last_late, p->drop_starved - p->last_starved, p->empty_ticks - p->last_empty, p->underruns,
                  p->err_n ? p->err_sum * 1000.0 / (double)p->err_n : 0.0, p->err_max * 1000.0);
         p->last_shown = p->shown; p->last_dropped = p->dropped; p->err_sum = p->err_max = 0; p->err_n = 0;
+        p->last_late = p->drop_late; p->last_starved = p->drop_starved; p->last_empty = p->empty_ticks;
         p->stats_next = mono + STATS_MS / 1000.0;
     }
     return -1;
