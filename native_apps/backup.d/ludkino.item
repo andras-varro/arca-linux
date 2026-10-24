@@ -1,0 +1,5 @@
+name=Ludkino login (server, user, token)
+paths=opt/ludkino/ludkino.conf
+unit=no
+secret=yes
+reboot=no

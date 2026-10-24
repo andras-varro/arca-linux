@@ -1,0 +1,5 @@
+name=Ludkino settings (audio, subtitles, library)
+paths=home/root/data/ludkino/settings.conf
+unit=no
+secret=no
+reboot=no
