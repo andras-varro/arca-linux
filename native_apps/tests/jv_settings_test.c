@@ -28,7 +28,7 @@ static void put(const char *text)
 
 static void is_default(const JvSettings *s, const char *what)
 {
-    CHECK(!strcmp(s->audio_lang, "default") && s->sub_mode == JV_SUB_OFF && !strcmp(s->sub_lang, "hun") &&
+    CHECK(!strcmp(s->audio_lang, "default") && s->sub_mode == JV_SUB_FOREIGN && !strcmp(s->sub_lang, "hun") &&
           s->sub_scale == 2 && s->av_offset_ms[0] == 0 && s->av_offset_ms[1] == 0 && s->av_offset_ms[2] == 0 &&
           s->agc && !s->library_movies[0] && !s->library_shows[0], "%s: not the defaults", what);
 }
@@ -67,7 +67,7 @@ int main(void)
         "av_offset_onboard_ms=-99999\nagc=maybe\nlibrary_movies=notanid\nlibrary_shows=\n");
     CHECK(jv_settings_load(&t, path) == 0, "malformed file still loads");
     CHECK(!strcmp(t.audio_lang, "default"), "bad language list -> default: '%s'", t.audio_lang);
-    CHECK(t.sub_mode == JV_SUB_OFF && !strcmp(t.sub_lang, "hun") && t.sub_scale == 2, "bad mode/empty lang/bad scale -> default");
+    CHECK(t.sub_mode == JV_SUB_FOREIGN && !strcmp(t.sub_lang, "hun") && t.sub_scale == 2, "bad mode/empty lang/bad scale -> default");
     CHECK(t.av_offset_ms[JV_SINK_USB] == 0, "non-numeric offset -> 0");
     CHECK(t.av_offset_ms[JV_SINK_BT] == JV_OFFSET_MAX_MS && t.av_offset_ms[JV_SINK_ONBOARD] == -JV_OFFSET_MAX_MS, "offsets clamped: %d %d",
           t.av_offset_ms[JV_SINK_BT], t.av_offset_ms[JV_SINK_ONBOARD]);

@@ -18,7 +18,7 @@ void jv_settings_defaults(JvSettings *s)
 {
     memset(s, 0, sizeof *s);
     strcpy(s->audio_lang, "default");
-    s->sub_mode = JV_SUB_OFF;
+    s->sub_mode = JV_SUB_FOREIGN;   /* subtitles when the audio is not a language you listen to */
     strcpy(s->sub_lang, "hun");
     s->sub_scale = 2;
     s->agc = true;

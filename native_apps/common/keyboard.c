@@ -244,7 +244,7 @@ static bool kb_apply_key(KeyboardLayout layout, char *work, int *cursor, int max
     return true;
 }
 
-enum { KA_DEL, KA_CLEAR, KA_SHIFT, KA_SYM, KA_SPACE, KA_CANCEL, KA_OK, KA_ORDER };
+enum { KA_DEL, KA_CLEAR, KA_SHIFT, KA_SYM, KA_SPACE, KA_CANCEL, KA_OK, KA_ORDER, KA_EYE };
 
 static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
                   const char *title, char *buf, int max_len, KeyboardLayout layout,
@@ -374,10 +374,20 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
     act_btn[na] = &btn_cancel; act_id[na++] = KA_CANCEL;
     act_btn[na] = &btn_ok;     act_id[na++] = KA_OK;
 
+    /* Password show/hide key (masked entry only): right of the text field, 130x52,
+     * so no grid or action key changes size.  `reveal` is per call.  Focus row -1
+     * reaches it: UP from the top key row, DOWN returns. */
+    bool reveal = false;
+    Button btn_eye;
+    memset(&btn_eye, 0, sizeof(btn_eye));
+    if (mask)
+        button_init_full(&btn_eye, safe_l + safe_w - 20 - 130, 50, 130, 52, "SHOW",
+                         RGB(30, 30, 80), COLOR_WHITE, RGB(100, 100, 220), 2);
+
     /* Pad / keyboard focus: (frow, fcol), frow == rows being the action row.
      * Edges are our own, from the level, seeded TRUE so a button still down
      * from the screen before must be released and pressed again. */
-    int  frow = 0, fcol = 0;
+    int  frow = 0, fcol = 0;          /* frow -1: the show/hide key (mask only) */
     bool focus_shown = true;
     bool prev_held[BTN_ID_COUNT];
     for (int b = 0; b < BTN_ID_COUNT; b++) prev_held[b] = true;
@@ -413,7 +423,7 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
 
             /* Input field box */
             int box_x = safe_l + 20;
-            int box_w = safe_w - 40;
+            int box_w = safe_w - 40 - (mask ? 138 : 0);   /* room for SHOW/HIDE */
             fb_fill_rect(fb, box_x, 50, box_w, 52, RGB(20, 20, 20));
             fb_draw_rect(fb, box_x, 50, box_w, 52, COLOR_CYAN);
 
@@ -422,7 +432,7 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
             strncpy(display, work, max_len);
             display[cursor] = '\0';           /* safety — cursor tracks length */
             int dlen = (int)strlen(display);
-            if (mask) for (int mi = 0; mi < dlen; mi++) display[mi] = '*';
+            if (mask && !reveal) for (int mi = 0; mi < dlen; mi++) display[mi] = '*';
             if (dlen < max_len) {
                 display[dlen]     = '_';
                 display[dlen + 1] = '\0';
@@ -468,10 +478,14 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
                 button_draw(fb, &btn_space);
             button_draw(fb, &btn_cancel);
             button_draw(fb, &btn_ok);
+            if (mask) {
+                strncpy(btn_eye.text, reveal ? "HIDE" : "SHOW", sizeof(btn_eye.text) - 1);
+                button_draw(fb, &btn_eye);
+            }
 
             if (gm) {
                 if (focus_shown) {
-                    const Button *fbtn = (frow == rows) ? act_btn[fcol] : &letter_btns[frow][fcol];
+                    const Button *fbtn = (frow < 0) ? &btn_eye : (frow == rows) ? act_btn[fcol] : &letter_btns[frow][fcol];
                     for (int k = 0; k < 3; k++)
                         fb_draw_rect(fb, fbtn->x - k, fbtn->y - k,
                                      fbtn->width + 2 * k, fbtn->height + 2 * k, COLOR_YELLOW);
@@ -521,6 +535,8 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
             for (int a = 0; a < na && pick_r < 0; a++)
                 if (button_is_touched(act_btn[a], state.x, state.y))
                     pick_a = act_id[a];
+            if (mask && pick_r < 0 && pick_a < 0 && button_is_touched(&btn_eye, state.x, state.y))
+                pick_a = KA_EYE;
             if (pick_r >= 0 || pick_a >= 0) last_press = now;
         }
 
@@ -560,12 +576,17 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
             } else if ((dir >= 0 || act) && !focus_shown) {
                 focus_shown = true;           /* the first key only shows it */
                 dirty = true;
+            } else if (dir >= 0 && frow < 0) {
+                if (dir == BTN_ID_DOWN) { frow = 0; fcol = cols - 1; dirty = true; }
+            } else if (dir == BTN_ID_UP && mask && frow == 0) {
+                frow = -1; fcol = 0; dirty = true;
             } else if (dir >= 0) {
                 int fr = frow, fc = fcol;
                 kb_focus_move(cur_keys, layout, rows, cols, na, btn_w, aw, &fr, &fc, dir);
                 if (fr != frow || fc != fcol) { frow = fr; fcol = fc; dirty = true; }
             } else if (act) {
-                if (frow == rows) pick_a = act_id[fcol];
+                if (frow < 0) pick_a = KA_EYE;
+                else if (frow == rows) pick_a = act_id[fcol];
                 else { pick_r = frow; pick_c = fcol; }
             }
         }
@@ -581,6 +602,9 @@ static int kb_run(Framebuffer *fb, TouchInput *touch, GamepadManager *gm,
                 work[cursor]   = '\0';
                 dirty = true;
             }
+        } else if (pick_a == KA_EYE) {
+            reveal = !reveal;
+            dirty = true;
         } else if (pick_a == KA_DEL) {
             if (cursor > 0) {
                 work[--cursor] = '\0';
