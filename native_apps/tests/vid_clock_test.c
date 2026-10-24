@@ -156,18 +156,23 @@ static void test_decide(void)
 {
     VidClock c; vid_clock_init(&c, RATE);
     double p = 1.0 / 24.0;
-    CHECK(vid_clock_decide(&c, 10.0050, 10.0, p) == VID_CLK_WAIT, "5 ms early must wait");
-    CHECK(vid_clock_decide(&c, 10.0039, 10.0, p) == VID_CLK_SHOW, "3.9 ms early must show");
-    CHECK(vid_clock_decide(&c, 10.0, 10.0, p) == VID_CLK_SHOW, "on time must show");
-    CHECK(vid_clock_decide(&c, 10.0 - p * 0.99, 10.0, p) == VID_CLK_SHOW, "just under a period late must show");
-    CHECK(vid_clock_decide(&c, 10.0 - p * 1.01, 10.0, p) == VID_CLK_DROP, "just over a period late must drop");
+    CHECK(vid_clock_decide(&c, 10.0050, 10.0, p, 0.0) == VID_CLK_WAIT, "5 ms early must wait");
+    CHECK(vid_clock_decide(&c, 10.0039, 10.0, p, 0.0) == VID_CLK_SHOW, "3.9 ms early must show");
+    CHECK(vid_clock_decide(&c, 10.0, 10.0, p, 0.0) == VID_CLK_SHOW, "on time must show");
+    CHECK(vid_clock_decide(&c, 10.0 - p * 0.99, 10.0, p, 0.0) == VID_CLK_SHOW, "just under a period late must show");
+    CHECK(vid_clock_decide(&c, 10.0 - p * 1.01, 10.0, p, 0.0) == VID_CLK_DROP, "just over a period late must drop");
     /* positive offset delays the picture: a frame that was due now becomes early */
     vid_clock_set_offset(&c, 0.1);
-    CHECK(vid_clock_decide(&c, 10.0, 10.0, p) == VID_CLK_WAIT, "offset +0.1: on-time frame must now wait");
-    CHECK(vid_clock_decide(&c, 9.9, 10.0, p) == VID_CLK_SHOW, "offset +0.1: frame 0.1 s old is now due");
+    CHECK(vid_clock_decide(&c, 10.0, 10.0, p, 0.0) == VID_CLK_WAIT, "offset +0.1: on-time frame must now wait");
+    CHECK(vid_clock_decide(&c, 9.9, 10.0, p, 0.0) == VID_CLK_SHOW, "offset +0.1: frame 0.1 s old is now due");
     vid_clock_set_offset(&c, -0.1);
-    CHECK(vid_clock_decide(&c, 10.0, 10.0, p) == VID_CLK_DROP, "offset -0.1: on-time frame is now late");
-    CHECK(vid_clock_decide(&c, 10.1, 10.0, p) == VID_CLK_SHOW, "offset -0.1: frame 0.1 ahead is now due");
+    CHECK(vid_clock_decide(&c, 10.0, 10.0, p, 0.0) == VID_CLK_DROP, "offset -0.1: on-time frame is now late");
+    CHECK(vid_clock_decide(&c, 10.1, 10.0, p, 0.0) == VID_CLK_SHOW, "offset -0.1: frame 0.1 ahead is now due");
+    /* a stalled decoder catching up: late frames drop until nothing was shown for 0.25 s, then one is shown */
+    vid_clock_set_offset(&c, 0.0);
+    CHECK(vid_clock_decide(&c, 8.0, 10.0, p, 0.24) == VID_CLK_DROP, "2 s late, last shown 0.24 s ago: drop");
+    CHECK(vid_clock_decide(&c, 8.0, 10.0, p, 0.25) == VID_CLK_SHOW, "2 s late, nothing shown for 0.25 s: show anyway");
+    CHECK(vid_clock_decide(&c, 10.5, 10.0, p, 9.0) == VID_CLK_WAIT, "an early frame still waits however long since the last");
     printf("  decide: boundaries and offset sign checked\n");
 }
 

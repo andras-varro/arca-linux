@@ -21,6 +21,7 @@
 #define VC_SNAP   0.25      /* beyond this the jump is real: take it at once, s   */
 #define VC_CAP    0.15      /* extrapolate at most this far past the last step, s */
 #define VC_EARLY  0.004     /* a frame this early or less is shown, s             */
+#define VC_LATE_SHOW 0.25   /* a late frame is shown anyway when none was for this long, s */
 
 static double clampd(double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
@@ -102,10 +103,10 @@ double vid_clock_now(VidClock *c, double mono_now)
 
 void vid_clock_set_offset(VidClock *c, double seconds) { c->offset = seconds; }
 
-int vid_clock_decide(const VidClock *c, double frame_pts, double audio_t, double period)
+int vid_clock_decide(const VidClock *c, double frame_pts, double audio_t, double period, double since_shown)
 {
     double d = frame_pts + c->offset - audio_t;
     if (d > VC_EARLY) return VID_CLK_WAIT;
-    if (d > -period)  return VID_CLK_SHOW;
+    if (d > -period || since_shown >= VC_LATE_SHOW) return VID_CLK_SHOW;
     return VID_CLK_DROP;
 }

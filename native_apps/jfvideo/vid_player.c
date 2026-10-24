@@ -34,7 +34,7 @@
 static double mono_s(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (double)t.tv_sec + (double)t.tv_nsec * 1e-9; }
 
 typedef struct { int sub_fd; bool tls; uint8_t *buf; size_t len, cap; VidSrt srt; bool parsed;
-                 int cue; uint32_t *spr; int sw, sh, scap_w, scap_h; bool spr_on; } Subs;
+                 int cue; uint32_t *spr; int sw, sh, scap_w, scap_h; bool spr_on, drawn; } Subs;
 
 struct VidPlayer {
     Audio *audio; bool audio_ok; Framebuffer *fb; Logger *log;
@@ -50,6 +50,7 @@ struct VidPlayer {
     double frozen_pos; bool has_pos; double buf_since;
     bool dry_seen;                           /* a tick found the frame ring empty since the last frame left it */
     long drop_late, drop_starved, empty_ticks, last_late, last_starved, last_empty;
+    double shown_at;            /* mono_s() of the last presented frame; 0 = none since start or seek */
     uint32_t *line; uint8_t clampt[1024];
     int16_t yy[256], crr[256], cbb[256], crg[256], cbg[256];
     int px0, py0, pw, ph;                    /* picture rectangle, logical coordinates */
@@ -167,16 +168,16 @@ static void subs_reset(Subs *s, bool keep_buf)
 {
     if (s->sub_fd >= 0) { if (s->tls) http_stream_close(s->sub_fd); else close(s->sub_fd); s->sub_fd = -1; }
     if (s->parsed) { vid_srt_free(&s->srt); s->parsed = false; }
-    s->len = 0; s->cue = -2; s->spr_on = false;
+    s->len = 0; s->cue = -2; s->spr_on = false; s->drawn = false;
     if (!keep_buf) { free(s->buf); s->buf = NULL; s->cap = 0; free(s->spr); s->spr = NULL; s->scap_w = s->scap_h = 0; }
 }
 
-static void subs_poll(Subs *s)
+static void subs_poll(Subs *s, Logger *lg, long pos_ms)
 {
     for (int k = 0; k < 4 && s->sub_fd >= 0; k++) {
         if (s->cap - s->len < 16384) {
             size_t nc = s->cap ? s->cap * 2 : 65536;
-            if (nc > SUB_CAP + 16384) { subs_reset(s, true); return; }
+            if (nc > SUB_CAP + 16384) { if (lg) LOG_INFO(lg, "player: subtitles FAILED: over %u bytes", SUB_CAP); subs_reset(s, true); return; }
             uint8_t *nb = realloc(s->buf, nc);
             if (!nb) { subs_reset(s, true); return; }
             s->buf = nb; s->cap = nc;
@@ -185,10 +186,18 @@ static void subs_poll(Subs *s)
                            : read(s->sub_fd, s->buf + s->len, s->cap - s->len);
         if (n > 0) { s->len += (size_t)n; if (s->len > SUB_CAP) { subs_reset(s, true); return; } continue; }
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) return;
-        int fd = s->sub_fd;
+        int fd = s->sub_fd, serr = errno;
         s->sub_fd = -1;                                                    /* EOF or error */
         if (s->tls) http_stream_close(fd); else close(fd);
-        if (n == 0 && vid_srt_parse(&s->srt, (const char *)s->buf, s->len) >= 0) s->parsed = true;
+        if (n == 0) {
+            int cnt = vid_srt_parse(&s->srt, (const char *)s->buf, s->len);
+            if (cnt >= 0) {
+                s->parsed = true;
+                if (lg) LOG_INFO(lg, "player: subtitles loaded: %d cues, %lu bytes, first %d ms, last end %d ms, clock %ld ms%s", cnt,
+                                 (unsigned long)s->len, vid_srt_start_ms(&s->srt, 0), vid_srt_end_ms(&s->srt, cnt - 1),
+                                 pos_ms, cnt == 0 ? " (EMPTY: nothing to draw)" : "");
+            } else if (lg) LOG_INFO(lg, "player: subtitles FAILED: SRT parse error (%lu bytes)", (unsigned long)s->len);
+        } else if (lg) LOG_INFO(lg, "player: subtitles FAILED: read error %d after %lu bytes", serr, (unsigned long)s->len);
         return;
     }
 }
@@ -343,7 +352,7 @@ int vid_player_start(VidPlayer *p, int fd, const VidPlayerCfg *cfg)
     atomic_store(&p->stop, 0); atomic_store(&p->ready, 0); atomic_store(&p->done, 0); atomic_store(&p->result, -1);
     p->voice = p->fill_on = p->base_set = p->clk_on = p->first_set = p->paused = p->has_pos = false;
     p->shown = p->dropped = p->last_shown = p->last_dropped = 0; p->err_sum = p->err_max = 0; p->err_n = 0;
-    p->dry_seen = false; p->drop_late = p->drop_starved = p->empty_ticks = 0; p->last_late = p->last_starved = p->last_empty = 0;
+    p->dry_seen = false; p->shown_at = 0; p->drop_late = p->drop_starved = p->empty_ticks = 0; p->last_late = p->last_starved = p->last_empty = 0;
     p->underruns = 0; p->wait_s = 0; p->wait_set = false; p->stats_next = mono_s() + STATS_MS / 1000.0; p->buf_since = 0;
     p->on = true;
     if (cfg->tls) {
@@ -444,7 +453,7 @@ static int finish(VidPlayer *p, int code, const char *why)
 int vid_player_tick(VidPlayer *p, unsigned long long now_ms)
 {
     (void)now_ms;
-    subs_poll(&p->sub);
+    subs_poll(&p->sub, p->log, vid_player_position(p));
     if (!p->on) return -1;
     double mono = mono_s();
     if (!atomic_load_explicit(&p->ready, memory_order_acquire)) {
@@ -494,7 +503,7 @@ int vid_player_tick(VidPlayer *p, unsigned long long now_ms)
     for (int i = 0; i < 4; i++) {
         const VidFrame *f = vid_fring_peek(&p->fr);
         if (!f) break;
-        int d = vid_clock_decide(&p->clk, f->pts, t, period);
+        int d = vid_clock_decide(&p->clk, f->pts, t, period, mono - p->shown_at);
         if (d == VID_CLK_WAIT) break;
         if (d == VID_CLK_DROP) {
             /* starved: the ring ran dry before this frame arrived (decoder late); late: it was queued in time and this loop missed it */
@@ -503,6 +512,7 @@ int vid_player_tick(VidPlayer *p, unsigned long long now_ms)
             vid_fring_release(&p->fr); p->dropped++; continue;
         }
         present(p, f);
+        p->shown_at = mono;
         /* error as the viewer gets it: the clock read after the picture is on the panel, not at the start of the tick */
         double tp = audio ? vid_clock_now(&p->clk, mono_s()) : mono_s() - p->mono0;
         double e = f->pts + p->clk.offset - tp;
@@ -519,6 +529,10 @@ int vid_player_tick(VidPlayer *p, unsigned long long now_ms)
                 s->cue = cue;
                 if (cue < 0) s->spr_on = false;
                 else { int sc = p->cfg.sub_scale == 3 ? 3 : 2; sprite_build(s, vid_srt_text(&s->srt, cue), sc, sc == 2 ? 720 : 760); }
+                if (cue >= 0 && !s->drawn && p->log) {
+                    s->drawn = true;
+                    LOG_INFO(p->log, "player: first subtitle cue %d at %ld ms, sprite %dx%d on=%d", cue, vid_player_position(p), s->sw, s->sh, (int)s->spr_on);
+                }
             }
             sprite_blit(p);
         }

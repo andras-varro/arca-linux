@@ -57,8 +57,10 @@ double vid_clock_now(VidClock *c, double mono_now);
 void vid_clock_set_offset(VidClock *c, double seconds);
 /**
  * WAIT when the frame is more than 4 ms early, DROP when it is a full `period` or more
- * late, SHOW between.  `audio_t` is vid_clock_now().
+ * late, SHOW between.  `audio_t` is vid_clock_now().  A late frame is SHOWN anyway once
+ * `since_shown` (seconds since the last presented frame) reaches 0.25 s: a decoder catching up
+ * after a stall then moves the picture at ~4 fps instead of freezing it until it is back in time.
  */
-int vid_clock_decide(const VidClock *c, double frame_pts, double audio_t, double period);
+int vid_clock_decide(const VidClock *c, double frame_pts, double audio_t, double period, double since_shown);
 
 #endif
