@@ -438,8 +438,6 @@ void jf_step(JfApp *app, const JfEvent *ev, JfCmds *out);
  *  pushed from here can be returned to as it was: the next BACK sets restore_top / restore_cursor and bumps restore_seq. */
 void jf_note_view(JfApp *app, int top, int cursor);
 
-/** user_mdb for a volume step: 0 -> -100000 (mute, whatever the track's norm), else (step-10)*3000. */
-int jf_volume_mdb(int step);
 
 /** The queue entry playing (or last played); NULL when the queue is empty. */
 const JfItem *jf_now(const JfApp *app);

@@ -19,12 +19,6 @@ static void copy(char *dst, size_t cap, const char *src)
     snprintf(dst, cap, "%s", src);
 }
 
-int jf_volume_mdb(int step)
-{
-    if (step <= 0) return -100000;
-    return (step - 10) * 3000;
-}
-
 const JfItem *jf_now(const JfApp *app)
 {
     return app->queue_n > 0 && app->queue_cur >= 0 && app->queue_cur < app->queue_n

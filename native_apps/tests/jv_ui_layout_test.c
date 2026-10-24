@@ -2,7 +2,7 @@
  * the function the app draws and hit-tests with, run against several extents.
  *
  *   A  every pressable rect of a screen (sign-in rows and buttons, home tiles, grid cells and scroll buttons,
- *      list, search rows, details text, track rows, action row, player BACK) lies inside SAFE;
+ *      list, search rows, details text, track rows, action row, player back, bottom-bar buttons and progress track) lies inside SAFE;
  *   B  within one screen no two rects overlap;
  *   C  the drawn-only rects (banner, details poster, player info) lie inside VISIBLE; the poster does not
  *      overlap the details text;
@@ -35,6 +35,7 @@ static const char *const N_CELL[JV_UI_CELLS] = { "cell0", "cell1", "cell2", "cel
                                                  "cell5", "cell6", "cell7", "cell8", "cell9" };
 static const char *const N_TRK[JV_UI_TRK] = { "trk0", "trk1" };
 static const char *const N_ACT[JV_UI_ACT] = { "act0", "act1", "act2", "act3" };
+static const char *const N_PBTN[JV_UI_PBTN] = { "seek-", "play", "seek+", "stop", "eq", "vol-", "vol+", "audio", "subs" };
 
 /* One screen's rects: `hit` ones are pressable (checked against SAFE), the others are drawn only (checked against VISIBLE). */
 typedef struct { const char *name; UiRect r; } Item;
@@ -113,9 +114,73 @@ static void run(const char *tag, const JvExtents *e)
     for (int i = 0; i < JV_UI_ACT; i++) add(&g, N_ACT[i], L.act[i]);
     group_flush(&g, e, tag);
 
+    /* player overlay (bottom bar, title row): pressable parts inside SAFE and disjoint; the rest inside their band */
     memset(&g, 0, sizeof g); g.screen = "player"; g.hit = true;
-    add(&g, "pback", L.pback);
+    add(&g, "tb_back", L.tb_back);
+    for (int i = 0; i < JV_UI_PBTN; i++) add(&g, N_PBTN[i], L.pbtn[i]);
+    add(&g, "ptrack", L.ptrack);
     group_flush(&g, e, tag);
+
+    memset(&g, 0, sizeof g); g.screen = "player-drawn"; g.hit = false;
+    add(&g, "top_band", L.top_band);
+    add(&g, "pic", L.pic);
+    add(&g, "bot_band", L.bot_band);
+    group_flush(&g, e, tag);
+
+    memset(&g, 0, sizeof g); g.screen = "player-top"; g.hit = false;
+    add(&g, "tb_back", L.tb_back);
+    add(&g, "tb_title", L.tb_title);
+    add(&g, "tb_vol", L.tb_vol);
+    add(&g, "tb_clock", L.tb_clock);
+    group_flush(&g, e, tag);
+    CHECK(inside(L.tb_back, L.top_band.x, L.top_band.y, L.top_band.x + L.top_band.w, L.top_band.y + L.top_band.h) &&
+          inside(L.tb_title, L.top_band.x, L.top_band.y, L.top_band.x + L.top_band.w, L.top_band.y + L.top_band.h) &&
+          inside(L.tb_vol, L.top_band.x, L.top_band.y, L.top_band.x + L.top_band.w, L.top_band.y + L.top_band.h) &&
+          inside(L.tb_clock, L.top_band.x, L.top_band.y, L.top_band.x + L.top_band.w, L.top_band.y + L.top_band.h),
+          "C: a title-row part lies outside the top band [%s]", tag);
+
+    memset(&g, 0, sizeof g); g.screen = "player-bottom"; g.hit = false;
+    add(&g, "ppos", L.ppos);
+    add(&g, "ptrack", L.ptrack);
+    add(&g, "pdur", L.pdur);
+    group_flush(&g, e, tag);
+    {
+        bool in_bot = true;
+        UiRect bb = L.bot_band;
+        UiRect parts[] = { L.ppos, L.ptrack, L.pdur };
+        for (unsigned k = 0; k < sizeof parts / sizeof parts[0]; k++) in_bot = in_bot && inside(parts[k], bb.x, bb.y, bb.x + bb.w, bb.y + bb.h);
+        for (int i = 0; i < JV_UI_PBTN; i++) in_bot = in_bot && inside(L.pbtn[i], bb.x, bb.y, bb.x + bb.w, bb.y + bb.h);
+        CHECK(in_bot, "C: a bottom-bar part lies outside the bottom band [%s]", tag);
+    }
+    CHECK(inside(L.pbanner, L.pic.x, L.pic.y, L.pic.x + L.pic.w, L.pic.y + L.pic.h),
+          "C: the player banner lies outside the picture area [%s]", tag);
+
+    /* the bands tile the picture: pic starts where the top band ends and ends where the bottom band starts */
+    CHECK(L.pic.y == L.top_band.y + L.top_band.h && L.pic.y + L.pic.h == L.bot_band.y,
+          "C: the picture area (y %d..%d) is not between the bands (%d / %d) [%s]", L.pic.y, L.pic.y + L.pic.h,
+          L.top_band.y + L.top_band.h, L.bot_band.y, tag);
+
+    /* progress track: x -> ms is monotonic, exact at both ends, clamped outside; ms -> width stays in 0..w */
+    {
+        static const long rts[] = { 1, 59999, 5400000, 14400000 };
+        for (unsigned k = 0; k < sizeof rts / sizeof rts[0]; k++) {
+            long rt = rts[k], prev = -1;
+            bool mono = true;
+            for (int x = L.ptrack.x - 5; x <= L.ptrack.x + L.ptrack.w + 5; x++) {
+                long ms = jv_ui_progress_ms(&L, x, rt);
+                if (ms < prev || ms < 0 || ms > rt) mono = false;
+                prev = ms;
+            }
+            CHECK(mono, "P: progress x->ms is not monotonic within 0..%ld [%s]", rt, tag);
+            CHECK(jv_ui_progress_ms(&L, L.ptrack.x, rt) == 0, "P: first pixel is not 0 ms (runtime %ld) [%s]", rt, tag);
+            CHECK(jv_ui_progress_ms(&L, L.ptrack.x + L.ptrack.w - 1, rt) == rt, "P: last pixel is not the runtime %ld [%s]", rt, tag);
+            CHECK(jv_ui_progress_ms(&L, L.ptrack.x - 50, rt) == 0 && jv_ui_progress_ms(&L, L.ptrack.x + L.ptrack.w + 50, rt) == rt,
+                  "P: taps beside the track do not clamp to the ends (runtime %ld) [%s]", rt, tag);
+            CHECK(jv_ui_progress_w(&L, 0, rt) == 0 && jv_ui_progress_w(&L, rt, rt) == L.ptrack.w &&
+                  jv_ui_progress_w(&L, rt / 2, rt) <= L.ptrack.w, "P: fill width ends wrong (runtime %ld) [%s]", rt, tag);
+        }
+        CHECK(jv_ui_progress_ms(&L, L.ptrack.x + 10, 0) == 0, "P: unknown runtime must give 0 [%s]", tag);
+    }
 
     /* drawn only: the bar's banner, the details poster (beside the text, not on it), the player's request text */
     memset(&g, 0, sizeof g); g.screen = "banner"; g.hit = false;
@@ -128,10 +193,6 @@ static void run(const char *tag, const JvExtents *e)
     CHECK(disjoint(L.poster, L.text),
           "C: details poster (%d,%d %dx%d) overlaps the details text (%d,%d %dx%d) [%s]",
           L.poster.x, L.poster.y, L.poster.w, L.poster.h, L.text.x, L.text.y, L.text.w, L.text.h, tag);
-
-    memset(&g, 0, sizeof g); g.screen = "player-drawn"; g.hit = false;
-    add(&g, "pinfo", L.pinfo);
-    group_flush(&g, e, tag);
 }
 
 int main(void)

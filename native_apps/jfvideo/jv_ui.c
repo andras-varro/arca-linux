@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "jf_login.h"
@@ -264,9 +265,7 @@ static int build_zones(JvUi *ui, UiZone z[UZ_ZONES])
         for (int i = 0; i < n; i++) zone_add(&z[Z_MAIN], L->tile[i], ids[i]);
         break;
     }
-    case JV_SCR_PLAYER:
-        zone_add(&z[Z_MAIN], L->pback, 0);
-        break;
+    case JV_SCR_PLAYER: break;
     case JV_SCR_DETAILS: {
         z[Z_MAIN].lv = &ui->lv;
         if (c->detail_ready && c->detail.n_audio > 1) zone_add(&z[Z_B2], L->trk[0], A_AUDIO);
@@ -298,6 +297,12 @@ static UiRect list_rect(const JvUi *ui)
 static void begin_screen(JvUi *ui)
 {
     const JvCore *c = ui->core;
+    if (c->screen == JV_SCR_PLAYER && ui->last_screen != JV_SCR_PLAYER) {   /* entering: the overlay starts up, for the auto-hide time */
+        ui->ov_shown = ui->ov_fresh = ui->bands_dirty = true;
+        ui->ov_ring = false; ui->ov_focus = -1;
+        memset(&ui->sig, 0, sizeof ui->sig);
+        ui->eq_up = false;
+    } else if (c->screen != JV_SCR_PLAYER) ui->ov_shown = ui->eq_up = false;
     ui->last_screen = c->screen;
     ui->last_kind = c->kind;
     bool shown = ui->zf.shown;
@@ -404,9 +409,7 @@ static void act(JvUi *ui, int zone, int id, Pointer *ptr, JvEvent *out, int *n, 
         if (id == A_SEARCH) do_search(ui, ptr, out, n, max);
         else { int k = emit(out, n, max, JV_EV_HOME); if (k >= 0) out[k].i = id; }
         break;
-    case JV_SCR_PLAYER:
-        emit(out, n, max, JV_EV_BACK);
-        break;
+    case JV_SCR_PLAYER: break;   /* the player has its own input, player_input() */
     case JV_SCR_DETAILS:
         if (zone == Z_B2) emit(out, n, max, id == A_AUDIO ? JV_EV_AUDIO_NEXT : JV_EV_SUB_NEXT);
         else if (zone == Z_B3) {
@@ -450,6 +453,177 @@ static void overlay_input(JvUi *ui, const TouchState *ts, const InputState *in, 
     }
 }
 
+/* ── player overlay: input ─────────────────────────────────────────────── */
+
+#define PH_BACK  9      /* hit ids beyond the nine pbtn: the title row's stop, the progress track, the bare picture */
+#define PH_TRACK 10
+#define PH_PIC   11
+#define PH_SHOW  12     /* a press while the overlay was hidden: its release shows it */
+#define PH_NONE  (-1)
+#define OV_HIDE_MS 4000
+#define TRK_NOTE_MS 2500   /* how long the title row names a just-cycled track */
+
+static void ov_show(JvUi *ui, uint32_t now)
+{
+    if (!ui->ov_shown) { ui->ov_shown = true; ui->bands_dirty = true; }
+    ui->ov_last = now;
+}
+
+static void ov_hide(JvUi *ui)
+{
+    if (ui->ov_shown) { ui->ov_shown = false; ui->bands_dirty = true; }
+}
+
+static int ph_hit(const JvUi *ui, int x, int y)
+{
+    const JvLayout *L = &ui->L;
+    for (int i = 0; i < JV_UI_PBTN; i++) if (in_rect(L->pbtn[i], x, y)) return i;
+    if (in_rect(L->tb_back, x, y)) return PH_BACK;
+    if (in_rect(L->ptrack, x, y)) return PH_TRACK;
+    if (in_rect(L->pic, x, y)) return PH_PIC;
+    return PH_NONE;
+}
+
+/* A bottom-bar button or the title row's stop. */
+static void p_press(JvUi *ui, int id, JvEvent *out, int *n, int max)
+{
+    int k;
+    switch (id) {
+    case PB_SEEK_BACK: case PB_SEEK_FWD:
+        k = emit(out, n, max, JV_EV_SEEK_STEP);
+        if (k >= 0) out[k].i = id == PB_SEEK_BACK ? -1 : 1;
+        break;
+    case PB_PLAY: emit(out, n, max, JV_EV_PAUSE); break;
+    case PB_STOP: case PH_BACK: emit(out, n, max, JV_EV_BACK); break;
+    case PB_EQ: ui->acts |= JV_UI_ACTB_EQ_OPEN; break;
+    case PB_VOL_DN: ui->acts |= JV_UI_ACTB_VOL_DN; break;
+    case PB_VOL_UP: ui->acts |= JV_UI_ACTB_VOL_UP; break;
+    case PB_AUDIO: emit(out, n, max, JV_EV_AUDIO_NEXT); ui->trk_note = 1; ui->trk_t = ui->p_now; break;
+    case PB_SUBS: emit(out, n, max, JV_EV_SUB_NEXT); ui->trk_note = 2; ui->trk_t = ui->p_now; break;
+    default: break;
+    }
+    ui->bands_dirty = true;
+}
+
+/* The focus ring runs over the nine buttons (0..8) and the title row's stop (9). */
+static void p_focus_rects(const JvUi *ui, UiRect r[JV_UI_PBTN + 1])
+{
+    for (int i = 0; i < JV_UI_PBTN; i++) r[i] = ui->L.pbtn[i];
+    r[JV_UI_PBTN] = ui->L.tb_back;
+}
+
+static void p_focus_set(JvUi *ui, int f)
+{
+    if (f >= 0 && f != ui->ov_focus) { ui->ov_focus = f; ui->bands_dirty = true; }
+}
+
+static void p_keys(JvUi *ui, const InputState *in, uint32_t now, JvEvent *out, int *n, int max)
+{
+    if (!in) return;
+    bool seek_l = bp(in, BTN_ID_LEFT), seek_r = bp(in, BTN_ID_RIGHT);
+    bool upd = bp(in, BTN_ID_UP) || bp(in, BTN_ID_DOWN), cyc = bp(in, BTN_ID_NEXT) || bp(in, BTN_ID_PREV);
+    if (bp(in, BTN_ID_JUMP)) {                      /* Space / pad A: pause here, not "activate" */
+        emit(out, n, max, JV_EV_PAUSE);
+        ov_show(ui, now);
+    } else if (seek_l || seek_r) {
+        int k = emit(out, n, max, JV_EV_SEEK_STEP);
+        if (k >= 0) out[k].i = seek_l ? -1 : 1;
+        ov_show(ui, now);
+    } else if (bp(in, BTN_ID_ACTION)) {             /* Enter */
+        if (!ui->ov_shown || ui->ov_focus < 0) { ov_show(ui, now); ui->ov_ring = true; p_focus_set(ui, PB_PLAY); }
+        else p_press(ui, ui->ov_focus, out, n, max);
+    } else if (upd || cyc) {
+        bool was = ui->ov_shown;
+        ov_show(ui, now);
+        ui->ov_ring = true;
+        if (!was || ui->ov_focus < 0) p_focus_set(ui, PB_PLAY);
+        else if (upd) {
+            UiRect r[JV_UI_PBTN + 1];
+            p_focus_rects(ui, r);
+            int f = ui_focus_move(r, JV_UI_PBTN + 1, ui->ov_focus, bp(in, BTN_ID_UP) ? UI_DIR_UP : UI_DIR_DOWN);
+            p_focus_set(ui, f);
+        } else {                                    /* Tab / RB / LB step along the row (Left and Right seek) */
+            int f = ui->ov_focus >= JV_UI_PBTN ? PB_PLAY : ui->ov_focus;
+            f += bp(in, BTN_ID_NEXT) ? 1 : JV_UI_PBTN - 1;
+            if (f >= JV_UI_PBTN) f -= JV_UI_PBTN;
+            p_focus_set(ui, f);
+        }
+        ui->bands_dirty = true;
+    } else if (bp(in, BTN_ID_PAUSE) || bp(in, BTN_ID_CANCEL) || bp(in, BTN_ID_BACK)) {   /* Esc / pad B: hide, else stop */
+        if (ui->ov_shown) ov_hide(ui);
+        else emit(out, n, max, JV_EV_BACK);
+    }
+    if (ui->ov_shown && (seek_l || seek_r || upd || cyc || bp(in, BTN_ID_ACTION) || bp(in, BTN_ID_JUMP))) ui->ov_last = now;
+}
+
+static void eq_input(JvUi *ui, const TouchState *ts, const InputState *in, uint32_t now)
+{
+    EqPanelEvent ev = eq_panel_input(&ui->eq, ts, in, now);
+    if (ev != EQP_NONE) {
+        memcpy(ui->eq_out, eq_panel_gains(&ui->eq), sizeof ui->eq_out);
+        ui->enh_out = *eq_panel_enh(&ui->eq);
+        ui->eq_apply = true;
+        ui->eq_save = ev == EQP_DONE;
+    }
+    if (ev == EQP_DONE || ev == EQP_CANCEL) {
+        ui->eq_up = false;
+        ui->eq_closed = true;
+        touch_guard_screen_changed(&ui->guard, now);   /* the finger that closed it must not press what is underneath */
+    }
+    if (eq_panel_take_dirty(&ui->eq) || !ui->eq_up) ui->dirty = true;
+}
+
+/* The PLAYER screen's whole input.  Touch acts on release over the widget the finger went down on. */
+static void player_input(JvUi *ui, const TouchState *ts, const InputState *in, uint32_t now, JvEvent *out, int *n, int max)
+{
+    ui->p_now = now;
+    const JvCore *c = ui->core;
+    if (ui->eq_up) { eq_input(ui, ts, in, now); return; }
+    if (ui->ov_fresh) { ui->ov_fresh = false; ui->ov_last = now; }
+    if (ts->pressed) {
+        ui->ov_ring = false;
+        ui->press_id = ui->ov_shown ? ph_hit(ui, ts->x, ts->y) : PH_SHOW;
+        if (ui->ov_focus >= 0 && ui->press_id >= 0) ui->bands_dirty = true;   /* the ring goes */
+    }
+    if (ui->ov_shown && (ts->pressed || ts->held)) ui->ov_last = now;
+    if (ts->released) {
+        int id = ui->press_id;
+        ui->press_id = -1;
+        if (id == PH_SHOW) ov_show(ui, now);
+        else if (id >= 0 && ph_hit(ui, ts->x, ts->y) == id) {
+            ui->ov_last = now;
+            if (id == PH_PIC) ov_hide(ui);
+            else if (id == PH_TRACK) {
+                int k = emit(out, n, max, JV_EV_SEEK_TO);
+                if (k >= 0) out[k].i = (int)jv_ui_progress_ms(&ui->L, ts->x, c->play.runtime_ms);
+            } else p_press(ui, id, out, n, max);
+        }
+    }
+    p_keys(ui, in, now, out, n, max);
+    if (ui->trk_note && (uint32_t)(now - ui->trk_t) > TRK_NOTE_MS) { ui->trk_note = 0; ui->bands_dirty = true; }
+    if (ui->ov_shown && c->play_state != JV_PLAY_PAUSED && (uint32_t)(now - ui->ov_last) > OV_HIDE_MS) ov_hide(ui);
+
+    /* what the bands show: repaint them (and only them) when it changed */
+    JvPSig s;
+    memset(&s, 0, sizeof s);
+    s.shown = ui->ov_shown;
+    s.busy = c->busy;
+    if (ui->ov_shown) {
+        s.focus = ui->ov_ring ? ui->ov_focus : -1;
+        s.state = c->play_state;
+        s.vol = ui->vol_step; s.volmax = ui->vol_max;
+        s.pos_s = (int)(jv_core_position(c) / 1000);
+        s.dur_s = (int)(c->play.runtime_ms / 1000);
+        s.clk = (int)(time(NULL) / 60);
+        s.seek = c->seek_pending;
+    }
+    if (memcmp(&s, &ui->sig, sizeof s)) {
+        if (s.busy != ui->sig.busy) ui->dirty = true;          /* BUFFERING... lives outside the bands: a full frame */
+        if (s.shown) ui->bands_dirty = true;
+        ui->sig = s;
+    }
+}
+
 int jv_ui_input(JvUi *ui, const TouchState *ts, const InputState *in, Pointer *ptr, uint32_t now, JvEvent *out, int max)
 {
     const JvCore *c = ui->core;
@@ -487,6 +661,7 @@ int jv_ui_input(JvUi *ui, const TouchState *ts, const InputState *in, Pointer *p
     }
     if (c->overlay) { overlay_input(ui, ts, in, now, out, &n, max); return n; }
     ui->dlg_up = false;
+    if (c->screen == JV_SCR_PLAYER) { player_input(ui, ts, in, now, out, &n, max); return n; }
 
     bool pad_nav = bp(in, BTN_ID_UP) || bp(in, BTN_ID_DOWN) || bp(in, BTN_ID_LEFT) || bp(in, BTN_ID_RIGHT) ||
                    bp(in, BTN_ID_JUMP) || bp(in, BTN_ID_ACTION) || bp(in, BTN_ID_NEXT) || bp(in, BTN_ID_PREV);
@@ -680,9 +855,67 @@ static void draw_details(JvUi *ui)
     }
 }
 
+static void draw_player_bands(JvUi *ui)
+{
+    if (!ui->ov_shown) return;
+    const JvCore *c = ui->core;
+    const JvLayout *L = &ui->L;
+    Framebuffer *fb = ui->fb;
+    char t[64];
+    UiRect tb = L->top_band, bb = L->bot_band;
+
+    fb_fill_rect(fb, tb.x, tb.y, tb.w, tb.h, BG);
+    fb_fill_rect(fb, tb.x, tb.y + tb.h - 1, tb.w, 1, BTN_HL);
+    draw_btn(ui, L->tb_back, "<", 3, RED_BG);
+    char nm[64];
+    if (ui->trk_note) trk_label(c, ui->trk_note == 1, nm, sizeof nm);
+    else snprintf(nm, sizeof nm, "%s", c->detail_ready ? c->detail.it.b.name : "");
+    lv_fit(t, sizeof t, nm, L->tb_title.w, 2);
+    fb_draw_text(fb, L->tb_title.x, L->tb_title.y + (L->tb_title.h - FONT_ROWS * 2) / 2, t, COLOR_WHITE, 2);
+    snprintf(t, sizeof t, "VOL %d/%d", ui->vol_step, ui->vol_max);
+    fb_draw_text(fb, L->tb_vol.x + L->tb_vol.w - text_measure_width(t, 2), L->tb_vol.y + (L->tb_vol.h - FONT_ROWS * 2) / 2, t, DIM, 2);
+    time_t now = time(NULL);
+    struct tm tmv;
+    if (localtime_r(&now, &tmv)) snprintf(t, sizeof t, "%02d:%02d", tmv.tm_hour, tmv.tm_min);
+    else snprintf(t, sizeof t, "--:--");
+    fb_draw_text(fb, L->tb_clock.x + L->tb_clock.w - text_measure_width(t, 2), L->tb_clock.y + (L->tb_clock.h - FONT_ROWS * 2) / 2, t, DIM, 2);
+
+    fb_fill_rect(fb, bb.x, bb.y, bb.w, bb.h, BG);
+    fb_fill_rect(fb, bb.x, bb.y, bb.w, 1, BTN_HL);
+    long pos = jv_core_position(c), dur = c->play.runtime_ms;
+    if (pos < 0) pos = 0;
+    mmss(t, sizeof t, pos / 1000);
+    fb_draw_text(fb, L->ppos.x, L->ppos.y + (L->ppos.h - FONT_ROWS * 2) / 2, t, c->seek_pending ? RING : COLOR_WHITE, 2);
+    mmss(t, sizeof t, dur / 1000);
+    fb_draw_text(fb, L->pdur.x + L->pdur.w - text_measure_width(t, 2), L->pdur.y + (L->pdur.h - FONT_ROWS * 2) / 2, t, DIM, 2);
+    UiRect tr = L->ptrack;
+    fb_fill_rect(fb, tr.x, tr.y, tr.w, tr.h, PANEL);
+    int fw = jv_ui_progress_w(L, pos, dur);
+    if (fw > 0) fb_fill_rect(fb, tr.x, tr.y, fw, tr.h, c->seek_pending ? RING : BTN_HL);
+    fb_draw_rect(fb, tr.x, tr.y, tr.w, tr.h, DIM);
+
+    static const char *lbl[JV_UI_PBTN] = { "<<", "PAUSE", ">>", "STOP", "EQ", "VOL-", "VOL+", "AUDIO", "SUBS" };
+    for (int i = 0; i < JV_UI_PBTN; i++) {
+        const char *s = lbl[i];
+        if (i == PB_PLAY && c->play_state == JV_PLAY_PAUSED) s = "PLAY";
+        draw_btn(ui, L->pbtn[i], s, 2, i == PB_STOP ? RED_BG : BTN_BG);
+    }
+    if (ui->ov_ring && ui->ov_focus >= 0 && ui->ov_focus <= JV_UI_PBTN)
+        ring(ui, ui->ov_focus == JV_UI_PBTN ? L->tb_back : L->pbtn[ui->ov_focus]);
+}
+/* The PLAYER screen: the bands and the banner, never a clear (the picture is under them; the loop clears to black
+ * and repaints it after a full swap). */
 static void draw_player(JvUi *ui)
 {
-    draw_btn(ui, ui->L.pback, "BACK", 3, BTN_BG);
+    const JvCore *c = ui->core;
+    const JvLayout *L = &ui->L;
+    if (c->banner[0]) fb_draw_text(ui->fb, L->pbanner.x + 4, L->pbanner.y + 2, c->banner, RING, 2);
+    if (c->busy) {
+        const char *w = "BUFFERING...";
+        fb_draw_text(ui->fb, L->pbanner.x + L->pbanner.w - 8 - text_measure_width(w, 2), L->pbanner.y + 2, w, DIM, 2);
+    }
+    draw_player_bands(ui);
+    if (c->overlay && ui->dlg_up) modal_dialog_draw(&ui->dlg, ui->fb);
 }
 
 void jv_ui_draw(JvUi *ui)
@@ -690,6 +923,12 @@ void jv_ui_draw(JvUi *ui)
     const JvCore *c = ui->core;
     Framebuffer *fb = ui->fb;
     const JvLayout *L = &ui->L;
+    if (ui->eq_up) {
+        fb_clear(fb, BG);
+        eq_panel_draw(&ui->eq, fb);
+        return;
+    }
+    if (c->screen == JV_SCR_PLAYER) { draw_player(ui); return; }
     fb_clear(fb, BG);
     const char *title = JF_APP_TITLE;
     if (c->screen != JV_SCR_HOME && c->screen != JV_SCR_SIGNIN && c->crumb[0]) title = c->crumb;
@@ -721,7 +960,7 @@ void jv_ui_draw(JvUi *ui)
         for (int i = 0; i < n; i++) draw_btn(ui, L->tile[i], name[ids[i]], 3, BTN_BG);
         break;
     }
-    case JV_SCR_PLAYER: draw_player(ui); break;
+    case JV_SCR_PLAYER: break;
     case JV_SCR_DETAILS: draw_details(ui); break;
     default:
         if (is_grid(c)) {
@@ -745,3 +984,43 @@ void jv_ui_draw(JvUi *ui)
     }
     if (c->overlay && ui->dlg_up) modal_dialog_draw(&ui->dlg, fb);
 }
+
+/* ── the player overlay's out-API ──────────────────────────────────────── */
+
+bool jv_ui_overlay_shown(const JvUi *ui) { return ui->ov_shown; }
+bool jv_ui_take_bands_dirty(JvUi *ui) { bool d = ui->bands_dirty; ui->bands_dirty = false; return d; }
+void jv_ui_band_rects(const JvUi *ui, UiRect *top, UiRect *bot)
+{
+    if (top) *top = ui->L.top_band;
+    if (bot) *bot = ui->L.bot_band;
+}
+unsigned jv_ui_take_actions(JvUi *ui) { unsigned a = ui->acts; ui->acts = 0; return a; }
+void jv_ui_set_volume(JvUi *ui, int step, int max)
+{
+    if (step == ui->vol_step && max == ui->vol_max) return;
+    ui->vol_step = step; ui->vol_max = max;
+    if (ui->ov_shown) ui->bands_dirty = true;
+}
+
+/* The equaliser panel: opened by the loop on JV_UI_ACTB_EQ_OPEN with the gains in force, owns the screen and every input until
+ * DONE or CANCEL.  The loop applies what jv_ui_eq_take() hands back and repaints the picture when jv_ui_eq_closed() says so. */
+void jv_ui_eq_open(JvUi *ui, const int gains[EQ_BANDS], const AudioEnh *enh, uint32_t now)
+{
+    AudioEnh en;
+    memset(&en, 0, sizeof en);
+    if (enh) en = *enh;
+    eq_panel_open_enh(&ui->eq, gains, &en, SCREEN_SAFE_LEFT, SCREEN_SAFE_TOP, SCREEN_SAFE_RIGHT, SCREEN_SAFE_BOTTOM, now);
+    ui->eq_up = true;
+    ui->dirty = true;
+    touch_guard_screen_changed(&ui->guard, now);
+}
+bool jv_ui_eq_take(JvUi *ui, int gains[EQ_BANDS], bool *save)
+{
+    if (!ui->eq_apply) return false;
+    memcpy(gains, ui->eq_out, sizeof ui->eq_out);
+    if (save) *save = ui->eq_save;
+    ui->eq_apply = ui->eq_save = false;
+    return true;
+}
+const AudioEnh *jv_ui_enh_out(const JvUi *ui) { return &ui->enh_out; }
+bool jv_ui_eq_closed(JvUi *ui) { bool c = ui->eq_closed; ui->eq_closed = false; return c; }

@@ -316,6 +316,46 @@ static void test_seek_burst(void)
     CHECK(again == 0, "no second restart");
 }
 
+static void test_seek_step(void)
+{
+    in_player(0);
+    step(JV_EV_POS, 100000);
+    static const long UP[] = { 110000, 140000, 200000, 500000 };   /* 10 s, 30 s, 1 min, 5 min */
+    int ok = 1;
+    for (int k = 0; k < 4; k++) {
+        now += 100; step(JV_EV_SEEK_STEP, 1);
+        if (jv_core_position(&core) != UP[k]) { ok = 0; CHECK(0, "step %d lands on %ld, wanted %ld", k, jv_core_position(&core), UP[k]); }
+    }
+    CHECK(ok, "ladder 10 s, 30 s, 1 min, 5 min");
+    now += 100; step(JV_EV_SEEK_STEP, 1);
+    CHECK(jv_core_position(&core) == 800000 || jv_core_position(&core) == core.play.runtime_ms - 1000, "capped at 5 min (%ld)", jv_core_position(&core));
+    /* the other direction starts over at 10 s */
+    long before = jv_core_position(&core);
+    now += 100; step(JV_EV_SEEK_STEP, -1);
+    CHECK(jv_core_position(&core) == before - 10000, "direction change restarts the ladder (%ld from %ld)", jv_core_position(&core), before);
+    now += 100; step(JV_EV_SEEK_STEP, -1);
+    CHECK(jv_core_position(&core) == before - 40000, "and climbs again (%ld)", jv_core_position(&core));
+    /* quiet period: the restart fires and the next burst starts at 10 s again */
+    now += 800; step(JV_EV_TICK, 0);
+    const JvCmd *s = req(JF_KIND_STREAM, 1);
+    CHECK(s && !core.seek_pending, "quiet period restarts the stream");
+    if (s) reply_stream(s->tag, 8);
+    long p0 = core.pos_ms;
+    now += 100; step(JV_EV_SEEK_STEP, 1);
+    CHECK(jv_core_position(&core) == p0 + 10000, "after the quiet period the ladder is back at 10 s (%ld from %ld)", jv_core_position(&core), p0);
+    /* clamps at the start */
+    step(JV_EV_SEEK_TO, 3000);
+    now += 100; step(JV_EV_SEEK_STEP, -1);
+    CHECK(jv_core_position(&core) == 0, "clamped at 0 (%ld)", jv_core_position(&core));
+    /* works while paused */
+    now += 800; step(JV_EV_TICK, 0);
+    s = req(JF_KIND_STREAM, 1); if (s) reply_stream(s->tag, 9);
+    step(JV_EV_POS, 60000);
+    step(JV_EV_PAUSE, 0);
+    now += 100; step(JV_EV_SEEK_STEP, 1);
+    CHECK(core.play_state == JV_PLAY_PAUSED && jv_core_position(&core) == 70000, "step while paused (%ld)", jv_core_position(&core));
+}
+
 static void test_audio_switch(void)
 {
     in_player(0);
@@ -541,6 +581,7 @@ int main(void)
     test_detail_play_url();
     test_progress_cadence();
     test_seek_burst();
+    test_seek_step();
     test_audio_switch();
     test_stop();
     test_failed_post();

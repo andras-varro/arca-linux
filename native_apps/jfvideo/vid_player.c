@@ -54,6 +54,8 @@ struct VidPlayer {
     int16_t yy[256], crr[256], cbb[256], crg[256], cbg[256];
     int px0, py0, pw, ph;                    /* picture rectangle, logical coordinates */
     long shown, dropped, last_shown, last_dropped; double err_sum, err_max; long err_n; double stats_next;
+    int band_top, band_bot;                  /* logical rows the UI owns (overlay bars); present() leaves them alone */
+    int gain_mdb;                            /* user volume (milli-dB), kept across restarts */
     Subs sub;
 };
 
@@ -85,15 +87,22 @@ static void voice_release(VidPlayer *p)
     p->voice = false;
 }
 
+/* the voice's peak: the sink volume's, times the user gain (0 = mute) */
+static int voice_peak(const VidPlayer *p)
+{
+    return audio_gain_peak(audio_voice_peak(p->audio->vol), audio_gain_total_mdb(0, p->gain_mdb));
+}
+
 static bool voice_add(VidPlayer *p)
 {
     if (!p->audio_ok) return false;
     p->base_set = false; p->padded = 0; p->fill_on = true;
-    int peak = audio_voice_peak(p->audio->vol);
-    if (peak < 1) peak = 1;
+    int peak = voice_peak(p), want = peak;
+    if (peak < 1) peak = 1;                 /* as before; a mute is applied just below */
     int slot = audio_mix_add_sample_ch(&p->audio->mix, vp_fill, p, p->vbuf, VBUF_FRAMES, VOICE_TOTAL, peak, p->pr.nch);
     if (slot < 0) { p->fill_on = false; return false; }
     p->slot = slot; p->gen = audio_mix_voice_gen(&p->audio->mix, slot); p->voice = true; p->clk_on = false;
+    if (want < 1) audio_mix_set_voice_peak(&p->audio->mix, slot, p->gen, 0);
     return true;
 }
 
@@ -257,7 +266,10 @@ static void present(VidPlayer *p, const VidFrame *f)
     uint8_t *dst = (uint8_t *)fb->buffer + (size_t)(fb->view_y + (uint32_t)p->py0) * fb->line_length
                  + (size_t)(fb->view_x + (uint32_t)p->px0) * 4;
     const uint8_t *ct = p->clampt + 384;
+    int bot0 = (int)fb->height - p->band_bot;
     for (int y = 0; y < ch; y++) {
+        int ly0 = p->py0 + 2 * y;
+        if (ly0 + 1 < p->band_top || ly0 >= bot0) { dst += 2 * (size_t)fb->line_length; continue; }   /* both rows under a band */
         const uint8_t *yr = f->y + (size_t)(y + cy) * (size_t)f->ys + cx;
         const uint8_t *cb = f->cb + (size_t)((y + cy) >> 1) * (size_t)f->cs + (cx >> 1);
         const uint8_t *cr = f->cr + (size_t)((y + cy) >> 1) * (size_t)f->cs + (cx >> 1);
@@ -270,8 +282,8 @@ static void present(VidPlayer *p, const VidFrame *f)
             uint32_t b = ((uint32_t)ct[y1 + rr] << 16) | ((uint32_t)ct[y1 - gg] << 8) | ct[y1 + bb];
             o[0] = a; o[1] = a; o[2] = b; o[3] = b; o += 4;
         }
-        memcpy(dst, p->line, (size_t)p->pw * 4); dst += fb->line_length;
-        memcpy(dst, p->line, (size_t)p->pw * 4); dst += fb->line_length;
+        for (int k = 0; k < 2; k++, dst += fb->line_length)
+            if (ly0 + k >= p->band_top && ly0 + k < bot0) memcpy(dst, p->line, (size_t)p->pw * 4);
     }
 }
 
@@ -280,6 +292,7 @@ static void sprite_blit(VidPlayer *p)
     Subs *s = &p->sub;
     if (!s->spr_on || !s->spr) return;
     int x0 = p->px0 + ((p->pw - s->sw) >> 1), y0 = p->py0 + p->ph - s->sh - 8;
+    if (p->band_bot > 0) { int lim = (int)p->fb->height - p->band_bot - s->sh - 4; if (y0 > lim) y0 = lim; }   /* above the bottom bar */
     if (x0 < 0 || y0 < 0) return;
     Framebuffer *fb = p->fb;
     for (int r = 0; r < s->sh; r++) {
@@ -357,6 +370,33 @@ void vid_player_free(VidPlayer *p)
 }
 
 bool vid_player_active(const VidPlayer *p) { return p->on; }
+
+void vid_player_set_bands(VidPlayer *p, int top_h, int bot_h)
+{
+    p->band_top = top_h < 0 ? 0 : top_h;
+    p->band_bot = bot_h < 0 ? 0 : bot_h;
+}
+
+/* Main thread.  Everything outside the bands goes black, then the head frame (the next one, NOT released) is drawn over it.
+ * Rows a band used to cover come back this way; while playing the next present() does the same within a frame period. */
+void vid_player_repaint(VidPlayer *p)
+{
+    Framebuffer *fb = p->fb;
+    int bot0 = (int)fb->height - p->band_bot;
+    for (int ly = p->band_top; ly < bot0; ly++)
+        memset((uint8_t *)fb->buffer + (size_t)(fb->view_y + (uint32_t)ly) * fb->line_length + (size_t)fb->view_x * 4, 0, (size_t)fb->width * 4);
+    if (!p->on || !atomic_load_explicit(&p->ready, memory_order_acquire)) return;
+    const VidFrame *f = vid_fring_peek(&p->fr);
+    if (!f) return;
+    present(p, f);
+    sprite_blit(p);
+}
+
+void vid_player_set_gain_mdb(VidPlayer *p, int user_mdb)
+{
+    p->gain_mdb = user_mdb;
+    if (p->voice && p->audio_ok) audio_mix_set_voice_peak(&p->audio->mix, p->slot, p->gen, voice_peak(p));   /* slews in ~20 ms */
+}
 
 long vid_player_position(const VidPlayer *p)
 {

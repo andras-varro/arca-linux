@@ -36,6 +36,16 @@ int  vid_player_tick(VidPlayer *p, unsigned long long now_ms);
 /** Media position in ms, -1 when nothing plays or before the first sound/picture. */
 long vid_player_position(const VidPlayer *p);
 bool vid_player_active(const VidPlayer *p);
+
+/** Logical rows from the top / bottom of the surface that the UI draws (overlay bars); 0, 0 = none.  present() leaves them
+ *  alone, and the subtitle sprite sits above the bottom band.  Main thread. */
+void vid_player_set_bands(VidPlayer *p, int top_h, int bot_h);
+/** One-off redraw of the picture area outside the bands: the head frame (not released), else black.  For un-pausing a hidden
+ *  overlay or closing a full-screen panel while paused (nothing is presented then).  Main thread only. */
+void vid_player_repaint(VidPlayer *p);
+/** User volume in milli-dB (the Ludfin jf_volume_mdb scale), summed by audio_gain_total_mdb(0, .).  Applied when the voice is
+ *  added and slewed on a live one; remembered across start() / seeks.  Default 0. */
+void vid_player_set_gain_mdb(VidPlayer *p, int user_mdb);
 /** Suggested loop sleep in microseconds while playing (<= max_us). */
 int  vid_player_wait_us(const VidPlayer *p, int max_us);
 

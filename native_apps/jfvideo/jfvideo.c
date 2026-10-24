@@ -29,6 +29,10 @@
 #include "jv_core.h"
 #include "jv_ui.h"
 #include "vid_player.h"
+#include "audio.h"
+#include "config.h"
+#include "eq_panel.h"
+#include "jf_login.h"
 
 #ifdef JV_LOOP_PROFILE
 static unsigned long long prof_us[6], prof_t0, prof_next;
@@ -97,6 +101,13 @@ static void push_failed(const JvCmd *c)
 static Audio audio;
 static bool audio_ok;
 static VidPlayer *vp;
+static bool eq_open, eq_was_playing;   /* the equaliser panel is up; the picture ran when it opened */
+static bool force_full, bands_force;   /* next frame: full redraw; redraw the bands */
+static bool pic_prev;                  /* the picture owned the frame last frame */
+static int  band_top, band_bot;        /* what vid_player_set_bands() holds now */
+static uint32_t band_t;                /* when the bands were last presented */
+static char ban_prev[48];
+static bool busy_prev;
 
 static void player_start(const JvCmd *c)
 {
@@ -147,6 +158,85 @@ static void vis_note(void)
 static bool video_owns_frame(void)
 {
     return vp && vid_player_active(vp) && core.screen == JV_SCR_PLAYER && !core.overlay;
+}
+
+/* ── volume, bands, equaliser ─────────────────────────────────────────────── */
+static int vol_level = JF_VOLUME_DEFAULT;
+
+/* Single volume entry point: every level change goes through here (not persisted); a system-volume job replaces its body. */
+static void volume_step(int delta)
+{
+    int s = vol_level + delta;
+    if (s < 0) s = 0;
+    if (s > JF_VOLUME_MAX) s = JF_VOLUME_MAX;
+    vol_level = s;
+    if (vp) vid_player_set_gain_mdb(vp, jf_volume_mdb(s));
+    jv_ui_set_volume(&ui, s, JF_VOLUME_MAX);
+    bands_force = true;
+}
+
+/* The gains the panel opens with: the live stream's when it is open, else the saved setting (as Ludfin does). */
+static void eq_now(int g[EQ_BANDS])
+{
+    if (audio_ok && audio_out_is_open(&audio.out)) audio_get_eq(&audio, g);
+    else eq_config_read(CONFIG_FILE_PATH, g);
+}
+static void enh_now(AudioEnh *e)
+{
+    if (audio_ok && audio_out_is_open(&audio.out)) audio_get_enh(&audio, e);
+    else enh_config_read(CONFIG_FILE_PATH, e);
+}
+
+/* The equaliser is full frame: pause the picture (through the core, so the reports stay true), remember whether it ran. */
+static void eq_begin(uint32_t now)
+{
+    int g[EQ_BANDS];
+    AudioEnh en;
+    memset(&en, 0, sizeof en);
+    eq_was_playing = core.play_state == JV_PLAY_PLAYING;
+    if (eq_was_playing) push_type(JV_EV_PAUSE, 0);
+    eq_now(g);
+    enh_now(&en);
+    jv_ui_eq_open(&ui, g, &en, now);
+    eq_open = true;
+    force_full = true;
+}
+
+static void eq_end(void)
+{
+    eq_open = false;
+    if (eq_was_playing && core.play_state == JV_PLAY_PAUSED) push_type(JV_EV_PAUSE, 0);
+    eq_was_playing = false;
+    force_full = true;       /* the next full swap is followed by vid_player_repaint() */
+}
+
+/* The rows (from the top / from the bottom of the surface) the video must leave alone: the overlay's bands while it is shown. */
+static void bands_want(int *top, int *bot)
+{
+    *top = *bot = 0;
+    if (core.screen != JV_SCR_PLAYER || core.overlay || eq_open || !jv_ui_overlay_shown(&ui)) return;
+    UiRect t, b;
+    jv_ui_band_rects(&ui, &t, &b);
+    *top = t.y + t.h;
+    *bot = ui.fb->height - b.y;
+    if (*top < 0) *top = 0;
+    if (*bot < 0) *bot = 0;
+}
+
+/* Hand a changed band geometry to the player; true when it changed.  Hiding while paused repaints the rows the bands covered. */
+static bool bands_sync(void)
+{
+    int t, b;
+    bands_want(&t, &b);
+    if (t == band_top && b == band_bot) return false;
+    band_top = t;
+    band_bot = b;
+    if (!t && !b) force_full = true;   /* hiding: the letterbox under the bands goes back to black */
+    if (vp) {
+        vid_player_set_bands(vp, t, b);
+        if (!t && !b && core.play_state == JV_PLAY_PAUSED && core.screen == JV_SCR_PLAYER && !eq_open) vid_player_repaint(vp);
+    }
+    return true;
 }
 
 static void execute(const JvCmds *cmds)
@@ -296,6 +386,7 @@ int main(int argc, char *argv[])
     audio_ok = audio_init(&audio) == 0;
     vp = vid_player_new(&audio, audio_ok, &fb, &logger);
     if (!vp) LOG_ERROR(&logger, "player: out of memory");
+    volume_step(0);   /* applies the default level to the player */
 
     push_type(JV_EV_START, 0);
 
@@ -325,6 +416,20 @@ int main(int argc, char *argv[])
             if (jv_ui_view(&ui, &vt, &vc)) jv_note_view(&core, vt, vc);
         }
         for (int i = 0; i < un; i++) push(&uev[i]);
+        {   /* what the overlay asked for: volume and the equaliser (neither is a core event) */
+            unsigned act = jv_ui_take_actions(&ui);
+            if (act & JV_UI_ACTB_VOL_UP) volume_step(+1);
+            if (act & JV_UI_ACTB_VOL_DN) volume_step(-1);
+            if ((act & JV_UI_ACTB_EQ_OPEN) && !eq_open && core.screen == JV_SCR_PLAYER) eq_begin(now);
+            int eg[EQ_BANDS];
+            bool esave;
+            if (jv_ui_eq_take(&ui, eg, &esave)) {   /* every edit is heard at once, DONE also saves */
+                if (audio_ok) audio_set_eq(&audio, eg);
+                if (audio_ok) audio_set_enh(&audio, jv_ui_enh_out(&ui));
+                if (esave) eq_panel_store_file_both(CONFIG_FILE_PATH, eg, jv_ui_enh_out(&ui));
+            }
+            if (eq_open && (jv_ui_eq_closed(&ui) || core.screen != JV_SCR_PLAYER)) eq_end();
+        }
 
         PROF_MARK(0);
         jv_ui_art_poll(&ui, now);
@@ -350,12 +455,44 @@ int main(int argc, char *argv[])
         evq_n = 0;
         PROF_MARK(3);
 
-        bool redraw = jv_ui_take_dirty(&ui);
-        if (redraw && video_owns_frame() && !vis_changed) redraw = false;   /* the picture owns the frame */
+        /* The picture owns the front buffer while it plays (the video writes fb->buffer; the UI draws in the back
+         * buffer).  So: bands (and only they) are presented with fb_swap_rect, on change and once a second; a full
+         * swap happens only when the picture is not what is on screen, or just before a repaint of it. */
+        bool bands_moved = bands_sync();
+        bool pic = video_owns_frame() && !eq_open;
+        bool ban_chg = strcmp(ban_prev, core.banner) != 0 || busy_prev != core.busy;
+        snprintf(ban_prev, sizeof ban_prev, "%s", core.banner);
+        busy_prev = core.busy;
+        bool dirty = jv_ui_take_dirty(&ui);
+        bool bdirty = jv_ui_take_bands_dirty(&ui);
+        bool shown = pic && jv_ui_overlay_shown(&ui);
+        bool full, bands_only = false;
+        if (pic) {
+            full = ban_chg || force_full || !pic_prev;
+            bands_only = !full && shown &&
+                         (bands_moved || bdirty || bands_force || vis_changed || (now - band_t) >= 1000);
+        } else {
+            full = dirty || force_full;
+        }
+        pic_prev = pic;
+        force_full = bands_force = false;
         vis_changed = false;
-        if (redraw) {
+        bool redraw = full || bands_only;
+        if (full) {
+            if (core.screen == JV_SCR_PLAYER) fb_clear(&fb, COLOR_BLACK);
             jv_ui_draw(&ui);
             fb_swap(&fb);
+            if (pic && !core.banner[0] && !core.busy) vid_player_repaint(vp);   /* the picture the full swap covered */
+            band_t = now;
+        } else if (bands_only) {
+            UiRect bt, bb;
+            jv_ui_draw(&ui);
+            jv_ui_band_rects(&ui, &bt, &bb);
+            fb_swap_rect(&fb, bt.x, bt.y, bt.w, bt.h);
+            fb_swap_rect(&fb, bb.x, bb.y, bb.w, bb.h);
+            band_t = now;
+        }
+        if (redraw) {
             pointer_invalidate(&ptr);
             pointer_paint(&ptr, &fb);
         }

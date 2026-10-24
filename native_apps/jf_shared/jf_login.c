@@ -163,3 +163,9 @@ int jf_login_signout(JfLogin *l, const char *path)
     jf_wipe(l->library_name, sizeof l->library_name);
     return jf_login_clear(l, path);
 }
+
+int jf_volume_mdb(int step)
+{
+    if (step <= 0) return -100000;
+    return (step - 10) * 3000;
+}

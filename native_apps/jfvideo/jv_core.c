@@ -443,6 +443,18 @@ static void seek(JvCore *c, long target)
     c->seek_due_ms = c->now_ms + JV_SEEK_QUIET_MS;
 }
 
+/* a burst of steps escalates; a quiet period (seek_pending cleared by the restart) or the other direction starts over */
+static void seek_step(JvCore *c, int dir)
+{
+    static const long LADDER[] = JV_SEEK_LADDER_MS;
+    int last = (int)(sizeof LADDER / sizeof LADDER[0]) - 1;
+    dir = dir < 0 ? -1 : 1;
+    if (!c->seek_pending || dir != c->seek_dir) c->seek_rung = 0;
+    else if (c->seek_rung < last) c->seek_rung++;
+    c->seek_dir = dir;
+    seek(c, jv_core_position(c) + dir * LADDER[c->seek_rung]);
+}
+
 static void on_tick(JvCore *c, JvCmds *out)
 {
     del_tick(c, out);                  /* DELETE retries and second sends outlive the player screen */
@@ -691,8 +703,9 @@ void jv_step(JvCore *c, const JvEvent *ev, long long now_ms, JvCmds *out)
         if (c->play_state == JV_PLAY_PLAYING) { c->play_state = JV_PLAY_PAUSED; emit(out, JV_CMD_PLAYER_PAUSE); post_report(c, out, 1, jv_core_position(c), "pause"); }
         else if (c->play_state == JV_PLAY_PAUSED) { c->play_state = JV_PLAY_PLAYING; emit(out, JV_CMD_PLAYER_RESUME); post_report(c, out, 1, jv_core_position(c), "unpause"); }
         break;
-    case JV_EV_SEEK_BY: seek(c, jv_core_position(c) + ev->i); break;
-    case JV_EV_SEEK_TO: seek(c, ev->i); break;
+    case JV_EV_SEEK_BY: c->seek_dir = 0; seek(c, jv_core_position(c) + ev->i); break;
+    case JV_EV_SEEK_TO: c->seek_dir = 0; seek(c, ev->i); break;
+    case JV_EV_SEEK_STEP: seek_step(c, ev->i); break;
     case JV_EV_STOP:
         if (c->screen == JV_SCR_PLAYER) { stop_play(c, out, false); pop(c, out); }
         break;

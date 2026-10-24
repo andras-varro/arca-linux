@@ -43,6 +43,7 @@
 #define JV_CMDS_MAX        10
 #define JV_PROGRESS_MS  10000      /* progress report cadence while playing */
 #define JV_SEEK_QUIET_MS  700      /* a seek burst restarts the stream once this long after its last press */
+#define JV_SEEK_LADDER_MS { 10000, 30000, 60000, 300000 }   /* JV_EV_SEEK_STEP: the step of the 1st, 2nd, 3rd, 4th-and-later press of a burst */
 #define JV_BODY_MAX       640
 #define JV_DEL_N            4      /* encoding-job DELETEs the core keeps track of (retry, second send) */
 #define JV_DEL_RETRY_MS   500      /* a failed DELETE is sent again this long after the failure, twice at most */
@@ -83,6 +84,7 @@ typedef enum {
     JV_EV_PLAY,           /* details: .i = start position in ms (0 = from the start; the UI passes the resume position) */
     JV_EV_PAUSE,          /* player: toggle */
     JV_EV_SEEK_BY,        /* player: .i = delta ms; bursts collapse into one restart after JV_SEEK_QUIET_MS */
+    JV_EV_SEEK_STEP,      /* player: .i = +1 / -1; each press of a burst steps further: 10 s, 30 s, 1 min, 5 min (cap) */
     JV_EV_SEEK_TO,        /* player: .i = absolute ms */
     JV_EV_STOP,
     JV_EV_QUIT,
@@ -184,6 +186,7 @@ typedef struct {
     JvPlayReq play;
     long pos_ms;                     /* last position the player reported (or the restart target) */
     bool seek_pending; long seek_target_ms;   /* a burst waiting for its quiet period: show seek_target_ms */
+    int seek_dir, seek_rung;         /* JV_EV_SEEK_STEP: direction of the burst and its place on JV_SEEK_LADDER_MS */
     int report_fail;                 /* reports, and DELETEs that stayed failed after their retries */
     JvSettings set;                  /* the UI edits it, then sends JV_EV_SETTINGS */
     JfLogin login;

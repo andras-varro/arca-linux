@@ -21,6 +21,7 @@
 #include "ui_zone.h"
 #include "pointer.h"
 #include "jf_art.h"
+#include "eq_panel.h"
 #include "jv_core.h"
 
 #define JV_UI_FIELDS    3     /* sign-in: SERVER, USER, PASSWORD */
@@ -31,9 +32,13 @@
 #define JV_UI_ACT       4     /* details: PLAY or RESUME, FROM START, CAST, SIMILAR (present ones fill from slot 0) */
 #define JV_UI_TRK       2     /* details: the AUDIO and SUBTITLES rows, each one change button */
 #define JV_UI_BTN_H     44
+#define JV_UI_PBTN      9     /* player bottom bar buttons, JvPBtn order */
 #define JV_UI_ART_GRID  120   /* art box of a grid tile */
 #define JV_UI_ART_THUMB 64    /* art box of a list row */
 #define JV_UI_ART_POSTER 200  /* art box of the details poster */
+
+/* The player bar's buttons, left to right. */
+typedef enum { PB_SEEK_BACK = 0, PB_PLAY, PB_SEEK_FWD, PB_STOP, PB_EQ, PB_VOL_DN, PB_VOL_UP, PB_AUDIO, PB_SUBS } JvPBtn;
 
 /* The screen the layout is taken against (SCREEN_* macros in the app). */
 typedef struct {
@@ -56,15 +61,34 @@ typedef struct {
     UiRect text;                    /* details: title, facts and overview as scrolling lines; pressable (it scrolls) */
     UiRect trk[JV_UI_TRK];          /* details: AUDIO, SUBTITLES; pressable */
     UiRect act[JV_UI_ACT];          /* details: the action row; pressable */
-    UiRect pinfo;                   /* player placeholder: the request text, drawn only */
-    UiRect pback;                   /* player placeholder: BACK; pressable */
+    /* player overlay: two opaque bands over the full-screen picture; the video skips their rows (vid_player_set_bands) */
+    UiRect top_band, bot_band;      /* span VISIBLE; drawn only */
+    UiRect pic;                     /* the picture between the bands: a tap there hides the overlay */
+    UiRect tb_back;                 /* title row: stop `<`; pressable */
+    UiRect tb_title, tb_vol, tb_clock;   /* title row: drawn only */
+    UiRect pbtn[JV_UI_PBTN];        /* bottom bar, in JvPBtn order; pressable */
+    UiRect ptrack;                  /* the progress bar: a tap seeks (jv_ui_progress_ms); pressable */
+    UiRect ppos, pdur;              /* position and duration text, drawn only */
+    UiRect pbanner;                 /* BUFFERING... and notices on the player screen, drawn only (inside pic) */
 } JvLayout;
 
 void jv_ui_layout(JvLayout *L, const JvExtents *e);
 void jv_ui_extents_live(JvExtents *e);
+/** x on the progress track -> media ms: 0..runtime_ms, monotonic in x, exact at both ends. */
+long jv_ui_progress_ms(const JvLayout *L, int x, long runtime_ms);
+/** media ms -> filled width of the progress track, 0..ptrack.w. */
+int  jv_ui_progress_w(const JvLayout *L, long pos_ms, long runtime_ms);
 
 #define JV_UI_LINES 80
 #define JV_UI_LINE_W 60
+
+/* Out-actions of the player overlay (jv_ui_take_actions): not core events, the loop owns volume and the equaliser. */
+#define JV_UI_ACTB_EQ_OPEN 1u
+#define JV_UI_ACTB_VOL_UP  2u
+#define JV_UI_ACTB_VOL_DN  4u
+
+/* What the player bands showed when last drawn; a change repaints them (all ints: compared with memcmp). */
+typedef struct { int shown, busy, focus, state, vol, volmax, pos_s, dur_s, clk, seek; } JvPSig;
 
 typedef struct {
     Framebuffer *fb;
@@ -97,6 +121,19 @@ typedef struct {
     char rowtxt[32][64];                 /* detail strings of the rows being drawn */
     int  rowtxt_i;
     unsigned seen_art;
+    /* player overlay */
+    bool ov_shown, ov_fresh, ov_ring, bands_dirty;
+    uint32_t ov_last;                    /* ms of the last input that keeps the overlay up */
+    int  ov_focus;                       /* 0..8 a pbtn, 9 the title row's stop, -1 none */
+    JvPSig sig;
+    int  vol_step, vol_max;
+    unsigned acts;
+    int  trk_note;                       /* 1 AUDIO / 2 SUBS was just cycled: the title row names the track */
+    uint32_t trk_t, p_now;               /* when it was cycled; now of the frame player_input is handling */
+    EqPanel eq;
+    bool eq_up, eq_apply, eq_save, eq_closed;
+    int  eq_out[EQ_BANDS];
+    AudioEnh enh_out;
 } JvUi;
 
 /** `art_dir` is the shared disk cache dir (JF_ART_CACHE_DIR).  The art instances are created here and freed by jv_ui_free. */
@@ -118,5 +155,24 @@ bool jv_ui_view(const JvUi *ui, int *top, int *cursor);
 void jv_ui_mark_dirty(JvUi *ui);
 /** True once when something wants a repaint (state change, button, bar tick). */
 bool jv_ui_take_dirty(JvUi *ui);
+
+/** PLAYER overlay.  Shown by a tap or key, hidden after 4 s of no input (not while paused) or by a tap on the picture.
+ *  jv_ui_draw() on PLAYER draws the banner and, when shown, the two bands, with no fb_clear (the loop owns the picture). */
+bool jv_ui_overlay_shown(const JvUi *ui);
+/** True once when the bands need repainting (also on the hide edge: then draw nothing, repaint the picture instead). */
+bool jv_ui_take_bands_dirty(JvUi *ui);
+/** The two band rectangles (VISIBLE width): `top` from the screen top, `bot` to the screen bottom. */
+void jv_ui_band_rects(const JvUi *ui, UiRect *top, UiRect *bot);
+/** Bits JV_UI_ACTB_* pressed since the last call (cleared). */
+unsigned jv_ui_take_actions(JvUi *ui);
+/** The volume shown in the title row ("VOL step/max"). */
+void jv_ui_set_volume(JvUi *ui, int step, int max);
+/** Opens the equaliser panel (full screen) with the gains and enhancer in force; it takes every input until DONE or CANCEL. */
+void jv_ui_eq_open(JvUi *ui, const int gains[EQ_BANDS], const AudioEnh *enh, uint32_t now);
+/** A gain set the panel produced since the last call (apply live); *save is true on DONE. */
+bool jv_ui_eq_take(JvUi *ui, int gains[EQ_BANDS], bool *save);
+const AudioEnh *jv_ui_enh_out(const JvUi *ui);
+/** One-shot: the panel closed (repaint the picture). */
+bool jv_ui_eq_closed(JvUi *ui);
 
 #endif /* ARCA_JV_UI_H */

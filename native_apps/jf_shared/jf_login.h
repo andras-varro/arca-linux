@@ -20,6 +20,8 @@
 
 #define JF_VOLUME_MAX    14   /**< volume_step runs 0..JF_VOLUME_MAX */
 #define JF_VOLUME_DEFAULT 10
+/** user_mdb for a volume step: 0 -> -100000 (mute, whatever the track's norm), else (step-10)*3000. */
+int jf_volume_mdb(int step);
 /** What a tap on a track row (the PLAY button of its bar) does; one setting, persisted as tap_action. */
 typedef enum { JF_TAP_REPLACE = 0, JF_TAP_ADD_PLAY, JF_TAP_ADD_ONLY, JF_TAP_COUNT } JfTapAction;
 
