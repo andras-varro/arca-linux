@@ -186,6 +186,7 @@ CTEST_ROWS=(
     "vid_dec_test|-I common -I jfvideo -fsanitize=undefined,address|jfvideo/vid_dec.c jfvideo/vid_ring.c|-lpthread -lm"
     "jv_url_test|-I common -I jf_shared -I jfvideo -fsanitize=undefined,address|jfvideo/jv_url.c jf_shared/jf_url.c"
     "jv_tracks_test|-I jfvideo -fsanitize=undefined,address|jfvideo/jv_tracks.c"
+    "jv_model_test|-I jfvideo -I jf_shared -I common -fsanitize=undefined,address|jfvideo/jv_model.c jfvideo/jv_tracks.c jf_shared/jf_model.c common/json.c"
     "jv_settings_test|-I common -I jf_shared -I jfvideo -fsanitize=undefined,address|jfvideo/jv_settings.c jfvideo/jv_tracks.c jf_shared/jf_url.c common/config.c"
     "icon_grid_focus_test|-I common|common/icon_grid.c common/ppm.c common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c"
     "modal_dialog_layout_test|-I common|common/icon_grid.c common/ppm.c common/common.c common/framebuffer.c common/font.c common/touch_input.c common/hardware.c common/config.c common/highscore.c common/keyboard.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/start_menu.c common/gamepad.c common/input_slots.c common/input_scan.c"
