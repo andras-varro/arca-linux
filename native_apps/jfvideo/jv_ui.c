@@ -471,7 +471,7 @@ int jv_ui_input(JvUi *ui, const TouchState *ts, const InputState *in, Pointer *p
         if (c->focus_password) { UiZone z[UZ_ZONES]; build_zones(ui, z); uz_focus(&ui->zf, z, Z_N, Z_MAIN, 2); }
         ui->dirty = true;
     }
-    if (top_bar_info_due(&ui->bar, now) && top_bar_info_sample(&ui->bar) && !c->overlay && !ui->dlg_up) {   /* the bar's CPU and clock, once a second */
+    if (c->screen != JV_SCR_PLAYER && top_bar_info_due(&ui->bar, now) && top_bar_info_sample(&ui->bar) && !c->overlay && !ui->dlg_up) {   /* the bar's CPU and clock, once a second */
         /* Only the bar's text changed: repaint just it; the full frame only when the text moved another section. */
         UiRect ir;
         if (ui->dirty || !top_bar_info_present(ui->fb, &ui->bar, &ir)) ui->dirty = true;
@@ -679,14 +679,6 @@ static void draw_details(JvUi *ui)
 
 static void draw_player(JvUi *ui)
 {
-    const JvCore *c = ui->core;
-    char t[96];
-    int y = ui->L.pinfo.y + 8, x = ui->L.pinfo.x + 8;
-    fb_draw_text(ui->fb, x, y, "PLAYER NOT BUILT YET", RING, 2); y += 28;
-    snprintf(t, sizeof t, "ITEM %s", c->play.item_id); fb_draw_text(ui->fb, x, y, t, COLOR_WHITE, 2); y += 24;
-    snprintf(t, sizeof t, "AUDIO INDEX %d   SUB INDEX %d", c->play.audio_index, c->play.sub_index); fb_draw_text(ui->fb, x, y, t, COLOR_WHITE, 2); y += 24;
-    snprintf(t, sizeof t, "START %ld MS", c->play.start_ms); fb_draw_text(ui->fb, x, y, t, COLOR_WHITE, 2); y += 24;
-    snprintf(t, sizeof t, "RUNTIME %ld MS", c->play.runtime_ms); fb_draw_text(ui->fb, x, y, t, DIM, 2);
     draw_btn(ui, ui->L.pback, "BACK", 3, BTN_BG);
 }
 

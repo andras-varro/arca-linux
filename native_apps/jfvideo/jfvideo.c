@@ -5,10 +5,8 @@
  *
  * Two JfApi instances: [0] metadata, [1] the stream and the reports; JvCmd.api picks one.
  *
- * THE PLAYER IS A STUB.  JV_CMD_PLAYER_START closes the stream it is handed and reports the decoder as failed
- * (JV_EV_PLAYER_ENDED, i = 0), so sign-in, browse, search and details work end to end and PLAY lands in the core's
- * own failure path.  The decoder (vid_dec) and the audio voice are the next step; the hooks are the player_*()
- * functions below.
+ * The player (vid_player: decoder thread, mix-bus voice, picture, subtitles) is driven through the player_*() hooks
+ * below; while a picture plays on the player screen it owns the frame (see video_owns_frame).
  */
 #include <signal.h>
 #include <stdio.h>
@@ -28,6 +26,7 @@
 #include "jv_app.h"
 #include "jv_core.h"
 #include "jv_ui.h"
+#include "vid_player.h"
 
 #ifdef JV_LOOP_PROFILE
 static unsigned long long prof_us[6], prof_t0, prof_next;
@@ -92,18 +91,61 @@ static void push_failed(const JvCmd *c)
     push(&e);
 }
 
-/* ── the player (stub) ────────────────────────────────────────────────────── */
+/* ── the player ───────────────────────────────────────────────────────────── */
+static Audio audio;
+static bool audio_ok;
+static VidPlayer *vp;
+
 static void player_start(const JvCmd *c)
 {
-    http_stream_close(c->fd);
-    push_type(JV_EV_PLAYER_ENDED, 0);
+    if (!vp) { http_stream_close(c->fd); push_type(JV_EV_PLAYER_ENDED, 0); return; }
+    VidPlayerCfg cfg;
+    memset(&cfg, 0, sizeof cfg);
+    cfg.channels = core.channels;
+    cfg.offset_ms = core.set.av_offset_ms[audio_out_device_is_onboard() ? JV_SINK_ONBOARD : JV_SINK_USB];
+    cfg.agc = core.set.agc;
+    cfg.tls = art_tls;
+    cfg.start_ms = core.play.start_ms;
+    cfg.sub_scale = core.set.sub_scale;
+    if (vid_player_start(vp, c->fd, &cfg) < 0) push_type(JV_EV_PLAYER_ENDED, 0);
 }
-static void player_stop(void) {}
-static void player_pause(bool paused) { (void)paused; }
-static void player_sub_feed(int fd) { http_stream_close(fd); }
-static void player_sub_clear(void) {}
+static void player_stop(void) { if (vp) vid_player_stop(vp); }
+static void player_pause(bool paused) { if (vp) vid_player_pause(vp, paused); }
+static void player_sub_feed(int fd)
+{
+    if (vp) vid_player_sub_feed(vp, fd, art_tls);
+    else http_stream_close(fd);
+}
+static void player_sub_clear(void) { if (vp) vid_player_sub_clear(vp); }
 /* the media position now in ms, or -1 when nothing plays */
-static long player_position(void) { return -1; }
+static long player_position(void) { return vp ? vid_player_position(vp) : -1; }
+
+/* What the UI overlay shows on the player screen.  While a picture plays the video owns the frame, so the UI
+ * redraws (and overwrites the picture) only when one of these changes. */
+typedef struct {
+    JvScreen screen; bool overlay, busy, seek_pending; unsigned buttons, generation;
+    JvPlayState state; int audio_index, sub_index;
+    char overlay_text[48], banner[48];
+} VisSig;
+static VisSig vis_prev;
+static bool vis_changed;
+
+static void vis_note(void)
+{
+    VisSig s;
+    memset(&s, 0, sizeof s);
+    s.screen = core.screen; s.overlay = core.overlay; s.busy = core.busy; s.seek_pending = core.seek_pending;
+    s.buttons = core.overlay_buttons; s.generation = core.play.generation; s.state = core.play_state;
+    s.audio_index = core.play.audio_index; s.sub_index = core.play.sub_index;
+    snprintf(s.overlay_text, sizeof s.overlay_text, "%s", core.overlay_text);
+    snprintf(s.banner, sizeof s.banner, "%s", core.banner);
+    if (memcmp(&s, &vis_prev, sizeof s) != 0) { vis_prev = s; vis_changed = true; }
+}
+
+static bool video_owns_frame(void)
+{
+    return vp && vid_player_active(vp) && core.screen == JV_SCR_PLAYER && !core.overlay;
+}
 
 static void execute(const JvCmds *cmds)
 {
@@ -168,6 +210,7 @@ static void step_event(const JvEvent *ev, long long now)
     memset(&cmds, 0, sizeof cmds);
     jv_step(&core, ev, now, &cmds);
     execute(&cmds);
+    vis_note();
     if (ev->type != JV_EV_TICK || cmds.n > 0) jv_ui_mark_dirty(&ui);   /* an idle tick changes nothing the screen shows */
 }
 
@@ -248,6 +291,9 @@ int main(int argc, char *argv[])
     core.channels = audio_out_device_is_onboard() ? 1 : 2;   /* what the sink can take; rate and max_w keep the core's defaults */
 
     jv_ui_init(&ui, &fb, &touch, &gp, &core, JF_ART_CACHE_DIR);
+    audio_ok = audio_init(&audio) == 0;
+    vp = vid_player_new(&audio, audio_ok, &fb, &logger);
+    if (!vp) LOG_ERROR(&logger, "player: out of memory");
 
     push_type(JV_EV_START, 0);
 
@@ -284,6 +330,11 @@ int main(int argc, char *argv[])
         drain_results();
         PROF_MARK(2);
 
+        if (audio_ok) audio_pump(&audio);
+        if (vp) {
+            int ended = vid_player_tick(vp, now);
+            if (ended >= 0) push_type(JV_EV_PLAYER_ENDED, ended);
+        }
         long pos = player_position();
         if (pos >= 0 && core.play_state == JV_PLAY_PLAYING) push_type(JV_EV_POS, (int)pos);
         push_type(JV_EV_TICK, 0);
@@ -298,6 +349,8 @@ int main(int argc, char *argv[])
         PROF_MARK(3);
 
         bool redraw = jv_ui_take_dirty(&ui);
+        if (redraw && video_owns_frame() && !vis_changed) redraw = false;   /* the picture owns the frame */
+        vis_changed = false;
         if (redraw) {
             jv_ui_draw(&ui);
             fb_swap(&fb);
@@ -320,7 +373,10 @@ int main(int argc, char *argv[])
             prof_next = prof_now_us() + 10000000ULL;
         }
 #endif
-        usleep(active ? FRAME_DELAY_ACTIVE_US : FRAME_DELAY_IDLE_US);
+        if (audio_ok && audio_pump_active(&audio)) active = true;
+        int delay = active ? FRAME_DELAY_ACTIVE_US : FRAME_DELAY_IDLE_US;
+        if (vp && vid_player_active(vp)) delay = vid_player_wait_us(vp, FRAME_DELAY_ACTIVE_US);
+        usleep(delay);
     }
 
     /* Leaving: a signal skips the core's own EXIT, so ask for the stop reports here; then let the queue empty. */
@@ -331,6 +387,11 @@ int main(int argc, char *argv[])
         step_event(&q, (long long)get_time_ms());
     }
     player_stop();
+    if (audio_ok) {
+        for (int i = 0; i < 20; i++) { audio_pump(&audio); usleep(16667); }
+        audio_close(&audio);
+    }
+    if (vp) vid_player_free(vp);
     {
         uint32_t t0 = get_time_ms();
         static JfResult res;

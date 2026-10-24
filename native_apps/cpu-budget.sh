@@ -59,7 +59,7 @@ cpu_budget() {
         file_manager)   echo 55 ;;   # 38 38 35
         terminal)       echo 10 ;;   #  4  4  4
         ludfin)         echo 30 ;;   # 19 20 19  (ctxsw ~305)
-        ludkino)        echo 15 ;;   #  6  4  5  (ctxsw ~100)
+        ludkino)        echo 25 ;;   # 15 17 15  (ctxsw ~297, audio stream open)
         snake)          echo 80 ;;   # 56 55 58
         tetris)         echo 75 ;;   # 52 54 53
         pong)           echo 80 ;;   # 57 59 59
