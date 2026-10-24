@@ -26,6 +26,7 @@
 #include <stddef.h>
 #include "jf_api.h"
 #include "jf_login.h"
+#include "jv_last.h"
 #include "jv_model.h"
 #include "jv_settings.h"
 #include "jv_tracks.h"
@@ -43,6 +44,7 @@
 #define JV_CMDS_MAX        10
 #define JV_PROGRESS_MS  10000      /* progress report cadence while playing */
 #define JV_SEEK_QUIET_MS  700      /* a seek burst restarts the stream once this long after its last press */
+#define JV_LAST_SAVE_MS  60000     /* the last-played record is rewritten this often while playing (SD-card wear) */
 #define JV_SEEK_LADDER_MS { 10000, 30000, 60000, 300000 }   /* JV_EV_SEEK_STEP: the step of the 1st, 2nd, 3rd, 4th-and-later press of a burst */
 #define JV_BODY_MAX       640
 #define JV_DEL_N            4      /* encoding-job DELETEs the core keeps track of (retry, second send) */
@@ -86,7 +88,7 @@ typedef enum {
     JV_EV_SEEK_BY,        /* player: .i = delta ms; bursts collapse into one restart after JV_SEEK_QUIET_MS */
     JV_EV_SEEK_STEP,      /* player: .i = +1 / -1; each press of a burst steps further: 10 s, 30 s, 1 min, 5 min (cap) */
     JV_EV_SEEK_TO,        /* player: .i = absolute ms */
-    JV_EV_STOP,
+    JV_EV_STOP,           /* the overlay's STOP: what BACK does in the player, and the last-played record is cleared (BACK keeps it) */
     JV_EV_QUIT,
     JV_EV_RETRY, JV_EV_CLOSE_ERROR,
     JV_EV_SETTINGS,       /* `set` was changed by the UI: nothing to do but a hook for the loop; picks up the preferences at the next detail */
@@ -120,6 +122,8 @@ typedef enum {
     JV_CMD_SUB_FEED,      /* hand .fd (the SRT stream) to the player's subtitle reader */
     JV_CMD_SUB_CLEAR,     /* drop the subtitle cues and the sprite */
     JV_CMD_CLOSE_FD,      /* close(.fd): a stream result the core does not want */
+    JV_CMD_SAVE_LAST,     /* jv_last_save(.last stamped with the wall clock, JF_LAST_PATH) */
+    JV_CMD_CLEAR_LAST,    /* jv_last_clear(JF_LAST_PATH) */
     JV_CMD_EXIT
 } JvCmdType;
 
@@ -140,6 +144,7 @@ typedef struct {
     int port;
     bool tls;
     int fd;
+    JvLast last;          /* SAVE_LAST */
 } JvCmd;
 
 typedef struct { JvCmd c[JV_CMDS_MAX]; int n; bool overflow; } JvCmds;
@@ -189,6 +194,7 @@ typedef struct {
     int seek_dir, seek_rung;         /* JV_EV_SEEK_STEP: direction of the burst and its place on JV_SEEK_LADDER_MS */
     int report_fail;                 /* reports, and DELETEs that stayed failed after their retries */
     JvSettings set;                  /* the UI edits it, then sends JV_EV_SETTINGS */
+    JvLast last;                     /* the last-played record: the loop reads the file into it before JV_EV_START; .id[0] = none */
     JfLogin login;
     int channels, rate, max_w;       /* the loop's sink facts; defaults 1, 44100, JV_STREAM_MAX_W */
     JvSessionFn session_fn;          /* NULL = jf_session_id */
@@ -205,6 +211,8 @@ typedef struct {
     int home_phase;                  /* 0 idle, 1 views, 2 resume probe, 3 next-up probe */
     bool auth_pending, list_pending_first, detail_refresh, started_sent, restarted_once;
     bool restart_paused;             /* the stream being opened replaces a paused one: it is paused again when it arrives */
+    bool auto_resume;                /* START found a record: the detail being loaded goes straight to the player */
+    long long next_last_ms;          /* the next periodic write of the record */
     JvDel del[JV_DEL_N]; int del_next;
     JvCmd retry;
     char cur_id[33], cur_id2[33], cur_title[96];

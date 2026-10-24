@@ -286,6 +286,13 @@ static void execute(const JvCmds *cmds)
         case JV_CMD_SUB_FEED:      player_sub_feed(c->fd); break;
         case JV_CMD_SUB_CLEAR:     player_sub_clear(); break;
         case JV_CMD_CLOSE_FD:      http_stream_close(c->fd); break;
+        case JV_CMD_SAVE_LAST: {
+            JvLast r = c->last;
+            r.saved_at = (long long)time(NULL);
+            if (jv_last_save(&r, JF_LAST_PATH) < 0) LOG_WARN(&logger, "last: cannot write " JF_LAST_PATH);
+            break;
+        }
+        case JV_CMD_CLEAR_LAST:    jv_last_clear(JF_LAST_PATH); break;
         case JV_CMD_EXIT:
             exit_cmd = true;
             running = 0;
@@ -380,6 +387,7 @@ int main(int argc, char *argv[])
 
     jv_core_init(&core, JF_CONF_PATH, JV_REUSE_LOGIN_PATH, JV_DEVICE_ID_SUFFIX);
     jv_settings_load(&core.set, JF_SETTINGS_PATH);
+    jv_last_load(&core.last, JF_LAST_PATH);
     core.channels = audio_out_device_is_onboard() ? 1 : 2;   /* what the sink can take; rate and max_w keep the core's defaults */
 
     jv_ui_init(&ui, &fb, &touch, &gp, &core, JF_ART_CACHE_DIR);

@@ -15,6 +15,7 @@
 
 #define JF_CONF_PATH     JF_CONF_DIR "/" JF_APP_BIN ".conf"   /**< the saved login */
 #define JF_SETTINGS_PATH JF_DATA_DIR "/settings.conf"
+#define JF_LAST_PATH     JF_DATA_DIR "/last.conf"      /**< the last-played record (jv_last.h) */
 #define JF_ART_CACHE_DIR JF_DATA_DIR "/art"
 
 /** Appended to the default device id so this app and the music app present two ids to the server. */

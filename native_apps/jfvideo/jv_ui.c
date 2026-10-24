@@ -484,7 +484,7 @@ static int ph_hit(const JvUi *ui, int x, int y)
     return PH_NONE;
 }
 
-/* A bottom-bar button or the title row's stop. */
+/* A bottom-bar button or the title row's back. */
 static void p_press(JvUi *ui, int id, JvEvent *out, int *n, int max)
 {
     int k;
@@ -494,7 +494,8 @@ static void p_press(JvUi *ui, int id, JvEvent *out, int *n, int max)
         if (k >= 0) out[k].i = id == PB_SEEK_BACK ? -1 : 1;
         break;
     case PB_PLAY: emit(out, n, max, JV_EV_PAUSE); break;
-    case PB_STOP: case PH_BACK: emit(out, n, max, JV_EV_BACK); break;
+    case PB_STOP: emit(out, n, max, JV_EV_STOP); break;       /* STOP forgets the film; the title row's "<" only leaves it */
+    case PH_BACK: emit(out, n, max, JV_EV_BACK); break;
     case PB_EQ: ui->acts |= JV_UI_ACTB_EQ_OPEN; break;
     case PB_VOL_DN: ui->acts |= JV_UI_ACTB_VOL_DN; break;
     case PB_VOL_UP: ui->acts |= JV_UI_ACTB_VOL_UP; break;
@@ -551,7 +552,7 @@ static void p_keys(JvUi *ui, const InputState *in, uint32_t now, JvEvent *out, i
         ui->bands_dirty = true;
     } else if (bp(in, BTN_ID_PAUSE) || bp(in, BTN_ID_CANCEL) || bp(in, BTN_ID_BACK)) {   /* Esc / pad B: hide, else stop */
         if (ui->ov_shown) ov_hide(ui);
-        else emit(out, n, max, JV_EV_BACK);
+        else emit(out, n, max, JV_EV_STOP);
     }
     if (ui->ov_shown && (seek_l || seek_r || upd || cyc || bp(in, BTN_ID_ACTION) || bp(in, BTN_ID_JUMP))) ui->ov_last = now;
 }

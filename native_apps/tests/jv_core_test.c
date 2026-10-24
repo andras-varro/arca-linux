@@ -2,7 +2,7 @@
  *
  *   cd native_apps && gcc -Wall -Wextra -I common -I jf_shared -I jfvideo -fsanitize=undefined,address \
  *       -o build/jv_core_test tests/jv_core_test.c jfvideo/jv_core.c jfvideo/jv_model.c jfvideo/jv_tracks.c \
- *       jfvideo/jv_url.c jfvideo/jv_settings.c jf_shared/jf_model.c jf_shared/jf_url.c jf_shared/jf_login.c \
+ *       jfvideo/jv_url.c jfvideo/jv_settings.c jfvideo/jv_last.c jf_shared/jf_model.c jf_shared/jf_url.c jf_shared/jf_login.c \
  *       common/config.c common/json.c -lm && setarch $(uname -m) -R ./build/jv_core_test
  *
  * Run from native_apps/ (the gate does): replies are the fixtures in tests/fixtures/jv/, parsed by the
@@ -569,6 +569,186 @@ static void test_paused_progress(void)
     CHECK(core.play_state == JV_PLAY_PAUSED, "still paused");
 }
 
+/* ── last-played record ────────────────────────────────────────────────── */
+
+#define DETAIL_ID "5eed0000000000000000000000000030"
+
+/* server stream indexes of the tracks the details screen will play */
+static int audio_pos_index(void) { return core.sel_audio >= 0 ? core.detail.audio[core.sel_audio].index : -1; }
+static int sub_pos_index(void) { return core.sel_sub >= 0 ? core.detail.subs[core.sel_sub].index : -1; }
+
+/* a signed-in start with `rec` already read from the file (NULL = no file) */
+static void start_with_last(const JvLast *rec)
+{
+    JfLogin l; memset(&l, 0, sizeof l);
+    snprintf(l.server, sizeof l.server, "10.0.0.1:8096"); snprintf(l.user, sizeof l.user, "bob");
+    snprintf(l.user_id, sizeof l.user_id, "0000000000000000000000000000abcd"); snprintf(l.token, sizeof l.token, "tok");
+    snprintf(l.device_id, sizeof l.device_id, "arca-t-v");
+    jf_login_save(&l, own);
+    fresh();
+    if (rec) core.last = *rec;
+    step(JV_EV_START, 0);
+}
+static JvLast rec_of(int pos_s, int audio, int sub, bool attempted)
+{
+    JvLast r; memset(&r, 0, sizeof r);
+    snprintf(r.id, sizeof r.id, "%s", DETAIL_ID);
+    r.position_s = pos_s; r.audio_index = audio; r.sub_index = sub; r.attempted = attempted;
+    return r;
+}
+static const JvCmd *detail_req(void)
+{
+    for (int k = 0; k < cm.n; k++)
+        if (cm.c[k].type == JV_CMD_REQUEST && cm.c[k].kind == JF_KIND_PARSE && strstr(cm.c[k].path, DETAIL_ID)) return &cm.c[k];
+    return NULL;
+}
+static bool saved(int pos_s, int audio, int sub)
+{
+    const JvCmd *s = find(JV_CMD_SAVE_LAST);
+    return s && STREQ(s->last.id, DETAIL_ID) && s->last.position_s == pos_s && s->last.audio_index == audio &&
+           s->last.sub_index == sub && !s->last.attempted;
+}
+
+static void test_last_saves(void)
+{
+    in_player(30000);                                    /* ends on the stream reply: PLAYING */
+    CHECK(saved(30, core.play.audio_index, core.play.sub_index), "PLAYING writes the record (%d saves)", count(JV_CMD_SAVE_LAST));
+    int a = core.play.audio_index;
+    step(JV_EV_POS, 61000);
+    step(JV_EV_PAUSE, 0);
+    CHECK(count(JV_CMD_SAVE_LAST) == 1 && saved(61, a, -1), "pause writes the record");
+    step(JV_EV_PAUSE, 0);
+    CHECK(count(JV_CMD_SAVE_LAST) == 0, "resume from pause writes nothing");
+    step(JV_EV_SUB_SET, 1);
+    CHECK(count(JV_CMD_SAVE_LAST) == 1 && saved(61, a, 4), "subtitle change writes the record");
+    step(JV_EV_AUDIO_SET, 0);
+    CHECK(count(JV_CMD_SAVE_LAST) == 1 && saved(61, 1, 4), "audio change writes the record");
+    const JvCmd *s = req(JF_KIND_STREAM, 1);
+    if (s) reply_stream(s->tag, 8);
+    CHECK(count(JV_CMD_SAVE_LAST) == 0, "the restart's PLAYING is not a second start: no write");
+
+    /* every 60 s while playing, not at the 10 s progress cadence */
+    step(JV_EV_POS, 70000);
+    int writes = 0;
+    for (int t = 1; t <= 59; t++) { now += 1000; step(JV_EV_TICK, 0); writes += count(JV_CMD_SAVE_LAST); }
+    CHECK(writes == 0, "no write in the first 59 s (%d)", writes);
+    now += 1000; step(JV_EV_TICK, 0);
+    CHECK(count(JV_CMD_SAVE_LAST) == 1, "one write at 60 s");
+    now += 1000; step(JV_EV_TICK, 0);
+    CHECK(count(JV_CMD_SAVE_LAST) == 0, "and not again at once");
+}
+
+static void test_last_leaving(void)
+{
+    in_player(0);
+    step(JV_EV_POS, 90000);
+    step(JV_EV_BACK, 0);
+    CHECK(saved(90, core.play.audio_index, core.play.sub_index) && count(JV_CMD_CLEAR_LAST) == 0 && core.screen == JV_SCR_DETAILS,
+          "BACK keeps the record at the position reached");
+    in_player(0);
+    step(JV_EV_POS, 90000);
+    step(JV_EV_STOP, 0);
+    CHECK(count(JV_CMD_CLEAR_LAST) == 1 && count(JV_CMD_SAVE_LAST) == 0 && !core.last.id[0] && core.screen == JV_SCR_DETAILS, "STOP clears the record");
+    in_player(0);
+    step(JV_EV_PLAYER_ENDED, 1);
+    CHECK(count(JV_CMD_CLEAR_LAST) == 1 && count(JV_CMD_SAVE_LAST) == 0, "watched to the end clears the record");
+    in_player(0);
+    step(JV_EV_POS, 50000);
+    step(JV_EV_QUIT, 0);
+    CHECK(count(JV_CMD_SAVE_LAST) == 1 && saved(50, core.play.audio_index, core.play.sub_index) && cm.c[cm.n - 1].type == JV_CMD_EXIT && count(JV_CMD_CLEAR_LAST) == 0,
+          "quit saves, then exits");
+}
+
+static void test_last_resume(void)
+{
+    /* a guard left by a crashed resume: skipped once, record kept, guard cleared */
+    JvLast r = rec_of(120, 2, 4, true);
+    start_with_last(&r);
+    const JvCmd *s = find(JV_CMD_SAVE_LAST);
+    CHECK(core.screen == JV_SCR_HOME && !core.auto_resume && !detail_req() && s && STREQ(s->last.id, DETAIL_ID) && !s->last.attempted &&
+          s->last.position_s == 120, "attempted=1: normal home, guard cleared, record kept");
+    CHECK(!core.last.attempted && core.last.id[0], "in memory too");
+
+    /* the happy path */
+    r = rec_of(120, 2, 4, false);
+    start_with_last(&r);
+    s = find(JV_CMD_SAVE_LAST);
+    CHECK(s && s->last.attempted && STREQ(s->last.id, DETAIL_ID), "the guard is written before the attempt");
+    const JvCmd *d = detail_req();
+    CHECK(core.screen == JV_SCR_DETAILS && core.auto_resume && d, "start loads the recorded item's detail");
+    if (d) reply_fixture(d, "detail.json");
+    CHECK(core.screen == JV_SCR_PLAYER && core.play_state == JV_PLAY_FETCHING && !core.auto_resume, "straight into the player");
+    CHECK(core.play.start_ms == 120000 && core.play.audio_index == 2 && core.play.sub_index == 4, "saved spot %ld, audio %d, sub %d",
+          core.play.start_ms, core.play.audio_index, core.play.sub_index);
+    s = req(JF_KIND_STREAM, 1);
+    if (s) reply_stream(s->tag, 7);
+    CHECK(core.play_state == JV_PLAY_PLAYING && saved(120, 2, 4), "PLAYING rewrites the record with the guard off");
+    step(JV_EV_BACK, 0);
+    CHECK(core.screen == JV_SCR_DETAILS, "BACK lands on the detail");
+    step(JV_EV_BACK, 0);
+    CHECK(core.screen == JV_SCR_HOME, "and BACK again on home");
+
+    /* gone from the server: the record goes, normal home */
+    start_with_last(&r);
+    d = detail_req();
+    if (d) reply_err(JF_KIND_PARSE, d->tag, JF_ERR_NOTFOUND);
+    CHECK(count(JV_CMD_CLEAR_LAST) == 1 && !core.last.id[0] && core.screen == JV_SCR_HOME && !core.auto_resume && !core.overlay, "404: record cleared, home");
+
+    /* any other failure keeps the record and takes the guard off */
+    start_with_last(&r);
+    d = detail_req();
+    if (d) reply_err(JF_KIND_PARSE, d->tag, JF_ERR_UNREACHABLE);
+    s = find(JV_CMD_SAVE_LAST);
+    CHECK(count(JV_CMD_CLEAR_LAST) == 0 && s && !s->last.attempted && core.last.id[0] && core.screen == JV_SCR_HOME, "network failure: record kept, guard off");
+
+    /* leaving before the detail arrives */
+    start_with_last(&r);
+    step(JV_EV_BACK, 0);
+    CHECK(!core.auto_resume && find(JV_CMD_SAVE_LAST) && !find(JV_CMD_SAVE_LAST)->last.attempted && core.screen == JV_SCR_HOME,
+          "BACK during the load drops the resume and the guard");
+
+    /* not signed in: sign-in as usual, the record is neither used nor touched */
+    unlink(own);
+    fresh();
+    r = rec_of(120, 2, 4, false);
+    core.last = r;
+    step(JV_EV_START, 0);
+    CHECK(core.screen == JV_SCR_SIGNIN && !core.auto_resume && count(JV_CMD_SAVE_LAST) == 0 && count(JV_CMD_CLEAR_LAST) == 0 && core.last.id[0],
+          "signed out: sign-in, record kept");
+}
+
+/* HOME -> MOVIES -> first row -> detail, with `rec` (NULL = none) set after the start, preferences "eng" */
+static void details_with_last(const JvLast *rec)
+{
+    home_ready();
+    core.set.audio_lang[0] = '\0'; snprintf(core.set.audio_lang, sizeof core.set.audio_lang, "eng");
+    if (rec) core.last = *rec;
+    step(JV_EV_HOME, JV_TILE_MOVIES);
+    const JvCmd *c = req(JF_KIND_PARSE, 0); if (c) reply_fixture(c, "movies.json");
+    step(JV_EV_ACTIVATE, 0);
+    c = req(JF_KIND_PARSE, 0); if (c) reply_fixture(c, "detail.json");
+}
+
+static void test_last_tracks_on_detail(void)
+{
+    details_with_last(NULL);                             /* what the preferences pick without a record */
+    int pa = audio_pos_index(), ps = sub_pos_index();
+    int want_a = pa == 1 ? 2 : 1, want_s = ps == 3 ? 4 : 3;
+
+    JvLast r = rec_of(10, want_a, want_s, false);
+    details_with_last(&r);                               /* the same item, recorded with other tracks */
+    CHECK(audio_pos_index() == want_a && sub_pos_index() == want_s, "recorded tracks win: audio %d (picked %d, want %d), sub %d (picked %d, want %d)",
+          audio_pos_index(), pa, want_a, sub_pos_index(), ps, want_s);
+
+    snprintf(r.id, sizeof r.id, "5eed00000000000000000000000000ff");
+    details_with_last(&r);
+    CHECK(audio_pos_index() == pa && sub_pos_index() == ps, "another item's record changes nothing");
+
+    r = rec_of(10, want_a, -1, false);
+    details_with_last(&r);
+    CHECK(audio_pos_index() == want_a && core.sel_sub == -1, "recorded 'subtitles off' is applied too");
+}
+
 int main(void)
 {
     snprintf(dir, sizeof dir, "/tmp/jvcoreXXXXXX");
@@ -591,6 +771,10 @@ int main(void)
     test_open_failure();
     test_paused_restart();
     test_paused_progress();
+    test_last_saves();
+    test_last_leaving();
+    test_last_resume();
+    test_last_tracks_on_detail();
     unlink(own); unlink(other); rmdir(dir);
     printf("jv_core_test: %d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;

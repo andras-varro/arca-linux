@@ -242,6 +242,53 @@ static void pop(JvCore *c, JvCmds *out)
 static int audio_index(const JvCore *c) { return c->sel_audio >= 0 && c->sel_audio < c->detail.n_audio ? c->detail.audio[c->sel_audio].index : -1; }
 static int sub_index(const JvCore *c) { return c->sel_sub >= 0 && c->sel_sub < c->detail.n_subs ? c->detail.subs[c->sel_sub].index : -1; }
 
+/* ── the last-played record ────────────────────────────────────────────── */
+
+/* the record as the player has it now: written at PLAYING, on pause, on a track change, every JV_LAST_SAVE_MS, on leaving.
+ * It is built fresh, so `attempted` is false: reaching here means the film did not take the app down. */
+static void note_last(JvCore *c, JvCmds *out, long pos_ms)
+{
+    if (!c->play.item_id[0]) return;
+    JvLast *r = &c->last;
+    memset(r, 0, sizeof *r);
+    copy(r->id, sizeof r->id, c->play.item_id);
+    r->position_s = pos_ms > 0 ? (int)(pos_ms / 1000) : 0;
+    r->audio_index = c->play.audio_index; r->sub_index = c->play.sub_index;
+    JvCmd *k = emit(out, JV_CMD_SAVE_LAST);
+    k->last = *r;
+}
+
+static void clear_last(JvCore *c, JvCmds *out)
+{
+    memset(&c->last, 0, sizeof c->last);
+    emit(out, JV_CMD_CLEAR_LAST);
+}
+
+/* an automatic resume that did not reach PLAYING for a reason that is not a crash: the guard comes off, the record stays */
+static void unguard(JvCore *c, JvCmds *out)
+{
+    if (!c->last.id[0] || !c->last.attempted) return;
+    c->last.attempted = false;
+    JvCmd *k = emit(out, JV_CMD_SAVE_LAST);
+    k->last = c->last;
+}
+
+/* BACK and QUIT leave the player but keep the record, at the position reached */
+static void keep_last(JvCore *c, JvCmds *out)
+{
+    if (c->started_sent && (c->play_state == JV_PLAY_PLAYING || c->play_state == JV_PLAY_PAUSED)) note_last(c, out, jv_core_position(c));
+    else unguard(c, out);
+}
+
+/* the detail on screen is the recorded item: its recorded tracks replace the picked ones */
+static void apply_last(JvCore *c)
+{
+    if (!c->last.id[0] || strcmp(c->last.id, c->detail.it.b.id) != 0) return;
+    for (int i = 0; i < c->detail.n_audio; i++) if (c->detail.audio[i].index == c->last.audio_index) c->sel_audio = i;
+    if (c->last.sub_index < 0) c->sel_sub = -1;
+    else for (int i = 0; i < c->detail.n_subs; i++) if (c->detail.subs[i].index == c->last.sub_index) c->sel_sub = i;
+}
+
 static void post_report(JvCore *c, JvCmds *out, int which, long pos, const char *event)
 {
     JvReport r;
@@ -383,6 +430,7 @@ static void on_stream(JvCore *c, const JfResult *r, JvCmds *out)
         if (c->started_sent) post_report(c, out, 2, jv_core_position(c), NULL);
         end_job(c, out, c->play.session_id, false);
         c->play_state = JV_PLAY_IDLE; c->seek_pending = false; c->restart_paused = false;
+        unguard(c, out);
         pop(c, out);
         set_overlay(c, t, JV_BTN_CLOSE);
         return;
@@ -395,6 +443,8 @@ static void on_stream(JvCore *c, const JfResult *r, JvCmds *out)
     if (!c->started_sent) {
         c->started_sent = true;
         post_report(c, out, 0, c->play.start_ms, NULL);
+        note_last(c, out, c->play.start_ms);
+        c->next_last_ms = c->now_ms + JV_LAST_SAVE_MS;
         load_sub(c, out);
     }
 }
@@ -421,7 +471,7 @@ static void change_sub(JvCore *c, JvCmds *out, int pos)
     c->play.sub_index = sub_index(c);
     { JvCmd *k = emit(out, JV_CMD_CANCEL); k->kind = JF_KIND_STREAM; }
     load_sub(c, out);
-    if (c->play_state == JV_PLAY_PLAYING || c->play_state == JV_PLAY_PAUSED) post_report(c, out, 1, jv_core_position(c), "timeupdate");
+    if (c->play_state == JV_PLAY_PLAYING || c->play_state == JV_PLAY_PAUSED) { post_report(c, out, 1, jv_core_position(c), "timeupdate"); note_last(c, out, jv_core_position(c)); }
 }
 
 static void change_audio(JvCore *c, JvCmds *out, int pos)
@@ -431,6 +481,7 @@ static void change_audio(JvCore *c, JvCmds *out, int pos)
     if (c->screen != JV_SCR_PLAYER || c->play_state == JV_PLAY_IDLE) return;
     c->play.audio_index = audio_index(c);
     restart_stream(c, out, jv_core_position(c), "timeupdate");
+    if (c->play_state == JV_PLAY_FETCHING) note_last(c, out, c->play.start_ms);
 }
 
 static void seek(JvCore *c, long target)
@@ -462,6 +513,7 @@ static void on_tick(JvCore *c, JvCmds *out)
     if (c->seek_pending && c->now_ms >= c->seek_due_ms) { restart_stream(c, out, c->seek_target_ms, "seek"); return; }
     /* paused too: the progress pings are what keeps the server from reaping the session and its encoding job */
     if ((c->play_state == JV_PLAY_PLAYING || c->play_state == JV_PLAY_PAUSED) && c->now_ms >= c->next_report_ms) post_report(c, out, 1, jv_core_position(c), "timeupdate");
+    if (c->play_state == JV_PLAY_PLAYING && c->now_ms >= c->next_last_ms) { note_last(c, out, jv_core_position(c)); c->next_last_ms = c->now_ms + JV_LAST_SAVE_MS; }
 }
 
 /* ── results ───────────────────────────────────────────────────────────── */
@@ -527,18 +579,43 @@ static void pick_tracks(JvCore *c)
                              c->sel_audio >= 0 ? &d->audio[c->sel_audio] : NULL);
 }
 
-static void on_detail(JvCore *c, const JfResult *r)
+/* the recorded item could not be loaded: gone from the server (404) -> the record goes; any other cause -> it stays, the guard comes off */
+static void resume_abort(JvCore *c, JvCmds *out, const JfResult *r)
+{
+    c->auto_resume = false;
+    if (r->err == JF_ERR_NOTFOUND) clear_last(c, out); else unguard(c, out);
+    if (r->err == JF_ERR_UNAUTH) { fail(c, r, true); return; }
+    pop(c, out);
+}
+
+/* START found a record and the detail is in: straight into the player at the recorded spot */
+static void resume_play(JvCore *c, JvCmds *out)
+{
+    c->auto_resume = false;
+    long ms = (long)c->last.position_s * 1000L;
+    long rt = (long)c->detail.it.b.runtime_s * 1000L;
+    if (rt > 0 && ms > rt - 1000) ms = 0;
+    on_play(c, out, ms);
+    if (c->play_state == JV_PLAY_IDLE) { unguard(c, out); pop(c, out); }   /* no media source: not playable */
+}
+
+static void on_detail(JvCore *c, const JfResult *r, JvCmds *out)
 {
     if (r->tag != c->detail_tag) return;
     c->detail_tag = 0;
     update_busy(c);
-    if (r->err != JF_ERR_NONE) { c->detail_refresh = false; fail(c, r, true); return; }
+    if (r->err != JF_ERR_NONE) {
+        c->detail_refresh = false;
+        if (c->auto_resume) resume_abort(c, out, r); else fail(c, r, true);
+        return;
+    }
     c->detail = c->detail_in;
     c->detail_ready = true;
-    if (c->screen == JV_SCR_DETAILS && !c->detail_refresh) { pick_tracks(c); }
+    if (c->screen == JV_SCR_DETAILS && !c->detail_refresh) { pick_tracks(c); apply_last(c); }
     if (c->sel_audio >= c->detail.n_audio) c->sel_audio = c->detail.n_audio ? 0 : -1;
     if (c->sel_sub >= c->detail.n_subs) c->sel_sub = -1;
     c->detail_refresh = false;
+    if (c->auto_resume && c->screen == JV_SCR_DETAILS) resume_play(c, out);
 }
 
 static void on_result(JvCore *c, const JfResult *r, JvCmds *out)
@@ -548,7 +625,7 @@ static void on_result(JvCore *c, const JfResult *r, JvCmds *out)
     case JF_KIND_PARSE:
         if (r->tag == c->home_tag) on_home(c, r, out);
         else if (r->tag == c->list_tag) on_list(c, r, out);
-        else if (r->tag == c->detail_tag) on_detail(c, r);
+        else if (r->tag == c->detail_tag) on_detail(c, r, out);
         break;
     case JF_KIND_POST: case JF_KIND_WRITE:
         if (r->kind == JF_KIND_WRITE && del_result(c, r)) break;
@@ -584,6 +661,16 @@ static void on_start(JvCore *c, JvCmds *out)
     if (c->login.token[0] && c->login.user_id[0] && jf_parse_server(c->login.server, host, sizeof host, &port, &tls) == JF_SERVER_OK) {
         set_server(c, out, host, port, tls);
         go_home(c, out);
+        if (c->last.id[0]) {
+            if (c->last.attempted) unguard(c, out);      /* the last automatic resume never reached PLAYING: normal home, once */
+            else {
+                c->last.attempted = true;
+                JvCmd *k = emit(out, JV_CMD_SAVE_LAST);
+                k->last = c->last;
+                c->auto_resume = true;
+                enter_details(c, out, c->last.id, "");
+            }
+        }
     } else go_signin(c);
 }
 
@@ -673,9 +760,9 @@ void jv_step(JvCore *c, const JvEvent *ev, long long now_ms, JvCmds *out)
         break;
     case JV_EV_ACTIVATE: on_activate(c, out, ev->i); break;
     case JV_EV_BACK:
-        if (c->screen == JV_SCR_PLAYER) { stop_play(c, out, false); pop(c, out); }
+        if (c->screen == JV_SCR_PLAYER) { keep_last(c, out); stop_play(c, out, false); pop(c, out); }
         else if (c->overlay) c->overlay = false;
-        else pop(c, out);
+        else { if (c->auto_resume) { c->auto_resume = false; unguard(c, out); } pop(c, out); }
         break;
     case JV_EV_NEED_MORE: {
         JvList *l = &c->lists[0];
@@ -700,16 +787,17 @@ void jv_step(JvCore *c, const JvEvent *ev, long long now_ms, JvCmds *out)
     case JV_EV_SUB_NEXT: change_sub(c, out, jv_next_sub(c->detail.subs, c->detail.n_subs, c->sel_sub)); break;
     case JV_EV_PLAY: on_play(c, out, ev->i); break;
     case JV_EV_PAUSE:
-        if (c->play_state == JV_PLAY_PLAYING) { c->play_state = JV_PLAY_PAUSED; emit(out, JV_CMD_PLAYER_PAUSE); post_report(c, out, 1, jv_core_position(c), "pause"); }
+        if (c->play_state == JV_PLAY_PLAYING) { c->play_state = JV_PLAY_PAUSED; emit(out, JV_CMD_PLAYER_PAUSE); post_report(c, out, 1, jv_core_position(c), "pause"); note_last(c, out, jv_core_position(c)); }
         else if (c->play_state == JV_PLAY_PAUSED) { c->play_state = JV_PLAY_PLAYING; emit(out, JV_CMD_PLAYER_RESUME); post_report(c, out, 1, jv_core_position(c), "unpause"); }
         break;
     case JV_EV_SEEK_BY: c->seek_dir = 0; seek(c, jv_core_position(c) + ev->i); break;
     case JV_EV_SEEK_TO: c->seek_dir = 0; seek(c, ev->i); break;
     case JV_EV_SEEK_STEP: seek_step(c, ev->i); break;
     case JV_EV_STOP:
-        if (c->screen == JV_SCR_PLAYER) { stop_play(c, out, false); pop(c, out); }
+        if (c->screen == JV_SCR_PLAYER) { stop_play(c, out, false); pop(c, out); clear_last(c, out); }
         break;
     case JV_EV_QUIT:
+        keep_last(c, out);
         stop_play(c, out, false);
         emit(out, JV_CMD_EXIT);
         break;
@@ -720,7 +808,7 @@ void jv_step(JvCore *c, const JvEvent *ev, long long now_ms, JvCmds *out)
     case JV_EV_POS: if (c->play_state != JV_PLAY_FETCHING && ev->i >= 0) c->pos_ms = ev->i; break;
     case JV_EV_PLAYER_ENDED:
         if (c->play_state != JV_PLAY_PLAYING && c->play_state != JV_PLAY_PAUSED) break;
-        if (ev->i) { stop_play(c, out, true); pop(c, out); }
+        if (ev->i) { stop_play(c, out, true); pop(c, out); clear_last(c, out); }
         else if (!c->restarted_once) { c->restarted_once = true; restart_stream(c, out, jv_core_position(c), "timeupdate"); }
         else { stop_play(c, out, false); pop(c, out); set_overlay(c, "PLAYBACK FAILED", JV_BTN_CLOSE); }
         break;
