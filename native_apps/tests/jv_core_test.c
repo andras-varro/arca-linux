@@ -159,7 +159,7 @@ static void in_player(long start_ms)
     in_details();
     core.set.sub_mode = JV_SUB_OFF;
     step(JV_EV_PLAY, (int)start_ms);
-    const JvCmd *s = req(JF_KIND_STREAM, 0);
+    const JvCmd *s = req(JF_KIND_STREAM, 1);
     if (s) reply_stream(s->tag, 7);
 }
 
@@ -256,7 +256,7 @@ static void test_detail_play_url(void)
     CHECK(core.detail_ready && core.sel_audio == 1 && core.sel_sub == 1, "preferences chose audio %d sub %d", core.sel_audio, core.sel_sub);
     core.channels = 2; core.rate = 48000;
     step(JV_EV_PLAY, 90000);
-    const JvCmd *s = req(JF_KIND_STREAM, 0);
+    const JvCmd *s = req(JF_KIND_STREAM, 1);
     CHECK(s && strstr(s->path, "AudioStreamIndex=2") && strstr(s->path, "StartTimeTicks=900000000") &&
           strstr(s->path, "PlaySessionId=00000000000000000000000000000001") && strstr(s->path, "DeviceId=") &&
           strstr(s->path, "audioChannels=2") && strstr(s->path, "audioSampleRate=48000"), "stream url: %s", s ? s->path : "(none)");
@@ -266,8 +266,8 @@ static void test_detail_play_url(void)
     CHECK(core.play_state == JV_PLAY_PLAYING && find(JV_CMD_PLAYER_START) && find(JV_CMD_PLAYER_START)->fd == 7, "player started");
     const JvCmd *p = post_to("/Sessions/Playing");
     CHECK(p && strstr(p->body, "00000000000000000000000000000001") && strstr(p->body, "\"AudioStreamIndex\":2"), "started report: %s", p ? p->body : "(none)");
-    const JvCmd *sub = req(JF_KIND_STREAM, 1);
-    CHECK(sub && strstr(sub->path, "/Subtitles/4/") && find(JV_CMD_SUB_CLEAR), "subtitle track fetched on the second instance");
+    const JvCmd *sub = req(JF_KIND_STREAM, 0);
+    CHECK(sub && strstr(sub->path, "/Subtitles/4/") && find(JV_CMD_SUB_CLEAR), "subtitle track fetched on the first instance");
 }
 
 static void test_progress_cadence(void)
@@ -286,7 +286,7 @@ static void test_progress_cadence(void)
     CHECK(post_to("/Sessions/Playing/Progress") && strstr(post_to("/Sessions/Playing/Progress")->body, "\"IsPaused\":true") && find(JV_CMD_PLAYER_PAUSE), "pause report");
     int more = 0;
     for (int k = 1; k <= 40; k++) { now += 500; step(JV_EV_TICK, 0); if (cm.n) more++; }
-    CHECK(more == 0, "no timer while paused (%d)", more);
+    CHECK(more == 2, "paused: a progress ping every 10 s, nothing else (%d)", more);
 }
 
 static void test_seek_burst(void)
@@ -298,21 +298,21 @@ static void test_seek_burst(void)
     for (int k = 0; k < 5; k++) {
         now += 100;
         step(JV_EV_SEEK_BY, 30000);
-        restarts += count_req(JF_KIND_STREAM, 0);
+        restarts += count_req(JF_KIND_STREAM, 1);
         step(JV_EV_TICK, 0);
-        restarts += count_req(JF_KIND_STREAM, 0);
+        restarts += count_req(JF_KIND_STREAM, 1);
     }
     CHECK(restarts == 0 && core.seek_pending && jv_core_position(&core) == 210000, "burst held (restarts %d, shown %ld)", restarts, jv_core_position(&core));
     now += 600; step(JV_EV_TICK, 0);
     CHECK(cm.n == 0, "not yet quiet for 700 ms");
     now += 100; step(JV_EV_TICK, 0);
-    const JvCmd *s = req(JF_KIND_STREAM, 0);
-    CHECK(count_req(JF_KIND_STREAM, 0) == 1 && s && strstr(s->path, "StartTimeTicks=2100000000") && count(JV_CMD_PLAYER_STOP) == 1, "one restart at the target");
-    CHECK(req(JF_KIND_WRITE, 0) && strstr(req(JF_KIND_WRITE, 0)->path, old) && strstr(req(JF_KIND_WRITE, 0)->path, "ActiveEncodings"), "old job deleted");
+    const JvCmd *s = req(JF_KIND_STREAM, 1);
+    CHECK(count_req(JF_KIND_STREAM, 1) == 1 && s && strstr(s->path, "StartTimeTicks=2100000000") && count(JV_CMD_PLAYER_STOP) == 1, "one restart at the target");
+    CHECK(req(JF_KIND_WRITE, 1) && strstr(req(JF_KIND_WRITE, 1)->path, old) && strstr(req(JF_KIND_WRITE, 1)->path, "ActiveEncodings"), "old job deleted");
     CHECK(!STREQ(old, core.play.session_id) && s && strstr(s->path, core.play.session_id), "fresh session id");
     CHECK(!core.seek_pending && core.play_state == JV_PLAY_FETCHING, "state after restart");
     int again = 0;
-    for (int k = 0; k < 20; k++) { now += 100; step(JV_EV_TICK, 0); if (req(JF_KIND_STREAM, 0)) again++; }
+    for (int k = 0; k < 20; k++) { now += 100; step(JV_EV_TICK, 0); if (req(JF_KIND_STREAM, 1)) again++; }
     CHECK(again == 0, "no second restart");
 }
 
@@ -322,16 +322,16 @@ static void test_audio_switch(void)
     step(JV_EV_POS, 123000);
     char old[33]; snprintf(old, sizeof old, "%s", core.play.session_id);
     step(JV_EV_AUDIO_SET, 0);
-    const JvCmd *s = req(JF_KIND_STREAM, 0);
+    const JvCmd *s = req(JF_KIND_STREAM, 1);
     CHECK(s && strstr(s->path, "AudioStreamIndex=1") && strstr(s->path, "StartTimeTicks=1230000000") && !strstr(s->path, old) && !STREQ(old, core.play.session_id),
           "audio switch restarts at the position: %s", s ? s->path : "(none)");
-    CHECK(req(JF_KIND_WRITE, 0) && strstr(req(JF_KIND_WRITE, 0)->path, old), "old job deleted");
+    CHECK(req(JF_KIND_WRITE, 1) && strstr(req(JF_KIND_WRITE, 1)->path, old), "old job deleted");
     CHECK(!post_to("/Sessions/Playing") && post_to("/Sessions/Playing/Progress"), "reported as progress, not a second start");
     reply_stream(s->tag, 8);
     CHECK(core.play_state == JV_PLAY_PLAYING && !post_to("/Sessions/Playing"), "second stream playing without a second start");
     /* a subtitle change is only an SRT reload */
     step(JV_EV_SUB_SET, 1);
-    CHECK(count_req(JF_KIND_STREAM, 0) == 0 && req(JF_KIND_STREAM, 1) && count(JV_CMD_PLAYER_STOP) == 0 && core.play.sub_index == 4, "subtitle change reloads only the SRT");
+    CHECK(count_req(JF_KIND_STREAM, 1) == 0 && req(JF_KIND_STREAM, 0) && count(JV_CMD_PLAYER_STOP) == 0 && core.play.sub_index == 4, "subtitle change reloads only the SRT");
 }
 
 static void test_stop(void)
@@ -342,13 +342,13 @@ static void test_stop(void)
     step(JV_EV_STOP, 0);
     const JvCmd *p = post_to("/Sessions/Playing/Stopped");
     CHECK(p && strstr(p->body, sid) && strstr(p->body, "\"PositionTicks\":450000000"), "stopped report: %s", p ? p->body : "(none)");
-    const JvCmd *w = req(JF_KIND_WRITE, 0);
+    const JvCmd *w = req(JF_KIND_WRITE, 1);
     CHECK(w && STREQ(w->method, "DELETE") && strstr(w->path, "ActiveEncodings") && strstr(w->path, sid), "DELETE ActiveEncodings");
     CHECK(count(JV_CMD_PLAYER_STOP) == 1 && core.play_state == JV_PLAY_IDLE && core.screen == JV_SCR_DETAILS && req(JF_KIND_PARSE, 0), "back on details, detail refreshed");
     /* quit while playing: the same reports, then EXIT last */
     in_player(0);
     step(JV_EV_QUIT, 0);
-    CHECK(post_to("/Sessions/Playing/Stopped") && req(JF_KIND_WRITE, 0) && cm.c[cm.n - 1].type == JV_CMD_EXIT, "quit reports before it exits");
+    CHECK(post_to("/Sessions/Playing/Stopped") && req(JF_KIND_WRITE, 1) && cm.c[cm.n - 1].type == JV_CMD_EXIT, "quit reports before it exits");
 }
 
 static void test_failed_post(void)
@@ -359,7 +359,7 @@ static void test_failed_post(void)
     {   /* replay the start: stop, play again, find the tag */
         step(JV_EV_STOP, 0);
         step(JV_EV_PLAY, 0);
-        const JvCmd *s = req(JF_KIND_STREAM, 0);
+        const JvCmd *s = req(JF_KIND_STREAM, 1);
         reply_stream(s->tag, 9);
         const JvCmd *p = post_to("/Sessions/Playing");
         started_tag = p ? p->tag : 0;
@@ -378,6 +378,157 @@ static void test_failed_post(void)
     CHECK(starts == 0 && progress == 2, "later: no repeat of the started report (%d), the timer's reports go on (%d)", starts, progress);
 }
 
+/* ── playback control: instances, DELETE safety, paused restarts ───────── */
+
+static int writes_for(const char *sid, int api)
+{
+    int n = 0;
+    for (int k = 0; k < cm.n; k++)
+        if (cm.c[k].type == JV_CMD_REQUEST && cm.c[k].kind == JF_KIND_WRITE && cm.c[k].api == api && STREQ(cm.c[k].method, "DELETE") && strstr(cm.c[k].path, sid)) n++;
+    return n;
+}
+
+static void test_api_instances(void)
+{
+    in_player(0);
+    step(JV_EV_POS, 45000);
+    char sid[33]; snprintf(sid, sizeof sid, "%s", core.play.session_id);
+    step(JV_EV_AUDIO_SET, 0);
+    const JvCmd *s = req(JF_KIND_STREAM, 1);
+    const JvCmd *pr = post_to("/Sessions/Playing/Progress");
+    CHECK(s && count_req(JF_KIND_STREAM, 0) == 0, "stream on the second instance");
+    CHECK(pr && pr->api == 1 && writes_for(sid, 1) == 1 && writes_for(sid, 0) == 0, "restart: report and DELETE on the second instance");
+    if (!s) return;
+    reply_stream(s->tag, 8);
+    step(JV_EV_STOP, 0);
+    const JvCmd *st = post_to("/Sessions/Playing/Stopped");
+    CHECK(st && st->api == 1 && writes_for(core.play.session_id, 1) == 1, "stop: Stopped report and DELETE on the second instance");
+    CHECK(req(JF_KIND_PARSE, 0) != NULL, "metadata stays on the first");
+}
+
+/* a DELETE that the ring refused (the loop answers BADREPLY) or the server failed is sent again, then counted */
+static void test_delete_retry(void)
+{
+    in_player(0);
+    char sid[33]; snprintf(sid, sizeof sid, "%s", core.play.session_id);
+    step(JV_EV_STOP, 0);
+    const JvCmd *w = req(JF_KIND_WRITE, 1);
+    unsigned tag = w ? w->tag : 0;
+    CHECK(tag && writes_for(sid, 1) == 1, "first DELETE");
+    int fail0 = core.report_fail;
+    reply_err(JF_KIND_WRITE, tag, JF_ERR_BADREPLY);
+    CHECK(cm.n == 0 && core.report_fail == fail0, "failure alone sends nothing yet");
+    now += 600; step(JV_EV_TICK, 0);
+    w = req(JF_KIND_WRITE, 1);
+    CHECK(w && writes_for(sid, 1) == 1, "DELETE sent again after a failure");
+    if (!w) return;
+    reply_err(JF_KIND_WRITE, w->tag, JF_ERR_BADREPLY);
+    now += 600; step(JV_EV_TICK, 0);
+    w = req(JF_KIND_WRITE, 1);
+    CHECK(w && writes_for(sid, 1) == 1, "and a third time");
+    if (!w) return;
+    reply_err(JF_KIND_WRITE, w->tag, JF_ERR_BADREPLY);
+    CHECK(core.report_fail == fail0 + 1, "counted once, when the retries are used up");
+    for (int k = 0; k < 20; k++) { now += 600; step(JV_EV_TICK, 0); CHECK(cm.n == 0, "no fourth DELETE"); }
+    /* a DELETE that went through is not repeated */
+    in_player(0);
+    snprintf(sid, sizeof sid, "%s", core.play.session_id);
+    step(JV_EV_STOP, 0);
+    w = req(JF_KIND_WRITE, 1);
+    if (w) reply_err(JF_KIND_WRITE, w->tag, JF_ERR_NONE);
+    int again = 0;
+    for (int k = 0; k < 20; k++) { now += 600; step(JV_EV_TICK, 0); again += writes_for(sid, 1); }
+    CHECK(again == 0, "an answered DELETE is not repeated (%d)", again);
+}
+
+/* cancelling a stream that is still opening: the server may not have its job yet, so the DELETE goes twice */
+static void test_cancelled_open_second_delete(void)
+{
+    in_player(0);
+    step(JV_EV_POS, 45000);
+    step(JV_EV_AUDIO_SET, 0);                       /* FETCHING */
+    char fetching[33]; snprintf(fetching, sizeof fetching, "%s", core.play.session_id);
+    step(JV_EV_AUDIO_SET, 1);                       /* cancels the open */
+    CHECK(writes_for(fetching, 1) == 1, "DELETE at once");
+    now += 1000; step(JV_EV_TICK, 0);
+    CHECK(writes_for(fetching, 1) == 0, "not yet at 1 s");
+    now += 600; step(JV_EV_TICK, 0);
+    CHECK(writes_for(fetching, 1) == 1, "again at about 1.5 s");
+    int more = 0;
+    for (int k = 0; k < 20; k++) { now += 500; step(JV_EV_TICK, 0); more += writes_for(fetching, 1); }
+    CHECK(more == 0, "and no more (%d)", more);
+    /* stop during an open */
+    char cur[33]; snprintf(cur, sizeof cur, "%s", core.play.session_id);
+    step(JV_EV_STOP, 0);
+    CHECK(writes_for(cur, 1) == 1, "stop during open: DELETE at once");
+    now += 1600; step(JV_EV_TICK, 0);
+    CHECK(writes_for(cur, 1) == 1, "stop during open: and again");
+    /* a stream that was playing is stopped once only */
+    in_player(0);
+    snprintf(cur, sizeof cur, "%s", core.play.session_id);
+    step(JV_EV_STOP, 0);
+    now += 1600; step(JV_EV_TICK, 0);
+    CHECK(writes_for(cur, 1) == 0, "a playing stream DELETE is not doubled");
+}
+
+static void test_open_failure(void)
+{
+    in_player(0);
+    step(JV_EV_POS, 60000);
+    step(JV_EV_SEEK_BY, 30000);
+    now += 800; step(JV_EV_TICK, 0);                /* restart at 90 s */
+    char sid[33]; snprintf(sid, sizeof sid, "%s", core.play.session_id);
+    CHECK(core.play_state == JV_PLAY_FETCHING && core.busy, "opening: FETCHING counts as busy");
+    step(JV_EV_SEEK_BY, 30000);                     /* pressed during the open: pending target 120 s */
+    reply_stream(core.stream_tag, -1);
+    CHECK(writes_for(sid, 1) == 1, "open failed: the new session job is ended");
+    const JvCmd *st = post_to("/Sessions/Playing/Stopped");
+    CHECK(st && strstr(st->body, "\"PositionTicks\":1200000000"), "open failed: Stopped at the position shown: %s", st ? st->body : "(none)");
+    CHECK(core.play_state == JV_PLAY_IDLE && core.screen == JV_SCR_DETAILS && core.overlay, "open failed: back on the details with the error");
+}
+
+static void test_paused_restart(void)
+{
+    in_player(0);
+    step(JV_EV_POS, 60000);
+    step(JV_EV_PAUSE, 0);
+    step(JV_EV_SEEK_BY, 30000);
+    now += 800; step(JV_EV_TICK, 0);
+    const JvCmd *pr = post_to("/Sessions/Playing/Progress");
+    CHECK(pr && strstr(pr->body, "\"IsPaused\":true"), "restart report says paused: %s", pr ? pr->body : "(none)");
+    CHECK(core.busy, "busy while the stream opens");
+    reply_stream(core.stream_tag, 9);
+    CHECK(core.play_state == JV_PLAY_PAUSED && find(JV_CMD_PLAYER_START) && find(JV_CMD_PLAYER_PAUSE), "seek while paused stays paused");
+    CHECK(!core.busy, "not busy once open");
+    step(JV_EV_PAUSE, 0);
+    CHECK(core.play_state == JV_PLAY_PLAYING && find(JV_CMD_PLAYER_RESUME), "and resumes on the next toggle");
+    /* an audio switch while paused */
+    step(JV_EV_PAUSE, 0);
+    step(JV_EV_AUDIO_SET, 0);
+    reply_stream(core.stream_tag, 10);
+    CHECK(core.play_state == JV_PLAY_PAUSED && find(JV_CMD_PLAYER_PAUSE), "audio switch while paused stays paused");
+    /* a restart while playing is not paused */
+    step(JV_EV_PAUSE, 0);
+    step(JV_EV_AUDIO_SET, 1);
+    reply_stream(core.stream_tag, 11);
+    CHECK(core.play_state == JV_PLAY_PLAYING && !find(JV_CMD_PLAYER_PAUSE), "a restart while playing plays");
+}
+
+static void test_paused_progress(void)
+{
+    in_player(0);
+    step(JV_EV_POS, 60000);
+    step(JV_EV_PAUSE, 0);
+    int n = 0; long long at[6]; memset(at, 0, sizeof at); long long t0 = now;
+    for (int k = 1; k <= 70; k++) {
+        now = t0 + 500LL * k; step(JV_EV_TICK, 0);
+        const JvCmd *p = post_to("/Sessions/Playing/Progress");
+        if (p) { CHECK(strstr(p->body, "\"IsPaused\":true") != NULL, "paused report body"); if (n < 6) at[n] = now - t0; n++; }
+    }
+    CHECK(n == 3 && at[0] == 10000 && at[2] == 30000, "paused progress every 10 s (n=%d)", n);
+    CHECK(core.play_state == JV_PLAY_PAUSED, "still paused");
+}
+
 int main(void)
 {
     snprintf(dir, sizeof dir, "/tmp/jvcoreXXXXXX");
@@ -393,6 +544,12 @@ int main(void)
     test_audio_switch();
     test_stop();
     test_failed_post();
+    test_api_instances();
+    test_delete_retry();
+    test_cancelled_open_second_delete();
+    test_open_failure();
+    test_paused_restart();
+    test_paused_progress();
     unlink(own); unlink(other); rmdir(dir);
     printf("jv_core_test: %d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;

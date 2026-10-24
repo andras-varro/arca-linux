@@ -40,7 +40,7 @@ static bool new_session(JvCore *c, char out[33])
 
 static void update_busy(JvCore *c)
 {
-    c->busy = c->auth_pending || c->lists[0].pending || c->detail_tag != 0 || c->home_phase != 0;
+    c->busy = c->auth_pending || c->lists[0].pending || c->detail_tag != 0 || c->home_phase != 0 || c->play_state == JV_PLAY_FETCHING;
 }
 
 /* ── init ──────────────────────────────────────────────────────────────── */
@@ -249,25 +249,65 @@ static void post_report(JvCore *c, JvCmds *out, int which, long pos, const char 
     r.item_id = c->play.item_id; r.media_source_id = c->play.media_source_id; r.session_id = c->play.session_id;
     r.position_ms = pos < 0 ? 0 : pos;
     r.audio_index = c->play.audio_index; r.sub_index = c->play.sub_index;
-    r.paused = c->play_state == JV_PLAY_PAUSED;
+    r.paused = c->play_state == JV_PLAY_PAUSED || (c->play_state == JV_PLAY_FETCHING && c->restart_paused);
     r.event = event;
     char path[JF_API_PATH_MAX], body[JV_BODY_MAX];
     int pn = which == 0 ? jv_path_playing(path, sizeof path) : which == 1 ? jv_path_progress(path, sizeof path) : jv_path_stopped(path, sizeof path);
     int bn = which == 0 ? jv_body_started(body, sizeof body, &r) : which == 1 ? jv_body_progress(body, sizeof body, &r) : jv_body_stopped(body, sizeof body, &r);
     if (pn < 0 || bn < 0) return;
     JvCmd *q = emit(out, JV_CMD_REQUEST);
-    q->kind = JF_KIND_POST; q->tag = ++c->req_tag; q->n = bn;
+    q->kind = JF_KIND_POST; q->api = 1; q->tag = ++c->req_tag; q->n = bn;
     copy(q->path, sizeof q->path, path); memcpy(q->body, body, (size_t)bn + 1);
     c->next_report_ms = c->now_ms + JV_PROGRESS_MS;
 }
 
-static void end_job(JvCore *c, JvCmds *out, const char *sid)
+/* the DELETE of a session's encoding job, on the stream instance.  The ring behind it can be full and the loop then
+ * answers BADREPLY, so the core keeps the DELETE in c->del until it is answered: a failure sends it again
+ * (JV_DEL_RETRY_MS later, twice at most).  `twice`: the stream was still opening, the server may not have its job
+ * yet, so it goes a second time JV_DEL_TWICE_MS after the first. */
+static void send_del(JvCore *c, JvCmds *out, JvDel *d)
 {
     char p[JF_API_PATH_MAX];
-    if (jv_path_end_job(p, sizeof p, c->login.device_id, sid) < 0) return;
+    d->due_ms = 0;
+    if (jv_path_end_job(p, sizeof p, c->login.device_id, d->sid) < 0) { d->sid[0] = '\0'; return; }
     JvCmd *w = emit(out, JV_CMD_REQUEST);
-    w->kind = JF_KIND_WRITE; w->tag = ++c->req_tag;
+    w->kind = JF_KIND_WRITE; w->api = 1; w->tag = d->tag = ++c->req_tag;
     copy(w->method, sizeof w->method, "DELETE"); copy(w->path, sizeof w->path, p);
+}
+
+static void end_job(JvCore *c, JvCmds *out, const char *sid, bool twice)
+{
+    JvDel *d = NULL;
+    for (int k = 0; k < JV_DEL_N && !d; k++) if (!c->del[k].sid[0]) d = &c->del[k];
+    if (!d) { d = &c->del[c->del_next]; c->del_next = (c->del_next + 1) & (JV_DEL_N - 1); }   /* all busy: the oldest slot goes */
+    memset(d, 0, sizeof *d);
+    copy(d->sid, sizeof d->sid, sid);
+    d->left = 2;
+    send_del(c, out, d);
+    if (d->sid[0] && twice) d->due_ms = c->now_ms + JV_DEL_TWICE_MS;
+}
+
+/* an answer for a DELETE (true when the tag was one of ours) */
+static bool del_result(JvCore *c, const JfResult *r)
+{
+    for (int k = 0; k < JV_DEL_N; k++) {
+        JvDel *d = &c->del[k];
+        if (!d->sid[0] || !d->tag || d->tag != r->tag) continue;
+        d->tag = 0;
+        if (r->err == JF_ERR_NONE) { if (!d->due_ms) d->sid[0] = '\0'; }
+        else if (d->left > 0) { d->left--; d->due_ms = c->now_ms + JV_DEL_RETRY_MS; }
+        else { c->report_fail++; d->sid[0] = '\0'; }
+        return true;
+    }
+    return false;
+}
+
+static void del_tick(JvCore *c, JvCmds *out)
+{
+    for (int k = 0; k < JV_DEL_N; k++) {
+        JvDel *d = &c->del[k];
+        if (d->sid[0] && d->due_ms && c->now_ms >= d->due_ms) send_del(c, out, d);
+    }
 }
 
 static void request_stream(JvCore *c, JvCmds *out)
@@ -278,7 +318,7 @@ static void request_stream(JvCore *c, JvCmds *out)
         c->play_state = JV_PLAY_IDLE; banner(c, "BAD REQUEST"); return;
     }
     JvCmd *s = emit(out, JV_CMD_REQUEST);
-    s->kind = JF_KIND_STREAM; s->tag = c->stream_tag = ++c->req_tag;
+    s->kind = JF_KIND_STREAM; s->api = 1; s->tag = c->stream_tag = ++c->req_tag;
     copy(s->path, sizeof s->path, p);
     c->play_state = JV_PLAY_FETCHING;
     c->pos_ms = c->play.start_ms;
@@ -292,10 +332,12 @@ static void restart_stream(JvCore *c, JvCmds *out, long start_ms, const char *ev
     if (rt > 0 && start_ms > rt - 1000) start_ms = rt > 1000 ? rt - 1000 : 0;
     char old[33];
     copy(old, sizeof old, c->play.session_id);
+    bool opening = c->play_state == JV_PLAY_FETCHING;
+    c->restart_paused = c->play_state == JV_PLAY_PAUSED || (opening && c->restart_paused);
     if (c->play_state == JV_PLAY_PLAYING || c->play_state == JV_PLAY_PAUSED) emit(out, JV_CMD_PLAYER_STOP);
-    else if (c->play_state == JV_PLAY_FETCHING) { JvCmd *k = emit(out, JV_CMD_CANCEL); k->kind = JF_KIND_STREAM; }
-    end_job(c, out, old);
-    if (!new_session(c, c->play.session_id)) { c->play_state = JV_PLAY_IDLE; banner(c, "NO SESSION ID"); return; }
+    else if (opening) { JvCmd *k = emit(out, JV_CMD_CANCEL); k->kind = JF_KIND_STREAM; k->api = 1; }
+    end_job(c, out, old, opening);
+    if (!new_session(c, c->play.session_id)) { c->play_state = JV_PLAY_IDLE; c->restart_paused = false; banner(c, "NO SESSION ID"); return; }
     c->play.start_ms = start_ms;
     c->play.generation++;
     c->seek_pending = false;
@@ -311,7 +353,7 @@ static void load_sub(JvCore *c, JvCmds *out)
     char p[JF_API_PATH_MAX];
     if (jv_path_subtitle(p, sizeof p, c->play.item_id, c->play.media_source_id, c->play.sub_index) < 0) return;
     JvCmd *s = emit(out, JV_CMD_REQUEST);
-    s->kind = JF_KIND_STREAM; s->api = 1; s->tag = c->sub_tag = ++c->req_tag;
+    s->kind = JF_KIND_STREAM; s->tag = c->sub_tag = ++c->req_tag;
     copy(s->path, sizeof s->path, p);
 }
 
@@ -338,8 +380,9 @@ static void on_stream(JvCore *c, const JfResult *r, JvCmds *out)
     if (c->play_state != JV_PLAY_FETCHING) { if (r->fd >= 0) { JvCmd *k = emit(out, JV_CMD_CLOSE_FD); k->fd = r->fd; } return; }
     if (r->err != JF_ERR_NONE || r->fd < 0) {
         char t[48]; err_text(t, sizeof t, r->err);
-        if (c->started_sent) post_report(c, out, 2, c->play.start_ms, NULL);
-        c->play_state = JV_PLAY_IDLE; c->seek_pending = false;
+        if (c->started_sent) post_report(c, out, 2, jv_core_position(c), NULL);
+        end_job(c, out, c->play.session_id, false);
+        c->play_state = JV_PLAY_IDLE; c->seek_pending = false; c->restart_paused = false;
         pop(c, out);
         set_overlay(c, t, JV_BTN_CLOSE);
         return;
@@ -347,6 +390,7 @@ static void on_stream(JvCore *c, const JfResult *r, JvCmds *out)
     c->play_state = JV_PLAY_PLAYING;
     JvCmd *s = emit(out, JV_CMD_PLAYER_START);
     s->fd = r->fd;
+    if (c->restart_paused) { c->play_state = JV_PLAY_PAUSED; emit(out, JV_CMD_PLAYER_PAUSE); c->restart_paused = false; }
     c->next_report_ms = c->now_ms + JV_PROGRESS_MS;
     if (!c->started_sent) {
         c->started_sent = true;
@@ -360,13 +404,14 @@ static void stop_play(JvCore *c, JvCmds *out, bool eof)
 {
     if (c->play_state == JV_PLAY_IDLE) return;
     long pos = eof && c->play.runtime_ms > 0 ? c->play.runtime_ms : jv_core_position(c);
-    if (c->play_state == JV_PLAY_FETCHING) { JvCmd *k = emit(out, JV_CMD_CANCEL); k->kind = JF_KIND_STREAM; }
+    bool opening = c->play_state == JV_PLAY_FETCHING;
+    if (opening) { JvCmd *k = emit(out, JV_CMD_CANCEL); k->kind = JF_KIND_STREAM; k->api = 1; }
     else emit(out, JV_CMD_PLAYER_STOP);
-    JvCmd *k = emit(out, JV_CMD_CANCEL); k->kind = JF_KIND_STREAM; k->api = 1;
+    JvCmd *k = emit(out, JV_CMD_CANCEL); k->kind = JF_KIND_STREAM;
     emit(out, JV_CMD_SUB_CLEAR);
     if (c->started_sent) post_report(c, out, 2, pos, NULL);
-    end_job(c, out, c->play.session_id);
-    c->play_state = JV_PLAY_IDLE; c->seek_pending = false; c->started_sent = false;
+    end_job(c, out, c->play.session_id, opening);
+    c->play_state = JV_PLAY_IDLE; c->seek_pending = false; c->started_sent = false; c->restart_paused = false;
 }
 
 static void change_sub(JvCore *c, JvCmds *out, int pos)
@@ -374,7 +419,7 @@ static void change_sub(JvCore *c, JvCmds *out, int pos)
     c->sel_sub = pos < 0 || pos >= c->detail.n_subs ? -1 : pos;
     if (c->screen != JV_SCR_PLAYER) return;
     c->play.sub_index = sub_index(c);
-    { JvCmd *k = emit(out, JV_CMD_CANCEL); k->kind = JF_KIND_STREAM; k->api = 1; }
+    { JvCmd *k = emit(out, JV_CMD_CANCEL); k->kind = JF_KIND_STREAM; }
     load_sub(c, out);
     if (c->play_state == JV_PLAY_PLAYING || c->play_state == JV_PLAY_PAUSED) post_report(c, out, 1, jv_core_position(c), "timeupdate");
 }
@@ -400,9 +445,11 @@ static void seek(JvCore *c, long target)
 
 static void on_tick(JvCore *c, JvCmds *out)
 {
+    del_tick(c, out);                  /* DELETE retries and second sends outlive the player screen */
     if (c->screen != JV_SCR_PLAYER) return;
     if (c->seek_pending && c->now_ms >= c->seek_due_ms) { restart_stream(c, out, c->seek_target_ms, "seek"); return; }
-    if (c->play_state == JV_PLAY_PLAYING && c->now_ms >= c->next_report_ms) post_report(c, out, 1, jv_core_position(c), "timeupdate");
+    /* paused too: the progress pings are what keeps the server from reaping the session and its encoding job */
+    if ((c->play_state == JV_PLAY_PLAYING || c->play_state == JV_PLAY_PAUSED) && c->now_ms >= c->next_report_ms) post_report(c, out, 1, jv_core_position(c), "timeupdate");
 }
 
 /* ── results ───────────────────────────────────────────────────────────── */
@@ -492,7 +539,8 @@ static void on_result(JvCore *c, const JfResult *r, JvCmds *out)
         else if (r->tag == c->detail_tag) on_detail(c, r);
         break;
     case JF_KIND_POST: case JF_KIND_WRITE:
-        if (r->err != JF_ERR_NONE) c->report_fail++;     /* never retried: the next report carries the newer position */
+        if (r->kind == JF_KIND_WRITE && del_result(c, r)) break;
+        if (r->err != JF_ERR_NONE) c->report_fail++;     /* a report is never retried: the next one carries the newer position */
         break;
     case JF_KIND_STREAM:
         if (r->tag == c->stream_tag) on_stream(c, r, out);
@@ -666,4 +714,5 @@ void jv_step(JvCore *c, const JvEvent *ev, long long now_ms, JvCmds *out)
     case JV_EV_TICK: on_tick(c, out); break;
     default: break;
     }
+    update_busy(c);                    /* the stream open (FETCHING) is part of it */
 }

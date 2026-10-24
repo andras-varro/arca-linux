@@ -14,7 +14,7 @@
  *   4. On JV_CMD_EXIT the core has already emitted the stop reports: pump jf_api for up to 2 s so they leave, then end.
  *
  * Rules: reports (started / progress / stopped) are POSTs and the core never sends one twice; a failed one only
- * counts in `report_fail`.  Every request carries a tag the core numbers; a result whose tag is not the one the core
+ * counts in `report_fail`; a failed encoding-job DELETE is sent again (JvDel).  Every request carries a tag the core numbers; a result whose tag is not the one the core
  * waits for is dropped (the user has left that view).  The loop wipes a JV_CMD_REQUEST AUTH password right after
  * jf_api_enqueue_auth.
  */
@@ -44,6 +44,9 @@
 #define JV_PROGRESS_MS  10000      /* progress report cadence while playing */
 #define JV_SEEK_QUIET_MS  700      /* a seek burst restarts the stream once this long after its last press */
 #define JV_BODY_MAX       640
+#define JV_DEL_N            4      /* encoding-job DELETEs the core keeps track of (retry, second send) */
+#define JV_DEL_RETRY_MS   500      /* a failed DELETE is sent again this long after the failure, twice at most */
+#define JV_DEL_TWICE_MS  1500      /* a DELETE for a stream that was still opening is sent a second time this long after the first */
 
 /* jf_api groups: a new PARSE of a group replaces any queued or in-flight one of it */
 enum { JV_GRP_LIST = 1, JV_GRP_DETAIL = 2, JV_GRP_HOME = 3 };
@@ -103,7 +106,7 @@ typedef enum {
     JV_CMD_NONE = 0,
     JV_CMD_SET_SERVER,    /* jf_api_set_server(.host, .port), jf_api_set_tls(.tls) on both instances */
     JV_CMD_SET_AUTH,      /* jf_api_set_auth(client, device, core->login.device_id, core->login.token) on both instances */
-    JV_CMD_REQUEST,       /* on instance .api (0 main, 1 subtitles): .kind AUTH -> jf_api_enqueue_auth(.tag, .user, .password);
+    JV_CMD_REQUEST,       /* on instance .api (0 metadata and subtitles, 1 stream, reports, DELETEs): .kind AUTH -> jf_api_enqueue_auth(.tag, .user, .password);
                            * PARSE -> jf_api_enqueue_parse(.tag, .path, .fn, .dst, .group);
                            * POST -> jf_api_enqueue_post_json(.tag, .path, .body, .n);
                            * WRITE -> jf_api_enqueue_write(.tag, .method, .path);
@@ -152,6 +155,9 @@ typedef struct {
 
 typedef bool (*JvSessionFn)(char out[33]);
 
+/** One encoding-job DELETE: `tag` is the request in flight (0 = none), `due_ms` the next send (0 = none), `left` retries after a failure. */
+typedef struct { char sid[33]; unsigned tag; long long due_ms; int left; } JvDel;
+
 typedef struct { JvScreen screen; JvKind kind; char id[33], id2[33], title[96]; int top, cursor; } JvNavEntry;
 
 typedef struct {
@@ -178,7 +184,7 @@ typedef struct {
     JvPlayReq play;
     long pos_ms;                     /* last position the player reported (or the restart target) */
     bool seek_pending; long seek_target_ms;   /* a burst waiting for its quiet period: show seek_target_ms */
-    int report_fail;                 /* reports/DELETEs that came back failed (never retried) */
+    int report_fail;                 /* reports, and DELETEs that stayed failed after their retries */
     JvSettings set;                  /* the UI edits it, then sends JV_EV_SETTINGS */
     JfLogin login;
     int channels, rate, max_w;       /* the loop's sink facts; defaults 1, 44100, JV_STREAM_MAX_W */
@@ -195,6 +201,8 @@ typedef struct {
     unsigned req_tag, list_tag, detail_tag, home_tag, auth_tag, stream_tag, sub_tag;
     int home_phase;                  /* 0 idle, 1 views, 2 resume probe, 3 next-up probe */
     bool auth_pending, list_pending_first, detail_refresh, started_sent, restarted_once;
+    bool restart_paused;             /* the stream being opened replaces a paused one: it is paused again when it arrives */
+    JvDel del[JV_DEL_N]; int del_next;
     JvCmd retry;
     char cur_id[33], cur_id2[33], cur_title[96];
     int search_phase;                /* 0 none, 1 items, 2 people, 3 genres */

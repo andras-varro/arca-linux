@@ -3,7 +3,9 @@
  * Input -> JvEvent -> jv_step -> execute JvCmds (jf_api / player / art) -> draw.
  * All policy is in jv_core.c, all screens in jv_ui.c.
  *
- * Two JfApi instances: [0] metadata, [1] the stream and the reports; JvCmd.api picks one.
+ * Two JfApi instances: [0] metadata and the subtitle SRT, [1] the stream, the reports and the encoding-job DELETEs
+ * (a stream open can take seconds and must not hold the reports behind it; two STREAMs on one instance supersede
+ * each other, which is why the SRT is on [0]); JvCmd.api picks one.
  *
  * The player (vid_player: decoder thread, mix-bus voice, picture, subtitles) is driven through the player_*() hooks
  * below; while a picture plays on the player screen it owns the frame (see video_owns_frame).

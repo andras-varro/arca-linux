@@ -607,7 +607,10 @@ static void draw_banner(JvUi *ui)
         snprintf(t, sizeof t, "%d OF %d", c->list->n, c->list->total);
         fb_draw_text(ui->fb, b.x + 4, b.y + 2, t, DIM, 2);
     }
-    if (c->busy) fb_draw_text(ui->fb, b.x + b.w - 8 - text_measure_width("LOADING", 2), b.y + 2, "LOADING", DIM, 2);
+    if (c->busy) {      /* on the player screen busy is the stream being opened */
+        const char *w = c->screen == JV_SCR_PLAYER ? "BUFFERING..." : "LOADING";
+        fb_draw_text(ui->fb, b.x + b.w - 8 - text_measure_width(w, 2), b.y + 2, w, DIM, 2);
+    }
 }
 
 static void draw_grid(JvUi *ui)
