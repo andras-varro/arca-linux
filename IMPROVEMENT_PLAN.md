@@ -314,8 +314,8 @@ keyboard enters letters, and a mouse click presses an on-screen key, at the pane
 ### F158. Jellyfin video client — open, operator wish 2026-10-23
 
 Movies, series → seasons → episodes, search by name/person/genre, a details page (overview, cast, similar), audio and subtitle choice
-before playback. **A separate app** beside Ludfin (`native_apps/jellyfin/`), both linking one shared Jellyfin layer: `jf_api`,
-`jf_art`, `jf_login` (one sign-in: `/opt/ludfin/ludfin.conf`), the auth/session half of `jf_url`, the BaseItem half of `jf_model`.
+before playback. **A separate app** beside Ludfin (`native_apps/jellyfin/`), both linking `native_apps/jf_shared/`, which knows no app name (client name, config path, art cache passed at run time);
+`jf_model` there still holds Ludfin's item shape, so split it when the video item model is designed. **Login (operator):** each app has its own config file and `DeviceId`; the video app's three-field login dialog is its own copy and offers "reuse saved login": server and user prefilled from Ludfin's file, password asked once, own token.
 Decode cost is measured and fits ([Display](SYSTEM_ANALYSIS.md#32-display)). **Stream (measured on `.115`, Jellyfin 12.1):** `stream.mpg?container=mpeg&videoCodec=mpeg1video&audioCodec=mp2&audioChannels=1&audioSampleRate=44100&maxWidth=400&maxHeight=240&videoBitRate=800000`
 → MPEG-PS at 400×216, which pl_mpeg reads natively through a `plm_buffer` load callback (`container=ts` it does not read). Live end to end
 (1920×1040 h264 source, 300 s): ~0.9 Mbit/s, RSS 2.2 MB, A-V mean 5.5 ms / max 42 ms on the audio clock (bytes written minus
@@ -327,7 +327,7 @@ ahead into a frame queue**, not on demand. **Decided (operator):** 32bpp (16bpp 
 fetch per item took 110 s (the server extracts every embedded track), later ones 0.05 s: fetch asynchronously, start without subtitles.
 **Seek:** restart with `StartTimeTicks` and a fresh `PlaySessionId` (a reused one returns the old job), first byte ~1.1 s. **Stop:**
 `DELETE /Videos/ActiveEncodings?deviceId=..&playSessionId=..` → 204.
-**Next:** shared-layer extraction (Ludfin unchanged, its host tests green), browse UI, player. The player also levels the audio (AGC plus limiter: the server's 5.1→mono downmix peaks near −18 dBFS and the operator found dialogue barely audible) and takes an adjustable A/V offset (operator unsure whether lip sync is off).
+**Next:** browse UI, player. The player also levels the audio (AGC plus limiter: the server's 5.1→mono downmix peaks near −18 dBFS and the operator found dialogue barely audible) and takes an adjustable A/V offset (operator unsure whether lip sync is off).
 **Done when** a movie and an episode play with the chosen audio track and subtitles at the panel.
 
 ### F156. Log page: a Follow setting — open, operator request 2026-10-22, not designed
