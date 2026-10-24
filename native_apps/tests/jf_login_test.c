@@ -69,7 +69,7 @@ static void test_roundtrip(void)
     CHECK(access(path, F_OK) != 0, "the nested dir does not exist yet");
     CHECK(jf_login_save(&a, path) == 0, "save creates the parent and writes");
     CHECK(mode_of(path) == 0600, "mode after save %o", mode_of(path));
-    CHECK(jf_login_load(&b, path) == 0, "load");
+    CHECK(jf_login_load(&b, path, "") == 0, "load");
     CHECK(!strcmp(a.server, b.server) && !strcmp(a.user, b.user) && !strcmp(a.user_id, b.user_id)
           && !strcmp(a.token, b.token) && !strcmp(a.device_id, b.device_id),
           "round trip equal: '%s' '%s' '%s' '%s' '%s'", b.server, b.user, b.user_id, b.token, b.device_id);
@@ -79,7 +79,7 @@ static void test_roundtrip(void)
 
     /* an old file that somehow carries a password: a save drops it */
     put(path, "server=x\npassword=hunter2\ntoken=" TOK "\n");
-    jf_login_load(&b, path);
+    jf_login_load(&b, path, "");
     jf_login_save(&b, path);
     CHECK(!strstr(slurp(path), "hunter2") && !strstr(slurp(path), "password"), "save does not carry a foreign password key");
     CHECK(mode_of(path) == 0600, "mode after re-save %o", mode_of(path));
@@ -112,7 +112,7 @@ static void test_clear(void)
     char *t = slurp(path);
     CHECK(!strstr(t, TOK) && !strstr(t, UID_) && !strstr(t, "token") && !strstr(t, "user_id"), "no token/user_id text after clear");
     CHECK(!strstr(t, "password"), "no password after clear");
-    CHECK(jf_login_load(&b, path) == 0, "load after clear");
+    CHECK(jf_login_load(&b, path, "") == 0, "load after clear");
     CHECK(!strcmp(b.server, "192.0.2.10:8096") && !strcmp(b.user, "user1") && !strcmp(b.device_id, "arca-test")
           && !b.token[0] && !b.user_id[0], "server/user/device_id kept");
 }
@@ -123,21 +123,21 @@ static void test_load_edges(void)
     char missing[200];
     snprintf(missing, sizeof missing, "%s/none/ludfin.conf", dir);
     memset(&l, 0xAA, sizeof l);
-    CHECK(jf_login_load(&l, missing) == -1, "missing file -> -1");
+    CHECK(jf_login_load(&l, missing, "") == -1, "missing file -> -1");
     CHECK(!l.server[0] && !l.user[0] && !l.token[0] && !l.user_id[0] && l.volume_step == 10, "defaults filled");
     CHECK(!strncmp(l.device_id, "arca-", 5) && strlen(l.device_id) > 5, "device_id from host: '%s'", l.device_id);
     CHECK(access(missing, F_OK) != 0, "load did not create the file");
 
     put(path, "server=h\nvolume_step=99\nuser_id=nothex\ntoken=" TOK "\n");
-    CHECK(jf_login_load(&l, path) == 0, "load odd file");
+    CHECK(jf_login_load(&l, path, "") == 0, "load odd file");
     CHECK(l.volume_step == 10 && !l.library[0], "a settings key in the login file is ignored, volume %d", l.volume_step);
     CHECK(l.user_id[0] == '\0', "invalid user_id dropped");
     CHECK(!strcmp(l.token, TOK) && !strncmp(l.device_id, "arca-", 5), "token kept, device_id defaulted");
     put(path, "user_id=" UID_ "0\n");
-    jf_login_load(&l, path);
+    jf_login_load(&l, path, "");
     CHECK(l.user_id[0] == '\0', "33-char id dropped");
     put(path, "user_id=" UID_ "\ndevice_id=mine\n");
-    jf_login_load(&l, path);
+    jf_login_load(&l, path, "");
     CHECK(!strcmp(l.user_id, UID_) && !strcmp(l.device_id, "mine"), "good id and stored device_id kept");
 
     /* empty token / user_id are omitted, not written empty */
@@ -181,7 +181,7 @@ static void test_library(void)
     snprintf(a.library, sizeof a.library, LIB1); snprintf(a.library_name, sizeof a.library_name, "Classical");
     a.volume_step = 5;
     CHECK(jf_login_save(&a, path) == 0 && jf_settings_save(&a, spath) == 0, "save");
-    jf_login_load(&b, path); jf_settings_load(&b, spath);
+    jf_login_load(&b, path, ""); jf_settings_load(&b, spath);
     CHECK(!strcmp(b.library, LIB1) && !strcmp(b.library_name, "Classical") && b.volume_step == 5,
           "library round trip: '%s' '%s' %d", b.library, b.library_name, b.volume_step);
     a.volume_step = 6;
@@ -190,7 +190,7 @@ static void test_library(void)
     CHECK(jf_login_signout(&a, path) == 0, "signout");
     CHECK(jf_settings_save(&a, spath) == 0, "signout settings save");
     CHECK(!a.library[0] && !a.library_name[0] && !a.token[0], "signout empties library and token in memory");
-    jf_login_load(&b, path); jf_settings_load(&b, spath);
+    jf_login_load(&b, path, ""); jf_settings_load(&b, spath);
     CHECK(!b.library[0] && !b.library_name[0] && !b.token[0] && !strcmp(b.server, "10.0.0.1:8096") && !strcmp(b.user, "bob"),
           "signout files: no library/token, server and user kept");
     FILE *f = fopen(spath, "w");
@@ -276,10 +276,28 @@ static void test_settings_split(void)
     /* an old login file that still carries the settings keys: ignored; no settings file: defaults, -1 */
     put(path, "server=h\nuser=u\nlibrary=" LIB1 "\nlibrary_name=Old\nvolume_step=3\ntoken=" TOK "\n");
     remove(spath);
-    CHECK(jf_login_load(&b, path) == 0 && !b.library[0] && b.volume_step == 10 && !strcmp(b.token, TOK),
+    CHECK(jf_login_load(&b, path, "") == 0 && !b.library[0] && b.volume_step == 10 && !strcmp(b.token, TOK),
           "old login keys ignored by the login load");
     CHECK(jf_settings_load(&b, spath) == -1 && !b.library[0] && !b.library_name[0] && b.volume_step == 10,
           "missing settings file -> -1 with defaults");
+}
+
+static void test_id_suffix(void)
+{
+    JfLogin a, b, c;
+    char none[300];
+    snprintf(none, sizeof none, "%s/a/b/absent.conf", dir);
+    CHECK(jf_login_load(&a, none, "") == -1, "absent file");
+    CHECK(jf_login_load(&b, none, "-v") == -1, "absent file, suffix");
+    CHECK(!strncmp(a.device_id, "arca-", 5), "default id: %s", a.device_id);
+    CHECK(!strcmp(b.device_id, strcat(strcpy(c.device_id, a.device_id), "-v")), "suffix appended: %s vs %s", a.device_id, b.device_id);
+    CHECK(strcmp(a.device_id, b.device_id) != 0, "the two apps get different ids");
+    /* a saved id is kept as it is: the suffix only shapes the default */
+    snprintf(a.device_id, sizeof a.device_id, "%s", "fixed-id");
+    CHECK(jf_login_save(&a, path) == 0, "save");
+    CHECK(jf_login_load(&c, path, "-v") == 0 && !strcmp(c.device_id, "fixed-id"), "saved id wins: %s", c.device_id);
+    /* a long hostname leaves room for the suffix: the id still ends with it and fits */
+    CHECK(strlen(b.device_id) < sizeof b.device_id, "fits");
 }
 
 int main(void)
@@ -295,6 +313,7 @@ int main(void)
     test_wipe();
     test_library();
     test_settings_split();
+    test_id_suffix();
 
     char cmd[200];
     snprintf(cmd, sizeof cmd, "rm -rf '%s'", dir);

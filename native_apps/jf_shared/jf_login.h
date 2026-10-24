@@ -40,11 +40,12 @@ typedef struct {
 /**
  * Fill `l` from `path`.  A missing file returns -1 but `l` still holds defaults
  * (empty strings, volume_step 10).  device_id is never empty afterwards:
- * "arca-<hostname>", or "arca-unit".  A user_id that is not 32 hex is dropped.
+ * "arca-<hostname>" + `id_suffix` (NULL or "" for none; a second app on the unit passes its own so the two do not share a
+ * DeviceId, the key of the server's access token), or "arca-unit" + suffix.  A saved device_id is kept as it is.  A user_id that is not 32 hex is dropped.
  * The settings keys (library, library_name, volume_step) are not read here; a
  * ludfin.conf that still carries them is ignored for them.
  */
-int jf_login_load(JfLogin *l, const char *path);
+int jf_login_load(JfLogin *l, const char *path, const char *id_suffix);
 
 /** Write `l` (0600, atomic).  Empty token / user_id are left out.  0 or -1. */
 int jf_login_save(const JfLogin *l, const char *path);

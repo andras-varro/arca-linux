@@ -514,13 +514,44 @@ static void test_glue(void)
     free(jpeg.p);
 }
 
+/* Two instances side by side: own box, own slot count, own state; the default instance is unaffected. */
+static void test_instances(void)
+{
+    char dir[300];
+    snprintf(dir, sizeof dir, "%s/two", g_root);
+    const char *id1 = "0123456789abcdef0123456789abcdef", *id2 = "fedcba9876543210fedcba9876543210";
+    CHECK(jf_art_create(dir, 0, 4) == NULL);                  /* a bad box */
+    CHECK(jf_art_create(NULL, 64, 4) == NULL);
+    JfArt *thumb = jf_art_create(dir, 64, 3);
+    JfArt *poster = jf_art_create(dir, 200, 1);
+    CHECK(thumb && poster);
+    if (!thumb || !poster) { jf_art_destroy(thumb); jf_art_destroy(poster); return; }
+    CHECK(!jf_art_busy_ex(thumb) && !jf_art_busy_ex(poster) && !jf_art_busy());
+    jf_art_request_ex(thumb, id1, "ab");
+    CHECK(jf_art_busy_ex(thumb) && !jf_art_busy_ex(poster) && !jf_art_busy());     /* a request lands in its own instance only */
+    jf_art_request_ex(poster, id1, "ab");
+    jf_art_request_ex(poster, id2, "ab");                      /* one slot, already wanted: the second waits for the caller's next ask */
+    CHECK(jf_art_busy_ex(poster));
+    CHECK(jf_art_get_ex(thumb, id1, "ab") == NULL && jf_art_get_ex(poster, id1, "ab") == NULL);   /* nothing ready yet */
+    for (long long t = 1000; t < 1000 + 4 * JF_ART_TOTAL_MS; t += 500) {    /* no server set: every want fails, none hangs */
+        jf_art_poll_ex(thumb, t); jf_art_poll_ex(poster, t);
+    }
+    CHECK(!jf_art_busy_ex(thumb) && !jf_art_busy_ex(poster));
+    CHECK(jf_art_generation_ex(thumb) == 0 && jf_art_generation_ex(poster) == 0 && jf_art_generation() == jf_art_generation());
+    jf_art_destroy(thumb);
+    CHECK(!jf_art_busy_ex(poster));                            /* destroying one leaves the other usable */
+    jf_art_request_ex(poster, id2, "ab");
+    CHECK(jf_art_busy_ex(poster));
+    jf_art_destroy(poster);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
     snprintf(g_root, sizeof g_root, "/tmp/jf_art_test_XXXXXX");
     if (!mkdtemp(g_root)) { perror("mkdtemp"); return 2; }
 
-    test_fit(); test_decode(); test_key(); test_evict(); test_cache(); test_glue();
+    test_fit(); test_decode(); test_key(); test_evict(); test_cache(); test_glue(); test_instances();
 
     char cmd[300];
     snprintf(cmd, sizeof cmd, "rm -rf '%s'", g_root);

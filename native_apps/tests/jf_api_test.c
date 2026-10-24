@@ -654,6 +654,110 @@ static void test_classify(void)
     CHECK(jf_api_classify(0, NULL) == JF_ERR_BADREPLY);
 }
 
+/* ── PARSE (a caller-supplied parse callback) and POST_JSON ────────────── */
+
+typedef struct { int objs, consumed, total; } PCount;
+
+static bool count_visit(void *ctx, const char *body, const JsonTok *t, int n, int obj)
+{
+    (void)body; (void)t; (void)n; (void)obj;
+    ((PCount *)ctx)->objs++;
+    return true;
+}
+
+static int count_parse(const char *body, size_t len, JsonTok *toks, int ntoks, void *dst)
+{
+    PCount *c = dst;
+    memset(c, 0, sizeof *c);
+    return jf_items_walk(body, len, toks, ntoks, count_visit, c, &c->consumed, &c->total);
+}
+
+static int bad_parse(const char *body, size_t len, JsonTok *toks, int ntoks, void *dst)
+{
+    (void)body; (void)len; (void)toks; (void)ntoks; (void)dst;
+    return JF_PARSE_BAD;
+}
+
+static void test_parse_and_post_json(void)
+{
+    JfApi a;
+    JfResult r[8];
+    PCount pc, pc2;
+    Act items[] = {{A_ITEMS, 0}};
+
+    /* a PARSE is a GET whose body goes to the caller's callback and storage */
+    Srv *s = srv_start(items, 1);
+    setup(&a, s);
+    memset(&pc, 0, sizeof pc);
+    CHECK(jf_api_enqueue_parse(&a, 21, "/Parse?x=1", count_parse, &pc, 1) == 0);
+    CHECK(jf_api_enqueue_parse(&a, 22, "/Parse", NULL, &pc, 1) == -1);
+    CHECK(pump(&a, r, 4, 3000) == 1);
+    CHECK(r[0].kind == JF_KIND_PARSE && r[0].tag == 21 && r[0].err == JF_ERR_NONE && r[0].parse == JF_PARSE_OK && r[0].dst == &pc);
+    CHECK(pc.objs == 2 && pc.consumed == 2 && pc.total == 2);
+    CHECK(strstr(heads(s), "GET /Parse?x=1 HTTP/1.0") != NULL);
+    /* a callback that refuses the body makes the request a BADREPLY with the callback's code */
+    CHECK(jf_api_enqueue_parse(&a, 23, "/Bad", bad_parse, &pc, 1) == 0);
+    CHECK(pump(&a, r, 4, 3000) == 1 && r[0].err == JF_ERR_BADREPLY && r[0].parse == JF_PARSE_BAD);
+    jf_api_free(&a); srv_stop(s);
+
+    /* supersession is per group: same group drops the older queued PARSE, another group keeps both */
+    s = srv_start(items, 1);
+    setup(&a, s);
+    memset(&pc, 0, sizeof pc); memset(&pc2, 0, sizeof pc2);
+    jf_api_enqueue_parse(&a, 31, "/g1a", count_parse, &pc, 1);
+    jf_api_enqueue_parse(&a, 32, "/g2", count_parse, &pc2, 2);
+    jf_api_enqueue_parse(&a, 33, "/g1b", count_parse, &pc, 1);
+    int n = pump(&a, r, 8, 3000);
+    CHECK(n == 2);
+    CHECK(n == 2 && r[0].tag == 32 && r[1].tag == 33);     /* oldest first among the survivors; tag 31 delivered nothing */
+    CHECK(strstr(heads(s), "GET /g1a") == NULL && strstr(heads(s), "GET /g1b") != NULL && strstr(heads(s), "GET /g2") != NULL);
+    jf_api_free(&a); srv_stop(s);
+
+    /* a PARSE is retried once like a LIST (a 500 then a 200) */
+    Act flaky[] = {{A_STATUS, 500}, {A_ITEMS, 0}};
+    s = srv_start(flaky, 2);
+    setup(&a, s);
+    jf_api_enqueue_parse(&a, 41, "/Flaky", count_parse, &pc, 1);
+    CHECK(pump(&a, r, 4, 3000) == 1 && r[0].err == JF_ERR_NONE && pc.objs == 2);
+    CHECK(count_str(heads(s), "GET /Flaky") == 2);
+    jf_api_free(&a); srv_stop(s);
+
+    /* POST_JSON: body and Content-Type on the wire, token in the header, status is the result */
+    Act ok204[] = {{A_STATUS, 204}};
+    static const char JB[] = "{\"ItemId\":\"" ID1 "\",\"PositionTicks\":0}";
+    s = srv_start(ok204, 1);
+    setup(&a, s);
+    jf_api_set_auth(&a, "Ludfin", "dev", "did", "TOK-P");
+    CHECK(jf_api_enqueue_post_json(&a, 51, "/Sessions/Playing", JB, strlen(JB)) == 0);
+    CHECK(jf_api_enqueue_post_json(&a, 52, "/Sessions/Playing", NULL, 0) == -1);
+    CHECK(jf_api_enqueue_post_json(&a, 52, "/Sessions/Playing", JB, JF_API_POST_BYTES + 1) == -1);
+    CHECK(pump(&a, r, 4, 3000) == 1);
+    CHECK(r[0].kind == JF_KIND_POST && r[0].tag == 51 && r[0].err == JF_ERR_NONE && r[0].status == 204);
+    const char *h = heads(s);
+    CHECK(strstr(h, "POST /Sessions/Playing HTTP/1.0\r\n") != NULL);
+    CHECK(strstr(h, "\r\nContent-Type: application/json\r\n") != NULL);
+    CHECK(strstr(h, "Token=\"TOK-P\"") != NULL);
+    CHECK(strstr(h, JB) != NULL);
+    jf_api_free(&a); srv_stop(s);
+
+    /* never retried, never superseded: a 500 costs exactly one POST; two queued POSTs are both sent */
+    Act s500[] = {{A_STATUS, 500}};
+    s = srv_start(s500, 1);
+    setup(&a, s);
+    jf_api_enqueue_post_json(&a, 61, "/Sessions/Playing/Progress", JB, strlen(JB));
+    CHECK(pump(&a, r, 4, 3000) == 1 && r[0].kind == JF_KIND_POST && r[0].err == JF_ERR_SERVER && r[0].status == 500);
+    CHECK(count_str(heads(s), "POST /Sessions/Playing/Progress") == 1);
+    jf_api_free(&a); srv_stop(s);
+
+    s = srv_start(ok204, 1);
+    setup(&a, s);
+    jf_api_enqueue_post_json(&a, 71, "/Sessions/Playing/Progress", JB, strlen(JB));
+    jf_api_enqueue_post_json(&a, 72, "/Sessions/Playing/Stopped", JB, strlen(JB));
+    CHECK(pump(&a, r, 4, 3000) == 2 && r[0].tag == 71 && r[1].tag == 72);
+    CHECK(count_str(heads(s), "POST /Sessions/Playing/") == 2);
+    jf_api_free(&a); srv_stop(s);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -666,6 +770,7 @@ int main(void)
     test_save();
     test_write_and_user();
     test_tags();
+    test_parse_and_post_json();
     printf("jf_api_test: %d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;
 }

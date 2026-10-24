@@ -26,8 +26,8 @@ static int map_err(int n)
 
 /* A string field into dst; absent, null or non-string leaves "".  json_str cuts
  * on character boundaries, so a long name is shortened, never split. */
-static bool sfield(const char *s, const JsonTok *t, int n, int obj, const char *key,
-                   char *dst, size_t cap)
+bool jf_get_str(const char *s, const JsonTok *t, int n, int obj, const char *key,
+                char *dst, size_t cap)
 {
     int i = json_obj_get(s, t, n, obj, key);
     dst[0] = '\0';
@@ -71,8 +71,8 @@ static void read_item(const char *s, const JsonTok *t, int n, int o, JfItem *it)
     double d;
     int i, e;
 
-    sfield(s, t, n, o, "Name", it->name, sizeof it->name);
-    if (sfield(s, t, n, o, "Container", it->container, sizeof it->container)) {
+    jf_get_str(s, t, n, o, "Name", it->name, sizeof it->name);
+    if (jf_get_str(s, t, n, o, "Container", it->container, sizeof it->container)) {
         char *comma = strchr(it->container, ',');
         if (comma) *comma = '\0';
     }
@@ -91,7 +91,7 @@ static void read_item(const char *s, const JsonTok *t, int n, int o, JfItem *it)
     if (it->type == JF_ITEM_ALBUM) {   /* an album is its own art source: its Id and ImageTags.Primary */
         memcpy(it->album_id, it->id, sizeof it->album_id);
         i = json_obj_get(s, t, n, o, "ImageTags");
-        if (i >= 0 && t[i].type == JSON_OBJECT) sfield(s, t, n, i, "Primary", it->image_tag, sizeof it->image_tag);
+        if (i >= 0 && t[i].type == JSON_OBJECT) jf_get_str(s, t, n, i, "Primary", it->image_tag, sizeof it->image_tag);
     }
 
     if (it->type == JF_ITEM_ARTIST || it->type == JF_ITEM_GENRE || it->type == JF_ITEM_PLAYLIST) return;
@@ -120,14 +120,14 @@ static void read_item(const char *s, const JsonTok *t, int n, int o, JfItem *it)
             it->genres[used] = '\0';
         }
     }
-    sfield(s, t, n, o, "Album", it->album, sizeof it->album);
-    sfield(s, t, n, o, "AlbumArtist", it->album_artist, sizeof it->album_artist);
+    jf_get_str(s, t, n, o, "Album", it->album, sizeof it->album);
+    jf_get_str(s, t, n, o, "AlbumArtist", it->album_artist, sizeof it->album_artist);
     if (it->type == JF_ITEM_TRACK) {   /* the cover is the album's: AlbumId + AlbumPrimaryImageTag */
         char aid[40];
         i = json_obj_get(s, t, n, o, "AlbumId");
         if (i >= 0 && t[i].type == JSON_STRING && json_str(s, &t[i], aid, sizeof aid) == 32 && hex32(aid))
             memcpy(it->album_id, aid, 33);
-        sfield(s, t, n, o, "AlbumPrimaryImageTag", it->image_tag, sizeof it->image_tag);
+        jf_get_str(s, t, n, o, "AlbumPrimaryImageTag", it->image_tag, sizeof it->image_tag);
     }
     i = json_obj_get(s, t, n, o, "Artists");
     e = i >= 0 ? json_arr_first(t, n, i) : -1;   /* only [0]: some tracks list dozens */
@@ -138,8 +138,22 @@ static void read_item(const char *s, const JsonTok *t, int n, int o, JfItem *it)
     }
 }
 
-int jf_parse_items(const char *body, size_t len, JsonTok *toks, int ntoks, JfList *out)
+/* An element's Id into id[33]; false (id emptied) when it is absent, not a string or not 32 hex. */
+static bool item_id(const char *s, const JsonTok *t, int n, int obj, char *id)
 {
+    char tmp[40];
+    jf_get_str(s, t, n, obj, "Id", tmp, sizeof tmp);
+    if (strlen(tmp) != 32 || !hex32(tmp)) { id[0] = '\0'; return false; }
+    memcpy(id, tmp, 33);
+    return true;
+}
+
+int jf_items_walk(const char *body, size_t len, JsonTok *toks, int ntoks,
+                  JfItemVisit visit, void *ctx, int *consumed, int *total)
+{
+    int cnt = 0;
+    if (consumed) *consumed = 0;
+    if (total) *total = -1;
     int n = json_parse(body, len, toks, ntoks);
     if (n < 0) return map_err(n);
     if (toks[0].type != JSON_OBJECT) return JF_PARSE_BAD;
@@ -148,31 +162,97 @@ int jf_parse_items(const char *body, size_t len, JsonTok *toks, int ntoks, JfLis
 
     int tr = json_obj_get(body, toks, n, 0, "TotalRecordCount");
     long long tv;
-    if (tr >= 0 && json_i64(body, &toks[tr], &tv)) out->total = clamp_i(tv, 0, INT_MAX);
+    if (total && tr >= 0 && json_i64(body, &toks[tr], &tv)) *total = clamp_i(tv, 0, INT_MAX);
 
     for (int e = json_arr_first(toks, n, arr); e >= 0; e = json_arr_next(toks, n, arr, e)) {
-        if (out->loaded < INT_MAX) out->loaded++;
+        if (cnt < INT_MAX) cnt++;
         if (toks[e].type != JSON_OBJECT) continue;
-        JfItemType ty = type_of(body, toks, n, e);
-        if (ty == JF_ITEM_NONE) {   /* a Views entry has no music Type: its CollectionType says what it is */
-            int ci = json_obj_get(body, toks, n, e, "CollectionType");
-            char ct[16];
-            if (ci >= 0 && toks[ci].type == JSON_STRING && json_str(body, &toks[ci], ct, sizeof ct) > 0 && !strcmp(ct, "music")) ty = JF_ITEM_LIBRARY;
-        }
-        if (ty == JF_ITEM_NONE) continue;
-        char id[40];
-        int il = -1;
-        int ii = json_obj_get(body, toks, n, e, "Id");
-        if (ii >= 0 && toks[ii].type == JSON_STRING) il = json_str(body, &toks[ii], id, sizeof id);
-        if (il != 32 || !hex32(id)) continue;
-        if (out->n >= out->cap) { out->full = true; continue; }
-
-        JfItem *it = &out->items[out->n++];
-        memset(it, 0, sizeof *it);
-        it->type = ty;
-        memcpy(it->id, id, 33);
-        read_item(body, toks, n, e, it);
+        if (visit && !visit(ctx, body, toks, n, e)) break;
     }
+    if (consumed) *consumed = cnt;
+    return JF_PARSE_OK;
+}
+
+int jf_get_int(const char *s, const JsonTok *t, int n, int obj, const char *key, int def)
+{
+    long long v;
+    int i = json_obj_get(s, t, n, obj, key);
+    return (i >= 0 && json_i64(s, &t[i], &v)) ? clamp_i(v, INT_MIN, INT_MAX) : def;
+}
+
+bool jf_get_bool(const char *s, const JsonTok *t, int n, int obj, const char *key, bool *out)
+{
+    int i = json_obj_get(s, t, n, obj, key);
+    return i >= 0 && json_bool(s, &t[i], out);
+}
+
+long jf_get_ticks_s(const char *s, const JsonTok *t, int n, int obj, const char *key)
+{
+    long long v;
+    int i = json_obj_get(s, t, n, obj, key);
+    if (i < 0 || !json_i64(s, &t[i], &v) || v <= 0) return 0;
+    return (long)(v / 10000000LL);   /* one library divide per call: not for a per-frame loop */
+}
+
+bool jf_get_image_tag(const char *s, const JsonTok *t, int n, int obj, const char *kind, char *out, size_t cap)
+{
+    out[0] = '\0';
+    int i = json_obj_get(s, t, n, obj, "ImageTags");
+    if (i < 0 || t[i].type != JSON_OBJECT) return false;
+    return jf_get_str(s, t, n, i, kind, out, cap);
+}
+
+bool jf_base_fill(JfBase *b, const char *s, const JsonTok *t, int n, int obj)
+{
+    memset(b, 0, sizeof *b);
+    if (obj < 0 || t[obj].type != JSON_OBJECT || !item_id(s, t, n, obj, b->id)) return false;
+    jf_get_str(s, t, n, obj, "Name", b->name, sizeof b->name);
+    jf_get_str(s, t, n, obj, "Type", b->type, sizeof b->type);
+    b->year = clamp_i(jf_get_int(s, t, n, obj, "ProductionYear", 0), 0, 9999);
+    b->runtime_s = (int)clamp_i(jf_get_ticks_s(s, t, n, obj, "RunTimeTicks"), 0, INT_MAX);
+    jf_get_image_tag(s, t, n, obj, "Primary", b->image_tag, sizeof b->image_tag);
+    int ud = json_obj_get(s, t, n, obj, "UserData");
+    if (ud >= 0 && t[ud].type == JSON_OBJECT) {
+        jf_get_bool(s, t, n, ud, "Played", &b->played);
+        b->position_s = (int)clamp_i(jf_get_ticks_s(s, t, n, ud, "PlaybackPositionTicks"), 0, INT_MAX);
+        b->unplayed = clamp_i(jf_get_int(s, t, n, ud, "UnplayedItemCount", 0), 0, INT_MAX);
+        jf_get_bool(s, t, n, ud, "IsFavorite", &b->favorite);
+    }
+    return true;
+}
+
+typedef struct { JfList *out; } ItemsCtx;
+
+static bool music_visit(void *vc, const char *body, const JsonTok *toks, int n, int e)
+{
+    JfList *out = ((ItemsCtx *)vc)->out;
+    JfItemType ty = type_of(body, toks, n, e);
+    if (ty == JF_ITEM_NONE) {   /* a Views entry has no music Type: its CollectionType says what it is */
+        int ci = json_obj_get(body, toks, n, e, "CollectionType");
+        char ct[16];
+        if (ci >= 0 && toks[ci].type == JSON_STRING && json_str(body, &toks[ci], ct, sizeof ct) > 0 && !strcmp(ct, "music")) ty = JF_ITEM_LIBRARY;
+    }
+    if (ty == JF_ITEM_NONE) return true;
+    char id[33];
+    if (!item_id(body, toks, n, e, id)) return true;
+    if (out->n >= out->cap) { out->full = true; return true; }
+
+    JfItem *it = &out->items[out->n++];
+    memset(it, 0, sizeof *it);
+    it->type = ty;
+    memcpy(it->id, id, 33);
+    read_item(body, toks, n, e, it);
+    return true;
+}
+
+int jf_parse_items(const char *body, size_t len, JsonTok *toks, int ntoks, JfList *out)
+{
+    ItemsCtx c = { out };
+    int consumed = 0, total = -1;
+    int r = jf_items_walk(body, len, toks, ntoks, music_visit, &c, &consumed, &total);
+    if (r != JF_PARSE_OK) return r;
+    if (total >= 0) out->total = total;
+    out->loaded = consumed > INT_MAX - out->loaded ? INT_MAX : out->loaded + consumed;
     return JF_PARSE_OK;
 }
 
@@ -352,7 +432,7 @@ int jf_parse_format(const char *body, size_t len, JsonTok *toks, int ntoks, JfFo
     int src = ms >= 0 && toks[ms].type == JSON_ARRAY ? json_arr_first(toks, n, ms) : -1;
     if (src < 0 || toks[src].type != JSON_OBJECT) return JF_PARSE_OK;
     out->have = true;
-    sfield(body, toks, n, src, "Container", out->container, sizeof out->container);
+    jf_get_str(body, toks, n, src, "Container", out->container, sizeof out->container);
     first_name(out->container);
     int src_bitrate;
     ifield(body, toks, n, src, "Bitrate", &src_bitrate);
@@ -360,8 +440,8 @@ int jf_parse_format(const char *body, size_t len, JsonTok *toks, int ntoks, JfFo
     if (st >= 0 && toks[st].type == JSON_ARRAY) {
         for (int e = json_arr_first(toks, n, st); e >= 0; e = json_arr_next(toks, n, st, e)) {
             char ty[16];
-            if (toks[e].type != JSON_OBJECT || !sfield(body, toks, n, e, "Type", ty, sizeof ty) || strcmp(ty, "Audio")) continue;
-            sfield(body, toks, n, e, "Codec", out->codec, sizeof out->codec);
+            if (toks[e].type != JSON_OBJECT || !jf_get_str(body, toks, n, e, "Type", ty, sizeof ty) || strcmp(ty, "Audio")) continue;
+            jf_get_str(body, toks, n, e, "Codec", out->codec, sizeof out->codec);
             ifield(body, toks, n, e, "BitDepth", &out->bit_depth);
             ifield(body, toks, n, e, "SampleRate", &out->sample_rate);
             ifield(body, toks, n, e, "Channels", &out->channels);

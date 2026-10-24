@@ -34,7 +34,7 @@ static void copy_str(char *dst, size_t cap, const char *s)
 static const char *kind_name(JfKind k)
 {
     return k == JF_KIND_AUTH ? "auth" : k == JF_KIND_LIST ? "list" : k == JF_KIND_STREAM ? "stream" : k == JF_KIND_WRITE ? "write" : k == JF_KIND_USER ? "user"
-         : k == JF_KIND_SAVE ? "save" : k == JF_KIND_TAGS ? "tags" : k == JF_KIND_FORMAT ? "format" : "none";
+         : k == JF_KIND_SAVE ? "save" : k == JF_KIND_PARSE ? "parse" : k == JF_KIND_POST ? "post" : k == JF_KIND_TAGS ? "tags" : k == JF_KIND_FORMAT ? "format" : "none";
 }
 
 /* ── pure: the error table ─────────────────────────────────────────────── */
@@ -186,6 +186,28 @@ int jf_api_enqueue_save(JfApi *a, unsigned tag, const char *name, const char *us
     return rc;
 }
 
+int jf_api_enqueue_parse(JfApi *a, unsigned tag, const char *path, JfParseFn fn, void *dst, int group)
+{
+    if (!fn || !dst) return -1;
+    for (int i = 0; i < JF_API_SLOTS; i++)    /* supersede: the same group only */
+        if (a->ring[i].kind == JF_KIND_PARSE && a->ring[i].group == group) slot_clear(&a->ring[i]);
+    if (a->cur.kind == JF_KIND_PARSE && a->cur.group == group) drop_current(a);
+    if (enqueue(a, JF_KIND_PARSE, tag, path, NULL, NULL, 0, NULL) < 0) return -1;
+    for (int i = 0; i < JF_API_SLOTS; i++)
+        if (a->ring[i].kind == JF_KIND_PARSE && a->ring[i].seq == a->next_seq) {
+            a->ring[i].parse_fn = fn;
+            a->ring[i].parse_dst = dst;
+            a->ring[i].group = group;
+        }
+    return 0;
+}
+
+int jf_api_enqueue_post_json(JfApi *a, unsigned tag, const char *path, const char *body, size_t len)
+{
+    if (!body || len == 0 || len > JF_API_POST_BYTES) return -1;
+    return enqueue(a, JF_KIND_POST, tag, path, NULL, body, len, NULL);
+}
+
 int jf_api_enqueue_write(JfApi *a, unsigned tag, const char *method, const char *path)
 {
     if (!method || (strcmp(method, "POST") != 0 && strcmp(method, "DELETE") != 0)) return -1;
@@ -221,7 +243,7 @@ bool jf_api_busy(const JfApi *a)
 
 static int prio(JfKind k)
 {
-    return k == JF_KIND_AUTH ? 4 : (k == JF_KIND_SAVE || k == JF_KIND_WRITE) ? 3 : k == JF_KIND_STREAM ? 2 : k == JF_KIND_TAGS ? 0 : 1;
+    return k == JF_KIND_AUTH ? 4 : (k == JF_KIND_SAVE || k == JF_KIND_WRITE || k == JF_KIND_POST) ? 3 : k == JF_KIND_STREAM ? 2 : k == JF_KIND_TAGS ? 0 : 1;
 }
 
 /* Highest priority, oldest first; -1 when the ring is empty. */
@@ -245,7 +267,7 @@ static void begin_current(JfApi *a)
     char hdr[1024];
     JfSlot *c = &a->cur;
     const char *tok = (c->kind == JF_KIND_AUTH) ? NULL : a->token;
-    int total = (c->kind == JF_KIND_AUTH || c->kind == JF_KIND_SAVE || c->kind == JF_KIND_WRITE) ? a->auth_total_ms
+    int total = (c->kind == JF_KIND_AUTH || c->kind == JF_KIND_SAVE || c->kind == JF_KIND_WRITE || c->kind == JF_KIND_POST) ? a->auth_total_ms
               : c->kind == JF_KIND_STREAM ? a->stream_total_ms : a->list_total_ms;
     int hl = jf_auth_header(hdr, sizeof(hdr), a->client, a->device, a->device_id, tok);
     a->began_ms = now_ms();
@@ -257,9 +279,9 @@ static void begin_current(JfApi *a)
         return;
     }
     /* without a JSON content type the sign-in POST is answered 415; the playlist POST needs it too */
-    if (c->kind == JF_KIND_AUTH || c->kind == JF_KIND_SAVE)
+    if (c->kind == JF_KIND_AUTH || c->kind == JF_KIND_SAVE || c->kind == JF_KIND_POST)
         hl += snprintf(hdr + hl, sizeof(hdr) - (size_t)hl, "Content-Type: application/json\r\n");
-    if (c->kind == JF_KIND_AUTH || c->kind == JF_KIND_SAVE)
+    if (c->kind == JF_KIND_AUTH || c->kind == JF_KIND_SAVE || c->kind == JF_KIND_POST)
         http_begin(&a->req, a->host, a->port, a->tls, "POST", c->path, hdr, c->body, c->body_len,
                    HTTP_BUFFER, a->body, JF_API_BODY_BYTES);
     else if (c->kind == JF_KIND_WRITE)
@@ -272,7 +294,7 @@ static void begin_current(JfApi *a)
         snprintf(rh, sizeof rh, "Range: bytes=0-%d\r\n", c->range - 1);
         if (hl + (int)strlen(rh) < (int)sizeof(hdr)) strcpy(hdr + hl, rh);
         http_begin(&a->req, a->host, a->port, a->tls, "GET", c->path, hdr, NULL, 0, HTTP_BUFFER, a->body, (size_t)c->range + 1);
-    } else if (c->kind == JF_KIND_LIST || c->kind == JF_KIND_USER || c->kind == JF_KIND_FORMAT)
+    } else if (c->kind == JF_KIND_LIST || c->kind == JF_KIND_USER || c->kind == JF_KIND_FORMAT || c->kind == JF_KIND_PARSE)
         http_begin(&a->req, a->host, a->port, a->tls, "GET", c->path, hdr, NULL, 0,
                    HTTP_BUFFER, a->body, JF_API_BODY_BYTES);
     else
@@ -293,7 +315,7 @@ static void finish(JfApi *a, JfResult *out, int status, const char *herr, int fd
     out->fd = -1;
     out->parse = JF_PARSE_OK;
     out->err = jf_api_classify(status, herr);
-    if (c->kind == JF_KIND_WRITE && status == 204) out->err = JF_ERR_NONE;   /* a DELETE or a playlist add answers 204 No Content */
+    if ((c->kind == JF_KIND_WRITE || c->kind == JF_KIND_POST) && status == 204) out->err = JF_ERR_NONE;   /* a DELETE or a playlist add answers 204 No Content */
     if (c->kind == JF_KIND_TAGS) {
         if (status == 206) out->err = JF_ERR_NONE;                 /* partial content is the answer we asked for */
         if (a->tags_overrun) {
@@ -316,6 +338,10 @@ static void finish(JfApi *a, JfResult *out, int status, const char *herr, int fd
     } else if (out->err == JF_ERR_NONE && c->kind == JF_KIND_FORMAT) {
         if (jf_parse_format(http_body(&a->req), http_body_len(&a->req), a->toks, JF_TOKENS_PAGE, &out->format) != JF_PARSE_OK)
             out->err = JF_ERR_BADREPLY;
+    } else if (out->err == JF_ERR_NONE && c->kind == JF_KIND_PARSE) {
+        out->dst = c->parse_dst;
+        out->parse = c->parse_fn(http_body(&a->req), http_body_len(&a->req), a->toks, JF_TOKENS_PAGE, c->parse_dst);
+        if (out->parse != JF_PARSE_OK) out->err = JF_ERR_BADREPLY;
     } else if (c->kind == JF_KIND_STREAM) {
         if (out->err == JF_ERR_NONE && fd >= 0) out->fd = fd;
         else if (out->err == JF_ERR_NONE) out->err = JF_ERR_BADREPLY;   /* a 200 with no fd to hand over: not a success */
@@ -358,7 +384,7 @@ bool jf_api_poll(JfApi *a, JfResult *out)
     copy_str(herr, sizeof(herr), hp == HTTP_ERROR ? http_error(&a->req) : "");
     JfErr e = jf_api_classify(status, herr);
 
-    bool post = a->cur.kind == JF_KIND_AUTH || a->cur.kind == JF_KIND_SAVE || a->cur.kind == JF_KIND_WRITE || a->cur.kind == JF_KIND_TAGS;     /* never retried */
+    bool post = a->cur.kind == JF_KIND_AUTH || a->cur.kind == JF_KIND_SAVE || a->cur.kind == JF_KIND_WRITE || a->cur.kind == JF_KIND_POST || a->cur.kind == JF_KIND_TAGS;     /* never retried */
     a->tags_overrun = false;
     if (a->cur.kind == JF_KIND_TAGS && hp == HTTP_ERROR && strstr(herr, "larger than the buffer") && http_status(&a->req) == 200) {
         a->tags_overrun = true;

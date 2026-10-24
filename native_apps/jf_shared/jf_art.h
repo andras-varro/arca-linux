@@ -50,4 +50,23 @@ unsigned jf_art_generation(void);
 /** Free everything, close the socket, wipe the token. */
 void jf_art_shutdown(void);
 
+
+/*
+ * Instances.  The calls above act on one default instance.  A second app (or a second box size) makes its own:
+ * a square `box` per instance (tiles are letterboxed into it) and its own number of in-memory tiles.  Every call
+ * has an _ex twin taking the instance; the disk cache dir may be shared (the box is part of a file name).
+ */
+typedef struct JfArt JfArt;
+JfArt *jf_art_create(const char *cache_dir, int box, int mem_slots);   /**< NULL on a bad argument or no memory */
+void jf_art_destroy(JfArt *a);                                         /**< shuts down and frees */
+bool jf_art_init_ex(JfArt *a, const char *cache_dir, int box, int mem_slots);   /**< (re)open a zeroed or shut-down instance */
+void jf_art_set_tls_ex(JfArt *a, bool tls);
+void jf_art_set_server_ex(JfArt *a, const char *host, int port, const char *client, const char *device, const char *device_id, const char *token);
+void jf_art_request_ex(JfArt *a, const char *album_id, const char *tag);
+void jf_art_poll_ex(JfArt *a, long long now_ms);
+const LvIcon *jf_art_get_ex(JfArt *a, const char *album_id, const char *tag);
+bool jf_art_busy_ex(const JfArt *a);
+unsigned jf_art_generation_ex(const JfArt *a);
+void jf_art_shutdown_ex(JfArt *a);
+
 #endif

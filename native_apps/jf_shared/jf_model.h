@@ -81,6 +81,41 @@ void jf_list_clear(JfList *l);
 /** Append a page's Items to `out`.  TotalRecordCount, when present, sets out->total. */
 int jf_parse_items(const char *body, size_t len, JsonTok *toks, int ntoks, JfList *out);
 
+/** Called for each ELEMENT of Items[] that is an object (a non-object is counted, not visited).  Return false to stop the walk. */
+typedef bool (*JfItemVisit)(void *ctx, const char *body, const JsonTok *t, int n, int obj);
+
+/**
+ * Validate the whole body, then walk Items[], calling `visit` per object element.  `*consumed` = elements walked (a skipped one
+ * counts: it is the next StartIndex step); `*total` = TotalRecordCount, -1 when absent.  Either out may be NULL.  Returns a
+ * JfParse; on a non-OK return nothing was visited.
+ */
+int jf_items_walk(const char *body, size_t len, JsonTok *toks, int ntoks,
+                  JfItemVisit visit, void *ctx, int *consumed, int *total);
+
+/* Field getters over one object `obj` of a parsed document (s, t, n). */
+/** String into dst (cut on a UTF-8 boundary); absent, null or non-string leaves "" and returns false. */
+bool jf_get_str(const char *s, const JsonTok *t, int n, int obj, const char *key, char *dst, size_t cap);
+/** Integer field (a negative stays), `def` when absent or not a number. */
+int  jf_get_int(const char *s, const JsonTok *t, int n, int obj, const char *key, int def);
+bool jf_get_bool(const char *s, const JsonTok *t, int n, int obj, const char *key, bool *out);
+/** A 100 ns-ticks field in whole seconds; 0 when absent or not positive. */
+long jf_get_ticks_s(const char *s, const JsonTok *t, int n, int obj, const char *key);
+/** ImageTags.<kind> into out; "" and false when absent. */
+bool jf_get_image_tag(const char *s, const JsonTok *t, int n, int obj, const char *kind, char *out, size_t cap);
+
+/** The generic item every app shares; `type` is the server's Type string, mapped by each app. */
+typedef struct {
+    char id[33], name[96], type[16];
+    int  year, runtime_s;
+    char image_tag[40];   /**< ImageTags.Primary */
+    bool played, favorite;
+    int  position_s;      /**< UserData.PlaybackPositionTicks in seconds */
+    int  unplayed;        /**< UserData.UnplayedItemCount */
+} JfBase;
+
+/** Fill `b` from one object; false (b zeroed) when it is not an object or its Id is not 32 hex. */
+bool jf_base_fill(JfBase *b, const char *s, const JsonTok *t, int n, int obj);
+
 /** What the server lets a user do, from a user object's Policy.  Absent fields are false / 0. */
 typedef struct {
     bool is_admin;               /**< IsAdministrator */

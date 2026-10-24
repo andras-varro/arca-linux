@@ -316,7 +316,7 @@ int main(int argc, char *argv[])
         JfEvent *e = &evq[0];
         memset(e, 0, sizeof *e);
         e->type = JF_EV_START;
-        jf_login_load(&e->login, JF_CONF_PATH);
+        jf_login_load(&e->login, JF_CONF_PATH, "");
         jf_settings_load(&e->login, JF_SETTINGS_PATH);
         evq_n = 1;
     }

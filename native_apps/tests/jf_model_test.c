@@ -697,6 +697,104 @@ static void test_format(void)
     CHECK(rc == JF_PARSE_OK && l.n == 2 && !strcmp(l.items[0].container, "flac") && l.items[1].container[0] == '\0', "list item Container (rc %d)", rc);
 }
 
+#define IT(c) do { checks++; if (!(c)) { fails++; printf("FAIL line %d: %s\n", __LINE__, #c); } } while (0)
+
+typedef struct { int visits; int objs; char names[4][96]; } ItCtx;
+
+static bool it_visit(void *vc, const char *body, const JsonTok *t, int n, int obj)
+{
+    ItCtx *c = vc;
+    c->visits++;
+    JfBase b;
+    if (jf_base_fill(&b, body, t, n, obj) && c->objs < 4) snprintf(c->names[c->objs++], 96, "%s", b.name);
+    return true;
+}
+
+static bool it_stop_first(void *vc, const char *body, const JsonTok *t, int n, int obj)
+{
+    (void)body; (void)t; (void)n; (void)obj;
+    (*(int *)vc)++;
+    return false;
+}
+
+static const char IT_PAGE[] =
+    "{\"Items\":[{\"Id\":\"" ID1 "\",\"Name\":\"Movie One\",\"Type\":\"Movie\",\"ProductionYear\":1997,"
+    "\"RunTimeTicks\":90000000000,\"ImageTags\":{\"Primary\":\"abc123\"},"
+    "\"UserData\":{\"Played\":true,\"PlaybackPositionTicks\":6000000000,\"UnplayedItemCount\":3,\"IsFavorite\":true}},"
+    "42,{\"Id\":\"bad\",\"Name\":\"No id\"},"
+    "{\"Id\":\"" ID2 "\",\"Name\":\"Two\",\"Type\":\"Series\"}],\"TotalRecordCount\":17,\"StartIndex\":0}";
+
+static void test_items_walk(void)
+{
+    ItCtx c;
+    int consumed = -1, total = -2;
+    memset(&c, 0, sizeof c);
+    IT(jf_items_walk(IT_PAGE, strlen(IT_PAGE), toks, JF_TOKENS_PAGE, it_visit, &c, &consumed, &total) == JF_PARSE_OK);
+    IT(consumed == 4 && total == 17);        /* the number and the id-less object are walked and counted */
+    IT(c.visits == 3);                        /* a non-object element is counted but never visited */
+    IT(c.objs == 2 && !strcmp(c.names[0], "Movie One") && !strcmp(c.names[1], "Two"));   /* "bad" id: jf_base_fill refuses */
+
+    const char *none = "{\"Items\":[]}";
+    consumed = -1; total = -2;
+    IT(jf_items_walk(none, strlen(none), toks, JF_TOKENS_PAGE, it_visit, &c, &consumed, &total) == JF_PARSE_OK);
+    IT(consumed == 0 && total == -1);
+
+    int hits = 0;
+    consumed = -1;
+    IT(jf_items_walk(IT_PAGE, strlen(IT_PAGE), toks, JF_TOKENS_PAGE, it_stop_first, &hits, &consumed, &total) == JF_PARSE_OK);
+    IT(hits == 1 && consumed == 1);          /* false from the visitor stops the walk after that element */
+
+    IT(jf_items_walk("{\"x\":1}", 7, toks, JF_TOKENS_PAGE, it_visit, &c, &consumed, &total) == JF_PARSE_BAD);
+    IT(jf_items_walk("not json", 8, toks, JF_TOKENS_PAGE, it_visit, &c, &consumed, &total) == JF_PARSE_BAD);
+    IT(jf_items_walk(IT_PAGE, strlen(IT_PAGE) - 5, toks, JF_TOKENS_PAGE, it_visit, &c, &consumed, &total) == JF_PARSE_TRUNC);
+    IT(jf_items_walk(IT_PAGE, strlen(IT_PAGE), toks, 5, it_visit, &c, &consumed, &total) == JF_PARSE_NOMEM);
+}
+
+static void test_items_getters(void)
+{
+    int n = json_parse(IT_PAGE, strlen(IT_PAGE), toks, JF_TOKENS_PAGE);
+    int arr = json_obj_get(IT_PAGE, toks, n, 0, "Items");
+    int o = json_arr_first(toks, n, arr);
+    char s[8];
+    int v;
+    long sec;
+    IT(jf_get_str(IT_PAGE, toks, n, o, "Name", s, sizeof s) && !strcmp(s, "Movie O"));   /* cut to the buffer */
+    IT(!jf_get_str(IT_PAGE, toks, n, o, "Nope", s, sizeof s) && s[0] == '\0');
+    IT(!jf_get_str(IT_PAGE, toks, n, o, "ProductionYear", s, sizeof s) && s[0] == '\0');  /* not a string */
+    IT(jf_get_int(IT_PAGE, toks, n, o, "ProductionYear", 0) == 1997);
+    IT(jf_get_int(IT_PAGE, toks, n, o, "Nope", -5) == -5);
+    IT(jf_get_ticks_s(IT_PAGE, toks, n, o, "RunTimeTicks") == 9000);
+    IT(jf_get_ticks_s(IT_PAGE, toks, n, o, "Nope") == 0);
+    IT(jf_get_image_tag(IT_PAGE, toks, n, o, "Primary", s, sizeof s) && !strcmp(s, "abc123"));
+    IT(!jf_get_image_tag(IT_PAGE, toks, n, o, "Backdrop", s, sizeof s) && s[0] == '\0');
+    int ud = json_obj_get(IT_PAGE, toks, n, o, "UserData");
+    IT(ud >= 0);
+    IT(jf_get_int(IT_PAGE, toks, n, ud, "UnplayedItemCount", 0) == 3);
+    bool b = false;
+    IT(jf_get_bool(IT_PAGE, toks, n, ud, "Played", &b) && b);
+    IT(!jf_get_bool(IT_PAGE, toks, n, ud, "Nope", &b));
+    (void)v; (void)sec;
+}
+
+static void test_items_base(void)
+{
+    int n = json_parse(IT_PAGE, strlen(IT_PAGE), toks, JF_TOKENS_PAGE);
+    int arr = json_obj_get(IT_PAGE, toks, n, 0, "Items");
+    int o = json_arr_first(toks, n, arr);
+    JfBase b;
+    IT(jf_base_fill(&b, IT_PAGE, toks, n, o));
+    IT(!strcmp(b.id, ID1) && !strcmp(b.name, "Movie One") && !strcmp(b.type, "Movie"));
+    IT(b.year == 1997 && b.runtime_s == 9000 && !strcmp(b.image_tag, "abc123"));
+    IT(b.played && b.position_s == 600 && b.unplayed == 3 && b.favorite);
+    o = json_arr_next(toks, n, arr, o);          /* 42 */
+    IT(!jf_base_fill(&b, IT_PAGE, toks, n, o));
+    o = json_arr_next(toks, n, arr, o);          /* id "bad" */
+    IT(!jf_base_fill(&b, IT_PAGE, toks, n, o));
+    o = json_arr_next(toks, n, arr, o);          /* a bare item: absent fields are zero / empty */
+    IT(jf_base_fill(&b, IT_PAGE, toks, n, o));
+    IT(!strcmp(b.type, "Series") && b.year == 0 && b.runtime_s == 0 && b.image_tag[0] == '\0' && !b.played && b.position_s == 0 && !b.favorite);
+}
+
 int main(void)
 {
     test_pool_page_budget();
@@ -717,6 +815,9 @@ int main(void)
     test_playlist_count();
     test_mix_fields();
     test_art_fields();
+    test_items_walk();
+    test_items_getters();
+    test_items_base();
     printf("jf_model_test: %d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;
 }

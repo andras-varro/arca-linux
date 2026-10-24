@@ -26,8 +26,8 @@ static void copy(char *dst, size_t cap, const char *src)
     snprintf(dst, cap, "%s", src);
 }
 
-/* "arca-" + hostname, reduced to the characters a header value may carry. */
-static void default_device_id(char *out, size_t cap)
+/* "arca-" + hostname + `suffix`, reduced to the characters a header value may carry; the suffix is kept whole (the hostname is cut for it). */
+static void default_device_id(char *out, size_t cap, const char *suffix)
 {
     char host[48];
     size_t j = 0;
@@ -35,16 +35,20 @@ static void default_device_id(char *out, size_t cap)
     host[sizeof host - 1] = '\0';
     char id[64] = "arca-";
     j = strlen(id);
-    for (size_t i = 0; host[i] && j < sizeof id - 1; i++) {
+    size_t sl = strlen(suffix);
+    size_t room = sl < sizeof id - 6 ? sizeof id - 1 - sl : sizeof id - 1;   /* an absurd suffix gets none: it is the app's constant */
+    for (size_t i = 0; host[i] && j < room; i++) {
         char c = host[i];
         if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-' || c == '.' || c == '_')
             id[j++] = c;
     }
     id[j] = '\0';
-    copy(out, cap, j > 5 ? id : "arca-unit");
+    if (j <= 5) { strcpy(id, "arca-unit"); j = strlen(id); }
+    if (sl < sizeof id - j) strcpy(id + j, suffix);
+    copy(out, cap, id);
 }
 
-int jf_login_load(JfLogin *l, const char *path)
+int jf_login_load(JfLogin *l, const char *path, const char *id_suffix)
 {
     Config cfg;
     memset(l, 0, sizeof *l);
@@ -61,7 +65,7 @@ int jf_login_load(JfLogin *l, const char *path)
         if (jf_id_valid(uid)) copy(l->user_id, sizeof l->user_id, uid);
     }
     jf_wipe(&cfg, sizeof cfg);   /* it held the token */
-    if (!l->device_id[0]) default_device_id(l->device_id, sizeof l->device_id);
+    if (!l->device_id[0]) default_device_id(l->device_id, sizeof l->device_id, id_suffix ? id_suffix : "");
     return rc;
 }
 

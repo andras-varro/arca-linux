@@ -2,7 +2,7 @@
  * jf_api.h — the Jellyfin client's request queue: one HTTP request in flight at
  * a time over a four-slot ring, polled once per frame, never blocking.
  *
- * Seven kinds.  FORMAT is a GET of one item, its source format parsed into the result (priority, retry and supersession as LIST).  AUTH is a POST (sign-in).  WRITE is a DELETE or an empty-body POST whose status is the result (as SAVE,
+ * Nine kinds (PARSE: a GET parsed by the caller's JfParseFn into the caller's storage, superseded per group; POST: a JSON-body POST as SAVE, never retried).  FORMAT is a GET of one item, its source format parsed into the result (priority, retry and supersession as LIST).  AUTH is a POST (sign-in).  WRITE is a DELETE or an empty-body POST whose status is the result (as SAVE,
  * never retried).  USER is a GET of one user object, its Policy parsed into the result.  SAVE is a POST of a JSON body (create a playlist) whose
  * reply body is ignored: the status is the result.  LIST is a GET whose body is parsed
  * with jf_parse_items() into a caller-given JfList.  STREAM is a GET in
@@ -53,10 +53,15 @@
 #define JF_API_TOKEN_MAX  64
 #define JF_API_NAME_MAX   64
 
+/** A PARSE request's parser: the body into `dst`, a JfParse back.  `toks` is the api's JF_TOKENS_PAGE scratch. */
+typedef int (*JfParseFn)(const char *body, size_t len, JsonTok *toks, int ntoks, void *dst);
+
 typedef enum { JF_KIND_NONE = 0, JF_KIND_AUTH, JF_KIND_LIST, JF_KIND_STREAM, JF_KIND_SAVE,
                JF_KIND_WRITE,   /* DELETE or POST with an empty body: the status is the result, never retried */
                JF_KIND_USER,    /* GET /Users/<uid>: one user object, its Policy in JfResult.policy */
                JF_KIND_FORMAT,  /* GET /Users/<uid>/Items/<id>: one item, its source format parsed into JfResult.format; a new one supersedes any older */
+               JF_KIND_PARSE,   /* GET of `path`, the body parsed by the caller's JfParseFn into the caller's storage; retried as LIST; a new one supersedes queued/in-flight PARSEs of the same group */
+               JF_KIND_POST,    /* POST of a JSON body; the status is the result, never retried, never superseded */
                JF_KIND_TAGS     /* GET of a file with a Range header (bytes 0..range-1): 206 (or a 200 that fits) parsed into JfResult.tags; lowest priority, never retried, dropped when anything else is enqueued */
              } JfKind;
 
@@ -83,6 +88,7 @@ typedef struct {
     int      fd;          /**< STREAM: the socket on success, else -1             */
     JfTags   tags;        /**< TAGS: the parsed head of the file (tags.have false = no covered tag) */
     bool     tags_rejected; /**< TAGS: the server answered 200 with a body past the range: it ignores Range, the read was cut off at the cap */
+    void    *dst;         /**< PARSE: the caller's storage the callback filled (`parse` is its return value; non-OK makes err BADREPLY) */
     JfFormat format;      /**< FORMAT: the source file's format (have false = the reply named no MediaSources) */
 } JfResult;
 
@@ -95,6 +101,9 @@ typedef struct {
     char     method[8];                /**< WRITE: "POST" or "DELETE" */
     char     body[JF_API_POST_BYTES];   /**< AUTH and SAVE only; wiped when the request ends */
     size_t   body_len;
+    JfParseFn parse_fn;                 /**< PARSE: the caller's parser */
+    void    *parse_dst;                 /**< PARSE: its storage */
+    int      group;                     /**< PARSE: supersession group */
     int      range;                     /**< TAGS: bytes asked for (Range: bytes=0-range-1) */
 } JfSlot;
 
@@ -151,6 +160,11 @@ int  jf_api_enqueue_user(JfApi *a, unsigned tag, const char *path);
 int  jf_api_enqueue_format(JfApi *a, unsigned tag, const char *path);
 /** GET of `path` with Range bytes=0-(range-1), range 1..JF_TAGS_HARD, else -1.  A new TAGS request replaces any queued or in-flight one. */
 int  jf_api_enqueue_tags(JfApi *a, unsigned tag, const char *path, int range);
+
+/** GET of `path`, the body parsed by `fn` into `dst` (both required).  Priority and retry as LIST.  A new PARSE with the same `group` replaces any queued or in-flight one of that group; other groups are untouched. */
+int  jf_api_enqueue_parse(JfApi *a, unsigned tag, const char *path, JfParseFn fn, void *dst, int group);
+/** POST of `path` with a JSON body of 1..JF_API_POST_BYTES bytes (Content-Type: application/json).  A 200 or 204 is success; never retried, never superseded.  The reply body is ignored. */
+int  jf_api_enqueue_post_json(JfApi *a, unsigned tag, const char *path, const char *body, size_t len);
 
 /** Drop every queued and in-flight request of `kind`; no result is delivered. */
 void jf_api_cancel_kind(JfApi *a, JfKind kind);
