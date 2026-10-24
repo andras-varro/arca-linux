@@ -1,7 +1,7 @@
-/* Host regression for jf_genre_key (jellyfin/jf_model.c): the key two spellings of a genre share.
+/* Host regression for jf_genre_key (jf_shared/jf_model.c): the key two spellings of a genre share.
  *
- *   cd native_apps && gcc -Wall -Wextra -I common -I jellyfin -fsanitize=undefined \
- *       -o build/jf_genre_test tests/jf_genre_test.c jellyfin/jf_model.c common/json.c -lm \
+ *   cd native_apps && gcc -Wall -Wextra -I common -I jellyfin -I jf_shared -fsanitize=undefined \
+ *       -o build/jf_genre_test tests/jf_genre_test.c jf_shared/jf_model.c common/json.c -lm \
  *       && ./build/jf_genre_test
  *
  * A MIX matches the ticked genres against the server's genre index by this key, so a mapping that is too

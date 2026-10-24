@@ -1,8 +1,8 @@
 /* Host regression for jellyfin/jf_core.c: the Jellyfin client's state machine.
  *
- *   cd native_apps && gcc -Wall -Wextra -I common -I jellyfin -fsanitize=undefined \
- *       -o build/jf_core_test tests/jf_core_test.c jellyfin/jf_core.c jellyfin/jf_model.c \
- *       jellyfin/jf_url.c jellyfin/jf_login.c common/config.c common/json.c -lm && ./build/jf_core_test
+ *   cd native_apps && gcc -Wall -Wextra -I common -I jellyfin -I jf_shared -fsanitize=undefined \
+ *       -o build/jf_core_test tests/jf_core_test.c jellyfin/jf_core.c jf_shared/jf_model.c \
+ *       jf_shared/jf_url.c jellyfin/jf_url_music.c jf_shared/jf_login.c common/config.c common/json.c -lm && ./build/jf_core_test
  *
  * Event scripts go in, emitted commands and UI-visible fields are asserted.  A
  * list "reply" is simulated the way jf_api does it: items appended to the cmd's

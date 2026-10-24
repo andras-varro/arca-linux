@@ -6,9 +6,9 @@
  * through a pipe, so the test can see what went on the wire and how often.
  *
  * Build (also a CTEST_ROWS row in tests/run-all.sh):
- *   gcc -Wall -Wextra -Wno-unused-parameter -I common -I jellyfin -fsanitize=undefined \
- *       -o /tmp/jf_api_test tests/jf_api_test.c jellyfin/jf_api.c jellyfin/jf_model.c \
- *       jellyfin/jf_url.c common/http.c common/json.c common/logger.c
+ *   gcc -Wall -Wextra -Wno-unused-parameter -I common -I jellyfin -I jf_shared -fsanitize=undefined \
+ *       -o /tmp/jf_api_test tests/jf_api_test.c jf_shared/jf_api.c jf_shared/jf_model.c \
+ *       jf_shared/jf_url.c common/http.c common/json.c common/logger.c
  */
 
 #define _GNU_SOURCE
@@ -181,7 +181,7 @@ static void setup(JfApi *a, Srv *s)
 {
     CHECK(jf_api_init(a) == 0);
     jf_api_set_server(a, "127.0.0.1", s->port);
-    jf_api_set_auth(a, "dev", "did", NULL);
+    jf_api_set_auth(a, "Ludfin", "dev", "did", NULL);
     a->retry_ms = 50;
 }
 
@@ -207,7 +207,7 @@ static void test_list_and_header(void)
     CHECK(strstr(h, "Token=") == NULL);                         /* not signed in: no token */
 
     /* signed in: the token goes out on a GET, never on the sign-in POST */
-    jf_api_set_auth(&a, "dev", "did", "TOK-ABC");
+    jf_api_set_auth(&a, "Ludfin", "dev", "did", "TOK-ABC");
     fresh_list();
     CHECK(jf_api_enqueue_list(&a, 8, "/Items?x=2", &list) == 0);
     CHECK(pump(&a, r, 4, 3000) == 1 && r[0].err == JF_ERR_NONE);
@@ -402,7 +402,7 @@ static void test_save(void)
     Act ok[] = {{A_STATUS, 200}};
     Srv *s = srv_start(ok, 1);
     setup(&a, s);
-    jf_api_set_auth(&a, "dev", "did", "TOK-SAVE");
+    jf_api_set_auth(&a, "Ludfin", "dev", "did", "TOK-SAVE");
     CHECK(jf_api_enqueue_save(&a, 21, "My \"mix\" \134 \303\251", ID1, ids2, 2) == 0);
     CHECK(jf_api_busy(&a));
     CHECK(pump(&a, r, 4, 3000) == 1);
@@ -516,7 +516,7 @@ static void test_write_and_user(void)
     /* DELETE: no body, no Content-Length; a 204 is a success */
     Srv *s = srv_start(ok204, 1);
     setup(&a, s);
-    jf_api_set_auth(&a, "dev", "did", "TOK-W");
+    jf_api_set_auth(&a, "Ludfin", "dev", "did", "TOK-W");
     snprintf(path, sizeof path, "/Items/%s", ID2);
     CHECK(jf_api_enqueue_write(&a, 31, "DELETE", path) == 0);
     CHECK(jf_api_enqueue_write(&a, 32, "PUT", path) == -1);

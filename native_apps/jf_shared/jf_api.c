@@ -101,8 +101,9 @@ void jf_api_set_tls(JfApi *a, bool tls)
     a->tls = tls;
 }
 
-void jf_api_set_auth(JfApi *a, const char *device, const char *device_id, const char *token)
+void jf_api_set_auth(JfApi *a, const char *client, const char *device, const char *device_id, const char *token)
 {
+    copy_str(a->client, sizeof(a->client), client);
     copy_str(a->device, sizeof(a->device), device);
     copy_str(a->device_id, sizeof(a->device_id), device_id);
     copy_str(a->token, sizeof(a->token), token);
@@ -246,7 +247,7 @@ static void begin_current(JfApi *a)
     const char *tok = (c->kind == JF_KIND_AUTH) ? NULL : a->token;
     int total = (c->kind == JF_KIND_AUTH || c->kind == JF_KIND_SAVE || c->kind == JF_KIND_WRITE) ? a->auth_total_ms
               : c->kind == JF_KIND_STREAM ? a->stream_total_ms : a->list_total_ms;
-    int hl = jf_auth_header(hdr, sizeof(hdr), a->device, a->device_id, tok);
+    int hl = jf_auth_header(hdr, sizeof(hdr), a->client, a->device, a->device_id, tok);
     a->began_ms = now_ms();
     a->waiting = false;
     if (hl < 0) {

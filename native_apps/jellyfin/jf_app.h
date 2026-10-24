@@ -18,4 +18,9 @@
 #define JF_CONF_DIR     "/opt/" JF_APP_BIN
 #define JF_DATA_DIR     "/home/root/data/" JF_APP_BIN
 
+/* The app's own files, passed at run time to the jf_shared layer, which knows no app name. */
+#define JF_CONF_PATH     JF_CONF_DIR "/" JF_APP_BIN ".conf"   /**< the saved login (jf_login_load/save/clear take a path) */
+#define JF_SETTINGS_PATH JF_DATA_DIR "/settings.conf"
+#define JF_ART_CACHE_DIR JF_DATA_DIR "/art"                  /**< jf_art_init's cache_dir */
+
 #endif

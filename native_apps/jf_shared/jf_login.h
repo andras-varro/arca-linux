@@ -1,7 +1,7 @@
 /*
  * jf_login.h — the Ludfin client's saved login: server, user, the access token
  * and the per-unit device id, in one 0600 file.  The non-secret settings (the
- * chosen library and the volume step) live in their own file, JF_SETTINGS_PATH,
+ * chosen library and the volume step) live in their own file (the app's JF_SETTINGS_PATH),
  * so the backup rules can take them without the token.
  *
  * ⚠️ There is no password field and no "password" key, on purpose: the password
@@ -10,17 +10,14 @@
  * written 0600 and the app's backup rules decide whether it ever leaves the unit.
  *
  * The API takes the path so a host test can use a temp dir; the app passes
- * JF_CONF_PATH.
+ * its own saved-login path (Ludfin's JF_CONF_PATH); any other app's file loads the same way.
  */
 
 #ifndef ARCA_JF_LOGIN_H
 #define ARCA_JF_LOGIN_H
 
 #include <stddef.h>
-#include "jf_app.h"
 
-#define JF_CONF_PATH     JF_CONF_DIR "/" JF_APP_BIN ".conf"
-#define JF_SETTINGS_PATH JF_DATA_DIR "/settings.conf"
 #define JF_VOLUME_MAX    14   /**< volume_step runs 0..JF_VOLUME_MAX */
 #define JF_VOLUME_DEFAULT 10
 /** What a tap on a track row (the PLAY button of its bar) does; one setting, persisted as tap_action. */

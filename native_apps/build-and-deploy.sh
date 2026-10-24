@@ -358,10 +358,10 @@ $CC "${WARN[@]}" -O2 -I. "${VTERM_CFLAGS[@]}" terminal/terminal.c control_panel/
 step "34/35" "file_manager"
 $CC "${WARN[@]}" -O2 -I. file_manager/file_manager.c file_manager/fm_core.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" build/list_view.o build/top_bar.o build/icon_grid.o build/ppm.o build/pointer.o build/ui_flow.o build/ui_focus.o control_panel/cpu_load.c common/status_line.c common/usb_watch.c -o build/file_manager -lm "${AUDIO_LIBS[@]}"
 
-# ludfin: music client (jellyfin/ sources).  jf_core/jf_api/jf_model/jf_url/jf_login are screen-free (host tests);
+# ludfin: music client (jellyfin/ sources + the generic Jellyfin layer in jf_shared/).  jf_core/jf_api/jf_model/jf_url/jf_login are screen-free (host tests);
 # jf_ui.c draws, jellyfin.c is the loop.  http.o and json.o come from the common block above.
 step "35/35" "ludfin"
-$CC "${WARN[@]}" -O2 -I. -Icommon -Ijellyfin jellyfin/jellyfin.c common/eq_panel.c jellyfin/jf_ui.c jellyfin/jf_core.c jellyfin/jf_api.c jellyfin/jf_tags.c jellyfin/jf_model.c jellyfin/jf_url.c jellyfin/jf_login.c jellyfin/jf_queue_store.c jellyfin/jf_art.c jellyfin/jf_fmt_icon.c common/icons.c common/jf_img.c build/http.o build/json.o build/list_view.o build/ui_zone.o build/top_bar.o build/top_pick.o build/icon_grid.o build/ppm.o build/pointer.o build/ui_flow.o build/ui_focus.o control_panel/cpu_load.c common/status_line.c common/logger.c build/product.o "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/ludfin -lm "${SSL_LIBS[@]}" "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. -Icommon -Ijellyfin -Ijf_shared jellyfin/jellyfin.c common/eq_panel.c jellyfin/jf_ui.c jellyfin/jf_core.c jf_shared/jf_api.c jf_shared/jf_tags.c jf_shared/jf_model.c jf_shared/jf_url.c jellyfin/jf_url_music.c jf_shared/jf_login.c jellyfin/jf_queue_store.c jf_shared/jf_art.c jellyfin/jf_fmt_icon.c common/icons.c common/jf_img.c build/http.o build/json.o build/list_view.o build/ui_zone.o build/top_bar.o build/top_pick.o build/icon_grid.o build/ppm.o build/pointer.o build/ui_flow.o build/ui_focus.o control_panel/cpu_load.c common/status_line.c common/logger.c build/product.o "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/ludfin -lm "${SSL_LIBS[@]}" "${AUDIO_LIBS[@]}"
 
 # Collect icon files from source dirs → build/icons/.  control_panel/icons/ holds
 # the control panel's home-grid icons (gen_cp_icons.py); control_panel reads them

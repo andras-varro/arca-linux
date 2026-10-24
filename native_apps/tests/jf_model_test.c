@@ -1,7 +1,7 @@
-/* Host regression for jellyfin/jf_model.c: item pages and the login reply.
+/* Host regression for jf_shared/jf_model.c: item pages and the login reply.
  *
- *   cd native_apps && gcc -Wall -Wextra -I common -I jellyfin -fsanitize=undefined \
- *       -o build/jf_model_test tests/jf_model_test.c jellyfin/jf_model.c common/json.c -lm \
+ *   cd native_apps && gcc -Wall -Wextra -I common -I jellyfin -I jf_shared -fsanitize=undefined \
+ *       -o build/jf_model_test tests/jf_model_test.c jf_shared/jf_model.c common/json.c -lm \
  *       && ./build/jf_model_test
  *
  * The fixtures are trimmed, anonymised copies of real server replies (fake ids,

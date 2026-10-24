@@ -111,6 +111,7 @@ typedef struct {
     char host[JF_HOST_MAX + 1];
     int  port;
     bool tls;            /**< https: set by jf_api_set_tls(); default plain */
+    char client[JF_API_NAME_MAX + 1];   /* the app's name in the Authorization header, supplied by the app */
     char device[JF_API_NAME_MAX + 1];
     char device_id[JF_API_NAME_MAX + 1];
     char token[JF_API_TOKEN_MAX + 1];
@@ -134,7 +135,7 @@ void jf_api_set_server(JfApi *a, const char *host, int port);
 /** TLS for every later request of `a` (default false); certificate checks cannot be disabled. */
 void jf_api_set_tls(JfApi *a, bool tls);
 /** The identity for the Authorization header; `token` NULL or "" = not signed in. */
-void jf_api_set_auth(JfApi *a, const char *device, const char *device_id, const char *token);
+void jf_api_set_auth(JfApi *a, const char *client, const char *device, const char *device_id, const char *token);
 
 /** Each returns 0, or -1 when the ring is full or an argument does not fit. */
 int  jf_api_enqueue_auth(JfApi *a, unsigned tag, const char *user, const char *password);

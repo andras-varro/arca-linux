@@ -43,7 +43,7 @@ static struct {
     char     host[JF_HOST_MAX + 1];
     int      port;
     bool     tls;
-    char     device[64], device_id[64], token[128];
+    char     client[64], device[64], device_id[64], token[128];
     bool     have_server;
 } G = { .cur = -1 };
 
@@ -122,13 +122,13 @@ void jf_art_set_tls(bool tls)
     G.tls = tls;
 }
 
-void jf_art_set_server(const char *host, int port, const char *device, const char *device_id, const char *token)
+void jf_art_set_server(const char *host, int port, const char *client, const char *device, const char *device_id, const char *token)
 {
-    if (!host || !device || !device_id || !token) return;
-    if (strlen(host) > JF_HOST_MAX || strlen(device) >= sizeof G.device ||
+    if (!host || !client || !device || !device_id || !token) return;
+    if (strlen(host) > JF_HOST_MAX || strlen(client) >= sizeof G.client || strlen(device) >= sizeof G.device ||
         strlen(device_id) >= sizeof G.device_id || strlen(token) >= sizeof G.token) return;
     strcpy(G.host, host); G.port = port;
-    strcpy(G.device, device); strcpy(G.device_id, device_id); strcpy(G.token, token);
+    strcpy(G.client, client); strcpy(G.device, device); strcpy(G.device_id, device_id); strcpy(G.token, token);
     G.have_server = true;
 }
 
@@ -200,7 +200,7 @@ static void start_fetch(int i, long long now)
     Slot *s = &G.slot[i];
     char path[256], hdr[512];
     if (!G.have_server || jf_art_path(path, sizeof path, s->id, s->tag, G.size) < 0 ||
-        jf_auth_header(hdr, sizeof hdr, G.device, G.device_id, G.token) < 0) {
+        jf_auth_header(hdr, sizeof hdr, G.client, G.device, G.device_id, G.token) < 0) {
         fail(s, now);
         return;
     }
@@ -278,7 +278,7 @@ void jf_art_shutdown(void)
     if (G.cur >= 0 || G.buf) end_fetch();
     for (int i = 0; i < JF_ART_MEM_SLOTS; i++) slot_free(&G.slot[i]);
     for (volatile char *p = G.token; p < G.token + sizeof G.token; p++) *p = 0;
-    memset(G.device, 0, sizeof G.device); memset(G.device_id, 0, sizeof G.device_id);
+    memset(G.client, 0, sizeof G.client); memset(G.device, 0, sizeof G.device); memset(G.device_id, 0, sizeof G.device_id);
     G.have_server = false;
     G.up = false;
     G.cur = -1;

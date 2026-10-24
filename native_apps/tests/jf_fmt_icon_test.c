@@ -9,7 +9,7 @@
  *   E  jf_fmt_icon_set_dir() empties the cache (a miss is retried under the new dir).
  *
  * Build (from native_apps/):
- *   gcc -Wall -Wextra -fsanitize=undefined,address -I common -I jellyfin -o build/jf_fmt_icon_test tests/jf_fmt_icon_test.c jellyfin/jf_fmt_icon.c common/ppm.c
+ *   gcc -Wall -Wextra -fsanitize=undefined,address -I common -I jellyfin -I jf_shared -o build/jf_fmt_icon_test tests/jf_fmt_icon_test.c jellyfin/jf_fmt_icon.c common/ppm.c
  */
 #include <stdio.h>
 #include <stdlib.h>

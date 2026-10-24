@@ -4,7 +4,7 @@
  *
  * Use:
  *   jf_art_init(dir, size);                       once; size is the square, e.g. 160
- *   jf_art_set_server(host, port, dev, dev_id, token);   when signed in (copies; wipe with jf_art_shutdown)
+ *   jf_art_set_server(host, port, client, dev, dev_id, token);   when signed in (copies; wipe with jf_art_shutdown)
  *   jf_art_request(album_id, tag);                when a track/album comes on screen; cheap, repeatable
  *   jf_art_poll(now_ms);                          once per frame
  *   const LvIcon *ic = jf_art_get(album_id, tag); NULL until the tile is ready
@@ -26,20 +26,18 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "jf_app.h"
 #include "list_view.h"
 
 #define JF_ART_MAX_BYTES  (256 * 1024)   /**< largest reply accepted                 */
 #define JF_ART_TOTAL_MS   8000           /**< whole-request deadline                 */
 #define JF_ART_RETRY_MS   60000          /**< a failed entry is retried after this   */
 #define JF_ART_MEM_SLOTS  6              /**< decoded tiles held in memory           */
-#define JF_ART_CACHE_DIR  JF_DATA_DIR "/art"
 
 /** The request path (pure): "/Items/<id>/Images/Primary?maxWidth=N&maxHeight=N&quality=90[&tag=T]".  Length or -1 (bad id/tag/size, no room). */
 int jf_art_path(char *out, size_t cap, const char *album_id, const char *tag, int size);
 
 bool jf_art_init(const char *cache_dir, int size);
-void jf_art_set_server(const char *host, int port, const char *device, const char *device_id, const char *token);
+void jf_art_set_server(const char *host, int port, const char *client, const char *device, const char *device_id, const char *token);
 /** TLS for later fetches (default false); call before jf_art_set_server(). */
 void jf_art_set_tls(bool tls);
 void jf_art_request(const char *album_id, const char *tag);

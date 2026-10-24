@@ -1,7 +1,7 @@
 /* Host regression for jellyfin/jf_queue_store.c: the persistent play queue file.
  *
- *   cd native_apps && gcc -Wall -Wextra -I common -I jellyfin -o build/jf_queue_store_test tests/jf_queue_store_test.c \
- *       jellyfin/jf_queue_store.c jellyfin/jf_url.c common/config.c && ./build/jf_queue_store_test
+ *   cd native_apps && gcc -Wall -Wextra -I common -I jellyfin -I jf_shared -o build/jf_queue_store_test tests/jf_queue_store_test.c \
+ *       jellyfin/jf_queue_store.c jf_shared/jf_url.c common/config.c && ./build/jf_queue_store_test
  *
  * Round trip, UTF-8 and tab / newline / backslash in titles, a cut-short file, a wrong version, an empty queue, an index out
  * of range, bad lines between good ones, and the file half (atomic save, load, missing file).

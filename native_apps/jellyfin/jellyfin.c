@@ -124,8 +124,8 @@ static void execute(const JfCmds *cmds, uint32_t now)
             jf_art_set_tls(c->tls);
             break;
         case JF_CMD_SET_AUTH:
-            jf_api_set_auth(&api, JF_APP_NAME, app.login.device_id, app.login.token);
-            jf_art_set_server(art_host, art_port, JF_APP_NAME, app.login.device_id, app.login.token);
+            jf_api_set_auth(&api, JF_APP_NAME, JF_APP_NAME, app.login.device_id, app.login.token);
+            jf_art_set_server(art_host, art_port, JF_APP_NAME, JF_APP_NAME, app.login.device_id, app.login.token);
             break;
         case JF_CMD_REQUEST:
             if (c->kind == JF_KIND_AUTH) {

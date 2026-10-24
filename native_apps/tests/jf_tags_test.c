@@ -2,7 +2,7 @@
  * tests/jf_tags_test.c — the file-tag parser (jf_tags.c): synthetic ID3v2.3/2.4 and FLAC byte blobs built here.
  *
  * Build and run (host gcc, from native_apps/):
- *   gcc -Wall -Wextra -I common -I jellyfin -fsanitize=undefined tests/jf_tags_test.c jellyfin/jf_tags.c \
+ *   gcc -Wall -Wextra -I common -I jellyfin -I jf_shared -fsanitize=undefined tests/jf_tags_test.c jf_shared/jf_tags.c \
  *       -o build/jf_tags_test && ./build/jf_tags_test
  */
 

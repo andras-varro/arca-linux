@@ -1,10 +1,10 @@
 /*
  * jf_art_test.c — host regression for common/jf_img.c (decode, geometry, key,
- * byte-budget cache) and jellyfin/jf_art.c (request/poll/get against a fork()ed
+ * byte-budget cache) and jf_shared/jf_art.c (request/poll/get against a fork()ed
  * loopback server).  Every JPEG is generated here with stb_image_write; no album art.
  *
- * Build: gcc -I common -I jellyfin -I tests tests/jf_art_test.c common/jf_img.c
- *        common/http.c jellyfin/jf_art.c jellyfin/jf_url.c -lssl -lcrypto -o jf_art_test
+ * Build: gcc -I common -I jellyfin -I jf_shared -I tests tests/jf_art_test.c common/jf_img.c
+ *        common/http.c jf_shared/jf_art.c jf_shared/jf_url.c -lssl -lcrypto -o jf_art_test
  */
 #define _GNU_SOURCE
 #include <arpa/inet.h>
@@ -419,7 +419,7 @@ static void test_glue(void)
     int lfd = srv_listen(&port);
     CHECK(lfd >= 0);
     pid_t pid = srv_fork(lfd, SRV_OK, &jpeg, S);
-    jf_art_set_server("127.0.0.1", port, "arca", "dev01", "TESTTOKEN");
+    jf_art_set_server("127.0.0.1", port, "Ludfin", "arca", "dev01", "TESTTOKEN");
     jf_art_request(ID, TAG);
     CHECK(jf_art_busy());
     run_until_settled(ID, TAG, &ready, &worst);
@@ -437,7 +437,7 @@ static void test_glue(void)
     /* 2. warm: a fresh module state, the server gone: served from the disk cache in one poll */
     jf_art_shutdown();
     CHECK(jf_art_init(dir, S));
-    jf_art_set_server("127.0.0.1", 1, "arca", "dev01", "TESTTOKEN");     /* nothing listens */
+    jf_art_set_server("127.0.0.1", 1, "Ludfin", "arca", "dev01", "TESTTOKEN");     /* nothing listens */
     jf_art_request(ID, TAG);
     jf_art_poll(mono_ms());
     CHECK(jf_art_get(ID, TAG) != NULL && !jf_art_busy());
@@ -448,7 +448,7 @@ static void test_glue(void)
     CHECK(jf_art_init(dir, S));
     lfd = srv_listen(&port);
     pid = srv_fork(lfd, SRV_OK, &jpeg, S);
-    jf_art_set_server("127.0.0.1", port, "arca", "dev01", "TESTTOKEN");
+    jf_art_set_server("127.0.0.1", port, "Ludfin", "arca", "dev01", "TESTTOKEN");
     jf_art_request(ID, TAG);
     run_until_settled(ID, TAG, &ready, &worst);
     reap(pid); close(lfd);
@@ -460,7 +460,7 @@ static void test_glue(void)
     CHECK(jf_art_init(dir, S));
     lfd = srv_listen(&port);
     pid = srv_fork(lfd, SRV_404, &jpeg, S);
-    jf_art_set_server("127.0.0.1", port, "arca", "dev01", "TESTTOKEN");
+    jf_art_set_server("127.0.0.1", port, "Ludfin", "arca", "dev01", "TESTTOKEN");
     jf_art_request(ID, TAG);
     run_until_settled(ID, TAG, &ready, &worst);
     reap(pid); close(lfd);
@@ -472,7 +472,7 @@ static void test_glue(void)
     CHECK(jf_art_init(dir, S));
     lfd = srv_listen(&port);
     pid = srv_fork(lfd, SRV_404, &jpeg, S);
-    jf_art_set_server("127.0.0.1", port, "arca", "dev01", "TESTTOKEN");
+    jf_art_set_server("127.0.0.1", port, "Ludfin", "arca", "dev01", "TESTTOKEN");
     jf_art_request(ID, TAG);
     run_until_settled(ID, TAG, &ready, &worst);
     reap(pid); close(lfd);
@@ -485,7 +485,7 @@ static void test_glue(void)
     CHECK(jf_art_init(dir, S));
     lfd = srv_listen(&port);
     pid = srv_fork(lfd, SRV_BIG, &jpeg, S);
-    jf_art_set_server("127.0.0.1", port, "arca", "dev01", "TESTTOKEN");
+    jf_art_set_server("127.0.0.1", port, "Ludfin", "arca", "dev01", "TESTTOKEN");
     jf_art_request(ID, TAG);
     run_until_settled(ID, TAG, &ready, &worst);
     reap(pid); close(lfd);
@@ -496,7 +496,7 @@ static void test_glue(void)
     CHECK(jf_art_init(dir, S));
     lfd = srv_listen(&port);
     pid = srv_fork(lfd, SRV_SLOW, &jpeg, S);
-    jf_art_set_server("127.0.0.1", port, "arca", "dev01", "TESTTOKEN");
+    jf_art_set_server("127.0.0.1", port, "Ludfin", "arca", "dev01", "TESTTOKEN");
     jf_art_request(ID, TAG);
     long long took = run_until_settled(ID, TAG, &ready, &worst);
     reap(pid); close(lfd);

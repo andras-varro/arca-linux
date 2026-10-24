@@ -30,7 +30,7 @@
 #include "jf_model.h"
 #include "jf_login.h"
 #include "jf_api.h"
-#include "jf_url.h"
+#include "jf_url_music.h"
 
 /* Page sizes (items per request) and storage caps per list.  The artists cap
  * covers the 1505 album artists and the 1120 genres of the test server (the root list

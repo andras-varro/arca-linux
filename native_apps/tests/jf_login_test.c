@@ -1,7 +1,7 @@
-/* Host regression for jellyfin/jf_login.c: the saved login file and the settings file.
+/* Host regression for jf_shared/jf_login.c: the saved login file and the settings file.
  *
- *   cd native_apps && gcc -Wall -Wextra -I common -I jellyfin -o build/jf_login_test \
- *       tests/jf_login_test.c jellyfin/jf_login.c jellyfin/jf_url.c common/config.c \
+ *   cd native_apps && gcc -Wall -Wextra -I common -I jellyfin -I jf_shared -o build/jf_login_test \
+ *       tests/jf_login_test.c jf_shared/jf_login.c jf_shared/jf_url.c common/config.c \
  *       && ./build/jf_login_test
  *
  * The fixture directory comes from mkdtemp under /tmp and the file sits in a

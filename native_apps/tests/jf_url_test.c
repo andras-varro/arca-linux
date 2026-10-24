@@ -10,7 +10,7 @@
  * cap == len (must be refused), the boundary an off-by-one in fin() would move.
  *
  * Build and run (host gcc, from native_apps/):
- *   gcc -Wall -Wextra -I common -I jellyfin tests/jf_url_test.c jellyfin/jf_url.c \
+ *   gcc -Wall -Wextra -I common -I jellyfin -I jf_shared tests/jf_url_test.c jf_shared/jf_url.c jellyfin/jf_url_music.c \
  *       -o build/jf_url_test && ./build/jf_url_test
  */
 
@@ -18,6 +18,7 @@
 #include <string.h>
 
 #include "jf_url.h"
+#include "jf_url_music.h"
 #include "jf_api.h"
 
 static int fails, checks;
@@ -321,32 +322,32 @@ static void test_header(void)
     int n;
     const char *base = "Authorization: MediaBrowser Client=\"Ludfin\", Device=\"RW\", DeviceId=\"d1\", Version=\"1\"";
 
-    n = jf_auth_header(b, sizeof(b), "RW", "d1", NULL);
+    n = jf_auth_header(b, sizeof(b), "Ludfin", "RW", "d1", NULL);
     CHECK(n > 0 && strstr(b, "Token=") == NULL, "NULL token left a Token: %s", b);
     snprintf(want, sizeof(want), "%s\r\n", base);
     EXPECT("header no token", n, b, want);
 
-    n = jf_auth_header(b, sizeof(b), "RW", "d1", "");
+    n = jf_auth_header(b, sizeof(b), "Ludfin", "RW", "d1", "");
     CHECK(n > 0 && strstr(b, "Token=") == NULL, "empty token left a Token: %s", b);
 
-    n = jf_auth_header(b, sizeof(b), "RW", "d1", "tok123");
+    n = jf_auth_header(b, sizeof(b), "Ludfin", "RW", "d1", "tok123");
     snprintf(want, sizeof(want), "%s, Token=\"tok123\"\r\n", base);
     EXPECT("header token", n, b, want);
 
-    CHECK(jf_auth_header(b, sizeof(b), "RW", "", NULL) == -1, "empty device_id (the server answers 500)");
-    CHECK(jf_auth_header(b, sizeof(b), "", "d1", NULL) == -1, "empty device");
-    CHECK(jf_auth_header(b, sizeof(b), "R\"W", "d1", NULL) == -1, "quote in device");
-    CHECK(jf_auth_header(b, sizeof(b), "RW", "d\\1", NULL) == -1, "backslash in device_id");
-    CHECK(jf_auth_header(b, sizeof(b), "R\rW", "d1", NULL) == -1, "CR in device");
-    CHECK(jf_auth_header(b, sizeof(b), "RW", "d\n1", NULL) == -1, "LF in device_id");
-    CHECK(jf_auth_header(b, sizeof(b), "RW", "d1", "t\"k") == -1, "quote in token");
-    CHECK(jf_auth_header(b, sizeof(b), "RW", "d1", "t\\k") == -1, "backslash in token");
-    CHECK(jf_auth_header(b, sizeof(b), "RW", "d1", "t\rk") == -1, "CR in token");
-    CHECK(jf_auth_header(b, sizeof(b), "RW", "d1", "t\nk") == -1, "LF in token");
-    CHECK(jf_auth_header(b, sizeof(b), NULL, "d1", NULL) == -1, "NULL device");
+    CHECK(jf_auth_header(b, sizeof(b), "Ludfin", "RW", "", NULL) == -1, "empty device_id (the server answers 500)");
+    CHECK(jf_auth_header(b, sizeof(b), "Ludfin", "", "d1", NULL) == -1, "empty device");
+    CHECK(jf_auth_header(b, sizeof(b), "Ludfin", "R\"W", "d1", NULL) == -1, "quote in device");
+    CHECK(jf_auth_header(b, sizeof(b), "Ludfin", "RW", "d\\1", NULL) == -1, "backslash in device_id");
+    CHECK(jf_auth_header(b, sizeof(b), "Ludfin", "R\rW", "d1", NULL) == -1, "CR in device");
+    CHECK(jf_auth_header(b, sizeof(b), "Ludfin", "RW", "d\n1", NULL) == -1, "LF in device_id");
+    CHECK(jf_auth_header(b, sizeof(b), "Ludfin", "RW", "d1", "t\"k") == -1, "quote in token");
+    CHECK(jf_auth_header(b, sizeof(b), "Ludfin", "RW", "d1", "t\\k") == -1, "backslash in token");
+    CHECK(jf_auth_header(b, sizeof(b), "Ludfin", "RW", "d1", "t\rk") == -1, "CR in token");
+    CHECK(jf_auth_header(b, sizeof(b), "Ludfin", "RW", "d1", "t\nk") == -1, "LF in token");
+    CHECK(jf_auth_header(b, sizeof(b), "Ludfin", NULL, "d1", NULL) == -1, "NULL device");
 
-    CHECK(jf_auth_header(b, (size_t)n + 1, "RW", "d1", "tok123") == n, "header cap=len+1 refused");
-    CHECK(jf_auth_header(b, (size_t)n, "RW", "d1", "tok123") == -1, "header cap=len accepted");
+    CHECK(jf_auth_header(b, (size_t)n + 1, "Ludfin", "RW", "d1", "tok123") == n, "header cap=len+1 refused");
+    CHECK(jf_auth_header(b, (size_t)n, "Ludfin", "RW", "d1", "tok123") == -1, "header cap=len accepted");
 }
 
 static void test_body(void)

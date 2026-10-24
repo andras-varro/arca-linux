@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "icons.h"
+#include "jf_app.h"
 #include "jf_art.h"
 #include "jf_fmt_icon.h"
 #include "keyboard.h"
