@@ -1,4 +1,4 @@
 # Retro station system definition; keys: name core exts opts roms video (see native_apps/retro_picker/retro_picker.c)
 name=Arcade
-core=mame2003_plus_fast.so
+core=mame2003_plus_libretro.so
 exts=zip
