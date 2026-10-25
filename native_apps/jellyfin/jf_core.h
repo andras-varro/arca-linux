@@ -221,12 +221,12 @@ typedef enum {
                           * .kind TAGS: jf_api_enqueue_tags(.tag, .path, .range): the head of the playing file; a failure to enqueue
                           *   is pushed back as a BADREPLY result (the core then simply shows no file tags) */
     JF_CMD_CANCEL,       /* jf_api_cancel_kind(.kind) */
-    JF_CMD_PLAY_STREAM,  /* jf_api_enqueue_stream(.tag, .path); .norm_mdb/.user_mdb repeat the gain */
-    JF_CMD_START_AUDIO,  /* audio_music_start_fd(.fd), then audio_music_set_gain(.norm_mdb, .user_mdb);
+    JF_CMD_PLAY_STREAM,  /* jf_api_enqueue_stream(.tag, .path); .norm_mdb repeats the track gain */
+    JF_CMD_START_AUDIO,  /* audio_music_start_fd(.fd), then audio_music_set_gain(.norm_mdb, 0);
                           * then send JF_EV_STREAM_STARTED (or TRACK_ENDED played_ms 0 on failure) */
     JF_CMD_CLOSE_FD,     /* close(.fd): a stream result the core does not want */
     JF_CMD_STOP,         /* stop the music voice */
-    JF_CMD_SET_GAIN,     /* audio_music_set_gain(.norm_mdb, .user_mdb) */
+    JF_CMD_SET_VOLUME,   /* audio_system_volume_set(.n): the system volume, app->volume_step follows the result */
     JF_CMD_SAVE_LOGIN,   /* jf_login_save(&app->login) and jf_settings_save(&app->login) */
     JF_CMD_CLEAR_LOGIN,  /* jf_login_clear(&app->login); the core already emptied the token */
     JF_CMD_PURGE_LOCAL,  /* delete the saved queue file and the art cache (disk and memory tiles): the queue belonged to another server or user, or the user signed out */
@@ -248,9 +248,8 @@ typedef struct {
     int fd;
     int channels;        /* START_AUDIO: 1 or 2, what the URL asked the server for */
     int norm_mdb;
-    int user_mdb;
     char name[96];       /* SAVE: the playlist name */
-    int n;               /* SAVE: how many queue ids */
+    int n;               /* SAVE: how many queue ids; SET_VOLUME: the step */
     char method[8];      /* WRITE: "POST" or "DELETE" */
     int ids_src;         /* SAVE: JF_IDS_QUEUE (app->queue[]) or JF_IDS_PICK (app->pick_ids[]) */
     int range;           /* REQUEST kind TAGS: bytes to read from the start of the file (jf_api_enqueue_tags) */
@@ -338,7 +337,7 @@ typedef struct {
     int dup_hits;            /* JF_CONFIRM_ADD_DUP: how many of the pick_n ids the playlist already holds */
     bool dup_unknown;        /* JF_CONFIRM_ADD_DUP: the scan could not tell (page cap or a failed page): the UI asks "COULD NOT CHECK DUPLICATES - ADD?" */
     bool pick_wait;          /* PICK_OPEN -1 is fetching the rest of the TRACKS list before it opens the picker */
-    int volume_step;         /* 0..JF_VOLUME_MAX; 0 = mute (also in .login.volume_step) */
+    int volume_step;         /* the system volume, 0..AUDIO_VOLUME_MAX, 0 = mute: a mirror the shell fills from audio_system_volume_get() */
     int start_ms;            /* where the live stream started (0, or a seek / resume offset): shown elapsed = start_ms + time since START_AUDIO */
     int pos_ms;              /* PAUSED: the held position */
     uint32_t rng_state;      /* the shuffle's generator (xorshift32); jf_seed() */

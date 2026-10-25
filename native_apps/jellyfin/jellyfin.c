@@ -192,7 +192,7 @@ static void execute(const JfCmds *cmds, uint32_t now)
             break;
         case JF_CMD_START_AUDIO:
             if (audio_ok && audio_music_start_fd(&audio, c->fd, c->channels == 2 ? 2 : 1)) {
-                audio_music_set_gain(&audio, c->norm_mdb, c->user_mdb);
+                audio_music_set_gain(&audio, c->norm_mdb, 0);
                 track_live = true;
                 track_t0 = now;
                 push_type(JF_EV_STREAM_STARTED, 0);
@@ -208,8 +208,8 @@ static void execute(const JfCmds *cmds, uint32_t now)
             track_live = false;
             if (audio_ok) audio_music_stop(&audio);
             break;
-        case JF_CMD_SET_GAIN:
-            if (audio_ok) audio_music_set_gain(&audio, c->norm_mdb, c->user_mdb);
+        case JF_CMD_SET_VOLUME:
+            app.volume_step = audio_system_volume_set(audio_ok ? &audio : NULL, c->n);
             break;
         case JF_CMD_SAVE_LOGIN:
             jf_login_save(&app.login, JF_CONF_PATH);
@@ -291,6 +291,7 @@ int main(int argc, char *argv[])
     if (!audio_ok) fprintf(stderr, JF_APP_BIN ": no audio output\n");
 
     jf_app_init(&app);
+    app.volume_step = audio_system_volume_get(&audio);
     jf_seed(&app, (uint32_t)time(NULL) * 2654435761u);
     {   /* the saved queue comes back paused at its track: nothing plays until PLAY */
         static JfItem saved[JF_QUEUE_MAX];

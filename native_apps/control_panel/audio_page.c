@@ -40,6 +40,7 @@ typedef struct {
     bool effects;       /* effects_enabled — likewise */
     int  dev_idx;       /* audio_device as SAVED, an AudioOutChoice */
     char bt_addr[18];   /* audio_bt_addr: the preferred headset (BLUETOOTH, AUTO), or "" */
+    int  volume;        /* volume_step, 0..AUDIO_VOLUME_MAX; written by vol_apply(), not audio_persist() */
 } AudioPageState;
 
 static AudioPageState audio_state;      /* the values, as saved */
@@ -68,6 +69,8 @@ static void audio_page_load(const Config *cfg) {
     const char *a = config_audio_bt_addr(cfg);
     snprintf(audio_state.bt_addr, sizeof(audio_state.bt_addr), "%s",
              audio_out_bt_addr_valid(a) ? a : "");
+    int v = config_get_int(cfg, AUDIO_VOLUME_KEY, AUDIO_VOLUME_DEFAULT);
+    audio_state.volume = v < 0 ? 0 : v > AUDIO_VOLUME_MAX ? AUDIO_VOLUME_MAX : v;
 }
 
 /* Writes the four keys into the FILE by re-reading it, not by saving the
@@ -115,6 +118,16 @@ static void page_audio_close(void) {
     page_audio_open = false;
 }
 
+/* The system volume: audio_system_volume_set() applies it to the open bus and
+ * writes the file; the in-memory Config gets the key too, for the same reason
+ * audio_persist() updates both — a later whole-file save from another page must
+ * write this step, not the one the Config was loaded with.  Passes NULL while
+ * the bus is closed (persist only). */
+static void vol_apply(Config *mem, int step) {
+    audio_state.volume = audio_system_volume_set(page_audio_open ? &page_audio : NULL, step);
+    config_set_int(mem, AUDIO_VOLUME_KEY, audio_state.volume);
+}
+
 /* Unchecked because the ENABLE gate is applied at the widget instead: TEST is
  * disabled while audio is off, so this never opens against a switched-off
  * setting, and the bus stays ready for the moment it is switched back on.  The
@@ -151,6 +164,11 @@ static void audio_page_reset_defaults(Config *cfg) {
     audio_page_load(cfg);
     if (page_audio_open && page_audio_idx != audio_state.dev_idx)
         page_audio_reopen();
+    /* The cleared Config has no volume key, so the default is what is shown; an
+     * open bus is moved onto it too.  The file's copy of the key goes with the
+     * whole-file save that follows. */
+    if (page_audio_open)
+        audio_system_volume_set(&page_audio, audio_state.volume);
 }
 
 /* ── Layout ─────────────────────────────────────────────────────────────── */
@@ -160,15 +178,21 @@ static ToggleSwitch music_toggle, effects_toggle;
 static Button       audio_dev_btn;
 static Button       test_audio_btn;
 static Button       mix_test_btn;
-static Button       eq_btn;            /* EQUALISER: the shared panel (common/eq_panel.h), full screen */
+static Button       vol_dn_btn, vol_up_btn;   /* VOL row: minus, plus; the readout between is drawn text */
+static int          vol_val_cx, vol_val_w;    /* the readout box centre x and width, set by layout */
+static Button       eq_btn;          /* EQUALISER: the shared panel (common/eq_panel.h), full screen */
 static bool         eq_fullscreen;     /* the pending CP_PAGE_FULLSCREEN is the panel, not MIX BUS TEST */
 static Config      *eq_cfg;            /* the page's own Config, kept from input() for the panel's save */
 
 /* Row 2 carries MUSIC / EFFECTS / OUT under the master switch; row 3 the
- * MIX BUS TEST launch, alone, so a finger aimed at it lands on nothing else. */
+ * MIX BUS TEST launch, alone, so a finger aimed at it lands on nothing else.
+ * Row 4 is the VOL row: label, minus, readout, plus. */
 #define AUD_SEC_Y      (CONTENT_Y + CONTENT_TOP_GAP)
 #define AUD_ROW2_Y     (AUD_SEC_Y + 54)
 #define AUD_ROW3_Y     (AUD_ROW2_Y + 54)
+#define AUD_ROW4_Y     (AUD_ROW3_Y + 54)
+#define AUD_VOL_BTN_W  50
+#define AUD_VOL_BTN_H  30
 #define AUD_TRACK_W    60
 #define AUD_TRACK_H    28
 
@@ -261,16 +285,34 @@ static void audio_page_layout(void) {
                      "EQUALISER", BTN_COLOR_INFO, COLOR_WHITE,
                      BTN_COLOR_HIGHLIGHT, 2);
 
+    /* VOL: label at scale 2, then minus, the readout and plus.  The readout box is
+     * sized from the widest text it can show ("14/14" or "MUTE") so the plus
+     * button does not move as the value changes. */
+    {
+        int lx = CONTENT_LEFT + 5;
+        int lw = text_measure_width("VOL", 2);
+        int w1 = text_measure_width("14/14", 2), w2 = text_measure_width("MUTE", 2);
+        vol_val_w = (w1 > w2 ? w1 : w2) + 16;
+        int dn_x = lx + lw + 12;
+        button_init_full(&vol_dn_btn, dn_x, AUD_ROW4_Y, AUD_VOL_BTN_W, AUD_VOL_BTN_H,
+                         "-", BTN_COLOR_INFO, COLOR_WHITE, BTN_COLOR_HIGHLIGHT, 2);
+        int val_x = dn_x + AUD_VOL_BTN_W + 8;
+        vol_val_cx = val_x + vol_val_w / 2;
+        button_init_full(&vol_up_btn, val_x + vol_val_w + 8, AUD_ROW4_Y,
+                         AUD_VOL_BTN_W, AUD_VOL_BTN_H,
+                         "+", BTN_COLOR_INFO, COLOR_WHITE, BTN_COLOR_HIGHLIGHT, 2);
+    }
+
     /* ⚠️ THE RECEIPT.  Everything here hangs off CONTENT_Y, which comes from a
      * per-unit touch inset, so a row pushed past the touchable rect looks
-     * perfect in a screenshot and is dead to a finger.  Row 3 is the lowest
-     * row, so MIX BUS TEST sets the bottom.  Row 2 is the one exposed
+     * perfect in a screenshot and is dead to a finger.  Row 4 (VOL) is the lowest
+     * row, so its buttons set the bottom.  Row 2 is the one exposed
      * sideways — it stacks three text-derived widths left to right, and the
      * portrait content rect is only about 150 px wider than the first two, so
      * the OUT button is the widget whose right edge can leave it.  All read off
      * the widgets as placed. */
     {
-        int bottom = (mix_test_btn.y + mix_test_btn.height) - CONTENT_Y;
+        int bottom = (vol_up_btn.y + vol_up_btn.height) - CONTENT_Y;
         int right  = audio_dev_btn.x + audio_dev_btn.width;
         const ToggleSwitch *tg[3] = { &audio_toggle, &music_toggle, &effects_toggle };
         for (int i = 0; i < 3; i++)
@@ -281,6 +323,8 @@ static void audio_page_layout(void) {
             right = eq_btn.x + eq_btn.width;
         if (mix_test_btn.x + mix_test_btn.width > right)
             right = mix_test_btn.x + mix_test_btn.width;
+        if (vol_up_btn.x + vol_up_btn.width > right)
+            right = vol_up_btn.x + vol_up_btn.width;
         const char *verdict = bottom > CONTENT_H     ? "⚠ PAST CONTENT BOTTOM"
                             : right  > CONTENT_RIGHT ? "⚠ PAST CONTENT RIGHT"
                             : "fits";
@@ -306,6 +350,8 @@ static void audio_sync_disabled(void) {
     test_audio_btn.disabled = off;
     mix_test_btn.disabled   = off;
     eq_btn.disabled         = off;
+    vol_dn_btn.disabled     = off;
+    vol_up_btn.disabled     = off;
 }
 
 static void audio_page_draw(Framebuffer *fb) {
@@ -336,6 +382,17 @@ static void audio_page_draw(Framebuffer *fb) {
               audio_out_choice_shown(s->dev_idx, shown_usb, shown_bt));
     button_set_text(&audio_dev_btn, out_txt);
     button_draw(fb, &audio_dev_btn);
+
+    /* VOL readout: derived from the state each frame, between the two buttons. */
+    char vol_txt[24];
+    if (s->volume <= 0) snprintf(vol_txt, sizeof(vol_txt), "MUTE");
+    else                snprintf(vol_txt, sizeof(vol_txt), "%d/%d", s->volume, AUDIO_VOLUME_MAX);
+    int vy = AUD_ROW4_Y + AUD_VOL_BTN_H / 2;
+    uint32_t vc = s->enabled ? COLOR_WHITE : COLOR_GRAY;
+    text_draw_centered(fb, CONTENT_LEFT + 5 + text_measure_width("VOL", 2) / 2, vy, "VOL", vc, 2);
+    text_draw_centered(fb, vol_val_cx, vy, vol_txt, vc, 2);
+    button_draw(fb, &vol_dn_btn);
+    button_draw(fb, &vol_up_btn);
 }
 
 static CpPageResult audio_page_input(Config *cfg, int tx, int ty,
@@ -392,6 +449,16 @@ static CpPageResult audio_page_input(Config *cfg, int tx, int ty,
     if (page_audio_open && page_audio_idx != s->dev_idx)
         page_audio_reopen();
 
+    /* A step per press.  After the reopen above, so the step lands on the bus
+     * the page now holds. */
+    if (button_update(&vol_dn_btn, tx, ty, touching, now) && s->volume > 0) {
+        vol_apply(cfg, s->volume - 1);
+        act = CP_PAGE_REDRAW;
+    }
+    if (button_update(&vol_up_btn, tx, ty, touching, now) && s->volume < AUDIO_VOLUME_MAX) {
+        vol_apply(cfg, s->volume + 1);
+        act = CP_PAGE_REDRAW;
+    }
     /* ⚠️ Every main-loop iteration: the panel calls input() once per iteration
      * whether or not anything was touched, which makes this the page's frame
      * tick.  audio_page_busy() keeps that tick at FRAME_DELAY_ACTIVE_US while
@@ -526,6 +593,8 @@ static int audio_page_focusables(UiRect *out, int max) {
     n = focus_add_button(out, n, max, &test_audio_btn);
     n = focus_add_button(out, n, max, &mix_test_btn);
     n = focus_add_button(out, n, max, &eq_btn);
+    n = focus_add_button(out, n, max, &vol_dn_btn);
+    n = focus_add_button(out, n, max, &vol_up_btn);
     return n;
 }
 

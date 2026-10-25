@@ -346,6 +346,54 @@ static long fill_ramp(void *ctx, int16_t *buf, long frames, int channels)
     return frames;
 }
 
+/* ── Group V helpers: the system volume, through mode 2 ─────────────────────
+ *
+ * audio_out_write() is the path that needs no fill callback, so a test hands it
+ * a mono buffer and reads the left channel back from the fake's byte log. */
+static Fake vf;
+
+/** Opens a stream, sets `step` (skipped when `set` is false), writes `n` mono
+ *  samples (n <= 4096), returns the left channel in `outl`.  Returns frames
+ *  written, or -1 when the open failed. */
+static long vol_run(bool set, int step, const int16_t *in, long n, int16_t *outl)
+{
+    AudioOut o;
+    fake_reset(&vf);
+    if (audio_out_open(&o, &FAKE_DEV, &vf, 44100, 2) != 0) return -1;
+    if (set) audio_out_set_volume_step(&o, step);
+    long before = vf.len;
+    long w = audio_out_write(&o, in, n);
+    for (long i = 0; i < n; i++) {
+        int16_t s;
+        memcpy(&s, vf.got + before + i * vf.fb, sizeof(s));
+        outl[i] = s;
+    }
+    audio_out_close(&o);
+    return w;
+}
+
+/** Writes a one-line config fixture and points the open at it; returns the
+ *  step the open then holds, or -2 if the open failed. */
+static int vol_from_file(const char *text)
+{
+    char path[] = "/tmp/audio_out_vol_XXXXXX";
+    int fd = mkstemp(path);
+    if (fd < 0) return -2;
+    if (text) { FILE *fp = fdopen(fd, "w"); fputs(text, fp); fclose(fp); }
+    else close(fd);
+    audio_out_set_eq_path(path);
+    AudioOut o;
+    fake_reset(&vf);
+    int r = -2;
+    if (audio_out_open(&o, &FAKE_DEV, &vf, 44100, 2) == 0) {
+        r = audio_out_get_volume_step(&o);
+        audio_out_close(&o);
+    }
+    audio_out_set_eq_path(NULL);
+    unlink(path);
+    return r;
+}
+
 /** A fill that touches nothing at all — `audio_mix_render()` on a silent bus. */
 static long fill_silent(void *ctx, int16_t *buf, long frames, int channels)
 {
@@ -1635,6 +1683,117 @@ int main(void)
         audio_out_close(&out);
     }
 
+
+    printf("\n=== V. the system volume: volume_step, 0 = mute, 3 dB a step, 10 = unity ===\n");
+    {
+        static int16_t vin[4096], vout[4096];
+        bool ident = true, mono_up = true, nowrap = true, sign_ok = true, mute0 = true;
+
+        /* V1: step 10 is a bit-exact passthrough over every int16, set or not. */
+        for (int pass = 0; pass < 2; pass++) {
+            ident = true;
+            for (long base = -32768; base < 32768; base += 4096) {
+                for (long i = 0; i < 4096; i++) vin[i] = (int16_t)(base + i);
+                if (vol_run(pass == 1, 10, vin, 4096, vout) != 4096) ident = false;
+                if (memcmp(vin, vout, sizeof(vin)) != 0) ident = false;
+            }
+            check(ident, pass ? "V1b step 10 set explicitly: all 65536 int16 values pass bit-exact"
+                              : "V1a no volume set (default): all 65536 int16 values pass bit-exact");
+        }
+
+        /* V2: step 0 is silence, whatever the input. */
+        for (long i = 0; i < 4096; i++) vin[i] = (int16_t)((i & 1) ? 32767 : -32768);
+        vol_run(true, 0, vin, 4096, vout);
+        for (long i = 0; i < 4096; i++) if (vout[i] != 0) mute0 = false;
+        check(mute0, "V2 step 0 (mute) writes all zeros");
+
+        /* V3: steps 1..9 are the stated dB, within the Q12 table's rounding. */
+        for (long i = 0; i < 4096; i++) vin[i] = 10000;
+        vol_run(true, 7, vin, 4096, vout);
+        check(vout[100] >= 3546 && vout[100] <= 3550,
+              "V3a step 7 is -9 dB: 10000 -> ~3548");
+        vol_run(true, 1, vin, 4096, vout);
+        check(vout[100] >= 445 && vout[100] <= 449,
+              "V3b step 1 is -27 dB: 10000 -> ~447");
+        {
+            int prev = -1;
+            bool up = true;
+            for (int s = 0; s <= AUDIO_VOLUME_MAX; s++) {
+                vol_run(true, s, vin, 4096, vout);
+                if (vout[100] < prev) up = false;
+                prev = vout[100];
+            }
+            check(up, "V3c output for a fixed input never falls as the step rises, 0..14");
+        }
+        {
+            for (long i = 0; i < 4096; i++) vin[i] = 20000;
+            vol_run(true, 9, vin, 4096, vout);
+            check(vout[100] <= 20000 && vout[100] >= 13900,
+                  "V3d steps below 10 never exceed the input (step 9: 20000 -> ~13950)");
+        }
+
+        /* V4: step 14 boosts +12 dB below the knee and never wraps above it. */
+        for (long i = 0; i < 4096; i++) vin[i] = 4000;
+        vol_run(true, 14, vin, 4096, vout);
+        check(vout[100] >= 15920 && vout[100] <= 15930,
+              "V4a step 14 is +12 dB below the limiter knee: 4000 -> ~15925");
+        {
+            const double amps[2] = { 32767.0, 16384.0 };
+            for (int a = 0; a < 2; a++) {
+                int peak = 0;
+                for (long i = 0; i < 4096; i++)
+                    vin[i] = (int16_t)(amps[a] * sin(2.0 * M_PI * (double)i / 64.0));
+                vol_run(true, 14, vin, 4096, vout);
+                for (long i = 0; i < 4096; i++) {
+                    int m = vout[i] < 0 ? -vout[i] : vout[i];
+                    if (m > peak) peak = m;
+                    if (vin[i] > 0 && vout[i] < 0) nowrap = false;
+                    if (vin[i] < 0 && vout[i] > 0) nowrap = false;
+                    if (vin[i] == 0 && vout[i] != 0) sign_ok = false;
+                }
+                check(peak <= 32767 && peak > 22000,
+                      a == 0 ? "V4b step 14 on a full-scale sine: peak within int16, boosted"
+                             : "V4c step 14 on a half-scale sine: peak within int16, boosted");
+            }
+            check(nowrap && sign_ok, "V4d no sign flip (wrap) and no offset on either sine");
+        }
+        {
+            /* Monotone in |input|, odd-symmetric, over the whole magnitude range. */
+            int last_p = -1, last_n = 1;
+            for (long k = 0; k < 4096; k++) vin[k] = (int16_t)(k * 8);        /* 0..32760 */
+            vol_run(true, 14, vin, 4096, vout);
+            for (long k = 0; k < 4096; k++) { if (vout[k] < last_p) mono_up = false; last_p = vout[k]; }
+            for (long k = 0; k < 4096; k++) vin[k] = (int16_t)(-(k * 8));
+            vol_run(true, 14, vin, 4096, vout);
+            for (long k = 0; k < 4096; k++) { if (vout[k] > last_n) mono_up = false; last_n = vout[k]; }
+            check(mono_up, "V4e step 14 is monotone in |input| on both polarities");
+        }
+
+        /* V5: the setter clamps, and a NULL stream is safe. */
+        {
+            AudioOut o;
+            fake_reset(&vf);
+            check(audio_out_open(&o, &FAKE_DEV, &vf, 44100, 2) == 0 &&
+                  audio_out_get_volume_step(&o) == AUDIO_VOLUME_DEFAULT,
+                  "V5a a fresh stream with no key holds the default step (10)");
+            audio_out_set_volume_step(&o, -5);
+            check(audio_out_get_volume_step(&o) == 0, "V5b step -5 clamps to 0");
+            audio_out_set_volume_step(&o, 99);
+            check(audio_out_get_volume_step(&o) == AUDIO_VOLUME_MAX, "V5c step 99 clamps to 14");
+            audio_out_close(&o);
+            audio_out_set_volume_step(NULL, 5);
+            check(audio_out_get_volume_step(NULL) == AUDIO_VOLUME_DEFAULT,
+                  "V5d NULL stream: set is a no-op, get reads the default");
+        }
+
+        /* V6: volume_step is read from the config file at open. */
+        check(vol_from_file("volume_step=7\n") == 7, "V6a volume_step=7 is read at open");
+        check(vol_from_file("eq=0,0,0,0,0\nvolume_step=0\n") == 0, "V6b volume_step=0 (mute) is read");
+        check(vol_from_file("volume_step=99\n") == AUDIO_VOLUME_MAX, "V6c an out-of-range key clamps to 14");
+        check(vol_from_file("eq=0,0,0,0,0\n") == AUDIO_VOLUME_DEFAULT, "V6d key absent: default 10");
+        check(vol_from_file("volume_step=loud\n") == AUDIO_VOLUME_DEFAULT, "V6e garbled key: default 10");
+        check(vol_from_file(NULL) == AUDIO_VOLUME_DEFAULT, "V6f empty file: default 10");
+    }
 
     printf("\n%s  %d checks, %d failure(s)\n",
            failures ? "FAILED" : "PASSED", checks, failures);

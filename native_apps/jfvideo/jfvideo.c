@@ -161,17 +161,14 @@ static bool video_owns_frame(void)
 }
 
 /* ── volume, bands, equaliser ─────────────────────────────────────────────── */
-static int vol_level = JF_VOLUME_DEFAULT;
-
-/* Single volume entry point: every level change goes through here (not persisted); a system-volume job replaces its body. */
+/* Single volume entry point: every level change goes through here.  The level is the system volume (applied at the device
+ * output, persisted by the helper); delta 0 only refreshes the on-screen value. */
 static void volume_step(int delta)
 {
-    int s = vol_level + delta;
-    if (s < 0) s = 0;
-    if (s > JF_VOLUME_MAX) s = JF_VOLUME_MAX;
-    vol_level = s;
-    if (vp) vid_player_set_gain_mdb(vp, jf_volume_mdb(s));
-    jv_ui_set_volume(&ui, s, JF_VOLUME_MAX);
+    Audio *a = audio_ok ? &audio : NULL;
+    int s = audio_system_volume_get(a);
+    if (delta) s = audio_system_volume_set(a, s + delta);
+    jv_ui_set_volume(&ui, s, AUDIO_VOLUME_MAX);
     bands_force = true;
 }
 
@@ -394,7 +391,7 @@ int main(int argc, char *argv[])
     audio_ok = audio_init(&audio) == 0;
     vp = vid_player_new(&audio, audio_ok, &fb, &logger);
     if (!vp) LOG_ERROR(&logger, "player: out of memory");
-    volume_step(0);   /* applies the default level to the player */
+    volume_step(0);   /* shows the system level */
 
     push_type(JV_EV_START, 0);
 

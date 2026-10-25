@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "audio_out.h"
 #include "jf_core.h"
 #include "jf_url.h"
 
@@ -115,7 +116,6 @@ static void signed_in(void)
     snprintf(ev.login.user, sizeof(ev.login.user), "bob");
     snprintf(ev.login.user_id, sizeof(ev.login.user_id), UID);
     snprintf(ev.login.token, sizeof(ev.login.token), "tok");
-    ev.login.volume_step = 10;
     step_ev(&ev);
 }
 static void artists_loaded(int count, int total)
@@ -140,10 +140,9 @@ static void test_start(void)
     static JfEvent ev; memset(&ev, 0, sizeof(ev)); ev.type = JF_EV_START;
     snprintf(ev.login.server, sizeof(ev.login.server), "10.0.0.1:8096");
     snprintf(ev.login.user, sizeof(ev.login.user), "bob");
-    ev.login.volume_step = 7;
     step_ev(&ev);
     CHECK(app.screen == JF_SCR_SIGNIN && cm.n == 0, "no token -> SIGNIN, no commands (screen %d, n %d)", app.screen, cm.n);
-    CHECK(app.volume_step == 7 && strcmp(app.login.user, "bob") == 0, "login kept");
+    CHECK(strcmp(app.login.user, "bob") == 0, "login kept");
 
     signed_in();
     CHECK(app.screen == JF_SCR_ARTISTS && app.list == &app.lists[JF_LIST_ARTISTS], "token -> ARTISTS");
@@ -308,7 +307,7 @@ static void test_queue(void)
     const JfCmd *p = &cm.c[0];
     char want[JF_PATH_MAX], sess[33]; snprintf(sess, sizeof(sess), "%032u", sess_n);
     jf_path_stream(want, sizeof(want), tl->items[2].id, sess, 1);
-    CHECK(strcmp(p->path, want) == 0 && p->norm_mdb == tl->items[2].norm_gain_mdb && p->user_mdb == 0, "stream path, norm gain, volume 10 = 0 mdb");
+    CHECK(strcmp(p->path, want) == 0 && p->norm_mdb == tl->items[2].norm_gain_mdb, "stream path, norm gain");
     unsigned tag = p->tag;
     reply_stream(tag + 9, JF_ERR_NONE, 77);
     CHECK(cm.n == 1 && cm.c[0].type == JF_CMD_CLOSE_FD && cm.c[0].fd == 77, "stale stream fd is closed");
@@ -432,25 +431,23 @@ static void test_expiry(void)
 static void test_volume(void)
 {
     signed_in(); artists_loaded(3, 3);
-    CHECK(app.volume_step == 10, "default step");
+    CHECK(app.volume_step == AUDIO_VOLUME_DEFAULT, "default step");
     for (int k = 0; k < 4; k++) send(JF_EV_VOL_UP, 0);
-    CHECK(app.volume_step == 14 && cm.n == 2 && cm.c[0].type == JF_CMD_SET_GAIN && cm.c[0].user_mdb == 12000 && cm.c[1].type == JF_CMD_SAVE_LOGIN,
-          "step 14 = +12000 mdb, SET_GAIN + SAVE_LOGIN");
+    CHECK(app.volume_step == 14 && cm.n == 1 && cm.c[0].type == JF_CMD_SET_VOLUME && cm.c[0].n == 14,
+          "step 14, one SET_VOLUME carrying it and nothing to save");
     send(JF_EV_VOL_UP, 0);
     CHECK(app.volume_step == 14 && cm.n == 0, "clamped at 14, nothing emitted");
-    CHECK(app.login.volume_step == 14, "login carries the step");
     for (int k = 0; k < 13; k++) send(JF_EV_VOL_DOWN, 0);
-    CHECK(app.volume_step == 1 && cm.c[0].user_mdb == -27000, "step 1");
+    CHECK(app.volume_step == 1 && cm.c[0].type == JF_CMD_SET_VOLUME && cm.c[0].n == 1, "step 1");
     send(JF_EV_VOL_DOWN, 0);
-    CHECK(app.volume_step == 0 && cm.c[0].user_mdb == -100000, "step 0 = mute value");
+    CHECK(app.volume_step == 0 && cm.c[0].n == 0, "step 0 = mute");
     send(JF_EV_VOL_DOWN, 0);
     CHECK(app.volume_step == 0 && cm.n == 0, "clamped at 0");
-    CHECK(jf_volume_mdb(10) == 0 && jf_volume_mdb(0) == -100000 && jf_volume_mdb(14) == 12000, "jf_volume_mdb");
-    /* norm gain of the playing track rides along */
+    /* the track's own gain is untouched by a volume change: no user gain is sent any more */
     in_tracks(3, 3);
     send(JF_EV_ACTIVATE, 1);
     send(JF_EV_VOL_UP, 0);
-    CHECK(cm.c[0].norm_mdb == app.lists[JF_LIST_TRACKS].items[1].norm_gain_mdb, "SET_GAIN carries the playing track's norm");
+    CHECK(cm.n == 1 && cm.c[0].type == JF_CMD_SET_VOLUME, "volume emits only SET_VOLUME");
 }
 
 static void test_search(void)

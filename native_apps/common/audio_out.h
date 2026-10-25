@@ -213,6 +213,11 @@ typedef struct {
     /* Post-fill attenuation, as a shift count.  See audio_out_set_shift(). */
     int         shift;
 
+    /* System volume step, 0..AUDIO_VOLUME_MAX.  ⚠️ A zeroed struct means MUTE, so
+     * audio_out_open() — which memsets — is the one place that sets it, from the
+     * config key or the default, before anything can read it. */
+    int         volume_step;
+
     /* System equaliser, applied before the attenuation. See audio_out_set_eq(). */
     EqParams    eq_p;
     EqState     eq_s;
@@ -626,6 +631,25 @@ const char *audio_out_fill_owner(const AudioOut *out);
  * pitch.  At `shift = 0` it is a parameter, nothing more.
  */
 void audio_out_set_shift(AudioOut *out, int shift);
+
+/**
+ * The system volume: one level for the whole device, applied here once so every
+ * client (native apps through audio.c, ScummVM directly) gets it.  A step 0..14
+ * at 3 dB each around unity: gain_dB = (step - 10) * 3, so 10 is unity, 14 is
+ * +12 dB and 1 is -27 dB; step 0 is MUTE.  audio_out_open() reads the
+ * `volume_step` key of the same config file as the equaliser (missing, garbled
+ * or out of range reads as the default / is clamped); this setter changes the
+ * OPEN stream live and does not write the config (audio_system_volume_set() in
+ * audio.h does both).  Applied after the equaliser and enhancer and before the
+ * master shift.  Step 10 is a bit-exact bypass; steps 11..14 pass a soft limiter
+ * so a boost bends instead of wrapping.  Same single-thread rule as set_shift.
+ * A NULL stream is ignored; the getter reads the default for it.
+ */
+#define AUDIO_VOLUME_MAX     14
+#define AUDIO_VOLUME_DEFAULT 10
+#define AUDIO_VOLUME_KEY     "volume_step"
+void audio_out_set_volume_step(AudioOut *out, int step);
+int  audio_out_get_volume_step(const AudioOut *out);
 
 /**
  * The system equaliser (audio_eq.h): 60/250/1k/4k/12k Hz, integer dB in

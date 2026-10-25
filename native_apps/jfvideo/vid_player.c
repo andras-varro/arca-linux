@@ -56,7 +56,6 @@ struct VidPlayer {
     int px0, py0, pw, ph;                    /* picture rectangle, logical coordinates */
     long shown, dropped, last_shown, last_dropped; double err_sum, err_max; long err_n; double stats_next;
     int band_top, band_bot;                  /* logical rows the UI owns (overlay bars); present() leaves them alone */
-    int gain_mdb;                            /* user volume (milli-dB), kept across restarts */
     Subs sub;
 };
 
@@ -88,10 +87,10 @@ static void voice_release(VidPlayer *p)
     p->voice = false;
 }
 
-/* the voice's peak: the sink volume's, times the user gain (0 = mute) */
+/* the voice's peak: the sink volume's, at 0 dB (the system volume is applied at the device output) */
 static int voice_peak(const VidPlayer *p)
 {
-    return audio_gain_peak(audio_voice_peak(p->audio->vol), audio_gain_total_mdb(0, p->gain_mdb));
+    return audio_gain_peak(audio_voice_peak(p->audio->vol), 0);
 }
 
 static bool voice_add(VidPlayer *p)
@@ -401,11 +400,6 @@ void vid_player_repaint(VidPlayer *p)
     sprite_blit(p);
 }
 
-void vid_player_set_gain_mdb(VidPlayer *p, int user_mdb)
-{
-    p->gain_mdb = user_mdb;
-    if (p->voice && p->audio_ok) audio_mix_set_voice_peak(&p->audio->mix, p->slot, p->gen, voice_peak(p));   /* slews in ~20 ms */
-}
 
 long vid_player_position(const VidPlayer *p)
 {

@@ -14,6 +14,7 @@
 #include "jf_fmt_icon.h"
 #include "keyboard.h"
 #include "font.h"
+#include "audio_out.h"
 
 #define BG        RGB(16, 18, 26)
 #define PANEL     RGB(30, 36, 52)
@@ -1703,7 +1704,7 @@ static void draw_nowplaying(JfUi *ui)
     snprintf(buf, sizeof buf, "%s / %s", a, z);
     fb_draw_text(fb, p.x, p.y + p.h + 8, buf, ui->seeking ? RING : COLOR_WHITE, 2);
     if (app->volume_step == 0) snprintf(buf, sizeof buf, "MUTE");
-    else snprintf(buf, sizeof buf, "VOLUME %d/%d", app->volume_step, JF_VOLUME_MAX);
+    else snprintf(buf, sizeof buf, "VOLUME %d/%d", app->volume_step, AUDIO_VOLUME_MAX);
     fb_draw_text(fb, p.x + p.w - text_measure_width(buf, 2), p.y + p.h + 8, buf, COLOR_WHITE, 2);
 
     for (int i = 0; i < JF_UI_NP; i++) {

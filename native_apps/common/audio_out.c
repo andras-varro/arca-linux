@@ -201,6 +201,48 @@ static bool all_silent(const int16_t *buf, long samples)
  *  the output is unchanged by the skip. */
 #define SILENT_HANG_MS 300
 
+/** Linear gain per volume step in Q12 (4096 = 1.0): 10^(((step - 10) * 3) / 20) * 4096,
+ *  rounded.  A table because the per-sample loop may not divide or use float; Q12
+ *  because the top (+12 dB, 3.98x) times a full-scale int16 is 5.3e8, inside int32.
+ *  Index 0 is never used (mute zeroes the buffer); 10 is never used (bit-exact
+ *  bypass); both are filled so the table reads straight off the step. */
+static const int32_t VOL_GAIN_Q12[AUDIO_VOLUME_MAX + 1] = {
+       0,  183,  258,  365,  516,  728, 1029, 1453, 2053, 2900,
+    4096, 5786, 8173, 11544, 16306
+};
+#define VOL_Q 12
+
+/** Where a boost starts to bend.  audio_mix_limit_at()'s curve is asymptotic to
+ *  knee * 1.44 (integer form knee + knee * 44 / 100), so the knee is the largest
+ *  one whose ceiling still fits int16: AUDIO_FULL_SCALE / 1.44, i.e. 22754, ceiling
+ *  32765.  Derived, so it follows AUDIO_FULL_SCALE. */
+#define VOL_KNEE ((AUDIO_FULL_SCALE * 100) / 144)
+
+/** The system volume — see audio_out_set_volume_step().  Step 10 returns before
+ *  touching a sample (bit-exact bypass); 1..9 only shrink, so cannot clip; 11..14
+ *  go through the soft limiter, which for |v| <= knee is the identity and is not
+ *  called at all (it uses double, which is soft-float on this core). */
+static void apply_volume(int16_t *buf, long samples, int step)
+{
+    if (step == AUDIO_VOLUME_DEFAULT) return;
+    if (step <= 0) { memset(buf, 0, (size_t)samples * sizeof(int16_t)); return; }
+    if (step > AUDIO_VOLUME_MAX) step = AUDIO_VOLUME_MAX;
+
+    int32_t g = VOL_GAIN_Q12[step];
+    int32_t half = 1 << (VOL_Q - 1);
+    if (step < AUDIO_VOLUME_DEFAULT) {
+        for (long i = 0; i < samples; i++)
+            buf[i] = (int16_t)(((int32_t)buf[i] * g + half) >> VOL_Q);
+        return;
+    }
+    for (long i = 0; i < samples; i++) {
+        int32_t v = ((int32_t)buf[i] * g + half) >> VOL_Q;
+        if (v > VOL_KNEE || v < -VOL_KNEE)
+            v = audio_mix_limit_at(v, AUDIO_MIX_SOFT, VOL_KNEE);
+        buf[i] = (int16_t)v;
+    }
+}
+
 static void attenuate(AudioOut *out, int16_t *buf, long samples)
 {
     long frames = (out->channels > 0) ? samples / out->channels : 0;
@@ -227,6 +269,7 @@ static void attenuate(AudioOut *out, int16_t *buf, long samples)
         eq_process(&out->eq_s, &out->eq_p, buf, frames, out->channels);
     if (out->enh_p.active && out->channels > 0)
         enh_process(&out->enh_s, &out->enh_p, buf, frames, out->channels);
+    apply_volume(buf, samples, out->volume_step);
     audio_attenuate(buf, samples, out->shift);
 }
 
@@ -255,6 +298,34 @@ static long push(AudioOut *out, const int16_t *buf, long frames,
 
 /* ── Open ───────────────────────────────────────────────────────────────── */
 
+/** The `volume_step` key of the config file at `path`, clamped to 0..MAX; the
+ *  default when the file, the key or a number is missing.  Its own scan beside
+ *  eq_config_read()'s rather than config.c, so this file still builds with the
+ *  host test's link line (and the last occurrence wins, as in config.c). */
+static int volume_config_read(const char *path)
+{
+    int step = AUDIO_VOLUME_DEFAULT;
+    FILE *f = path ? fopen(path, "r") : NULL;
+    if (!f) return step;
+    char line[160];
+    size_t kl = strlen(AUDIO_VOLUME_KEY);
+    while (fgets(line, sizeof(line), f)) {
+        char *t = line;
+        while (*t == ' ' || *t == '\t') t++;
+        if (strncmp(t, AUDIO_VOLUME_KEY, kl) != 0) continue;
+        t += kl;
+        while (*t == ' ' || *t == '\t') t++;
+        if (*t != '=') continue;
+        t++;
+        char *end = NULL;
+        long v = strtol(t, &end, 10);
+        if (end == t) continue;
+        step = (v < 0) ? 0 : (v > AUDIO_VOLUME_MAX) ? AUDIO_VOLUME_MAX : (int)v;
+    }
+    fclose(f);
+    return step;
+}
+
 int audio_out_open(AudioOut *out, const AudioOutDev *dev, void *dev_ctx,
                    int rate_req, int channels_req)
 {
@@ -264,6 +335,7 @@ int audio_out_open(AudioOut *out, const AudioOutDev *dev, void *dev_ctx,
     /* Zero first, so a caller that ignores the return value still holds a struct
      * every entry point reads as closed. */
     memset(out, 0, sizeof(*out));
+    out->volume_step = AUDIO_VOLUME_DEFAULT;   /* a zeroed step would be MUTE */
 
     if (g_live > 0) {
         fprintf(stderr, "audio_out: refused — one AudioOut is already open in "
@@ -314,6 +386,7 @@ int audio_out_open(AudioOut *out, const AudioOutDev *dev, void *dev_ctx,
         int g[EQ_BANDS];
         eq_config_read(eq_path ? eq_path : CONFIG_FILE_PATH, g);
         eq_design(&out->eq_p, out->rate, g);
+        out->volume_step = volume_config_read(eq_path ? eq_path : CONFIG_FILE_PATH);
         AudioEnh en;
         enh_config_read(eq_path ? eq_path : CONFIG_FILE_PATH, &en);
         enh_design(&out->enh_p, out->rate, &en);
@@ -426,6 +499,20 @@ void audio_out_set_shift(AudioOut *out, int shift)
     if (shift < 0)  shift = 0;
     if (shift > 15) shift = 15;
     out->shift = shift;
+}
+
+void audio_out_set_volume_step(AudioOut *out, int step)
+{
+    if (!out) return;
+    if (step < 0)                step = 0;
+    if (step > AUDIO_VOLUME_MAX) step = AUDIO_VOLUME_MAX;
+    out->volume_step = step;
+}
+
+int audio_out_get_volume_step(const AudioOut *out)
+{
+    /* A closed (zeroed) struct holds 0, which would read as mute. */
+    return (out && out->is_open) ? out->volume_step : AUDIO_VOLUME_DEFAULT;
 }
 
 void audio_out_set_eq(AudioOut *out, const int gains_db[EQ_BANDS])

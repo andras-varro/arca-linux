@@ -18,10 +18,6 @@
 
 #include <stddef.h>
 
-#define JF_VOLUME_MAX    14   /**< volume_step runs 0..JF_VOLUME_MAX */
-#define JF_VOLUME_DEFAULT 10
-/** user_mdb for a volume step: 0 -> -100000 (mute, whatever the track's norm), else (step-10)*3000. */
-int jf_volume_mdb(int step);
 /** What a tap on a track row (the PLAY button of its bar) does; one setting, persisted as tap_action. */
 typedef enum { JF_TAP_REPLACE = 0, JF_TAP_ADD_PLAY, JF_TAP_ADD_ONLY, JF_TAP_COUNT } JfTapAction;
 
@@ -31,8 +27,7 @@ typedef struct {
     char user_id[33];
     char token[64];
     char device_id[64];
-    int volume_step;
-    int tap_action;          /* JfTapAction; an unknown or missing value is JF_TAP_REPLACE */
+    int tap_action;         /* JfTapAction; an unknown or missing value is JF_TAP_REPLACE */
     int tags_on;             /* 1 = read each playing track's file tags by a range request (default 0); persisted as tags_read */
     char tags_cut[64];       /* the `server` string a 200-instead-of-206 answer switched tag reads off for (persisted as tags_cut); "" = none */
     char library[33];        /* chosen music library id; empty = all libraries */
@@ -41,10 +36,10 @@ typedef struct {
 
 /**
  * Fill `l` from `path`.  A missing file returns -1 but `l` still holds defaults
- * (empty strings, volume_step 10).  device_id is never empty afterwards:
+ * (empty strings).  device_id is never empty afterwards:
  * "arca-<hostname>" + `id_suffix` (NULL or "" for none; a second app on the unit passes its own so the two do not share a
  * DeviceId, the key of the server's access token), or "arca-unit" + suffix.  A saved device_id is kept as it is.  A user_id that is not 32 hex is dropped.
- * The settings keys (library, library_name, volume_step) are not read here; a
+ * The settings keys (library, library_name, ...) are not read here; a
  * ludfin.conf that still carries them is ignored for them.
  */
 int jf_login_load(JfLogin *l, const char *path, const char *id_suffix);
@@ -53,14 +48,14 @@ int jf_login_load(JfLogin *l, const char *path, const char *id_suffix);
 int jf_login_save(const JfLogin *l, const char *path);
 
 /**
- * Fill l->library, l->library_name and l->volume_step from the settings file at
+ * Fill l->library, l->library_name and the other settings from the settings file at
  * `path`.  Call after jf_login_load.  A missing file returns -1 with the defaults
- * (no library, volume_step 10).  An invalid library id is dropped and volume_step
- * is clamped to 0..JF_VOLUME_MAX.
+ * (no library).  An invalid library id is dropped.  The volume is not here: it is
+ * the system volume (audio.h).
  */
 int jf_settings_load(JfLogin *l, const char *path);
 
-/** Write l->library, l->library_name and l->volume_step to `path`.  0 or -1. */
+/** Write l->library, l->library_name and the other settings to `path`.  0 or -1. */
 int jf_settings_save(const JfLogin *l, const char *path);
 
 /** Forget the session: wipe token and user_id in `l` and rewrite the file without them. */

@@ -519,6 +519,31 @@ void audio_set_master_shift(Audio *audio, int shift)
 
 int audio_get_master_shift(const Audio *audio) { return audio ? audio->master_shift : 0; }
 
+int audio_system_volume_get(const Audio *audio)
+{
+    if (audio_live(audio)) return audio_out_get_volume_step(&audio->out);
+    Config cfg;
+    config_init(&cfg);
+    config_load(&cfg);                  /* a missing file just starts empty */
+    int v = config_get_int(&cfg, AUDIO_VOLUME_KEY, AUDIO_VOLUME_DEFAULT);
+    return (v < 0) ? 0 : (v > AUDIO_VOLUME_MAX) ? AUDIO_VOLUME_MAX : v;
+}
+
+int audio_system_volume_set(Audio *audio, int step)
+{
+    if (step < 0)                step = 0;
+    if (step > AUDIO_VOLUME_MAX) step = AUDIO_VOLUME_MAX;
+    if (audio_live(audio)) audio_out_set_volume_step(&audio->out, step);
+
+    Config disk;
+    config_init(&disk);
+    config_load(&disk);
+    config_set_int(&disk, AUDIO_VOLUME_KEY, step);
+    if (config_save(&disk) != 0)
+        fprintf(stderr, "audio: volume save failed (volume_step=%d)\n", step);
+    return step;
+}
+
 /** Scratch for one pump call, allocated once and kept.  The pump runs every
  *  frame, so a malloc/free pair per call is the one allocation in this library
  *  worth removing. */

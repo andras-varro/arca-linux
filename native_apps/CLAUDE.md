@@ -862,7 +862,7 @@ These rules, each of which is a way to get this wrong:
   fixture control per check, and `starve` catches what the text cannot.
 The clamp is a single one after the whole `int32` sum, so slot order cannot change the mix, and it
 **counts** — `audio_pump_clipped()`. `tests/audio_mix_test.c` is the interactive tool for the panel
-questions: its top row is **LIM | LVL | STOP | DRAW** (DRAW turns the per-press full redraw off; the tap line logs `redraw=`), so the rejected limiter (`SOFT`) and every level rung sit on
+questions: its top row is **LIM | LVL | STOP | DRAW | VOL− | VOL+** (DRAW turns the per-press full redraw off; the tap line logs `redraw=`; VOL± move the system volume, not the ladder), so the rejected limiter (`SOFT`) and every level rung sit on
 the same screen as the shipped shape and "the click is gone" can be A/B'd rather than believed; the stream
 itself has no off switch to compare against any more. ⚠️ Its level ladder starts
 on the QUIETEST rung and wraps — a loud-to-quiet walk biases adaptation.

@@ -481,6 +481,31 @@ int  audio_get_volume(const Audio *audio);
 void audio_set_master_shift(Audio *audio, int shift);
 int  audio_get_master_shift(const Audio *audio);
 
+/**
+ * The system volume (audio_out.h: step 0..AUDIO_VOLUME_MAX, 3 dB a step, 10 =
+ * unity, 0 = mute) — the ONE set-and-persist every app's VOL control calls.
+ *
+ * audio_system_volume_set() clamps `step`, applies it to the open stream at once
+ * and writes the `volume_step` key by re-reading the config file and saving it
+ * back (so it cannot persist anything another page holds unsaved).  `audio` may
+ * be NULL or closed: then it only persists.  A failed write is logged to stderr
+ * and not fatal — the stream keeps the new level for this open.  Returns the
+ * clamped step.
+ *
+ * audio_system_volume_get() is the live step when the stream is open, else the
+ * stored key (default AUDIO_VOLUME_DEFAULT).  There is no copy on `Audio`: a
+ * device reopen re-reads the file in audio_out_open(), so the last persisted
+ * value wins and a stale in-memory one cannot override it.
+ *
+ * ⚠️ Needs config.o, which every linker of audio.o already has.
+ *
+ * ⚠️ **Never give an app its own volume or a per-voice user gain** — one level
+ * for the whole device is the design, and ScummVM (no VOL control) follows it by
+ * reading the key at device open.  A VOL button calls _set and shows _get.
+ */
+int  audio_system_volume_get(const Audio *audio);
+int  audio_system_volume_set(Audio *audio, int step);
+
 /** Sounds refused because all AUDIO_MAX_VOICES slots were busy.  A full bus
  *  never steals a playing voice; see audio_gen.h. */
 uint32_t audio_pump_dropped(const Audio *audio);

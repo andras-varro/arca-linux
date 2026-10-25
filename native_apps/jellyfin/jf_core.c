@@ -3,6 +3,7 @@
  */
 
 #include "jf_core.h"
+#include "audio_out.h"
 #include "jf_url.h"
 
 #include <stdio.h>
@@ -414,7 +415,6 @@ static void play_track_at(JfApp *app, int idx, int start_ms, bool stop_first, Jf
     c->kind = JF_KIND_STREAM;
     c->tag = ++app->stream_tag;
     c->norm_mdb = app->queue[idx].norm_gain_mdb;
-    c->user_mdb = jf_volume_mdb(app->volume_step);
     app->stream_channels = (app->sink_channels_fn && app->sink_channels_fn() == 2) ? 2 : 1;
     if (!app->session_fn || !app->session_fn(sess) ||
         jf_path_stream_at(c->path, sizeof(c->path), app->queue[idx].id, sess, start_ms,
@@ -1582,7 +1582,6 @@ static void on_stream(JfApp *app, const JfResult *r, JfCmds *out)
     c->channels = app->stream_channels;
     c->tag = r->tag;
     c->norm_mdb = app->queue[app->queue_cur].norm_gain_mdb;
-    c->user_mdb = jf_volume_mdb(app->volume_step);
 }
 
 /* The POST's answer: its tag must be the one in flight.  A failure is CLOSE only (no RETRY: it would POST again). */
@@ -1678,8 +1677,6 @@ static void on_start(JfApp *app, const JfLogin *lg, JfCmds *out)
     app->login = *lg;
     copy(app->id_server, sizeof(app->id_server), lg->server);
     copy(app->id_user, sizeof(app->id_user), lg->user);
-    int v = lg->volume_step;
-    app->volume_step = app->login.volume_step = v < 0 ? 0 : v > JF_VOLUME_MAX ? JF_VOLUME_MAX : v;
     char host[JF_HOST_MAX];
     int port = 0;
     bool tls = false;
@@ -1930,13 +1927,9 @@ void jf_queue_restore(JfApp *app, const JfItem *items, int n, int cur, int pos_m
 static void on_volume(JfApp *app, int delta, JfCmds *out)
 {
     int v = app->volume_step + delta;
-    if (v < 0 || v > JF_VOLUME_MAX) return;
-    app->volume_step = app->login.volume_step = v;
-    JfCmd *g = emit(out, JF_CMD_SET_GAIN);
-    const JfItem *now = jf_now(app);
-    g->norm_mdb = now ? now->norm_gain_mdb : 0;
-    g->user_mdb = jf_volume_mdb(v);
-    emit(out, JF_CMD_SAVE_LOGIN);
+    if (v < 0 || v > AUDIO_VOLUME_MAX) return;
+    app->volume_step = v;
+    emit(out, JF_CMD_SET_VOLUME)->n = v;
 }
 
 static int runtime_ms(const JfApp *app)
@@ -2105,8 +2098,7 @@ void jf_app_init(JfApp *app)
     app->pick_sel = -1;
     app->cat = JF_CAT_ARTISTS;
     app->session_fn = jf_session_id;
-    app->volume_step = JF_VOLUME_DEFAULT;
-    app->login.volume_step = JF_VOLUME_DEFAULT;
+    app->volume_step = AUDIO_VOLUME_DEFAULT;
     app->screen = JF_SCR_SIGNIN;
     refresh(app);
 }

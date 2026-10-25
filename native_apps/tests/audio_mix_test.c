@@ -11,7 +11,8 @@
  *
  * What each row is for:
  *
- *   controls   LIM / LVL / STOP.  STOP is `audio_interrupt()`, "silence every
+ *   controls   LIM / LVL / STOP / DRAW / VOL- / VOL+.  VOL± move the system
+ *              volume (audio_system_volume_set), never the ladder.  STOP is `audio_interrupt()`, "silence every
  *              voice" — note it cannot un-write what is already inside the device
  *              (one lead, ~139 ms).
  *              ⚠️ **LIMIT is the second negative control, added after the first
@@ -196,7 +197,8 @@ static void open_log(void)
 typedef enum {
     ACT_LIMIT, ACT_LEVEL, ACT_STOP,
     ACT_DRAW,                       /* the redraw A/B — see REDRAW_LIT_MS     */
-    ACT_TONE,                       /* uses freq/ms */
+    ACT_VOL_DOWN, ACT_VOL_UP,       /* the SYSTEM volume, not the ladder      */
+    ACT_TONE,                      /* uses freq/ms */
     ACT_BEEP, ACT_BLIP, ACT_SUCCESS, ACT_FAIL, ACT_CHORD,
     ACT_MUSIC,                      /* uses `path` — the looping bed          */
     ACT_MUSIC_STOP,
@@ -262,8 +264,8 @@ typedef struct {
     const char *path;               /* ACT_MUSIC / ACT_SFX only */
 } Pad;
 
-/** The pad table's size, and it is the EXACT count in use: 4 controls + 5 tones +
- *  5 canned + 6 ms + 5 sample = 25.
+/** The pad table's size, and it is the EXACT count in use: 6 controls + 5 tones +
+ *  5 canned + 6 ms + 5 sample = 27.
  *
  * ⚠️ **This was 26 with 22 used, and adding a five-pad row silently produced a
  * row that did not exist** — `pad_add()` returned NULL past the cap and said
@@ -271,7 +273,7 @@ typedef struct {
  * wrong. It is exact rather than padded on purpose: a spare slot restores the
  * silence for the next row. If you add pads, raise this AND check the log line
  * below, which is the only thing that can tell you the cap was hit. */
-#define MAX_PADS 25
+#define MAX_PADS 27
 static Pad  pads[MAX_PADS];
 static int  pad_count = 0;
 
@@ -406,6 +408,8 @@ typedef struct {
     uint32_t max_gap;       /* longest gap between two loop iterations, ms —
                              * restarted by a STOP tap (see the header)          */
     bool quiet_redraw;      /* DRAW PAD: a press repaints only its own pad       */
+    int  sysvol;            /* system volume step as the library last returned it;
+                             * global, so it is never reset on exit              */
     char last[40];
 } View;
 
@@ -600,6 +604,11 @@ static void draw_readout(Framebuffer *fb, const View *v, int rate)
         fb_draw_text(fb, info_x, SCREEN_VISIBLE_TOP + 34,
                      v->last, RGB(160, 160, 200), 1);
 
+    /* The system volume (VOL- / VOL+), not the per-voice ladder rung. */
+    if (v->sysvol <= 0) snprintf(line, sizeof(line), "VOL MUTE");
+    else snprintf(line, sizeof(line), "VOL %d/%d", v->sysvol, AUDIO_VOLUME_MAX);
+    fb_draw_text(fb, info_x, SCREEN_VISIBLE_TOP + 44, line, RGB(255, 200, 80), 1);
+
     /* Voice meter: one cell per slot, lit for as many as are sounding. */
     int meter_y = SCREEN_SAFE_TOP + 56;
     for (int i = 0; i < AUDIO_MAX_VOICES; i++) {
@@ -711,17 +720,23 @@ int main(int argc, char *argv[])
      * other row — the continuous stream is the library's only mode, so there is
      * no device-half or pump toggle left to put beside them.  The fourth is the
      * redraw A/B (see REDRAW_LIT_MS), which changes the loop, not the audio. */
-    row_geom(4, 0, gap, &x, &w);
+    row_geom(6, 0, gap, &x, &w);
     /* ⚠️ "LIM" with no value: set_toggle_labels() runs before the first draw and
      * reads the real position out of the library, so a literal here could only
      * ever be a lie waiting for a code path that skips that call. */
     Pad *limit_pad = pad_add(ACT_LIMIT,    "LIM",         x, y, w, row_h[0], BTN_COLOR_PRIMARY, 2);
-    row_geom(4, 1, gap, &x, &w);
+    row_geom(6, 1, gap, &x, &w);
     Pad *level_pad = pad_add(ACT_LEVEL,    "LVL 1/6",     x, y, w, row_h[0], BTN_COLOR_INFO, 2);
-    row_geom(4, 2, gap, &x, &w);
+    row_geom(6, 2, gap, &x, &w);
     pad_add(ACT_STOP, "STOP", x, y, w, row_h[0], BTN_COLOR_DANGER, 2);
-    row_geom(4, 3, gap, &x, &w);
+    row_geom(6, 3, gap, &x, &w);
     Pad *draw_pad  = pad_add(ACT_DRAW,     "DRAW",        x, y, w, row_h[0], RGB(70, 80, 100), 2);
+    /* The system volume, beside the ladder's pads but a different control: the
+     * ladder is per-voice headroom, these move the whole output. */
+    row_geom(6, 4, gap, &x, &w);
+    pad_add(ACT_VOL_DOWN, "VOL-", x, y, w, row_h[0], RGB(60, 110, 60), 2);
+    row_geom(6, 5, gap, &x, &w);
+    pad_add(ACT_VOL_UP,   "VOL+", x, y, w, row_h[0], RGB(60, 110, 60), 2);
 
     y = row_y[1];
     /* ⚠️ Two SUSTAINED tones, because defect 3's decisive question is about
@@ -803,6 +818,7 @@ int main(int argc, char *argv[])
     /* ⚠️ Start on the QUIETEST rung, not on the shipped default: the walk has to
      * run quiet-to-loud, and a tool that begins in the middle cannot enforce it. */
     v.rung = 0;
+    v.sysvol = audio_system_volume_get(&audio);
     audio_set_volume(&audio, ladder[0].vol);
     set_toggle_labels(limit_pad, level_pad, &audio, &v);
     if (draw_pad) set_draw_label(draw_pad, &v);
@@ -937,6 +953,16 @@ int main(int argc, char *argv[])
                 lit = NULL;
                 snprintf(v.last, sizeof(v.last), "redraw %s",
                          v.quiet_redraw ? "PAD only on a press" : "FULL on a press");
+                break;
+            case ACT_VOL_DOWN:
+            case ACT_VOL_UP:
+                /* The library clamps and returns the step it applied; show that,
+                 * not the requested one. */
+                v.sysvol = audio_system_volume_set(&audio,
+                               v.sysvol + (p->act == ACT_VOL_UP ? 1 : -1));
+                if (v.sysvol <= 0) snprintf(v.last, sizeof(v.last), "system volume MUTE");
+                else snprintf(v.last, sizeof(v.last), "system volume %d/%d",
+                              v.sysvol, AUDIO_VOLUME_MAX);
                 break;
             case ACT_TONE:
                 audio_tone(&audio, p->freq, p->ms);
