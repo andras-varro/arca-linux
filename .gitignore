@@ -569,3 +569,5 @@ backups/
 # Logo preview renders, rebuilt by distro/render.sh
 distro/preview/
 roomwizard.new.2/
+# Operator-supplied emulator content (games, ROMs, BIOS): never committed
+retro/input/

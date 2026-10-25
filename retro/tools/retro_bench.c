@@ -28,6 +28,7 @@ struct retro_system_av_info { struct retro_game_geometry geometry; struct retro_
 struct retro_game_info { const char *path; const void *data; size_t size; const char *meta; };
 struct retro_log_callback { void (*log)(int level, const char *fmt, ...); };
 struct retro_variable { const char *key, *value; };
+struct retro_frame_time_callback { void (*callback)(int64_t usec); int64_t reference; };
 
 #define ENV_GET_CAN_DUPE 3
 #define ENV_SET_VARIABLES 16
@@ -38,6 +39,7 @@ struct retro_variable { const char *key, *value; };
 #define ENV_SET_SUPPORT_NO_GAME 18
 #define ENV_GET_LOG_INTERFACE 27
 #define ENV_GET_SAVE_DIRECTORY 31
+#define ENV_SET_FRAME_TIME_CALLBACK 21
 #define ENV_EXPERIMENTAL 0x10000
 #define PF_0RGB1555 0
 #define PF_XRGB8888 1
@@ -46,6 +48,7 @@ struct retro_variable { const char *key, *value; };
 static int pixfmt = PF_0RGB1555;           /* libretro default */
 static const char *sysdir = ".";
 static int no_game_ok;
+static struct retro_frame_time_callback ftcb;
 static unsigned char *last; static size_t last_cap;
 static unsigned lw, lh; static size_t lpitch;
 static unsigned long frames_video, dupes, audio_frames, audio_calls;
@@ -100,6 +103,7 @@ static int env_cb(unsigned cmd, void *data)
     case ENV_GET_CORE_OPTIONS_VERSION: *(unsigned *)data = 0; return 1;
     case ENV_SET_SUPPORT_NO_GAME: no_game_ok = *(unsigned char *)data; return 1;
     case ENV_GET_LOG_INTERFACE: ((struct retro_log_callback *)data)->log = logfn; return 1;
+    case ENV_SET_FRAME_TIME_CALLBACK: ftcb = *(struct retro_frame_time_callback *)data; return 1;
     }
     for (int i = 0; i < nseen; i++) if (seen_cmd[i] == cmd) return 0;
     if (nseen < 64) seen_cmd[nseen++] = cmd;
@@ -196,7 +200,9 @@ int main(int argc, char **argv)
     printf("pixel format: %s\n", pfn[pixfmt]);
 
     struct timespec t0, t1; clock_gettime(CLOCK_MONOTONIC, &t0);
-    for (int i = 0; i < nframes; i++) run();
+    /* A core that set a frame-time callback (ep128emu) advances by the time it
+     * is told, and by nothing if never told: report the nominal frame period. */
+    for (int i = 0; i < nframes; i++) { if (ftcb.callback) ftcb.callback(ftcb.reference); run(); }
     clock_gettime(CLOCK_MONOTONIC, &t1);
     double s = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) / 1e9;
 

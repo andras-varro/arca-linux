@@ -192,13 +192,22 @@ above, staged on p3 in `/home/root/data/retro-bench` (left there). The launcher 
 | FCEUmm | `nes-runner` | 1200 | 111.4 fps | 1.85× of 60.1 | 8.97 |
 | Fuse 1.6.0 | none (48K ROM screen) | 1000 | 263.0 fps | 5.26× of 50 | 3.80 |
 | VICE x64 3.10 | none (`READY.`) | 1000 | **29.7 fps** | **0.59× of 50.125** | 33.6 |
-| ep128emu-core | none, no ROMs | 500 | 397.9 fps | meaningless: 0 audio frames, nothing emulated | — |
-| MAME 2003-Plus | — | not run | | needs a romset; none staged | |
+| VICE x64 3.10 | Impossible Mission `.zip` (operator's), autostart, still `LOADING` at the end | 1500 | **22.7 fps** | **0.45×** | 44.0 |
+| ep128emu-core | none; operator's ROM set in `sys/ep128emu/roms/` (`core/core.cpp:59`) | 1000 | **11.45 fps** | **0.23× of 50** | 87.3 |
+| MAME 2003-Plus | Hard Hat (mamedev.org free romset) | 1200 | 53.5 fps | **0.94× of 57.0** | 18.7 |
 
 ⚠️ **VICE x64 does not reach real time with its default core options** (reSID 6581, filter on, 48 kHz, as its log
 reports). `retro_bench` serves only the `SET_VARIABLES` defaults and has no override, so whether a cheaper SID engine
 or a lower rate closes the 1.7× gap is **unmeasured**; an option-override (env var) in `retro_bench` is the next step
 for that core. Every core passes `RETRO_ENVIRONMENT` 17 (`GET_VARIABLE_UPDATE`), which `retro_bench` refuses.
+
+- **ep128emu advances only by the time `SET_FRAME_TIME_CALLBACK` reports** (`core/main.cpp:600`, `run_for(curr_frame_time, …)`):
+  a frontend that refuses that command gets 0 µs per frame, a blank frame and no audio at ~400 "fps". `retro_bench` now
+  serves it (nominal period). With it, the frame dump is the ENTERPRISE boot screen and audio is 881 of 882 samples per
+  frame, but the core is **4.4× too slow**; it was already flagged the heaviest per MHz (section 8).
+- **MAME 2003-Plus / Hard Hat** reaches the "PLEASE STAND BY / HARDHAT GAME" boot screen (frame dump); 0.94× with
+  the core's log discarded, 0.88× with it printed (~30 log lines per frame from the Exidy PIA driver), so a frontend must
+  filter core log levels.
 
 `fb_bench` (120 frames per line; fb0 mapped write-combined):
 
@@ -234,7 +243,8 @@ not measured. Fuse at 50 Hz (20 ms): 3.8 + 8.4 = 12.2 ms with software scaling. 
 
 **Decision rule (proposed, not yet decided):** a core goes ahead on a display path if core ms/frame + that path's
 ms/frame ≤ 80% of the frame period (13.3 ms at 60 Hz, 16 ms at 50 Hz), leaving the rest for audio and input.
-By that rule today: Fuse passes both paths; FCEUmm passes only via the overlay; VICE passes neither.
+By that rule today: Fuse passes both paths; FCEUmm passes only via the overlay; VICE, ep128emu and MAME 2003-Plus
+(Hard Hat) pass neither, since each misses real time before any display cost.
 
 ## 10. Open questions
 
