@@ -273,13 +273,14 @@ int main(int argc, char **argv)
         if (max_frames && total >= max_frames) break;
         if (t - st_t >= 1.0) {
             unsigned ru, ds; double lms, rt; aud_stats(&ru, &ds, &lms, &rt);
-            static double conv0, pres0;
-            fprintf(stderr, "stats[%s] fps %u shown %u late %u | core %.2f ms (max %.1f) conv %.2f ms present %.2f ms"
+            static double conv0, pres0, wait0;
+            fprintf(stderr, "stats[%s] fps %u shown %u late %u | core %.2f ms (max %.1f) conv %.2f ms present %.2f ms (+vsync wait %.2f)"
                     " | audio underruns %u starved %u ring %.0f ms ratio %.4f\n", vb->name, st_runs, st_pres, st_late,
                     st_runs ? 1000 * st_core / st_runs : 0, 1000 * st_cmax,
                     st_runs ? 1000 * (vstat_conv - conv0) / (st_pres ? st_pres : 1) : 0,
-                    st_pres ? 1000 * (vstat_present - pres0) / st_pres : 0, ru, ds, lms, rt);
-            conv0 = vstat_conv; pres0 = vstat_present;
+                    st_pres ? 1000 * (vstat_present - pres0) / st_pres : 0,
+                    st_pres ? 1000 * (vstat_wait - wait0) / st_pres : 0, ru, ds, lms, rt);
+            conv0 = vstat_conv; pres0 = vstat_present; wait0 = vstat_wait;
             st_t = t; st_core = st_cmax = 0; st_runs = st_pres = st_late = 0;
         }
     }

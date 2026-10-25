@@ -2,7 +2,7 @@
  * Pads -> RETRO_DEVICE_JOYPAD/ANALOG ports 0..1 (SNES layout: Xbox A = B,
  * B = A, X = Y, Y = X).  Keyboard -> RETRO_DEVICE_KEYBOARD and the keyboard
  * callback; for a core that never asks for the keyboard it doubles as pad 0.
- * Quit: pad Select+Start, or F12. */
+ * Quit: pad Select+Start, or F12 (Esc too, unless the core is a computer with a keyboard). */
 #include "retro.h"
 #include "input_scan.h"
 #include <errno.h>
@@ -154,6 +154,7 @@ void in_poll(void)
                     bool down = x->value != 0;
                     key[rk] = down;
                     if (rk == 293 && down) quit_req = true;       /* F12 */
+                    if (rk == 27 && down && !in_computer) quit_req = true;   /* Esc, pad-style cores only: a computer core needs it as a key */
                     if (!in_computer) kbd_joy(rk, down);
                     if (in_kbd_cb) in_kbd_cb(down, rk, down ? ch_of(rk) : 0, mods());
                 }
@@ -178,9 +179,11 @@ int16_t in_state(unsigned port, unsigned dev, unsigned idx, unsigned id)
     unsigned bits = joy[port] | (port == 0 && !in_computer ? (unsigned)kjoy : 0);
     /* left stick also drives the d-pad, for cores that only read digital */
     int16_t ax = ana[port][0][0], ay = ana[port][0][1];
-    if (ax < -16000) bits |= 1 << 6; if (ax > 16000) bits |= 1 << 7;
-    if (ay < -16000) bits |= 1 << 4; if (ay > 16000) bits |= 1 << 5;
-    if (dev == RDEV_JOYPAD) return id == 256 ? (int16_t)bits : (id < 16 ? (bits >> id) & 1 : 0);
+    if (ax < -16000) bits |= 1 << 6;
+    if (ax > 16000) bits |= 1 << 7;
+    if (ay < -16000) bits |= 1 << 4;
+    if (ay > 16000) bits |= 1 << 5;
+    if (dev == RDEV_JOYPAD) return id == 256 ? (int16_t)bits : (int16_t)(id < 16 ? (bits >> id) & 1 : 0);
     if (dev == RDEV_ANALOG && idx < 2 && id < 2) return ana[port][idx][id];
     return 0;
 }

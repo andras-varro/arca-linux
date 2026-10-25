@@ -29,7 +29,7 @@ struct ofb_mem { uint32_t size; uint8_t type, reserved[3]; };
 #define PW 800
 #define PH 480
 
-double vstat_conv, vstat_present;
+double vstat_conv, vstat_present, vstat_wait;
 unsigned vstat_vsync_waits;
 
 static int fd0 = -1, have_orig;
@@ -176,6 +176,7 @@ static void sw_present(void)
     if (!sw_ready) return;
     double t0 = now_s();
     vsync_guard(sw_pan_t);              /* the back page may still be on screen */
+    double tg = now_s(); vstat_wait += tg - t0; t0 = tg;
     uint16_t *pg = fb0m + (size_t)sw_page * PH * line0;
     if (sw_clear) { memset(pg, 0, (size_t)line0 * PH * 2); sw_clear--; }
     if (sw_dw == PW && line0 == PW)
@@ -208,6 +209,7 @@ static struct ofb_mem ov_morig;
 static unsigned char *ov_map; static size_t ov_maplen; static unsigned ov_line;
 static unsigned ov_w, ov_h, ov_page; static float ov_aspect;
 static int ov_ready; static double ov_pan_t;
+static uint16_t ov_row[4096];
 
 static int ov_init(void)
 {
@@ -262,12 +264,19 @@ static int ov_config(unsigned w, unsigned h, float aspect)
 static void ov_frame(const void *data, unsigned w, unsigned h, size_t pitch, int fmt, float aspect)
 {
     double t0 = now_s();
+    if (w > 4096 || h > 4096) return;
     if ((w != ov_w || h != ov_h || aspect != ov_aspect) && ov_config(w, h, aspect)) { ov_w = 0; return; }
     if (!ov_map) return;
-    if (ov_pages > 1) vsync_guard(ov_pan_t);
+    if (ov_pages > 1) { vsync_guard(ov_pan_t); double tg = now_s(); vstat_wait += tg - t0; }   /* counted in conv too: it runs inside run() */
     unsigned char *pg = ov_map + (size_t)ov_page * h * ov_line;
     for (unsigned j = 0; j < h; j++)
-        row_to_565((uint16_t *)(pg + (size_t)j * ov_line), (const unsigned char *)data + j * pitch, w, fmt);
+    {
+        /* convert into RAM, then copy the row: 16-bit stores straight into the
+         * uncached overlay memory cost far more than a burst memcpy */
+        if (fmt == PF_RGB565) memcpy(pg + (size_t)j * ov_line, (const unsigned char *)data + j * pitch, w * 2);
+        else { row_to_565(ov_row, (const unsigned char *)data + j * pitch, w, fmt);
+               memcpy(pg + (size_t)j * ov_line, ov_row, w * 2); }
+    }
     ov_ready = 1;
     vstat_conv += now_s() - t0;
 }

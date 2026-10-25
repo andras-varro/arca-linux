@@ -26,7 +26,7 @@ typedef struct {
     void (*close)(void);
 } VideoBackend;
 extern const VideoBackend video_sw, video_overlay;
-extern double vstat_conv, vstat_present;   /* seconds, accumulated */
+extern double vstat_conv, vstat_present, vstat_wait;   /* seconds, accumulated */
 extern unsigned vstat_vsync_waits;
 void video_dst_rect(unsigned w, unsigned h, float aspect, int integer,
                     unsigned *x, unsigned *y, unsigned *dw, unsigned *dh);

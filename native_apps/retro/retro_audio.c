@@ -60,7 +60,8 @@ void aud_push(const int16_t *st, size_t frames)
     if (!open_ok) return;
     /* rate correction: +-0.5 % pulling the ring toward its target */
     double err = ((double)target - (double)level()) / (double)target;
-    if (err > 1) err = 1; if (err < -1) err = -1;
+    if (err > 1) err = 1;
+    if (err < -1) err = -1;
     ratio = 1.0 + 0.005 * err;
     double st_eff = step / ratio;        /* fewer source samples per output = more output */
     for (size_t i = 0; i < frames; i++) {
