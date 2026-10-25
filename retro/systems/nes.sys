@@ -1,0 +1,4 @@
+# Retro station system definition; keys: name core exts opts roms video (see native_apps/retro_picker/retro_picker.c)
+name=NES
+core=fceumm_libretro.so
+exts=nes,fds,unf,zip

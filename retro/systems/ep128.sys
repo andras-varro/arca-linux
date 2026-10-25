@@ -1,0 +1,5 @@
+# Retro station system definition; keys: name core exts opts roms video (see native_apps/retro_picker/retro_picker.c)
+name=Enterprise 128
+core=ep128_fast.so
+exts=tap,dsk,img,vhd,com,prg,bas
+opts=ep128emu_wait=5,ep128emu_sdhq=0
