@@ -122,6 +122,7 @@ CTEST_ROWS=(
     "audio_alsa_lost_test|-I common -DAUDIO_OUT_HAVE_ALSA -I tests/alsa_stub -Wl,--wrap=clock_gettime -Wl,--wrap=opendir|common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_gen.c"
     "audio_bed_test|-I common|common/audio_bed.c common/config.c common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c"
     "audio_carry_test|-I. -Wl,--wrap=audio_out_open_resolved|common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/config.c"
+    "audio_sysvol_test|-I. -Wl,--wrap=audio_out_open_resolved -Wl,--wrap=config_init|common/audio.c common/audio_gen.c common/audio_out.c common/audio_eq.c common/audio_enh.c common/audio_wav.c common/config.c"
     "audio_eq_test|-I common|common/audio_eq.c"
     "audio_enh_test|-I common|common/audio_enh.c"
     "audio_gen_test|-I common|common/audio_gen.c"
