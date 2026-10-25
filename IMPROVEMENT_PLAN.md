@@ -330,18 +330,13 @@ fetch per item took 110 s (the server extracts every embedded track), later ones
 **Next:** browse UI, player. The player also levels the audio (AGC plus limiter: the server's 5.1→mono downmix peaks near −18 dBFS and the operator found dialogue barely audible) and takes an adjustable A/V offset (operator unsure whether lip sync is off).
 **Done when** a movie and an episode play with the chosen audio track and subtitles at the panel.
 
-### F159. One system volume for every app — open, operator decision 2026-10-24
+### F160. Does BT/USB audio need the speaker's `>>1` ceiling? — open, operator decision 2026-10-24
 
-**One level, no per-app trims.** Key `volume_step` (0..14, default 10) in `arca_config.conf`; gain `(step−10)×3 dB`, 0 = mute,
-top +12 dB. **Applied once, in `audio_out` `attenuate()`** (`common/audio_out.c`): after the equaliser and enhancer, before the
-`>>1` master shift, as an int32 multiply then the mix bus's SOFT curve (`audio_mix_limit_at`) — at that stage nothing else limits,
-so an unlimited boost would hard-clip. Ludfin's +12 dB sounded right on BT because it gains one voice that sits at
-`AUDIO_VOICE_VOL` (≈ −8.5 dB) before the mix [inferred]. `audio_out` reads the key at open, so ScummVM follows (redeploy all three);
-a setter changes it live. Writers, through one set-and-persist helper: a VOL row on the control panel's audio page, Ludfin's VOL±
-(its own `volume_step` key and user gain go), Ludkino's `volume_step()` (`jfvideo/jfvideo.c`), and separate VOL± on MIX BUS TEST,
-whose headroom ladder stays. **The `>>1` stays on every output for now** (operator); whether BT/USB need the internal speaker's
-ceiling is a later A/B. **Done when** one VOL change in any app is heard in the next app, ScummVM included, and the per-sample cost
-is measured on `.115`.
+`AUDIO_MASTER_SHIFT` (`common/audio_gen.h`, set in `common/audio.c`) halves every output: it is the internal speaker's ceiling,
+but it is spent on BT and USB sinks too, which is 6 dB of headroom they may not need. The system volume's top step (+12 dB,
+soft-limited) already sounds right on a BT speaker [operator, by ear]. **Next:** an A/B on one BT and one USB sink, shift 1 vs 0
+at the same volume step, listening for clipping and limiter pumping. **Done when** the shift per sink class is decided and, if it
+differs, set by the output route rather than the app.
 
 ### F156. Log page: a Follow setting — open, operator request 2026-10-22, not designed
 

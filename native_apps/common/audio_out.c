@@ -221,7 +221,11 @@ static const int32_t VOL_GAIN_Q12[AUDIO_VOLUME_MAX + 1] = {
 /** The system volume — see audio_out_set_volume_step().  Step 10 returns before
  *  touching a sample (bit-exact bypass); 1..9 only shrink, so cannot clip; 11..14
  *  go through the soft limiter, which for |v| <= knee is the identity and is not
- *  called at all (it uses double, which is soft-float on this core). */
+ *  called at all (it uses double, which is soft-float on this core).  Measured on
+ *  a unit (MIX BUS TEST, a 220 Hz tone at its top headroom level, process CPU over
+ *  20 s windows): step 7 costs the same as 10; step 14 costs about 5-6 % more of
+ *  the core, i.e. the limiter, paid only while a boosted signal sits above the
+ *  knee.  An integer curve is the fix if a CPU-bound app ever needs that back. */
 static void apply_volume(int16_t *buf, long samples, int step)
 {
     if (step == AUDIO_VOLUME_DEFAULT) return;
