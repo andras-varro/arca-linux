@@ -8,15 +8,61 @@
  *
  * Env: RETRO_SYS = system/save directory (default "."). Runs N frames with no
  * input, prints timing and audio/video statistics, optionally dumps the last
- * frame as a P6 PPM. Not a real frontend: no video output, audio or input. */
+ * frame as a P6 PPM. Not a real frontend: no video output, audio or input.
+ * RETRO_PROF=<file>: sample the PC of whichever thread is on the CPU (SIGPROF,
+ * process CPU time) during the timed frames; the file holds /proc/self/maps
+ * then one "tid pc" line per sample. Resolve on the host with
+ * retro/tools/prof_resolve.py against an unstripped copy of the core. */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/syscall.h>
+#include <sys/time.h>
 #include <time.h>
+#include <ucontext.h>
+#include <unistd.h>
+
+#define PROF_MAX (1 << 18)
+static uint32_t prof_pc[PROF_MAX], prof_tid[PROF_MAX];
+static volatile unsigned prof_n;
+
+static void prof_sig(int sig, siginfo_t *si, void *uc)
+{
+    (void)sig; (void)si;
+    unsigned i = __sync_fetch_and_add(&prof_n, 1);
+    if (i >= PROF_MAX) return;
+    prof_pc[i] = ((ucontext_t *)uc)->uc_mcontext.arm_pc;
+    prof_tid[i] = (uint32_t)syscall(SYS_gettid);
+}
+
+static void prof_start(void)
+{
+    struct sigaction sa; memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = prof_sig; sa.sa_flags = SA_SIGINFO | SA_RESTART;
+    sigaction(SIGPROF, &sa, NULL);
+    struct itimerval it = { { 0, 1000 }, { 0, 1000 } };
+    setitimer(ITIMER_PROF, &it, NULL);
+}
+
+static void prof_stop(const char *path)
+{
+    struct itimerval it; memset(&it, 0, sizeof it);
+    setitimer(ITIMER_PROF, &it, NULL);
+    FILE *o = fopen(path, "w"), *m = fopen("/proc/self/maps", "r");
+    if (!o || !m) { perror(path); return; }
+    char line[512];
+    while (fgets(line, sizeof line, m)) fprintf(o, "map %s", line);
+    fclose(m);
+    unsigned n = prof_n < PROF_MAX ? prof_n : PROF_MAX;
+    for (unsigned i = 0; i < n; i++) fprintf(o, "%u %08x\n", prof_tid[i], prof_pc[i]);
+    fclose(o);
+    printf("profile: %u samples -> %s\n", n, path);
+}
 
 /* --- the subset of libretro.h we need (the ABI is stable) --- */
 struct retro_system_info { const char *library_name, *library_version, *valid_extensions;
@@ -230,11 +276,15 @@ int main(int argc, char **argv)
     /* A core that set a frame-time callback (ep128emu) advances by the time it
      * is told, and by nothing if never told: report the nominal frame period. */
     for (int i = 0; i < nframes; i++) {
-        if (i == warm) clock_gettime(CLOCK_MONOTONIC, &tw);
+        if (i == warm) {
+            clock_gettime(CLOCK_MONOTONIC, &tw);
+            if (getenv("RETRO_PROF")) prof_start();
+        }
         if (ftcb.callback) ftcb.callback(ftcb.reference);
         run();
     }
     clock_gettime(CLOCK_MONOTONIC, &t1);
+    if (getenv("RETRO_PROF")) prof_stop(getenv("RETRO_PROF"));
     double sw = (tw.tv_sec - t0.tv_sec) + (tw.tv_nsec - t0.tv_nsec) / 1e9;
     double s = (t1.tv_sec - tw.tv_sec) + (t1.tv_nsec - tw.tv_nsec) / 1e9;
     int n = nframes - warm;

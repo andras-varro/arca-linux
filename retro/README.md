@@ -111,7 +111,8 @@ Bluetooth/USB keyboards, pads and audio are solved in the platform; the frontend
 - **Computer emulators need a raw key-event stream** (precedent: `native_apps/terminal/terminal.c` about lines 488-500).
 - **Arcade defaults to the game controller.**
 - **On-screen keyboard only as a fallback** for special cases. `keyboard.c` is a modal text-entry box; a
-  computer-keyboard overlay would be new code.
+  computer-keyboard overlay would be new code. **The first version assumes a physical keyboard and a controller
+  are attached** (operator, 2026-10-25), so it has no on-screen keyboard and no touch play.
 
 ## 6. Audio
 
@@ -214,8 +215,13 @@ stand (re-measured: ep128emu 0.23×, Fuse 5.16×, Hard Hat 0.89× with the log p
   load is trapped and finishes almost at once, so it most likely times the game rather than the load (**inferred**:
   no frame dump was taken). The sample rate costs nothing measurable; reSID over FastSID costs 2.6 ms/frame and TDE
   1.6 ms/frame idle.
-- ep128emu at 0.23× is out of line with Fuse (a 3.5 MHz Z80 at 5.16×), so its cost is in the core's own emulation
-  or defaults, not the Z80; its options are the next thing to list and vary.
+- ep128emu at 0.23× is out of line with Fuse (a 3.5 MHz Z80 at 5.16×), and the cost is **not the Z80** (measured
+  2026-10-25, `RETRO_PROF` sampling, 2438 samples): `AudioConverterHighQuality::sendInputSignal` takes **45.5%** of
+  all CPU, the display thread's per-pixel `LibretroDisplay::draw` 26.9%, the Z80 about 4%, Nick and Dave about 6%.
+  The default `ep128emu_wait=0` makes `retro_run` busy-spin on the VM thread (`core/core.cpp` `run_for`): `wait=5`
+  takes it from 86 to 50 ms/frame (0.40×). `ep128emu_sdhq=0` and `ep128emu_swfb=1` changed nothing measurable;
+  `main.cpp:234-239` applies `sdhq` only on a change and only to an existing core, so it probably never reaches the
+  resampler (**inferred**, unchecked). The `unix` platform also builds with `-fno-inline-functions` (Makefile:504).
 
 Every core passes `RETRO_ENVIRONMENT` 17 (`GET_VARIABLE_UPDATE`), which `retro_bench` refuses.
 
