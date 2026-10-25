@@ -59,8 +59,7 @@ itself writes only `uImage-test`; `mlo`, `u-boot.bin` and `ctrlblock.bin` stay u
 (`24ab7f08…`, the flush-patch image), `.f125undo` (`fb4f2c94…`, the image before the TCP patches), `.f4undo`
 (`022be99b…`, the image before `OMAP3_THERMAL`), `.f101vbusundo` (`72683498…`, the image before the 500 mA
 budget, so the undo for that change) and `uImage-system`, our image with every `kernel/patches/`
-patch, our panel DTB, the power node below, `OMAP3_THERMAL` and the 500 mA budget (`45b05f77…`). p1 is 54% used; an image is ~5.2 MB, so
-delete a stale one before the next.
+patch, our panel DTB, the power node below, `OMAP3_THERMAL` and the 500 mA budget (`45b05f77…`). p1 is 54% used; an image is ~5.2 MB, so delete a stale one before the next.
 
 **Software power-off (the `power` node of `dts/rw20.dts`): booted on `.188`, powers the board down — measured 2026-10-04.**
 `/sys/bus/platform/drivers/twl4030_power/` holds `48070000.i2c:twl@48:power` after boot, and `poweroff` darkened
