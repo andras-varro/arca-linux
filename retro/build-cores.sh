@@ -1,0 +1,175 @@
+#!/bin/bash
+# Reproducible build of the libretro cores we run on the Cortex-A8 device.
+#
+# Each core: fresh clone (or reuse of its own work-dir clone), checkout of the
+# pinned commit, `git clean -fdx`, apply retro/patches/<core>.patch if present,
+# cross-build with the ARM soft-float toolchain, strip into the out dir, then
+# gate the result with native_apps/check-arm-safe.sh (hard zero sdiv/udiv).
+#
+# Runs inside WSL. Never builds in ~/retro-src (other workers' clones).
+#
+# Usage:
+#   retro/build-cores.sh [--out DIR] [--work DIR] [core ...]
+#     --out DIR   output directory for the stripped .so files (default ~/retro-build/out)
+#     --work DIR  clone/build area, one subdirectory per core (default ~/retro-build)
+#     core ...    any of: ep128emu-core fuse fceumm vice mame2003-plus (default: all)
+#
+# Pins are the HEAD commits of the hand-made clones in ~/retro-src, each on
+# its upstream libretro branch.
+
+set -euo pipefail
+
+REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
+
+# ── Table: core key, upstream URL, pinned commit, extra make args, output .so ──
+CORES=(ep128emu-core fuse fceumm vice mame2003-plus)
+
+declare -A CORE_URL=(
+    [ep128emu-core]=https://github.com/libretro/ep128emu-core
+    [fuse]=https://github.com/libretro/fuse-libretro
+    [fceumm]=https://github.com/libretro/libretro-fceumm
+    [vice]=https://github.com/libretro/vice-libretro
+    [mame2003-plus]=https://github.com/libretro/mame2003-plus-libretro
+)
+declare -A CORE_COMMIT=(
+    [ep128emu-core]=6af5d03de220e6effcd0ffcd99e0fb8e8c77cc9e
+    [fuse]=e997e2bc32c888348f862f69f2c53babfedf7791
+    [fceumm]=ac0d00a7fc01166f84c7bac01d1084ebfd2b865e
+    [vice]=f63b56688f3133a2bb17499db9eebb7ab81df5f5
+    [mame2003-plus]=505733a2df272a0eaa46c143628bd30d6fafb232
+)
+# Extra make variables beyond platform=unix and the toolchain.
+declare -A CORE_MAKE_EXTRA=(
+    [ep128emu-core]=""
+    [fuse]=""
+    [fceumm]=""
+    [vice]="EMUTYPE=x64"
+    [mame2003-plus]=""
+)
+declare -A CORE_SO=(
+    [ep128emu-core]=ep128emu_core_libretro.so
+    [fuse]=fuse_libretro.so
+    [fceumm]=fceumm_libretro.so
+    [vice]=vice_x64_libretro.so
+    [mame2003-plus]=mame2003_plus_libretro.so
+)
+
+# ── Toolchain (same as ~/retro-src/env.sh, kept here so the script is self-contained)
+TC=arm-linux-gnueabi
+ARMFLAGS="-march=armv7-a -mtune=cortex-a8 -mfpu=neon -mfloat-abi=softfp"
+CC="$TC-gcc $ARMFLAGS"
+CXX="$TC-g++ $ARMFLAGS"
+AR="$TC-ar"
+STRIP="$TC-strip"
+
+usage() {
+    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+OUT="$HOME/retro-build/out"
+WORK="$HOME/retro-build"
+SEL=()
+while [ $# -gt 0 ]; do
+    case $1 in
+        --out)  OUT=${2:?--out needs a directory}; shift 2 ;;
+        --work) WORK=${2:?--work needs a directory}; shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        -*) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
+        *)
+            [[ -n "${CORE_URL[$1]:-}" ]] || die "unknown core '$1' (known: ${CORES[*]})"
+            SEL+=("$1"); shift ;;
+    esac
+done
+if [ ${#SEL[@]} -eq 0 ]; then
+    SEL=("${CORES[@]}")
+fi
+
+command -v "$TC-gcc" >/dev/null || die "$TC-gcc not found (run inside WSL with the ARM toolchain)"
+command -v git >/dev/null || die "git not found"
+
+OUT=$(realpath -m "$OUT")
+WORK=$(realpath -m "$WORK")
+
+# Guards (before anything is created): outputs never inside the repo; never build in the hand-made clones.
+case "$OUT/" in "$REPO"/*) die "--out must not be inside the repo ($REPO)" ;; esac
+case "$WORK/" in "$REPO"/*) die "--work must not be inside the repo ($REPO)" ;; esac
+case "$WORK/" in "$HOME/retro-src"/*) die "--work must not be ~/retro-src (other workers' clones)" ;; esac
+
+mkdir -p "$OUT" "$WORK"
+
+MAKE_VARS=("platform=unix" "CC=$CC" "CXX=$CXX" "AR=$AR")
+JOBS=$(nproc)
+
+build_core() {
+    local core=$1
+    local url=${CORE_URL[$core]}
+    local commit=${CORE_COMMIT[$core]}
+    local so=${CORE_SO[$core]}
+    local extra=${CORE_MAKE_EXTRA[$core]}
+    local src="$WORK/$core"
+    local patch="$REPO/retro/patches/$core.patch"
+    local dest="$OUT/$so"
+    local blog="$WORK/$core.build.log"
+    local glog="$WORK/$core.armsafe.log"
+
+    echo "== $core  $url @ $commit"
+
+    if [ -e "$src" ]; then
+        [ -d "$src/.git" ] || die "$src exists and is not a git clone; remove it or pick --work"
+        [ "$(git -C "$src" remote get-url origin)" = "$url" ] || die "$src has a different origin"
+        if ! git -C "$src" cat-file -e "$commit^{commit}" 2>/dev/null; then
+            git -C "$src" fetch -q origin
+        fi
+        git -C "$src" checkout -f -q "$commit"
+    else
+        git clone -q "$url" "$src"
+        git -C "$src" checkout -f -q "$commit"
+    fi
+    git -C "$src" clean -fdxq
+    [ "$(git -C "$src" rev-parse HEAD)" = "$commit" ] || die "$core: HEAD is not $commit"
+
+    if [ -f "$patch" ]; then
+        git -C "$src" apply "$patch"
+        echo "   applied $(basename "$patch")"
+    else
+        echo "   no patch (retro/patches/$core.patch absent)"
+    fi
+
+    # shellcheck disable=SC2086  # $extra is a space-separated list of VAR=value words
+    (cd "$src" && make -j"$JOBS" "${MAKE_VARS[@]}" $extra) >"$blog" 2>&1 \
+        || die "$core: make failed, see $blog"
+    [ -f "$src/$so" ] || die "$core: $so not produced, see $blog"
+
+    # The gate reads symbols (Thumb vs ARM). Some Makefiles link with -s (ep128emu does),
+    # so the gate runs on every object the build produced, not on the .so.
+    local objs=()
+    mapfile -d '' objs < <(find "$src" -name '*.o' -print0)
+    [ ${#objs[@]} -gt 0 ] || die "$core: no object files produced"
+    if ! bash "$REPO/native_apps/check-arm-safe.sh" "${objs[@]}" >"$glog" 2>&1 \
+        || ! grep -q 'unverified=0 bad=0' "$glog"; then
+        cat "$glog" >&2
+        die "$core: ARM gate FAILED or unverified (see $glog), nothing copied to $OUT"
+    fi
+
+    rm -f "$dest"
+    "$STRIP" --strip-unneeded -o "$dest" "$src/$so"
+
+    local bytes
+    bytes=$(stat -c %s "$dest")
+    printf 'RESULT %-16s built  arm-safe PASS  %9s bytes  %s\n' "$core" "$bytes" "$dest"
+
+    if [ "$core" = vice ]; then
+        echo "WARNING: $dest embeds Commodore ROMs. It is for on-device testing only; never ship it." >&2
+    fi
+}
+
+for c in "${SEL[@]}"; do
+    build_core "$c"
+done
+
+echo "done: ${#SEL[@]} core(s) in $OUT"
