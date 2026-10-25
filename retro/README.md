@@ -1,7 +1,7 @@
 # retro: libretro cores behind our own frontend (design and feasibility)
 
 **Status: design only. Nothing in this directory runs yet** except two benches: `tools/retro_bench.c`
-(headless core runner) and `tools/fb_bench.c` (display path, device-only, never yet run). Working name of the
+(headless core runner) and `tools/fb_bench.c` (display path, device-only); both ran on a unit 2026-10-24 (section 9). Working name of the
 frontend: `arca_retro`. Every device fact is linked to
 [`SYSTEM_ANALYSIS.md`](../SYSTEM_ANALYSIS.md); only the few numbers that justify a design choice are repeated, with their source.
 Claims are marked **measured**, **read in source**, **inferred** or **unverified**.
@@ -69,8 +69,8 @@ An emulator hands over a full frame per `retro_run`. The panel is 800x480 and re
 (hardware)**. Hybrid: software integer 2x into the overlay, DSS for the small remaining ratio.
 
 **(c) Page flipping.** Vanilla omapfb implements `FBIO_WAITFORVSYNC` / `OMAPFB_WAITFORVSYNC` and `pan_display`
-(`usb_host/linux-4.14.52/drivers/video/fbdev/omap2/omapfb/omapfb-ioctl.c:763,774`, `omapfb-main.c:1048`;
-**read in source, not measured on a unit**). fb0 holds 1,536,000 bytes, exactly two 16bpp pages, so a 16bpp flip
+(`usb_host/linux-4.14.52/drivers/video/fbdev/omap2/omapfb/omapfb-ioctl.c:763,774`, `omapfb-main.c:1048`);
+**measured working at 16bpp on a unit**, refused at 32bpp (section 9). fb0 holds 1,536,000 bytes, exactly two 16bpp pages, so a 16bpp flip
 on fb0 needs no extra memory ([display](../SYSTEM_ANALYSIS.md#32-display)). fb memory is mapped write-combined
 (`omapfb-main.c:1116`, read in source).
 
@@ -82,8 +82,8 @@ resolution into the omapfb overlay plane and let the DSS scale:
 - `libpicofe` `linux/fbdev.c`: `yres_virtual = h_total * buffer_cnt` (:96), flip = `FBIOPAN_DISPLAY` (:58),
   vsync = `FBIO_WAITFORVSYNC` (:66), 16bpp throughout, old `var` screeninfo restored on exit.
 - They accepted the DSS filter: their 1:1 and 2:2 modes were crops, not a software scaler.
-- Their kernel was 2.6/3.x omapfb. That our 4.14 omapfb accepts the same calls is **inferred** (the same ioctls exist
-  in the vanilla tree), not measured.
+- Their kernel was 2.6/3.x omapfb. Our 4.14 omapfb accepts `OMAPFB_SETUP_MEM`, `OMAPFB_SETUP_PLANE`, pan and the
+  vsync wait (**measured**, section 9); that the scaled plane is visible is not yet checked by eye.
 
 **(a) Software scale into fb0 at 16bpp RGB565 ("Sharp").** Reuse ScummVM's scaler in
 `scummvm-arca/backend-files/arca-graphics.cpp` (precomputed column table, row dedup, NEON 8-pixel blit). Move it into
@@ -129,8 +129,8 @@ Same toolchain and flags as ScummVM ([building](../SYSTEM_ANALYSIS.md#6-building
   [why](../SYSTEM_ANALYSIS.md#61-cortex-a8-has-no-hardware-integer-divide)).
 - **Blind spot:** code generated at run time by a dynarec is invisible to that gate. Pandora-era dynarecs target
   ARMv7 without idiv (**inferred**), so the risk is low but not zero.
-- **Loading:** `dlopen` is used nowhere in the tree yet, and the device libdl is **unverified**. The
-  alternative is to link each core statically into its own binary (one `arca_retro_<core>` each).
+- **Loading:** `dlopen` is used nowhere in the tree yet; the device has `/lib/libdl.so.2` and `retro_bench` loads
+  cores with it (**measured**, section 9). The fallback, one statically linked `arca_retro_<core>` each, is not needed.
 
 ## 8. Bring-up order (decided)
 
@@ -176,15 +176,65 @@ answers `GET_VARIABLE` with nothing crashes it (SIGFPE): defaults from `SET_VARI
 3. `tools/fb_bench.c` (written, builds ARM-safe, unrun): 16/32bpp copy cost, pan + vsync flip, nearest-neighbour
    upscale of 256x240/320x240/384x272, and (`--test overlay` only) fb1 overlay upload and VRFB rotation.
 
-**First device session (about 15 min):**
+**First device session (measured 2026-10-24 on unit `192.168.50.115`, our rootfs, kernel 4.14.52 built 2026-10-13).**
+Both benches built from this tree with the section 7 flags, `check-arm-safe.sh` clean; cores are the 2026-10-20 builds
+above, staged on p3 in `/home/root/data/retro-bench` (left there). The launcher was idle (`top`: 83% idle) for
+`retro_bench`, and stopped (`/etc/init.d/arca-app stop`) for `fb_bench`.
 
-- run `fb_bench`, and `retro_bench` per core (unthrottled fps);
-- `cat` the cpufreq governor;
-- free space on p3;
-- `dlopen` smoke test.
+- **Governor** `performance`, 600 MHz (`scaling_available_frequencies` 125/250/500/550/600 MHz).
+- **p3** 115.8 GB free of 118 GB (on that unit's card); RAM 240 MB total, ~169 MB available.
+- **`dlopen` works:** `/lib/libdl.so.2` is on the rootfs and `retro_bench` (`-ldl`, `RTLD_NOW`) loaded all four cores it was given.
 
-**Decision rule:** a core goes ahead if its unthrottled fps leaves headroom for the display path. The threshold is
-a placeholder, to be set from `fb_bench`; no number is chosen yet.
+`retro_bench`, no input, unthrottled (`RETRO_SYS` = the staged `sys/`):
+
+| core | content | frames | unthrottled | × core fps | ms/frame |
+|---|---|---|---|---|---|
+| FCEUmm | `nes-runner` | 1200 | 111.4 fps | 1.85× of 60.1 | 8.97 |
+| Fuse 1.6.0 | none (48K ROM screen) | 1000 | 263.0 fps | 5.26× of 50 | 3.80 |
+| VICE x64 3.10 | none (`READY.`) | 1000 | **29.7 fps** | **0.59× of 50.125** | 33.6 |
+| ep128emu-core | none, no ROMs | 500 | 397.9 fps | meaningless: 0 audio frames, nothing emulated | — |
+| MAME 2003-Plus | — | not run | | needs a romset; none staged | |
+
+⚠️ **VICE x64 does not reach real time with its default core options** (reSID 6581, filter on, 48 kHz, as its log
+reports). `retro_bench` serves only the `SET_VARIABLES` defaults and has no override, so whether a cheaper SID engine
+or a lower rate closes the 1.7× gap is **unmeasured**; an option-override (env var) in `retro_bench` is the next step
+for that core. Every core passes `RETRO_ENVIRONMENT` 17 (`GET_VARIABLE_UPDATE`), which `retro_bench` refuses.
+
+`fb_bench` (120 frames per line; fb0 mapped write-combined):
+
+| path | 16bpp RGB565 | 32bpp XRGB8888 |
+|---|---|---|
+| full-frame memcpy RAM→fb | 3.75 ms (195 MB/s; RAM→RAM 191 MB/s) | 8.36 ms (175 MB/s) |
+| second page (`yres_virtual` 960) | **granted** | **refused**: driver answers `virt=800x480` |
+| `OMAPFB_WAITFORVSYNC` alone | 16.53 ms (60.5 Hz) | — |
+| `FBIOPAN_DISPLAY`, no wait | 0.017 ms | — |
+| memcpy + wait + pan (frame loop) | 16.65 ms, 60.1 fps | — |
+| NN upscale 256×240 → 800×480, into RAM / RAM then memcpy / direct into fb | 4.23 / **8.22** / 11.34 ms | 8.41 / 16.76 / 22.82 ms |
+| same, 320×240 | 4.43 / 8.38 / 11.48 ms | 8.43 / 16.69 / 22.64 ms |
+| same, 384×272 | 4.57 / 8.59 / 10.73 ms | 8.77 / 16.90 / 20.83 ms |
+
+- **Page flipping works on our 4.14 omapfb at 16bpp only** (measured): pan is free, the vsync wait tracks the panel
+  at 60 Hz. 32bpp gets no second page in the 1,536,000-byte fb0, so a flipping frontend runs 16bpp.
+- **Scale into RAM, then one memcpy;** never scatter writes into the mapped fb (35% slower at 16bpp). The upscale is
+  `fb_bench`'s plain C nearest-neighbour; ScummVM's NEON scaler is **not** measured here and may be faster.
+- **DSS overlay (fb1/vid1):** `OMAPFB_SETUP_MEM` + `OMAPFB_SETUP_PLANE` (scaled to 800×480) both succeeded at
+  256×240, 320×240 and 384×272; uploading a native-size RGB565 frame costs **0.19 / 0.23 / 0.35 ms**. Nobody watched
+  the panel during the run, so that the scaled plane was **visible**, and how its filtering looks, is **unverified**.
+- ⚠️ **The VRFB rotation pass left the gfx plane disabled until reboot.** After `--test overlay`, dmesg had
+  `overlay 0 vertically not inside the display area (0 + 800 >= 480)`, then `FIFO UNDERFLOW on gfx, disabling the
+  overlay`; `overlay0/enabled` read 0 (dark panel), restarting the app did not help, and writing `enabled` = 1
+  underflowed again; a reboot cleared it. That `rotate=1` caused it is **inferred** from the 800-vs-480 message.
+  `fb_bench` printed `rotate=1 … got 800x480` and normal copy times, so **it cannot see this failure**: it must
+  check `overlay0/enabled` and swap `xres`/`yres` for a 90° rotation before its rotation numbers mean anything.
+
+**Frame budget (arithmetic from the two tables; CPU only, no audio, no colour conversion).** At 60 Hz a frame is
+16.7 ms. FCEUmm 8.97 ms + Sharp (software 16bpp scale + memcpy, 8.22 ms) = **17.2 ms: does not fit**; with the
+overlay instead (0.19 ms) = 9.2 ms, which fits. FCEUmm also emits XRGB8888, so a 16bpp path adds a conversion that is
+not measured. Fuse at 50 Hz (20 ms): 3.8 + 8.4 = 12.2 ms with software scaling. VICE fails before the display path.
+
+**Decision rule (proposed, not yet decided):** a core goes ahead on a display path if core ms/frame + that path's
+ms/frame ≤ 80% of the frame period (13.3 ms at 60 Hz, 16 ms at 50 Hz), leaving the rest for audio and input.
+By that rule today: Fuse passes both paths; FCEUmm passes only via the overlay; VICE passes neither.
 
 ## 10. Open questions
 
