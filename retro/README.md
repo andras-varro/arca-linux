@@ -200,6 +200,8 @@ above, staged on p3 in `/home/root/data/retro-bench` (left there). The launcher 
 | VICE, defaults | Impossible Mission `.zip` (operator's), autostart, loading from disk | 1500 | 32.2 fps | **0.64×** | 31.04 |
 | VICE, FastSID + no true drive emulation | same | 1500 | 80.9 fps | 1.61× | 12.36 |
 | ep128emu-core | none; operator's ROM set in `sys/ep128emu/roms/` (`core/core.cpp:59`) | 1000 | **11.45 fps** | **0.23× of 50** | 87.3 |
+| ep128emu, `ep128emu_wait=5` | same | 500 | 20.0 fps | 0.40× | 49.9 |
+| ep128emu, `wait=5` + `sdhq=0`, `patches/ep128emu-core.patch` | same | 500 | 51.1 fps | **1.02×** | 19.6 |
 | MAME 2003-Plus | Hard Hat (mamedev.org free romset) | 1200 | 53.5 fps | **0.94× of 57.0** | 18.7 |
 
 Rows measured 2026-10-25; each speed excludes the first `retro_run`, timed apart (`RETRO_WARMUP`, default 1 frame).
@@ -215,20 +217,30 @@ stand (re-measured: ep128emu 0.23×, Fuse 5.16×, Hard Hat 0.89× with the log p
   load is trapped and finishes almost at once, so it most likely times the game rather than the load (**inferred**:
   no frame dump was taken). The sample rate costs nothing measurable; reSID over FastSID costs 2.6 ms/frame and TDE
   1.6 ms/frame idle.
-- ep128emu at 0.23× is out of line with Fuse (a 3.5 MHz Z80 at 5.16×), and the cost is **not the Z80** (measured
-  2026-10-25, `RETRO_PROF` sampling, 2438 samples): `AudioConverterHighQuality::sendInputSignal` takes **45.5%** of
-  all CPU, the display thread's per-pixel `LibretroDisplay::draw` 26.9%, the Z80 about 4%, Nick and Dave about 6%.
-  The default `ep128emu_wait=0` makes `retro_run` busy-spin on the VM thread (`core/core.cpp` `run_for`): `wait=5`
-  takes it from 86 to 50 ms/frame (0.40×). `ep128emu_sdhq=0` and `ep128emu_swfb=1` changed nothing measurable;
-  `main.cpp:234-239` applies `sdhq` only on a change and only to an existing core, so it probably never reaches the
-  resampler (**inferred**, unchecked). The `unix` platform also builds with `-fno-inline-functions` (Makefile:504).
+- **ep128emu's 0.23× was the core's settings and its frontend glue, not the Z80** (measured 2026-10-25, `RETRO_PROF`
+  sampling, 2438 samples): `AudioConverterHighQuality::sendInputSignal` took **45.5%** of all CPU, the display
+  thread's per-pixel `LibretroDisplay::draw` 26.9%, the Z80 about 4%, Nick and Dave about 6%. Three fixes, each
+  measured alone, take it to **1.02×** (CPU-bound, not paced: user + sys 10.05 s of 10.38 s real):
+  - `ep128emu_wait=5`: the default `wait=0` makes `retro_run` busy-spin on the VM thread (`core/core.cpp` `run_for`);
+    86 → 50 ms/frame.
+  - `ep128emu_sdhq=0` did nothing as shipped: `core/core.cpp:455` creates the core with `highQuality = true`, and
+    `check_variables` (`core/main.cpp:234`) only acts when the option differs from its cached copy, which was already
+    updated before the core existed. `patches/ep128emu-core.patch` compares against the core's config; 50 → 34 ms.
+  - The same patch adds a fast path to `LibretroDisplay::draw` for frames with no border scan and no interlace (one
+    palette lookup per pixel, then a `memcpy` for the doubled line); 34 → 19.6 ms, frame 500 byte-identical (md5).
+    The run is half-frame (768×288), so the `memcpy` branch and the interlaced and border-scan frames are **not
+    exercised** by it.
+
+  Building without the `unix` platform's `-fno-inline-functions` (Makefile:504) changed nothing (34.1 vs 34.2 ms).
+  Left after the fixes: the low-quality resampler 13.9%, `draw` 16.5%, Dave + VM loop 17%, Z80 6%, libc ~26%.
+  The patch is GPL-2.0-or-later like the core, against upstream `6af5d03`.
 
 Every core passes `RETRO_ENVIRONMENT` 17 (`GET_VARIABLE_UPDATE`), which `retro_bench` refuses.
 
 - **ep128emu advances only by the time `SET_FRAME_TIME_CALLBACK` reports** (`core/main.cpp:600`, `run_for(curr_frame_time, …)`):
   a frontend that refuses that command gets 0 µs per frame, a blank frame and no audio at ~400 "fps". `retro_bench` now
   serves it (nominal period). With it, the frame dump is the ENTERPRISE boot screen and audio is 881 of 882 samples per
-  frame, but the core is **4.4× too slow**; it was already flagged the heaviest per MHz (section 8).
+  frame (speed: the bullet above).
 - **MAME 2003-Plus / Hard Hat** reaches the "PLEASE STAND BY / HARDHAT GAME" boot screen (frame dump); 0.94× with
   the core's log discarded, 0.88× with it printed (~30 log lines per frame from the Exidy PIA driver), so a frontend must
   filter core log levels.
@@ -269,8 +281,8 @@ overlay; with FastSID + 22 kHz + no TDE: 18.7 / 10.4 ms.
 **Decision rule (proposed, not yet decided):** a core goes ahead on a display path if core ms/frame + that path's
 ms/frame ≤ 80% of the frame period (13.3 ms at 60 Hz, 16 ms at 50 Hz), leaving the rest for audio and input.
 By that rule today: Fuse passes both paths; FCEUmm and VICE (idle, either option set) pass only via the overlay;
-VICE while loading with TDE, ep128emu and MAME 2003-Plus (Hard Hat) pass neither, since each misses real time before
-any display cost.
+VICE while loading with TDE and MAME 2003-Plus (Hard Hat) pass neither, since each misses real time before any display
+cost; patched ep128emu is real time (19.6 of 20 ms) but over the 16 ms line before any display cost.
 
 ## 10. Open questions
 

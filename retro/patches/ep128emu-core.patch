@@ -1,0 +1,37 @@
+diff --git a/core/libretrodisp.cpp b/core/libretrodisp.cpp
+index a53a2d9..af9435c 100644
+--- a/core/libretrodisp.cpp
++++ b/core/libretrodisp.cpp
+@@ -670,6 +670,19 @@ void LibretroDisplay::draw(void * fb, bool scanForBorder)
+       bool nonborder = false;
+       lineBuffers[yc]->getLineData(bufp, nBytes);
+       decodeLine(lineBuf,bufp,nBytes);
++      if (!scanForBorder && !interlacedFrameCount)
++      {
++        // Fast path for the common frame (no border scan, no interlace):
++        // same pixels as the loop below, without its per-pixel branches.
++        int currWidth = viewPortX2 - viewPortX1 + 1;
++        int currLine = yc - viewPortY1;
++        decltype(frame_bufActive) dst =
++            frame_bufActive + (useHalfFrame ? currLine / 2 : currLine) * currWidth;
++        const unsigned char *src = lineBuf + viewPortX1;
++        for (int i = 0; i < currWidth; i++) dst[i] = colormap(src[i]);
++        if (!useHalfFrame) std::memcpy(dst + currWidth, dst, currWidth * sizeof(*dst));
++        continue;
++      }
+ 
+       for(int i=0; i<EP128EMU_LIBRETRO_SCREEN_WIDTH; i++)
+       {
+diff --git a/core/main.cpp b/core/main.cpp
+index b6d418d..267c902 100644
+--- a/core/main.cpp
++++ b/core/main.cpp
+@@ -231,7 +231,7 @@ static void check_variables(void)
+   {
+     bool soundHq_;
+     soundHq_ = std::atoi(var.value) == 1 ? true : false;
+-    if (soundHq != soundHq_)
++    if (soundHq != soundHq_ || (core && core->config->sound.highQuality != soundHq_))
+     {
+       soundHq = soundHq_;
+       if(core)
