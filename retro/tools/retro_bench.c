@@ -57,21 +57,43 @@ static unsigned seen_cmd[64]; static int nseen;
 /* Core options: we announce option version 0 so cores use the legacy
  * SET_VARIABLES ("Desc; a|b|c", first value = default) and answer GET_VARIABLE
  * with those defaults. Without this, cores that read their sample rate or
- * similar from an option get 0 (VICE then divides by zero). */
+ * similar from an option get 0 (VICE then divides by zero).
+ * RETRO_OPTS="key=value,key=value" overrides a default (the value is not
+ * checked against the choices); RETRO_LIST_OPTS=1 prints every option with
+ * its choices, which is where the keys and values come from. */
 struct var { const char *key; char val[48]; };
 static struct var vars[512]; static int nvars;
 
+static void override_var(struct var *d)
+{
+    const char *o = getenv("RETRO_OPTS");
+    size_t kl = strlen(d->key);
+    while (o && *o) {
+        size_t n = strcspn(o, ",");
+        if (n > kl && o[kl] == '=' && !strncmp(o, d->key, kl)) {
+            size_t vl = n - kl - 1;
+            if (vl >= sizeof d->val) vl = sizeof d->val - 1;
+            memcpy(d->val, o + kl + 1, vl); d->val[vl] = 0;
+            printf("[opt] %s=%s (override)\n", d->key, d->val);
+        }
+        o += n; if (*o) o++;
+    }
+}
+
 static void store_vars(const struct retro_variable *v)
 {
+    int list = getenv("RETRO_LIST_OPTS") != NULL;
     for (; v->key && nvars < 512; v++) {
         const char *s = strstr(v->value, "; ");
         struct var *d = &vars[nvars++];
         d->key = v->key; d->val[0] = 0;
+        if (list) printf("[opts] %s: %s\n", v->key, v->value);
         if (!s) continue;
         s += 2;
         size_t n = strcspn(s, "|");
         if (n >= sizeof d->val) n = sizeof d->val - 1;
         memcpy(d->val, s, n); d->val[n] = 0;
+        override_var(d);
     }
 }
 
@@ -199,15 +221,27 @@ int main(int argc, char **argv)
     printf("timing: %.3f fps, %.0f Hz audio\n", av.timing.fps, av.timing.sample_rate);
     printf("pixel format: %s\n", pfn[pixfmt]);
 
-    struct timespec t0, t1; clock_gettime(CLOCK_MONOTONIC, &t0);
+    /* Cores may defer their init to the first retro_run (VICE: ~20 s on the
+     * device), so the first RETRO_WARMUP frames (default 1) are timed apart
+     * and the speed is the steady state over the rest. */
+    int warm = getenv("RETRO_WARMUP") ? atoi(getenv("RETRO_WARMUP")) : 1;
+    if (warm < 0 || warm >= nframes) warm = 0;
+    struct timespec t0, tw, t1; clock_gettime(CLOCK_MONOTONIC, &t0); tw = t0;
     /* A core that set a frame-time callback (ep128emu) advances by the time it
      * is told, and by nothing if never told: report the nominal frame period. */
-    for (int i = 0; i < nframes; i++) { if (ftcb.callback) ftcb.callback(ftcb.reference); run(); }
+    for (int i = 0; i < nframes; i++) {
+        if (i == warm) clock_gettime(CLOCK_MONOTONIC, &tw);
+        if (ftcb.callback) ftcb.callback(ftcb.reference);
+        run();
+    }
     clock_gettime(CLOCK_MONOTONIC, &t1);
-    double s = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) / 1e9;
+    double sw = (tw.tv_sec - t0.tv_sec) + (tw.tv_nsec - t0.tv_nsec) / 1e9;
+    double s = (t1.tv_sec - tw.tv_sec) + (t1.tv_nsec - tw.tv_nsec) / 1e9;
+    int n = nframes - warm;
 
-    printf("frames run: %d  wall: %.3f s  speed: %.2f frames/s (%.2fx of core fps)\n", nframes, s,
-           nframes / s, nframes / s / (av.timing.fps > 0 ? av.timing.fps : 1));
+    printf("warmup: %d frames in %.3f s\n", warm, sw);
+    printf("frames run: %d  wall: %.3f s  speed: %.2f frames/s (%.2fx of core fps)  %.2f ms/frame\n", n, s,
+           n / s, n / s / (av.timing.fps > 0 ? av.timing.fps : 1), 1000 * s / n);
     printf("video callbacks: %lu  dupes(NULL data): %lu  last frame %ux%u pitch %lu\n", frames_video, dupes,
            lw, lh, (unsigned long)lpitch);
     printf("audio frames: %lu in %lu calls = %.2f per video frame (expected %.2f)\n", audio_frames, audio_calls,

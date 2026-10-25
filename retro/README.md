@@ -191,15 +191,33 @@ above, staged on p3 in `/home/root/data/retro-bench` (left there). The launcher 
 |---|---|---|---|---|---|
 | FCEUmm | `nes-runner` | 1200 | 111.4 fps | 1.85× of 60.1 | 8.97 |
 | Fuse 1.6.0 | none (48K ROM screen) | 1000 | 263.0 fps | 5.26× of 50 | 3.80 |
-| VICE x64 3.10 | none (`READY.`) | 1000 | **29.7 fps** | **0.59× of 50.125** | 33.6 |
-| VICE x64 3.10 | Impossible Mission `.zip` (operator's), autostart, still `LOADING` at the end | 1500 | **22.7 fps** | **0.45×** | 44.0 |
+| VICE x64 3.10, defaults | none (`READY.`) | 1500 | 68.6 fps | 1.37× of 50.125 | 14.57 |
+| VICE, `vice_sid_engine=FastSID` | none | 1500 | 83.8 fps | 1.67× | 11.93 |
+| VICE, `vice_sound_sample_rate=22050` | none | 1500 | 69.0 fps | 1.38× | 14.49 |
+| VICE, `vice_drive_true_emulation=disabled` | none | 1500 | 77.4 fps | 1.54× | 12.93 |
+| VICE, all three above | none | 1500 | 99.4 fps | **1.98×** | 10.06 |
+| VICE, defaults | Impossible Mission `.zip` (operator's), autostart, loading from disk | 1500 | 32.2 fps | **0.64×** | 31.04 |
+| VICE, FastSID + no true drive emulation | same | 1500 | 80.9 fps | 1.61× | 12.36 |
 | ep128emu-core | none; operator's ROM set in `sys/ep128emu/roms/` (`core/core.cpp:59`) | 1000 | **11.45 fps** | **0.23× of 50** | 87.3 |
 | MAME 2003-Plus | Hard Hat (mamedev.org free romset) | 1200 | 53.5 fps | **0.94× of 57.0** | 18.7 |
 
-⚠️ **VICE x64 does not reach real time with its default core options** (reSID 6581, filter on, 48 kHz, as its log
-reports). `retro_bench` serves only the `SET_VARIABLES` defaults and has no override, so whether a cheaper SID engine
-or a lower rate closes the 1.7× gap is **unmeasured**; an option-override (env var) in `retro_bench` is the next step
-for that core. Every core passes `RETRO_ENVIRONMENT` 17 (`GET_VARIABLE_UPDATE`), which `retro_bench` refuses.
+Rows measured 2026-10-25; each speed excludes the first `retro_run`, timed apart (`RETRO_WARMUP`, default 1 frame).
+`RETRO_OPTS=key=value,…` overrides a core option and `RETRO_LIST_OPTS=1` lists every option with its choices.
+
+⚠️ **VICE runs its reSID init inside the first `retro_run`: 19.5 s on the device** (FastSID: 0.05 s). The first
+session's VICE figures (0.59× idle, 0.45× loading) counted it, so they measured the bench and not the core. A frontend must
+show something during that frame, or choose FastSID. The other cores' first frames take 0.01–0.08 s, so their rows
+stand (re-measured: ep128emu 0.23×, Fuse 5.16×, Hard Hat 0.89× with the log printed and filtered).
+
+- **VICE is real time with its defaults when idle, but not while loading with true drive emulation** (0.64×): the
+  1541's own 6502 runs during a load. The FastSID + no-TDE row is **not** the same workload, because without TDE the
+  load is trapped and finishes almost at once, so it most likely times the game rather than the load (**inferred**:
+  no frame dump was taken). The sample rate costs nothing measurable; reSID over FastSID costs 2.6 ms/frame and TDE
+  1.6 ms/frame idle.
+- ep128emu at 0.23× is out of line with Fuse (a 3.5 MHz Z80 at 5.16×), so its cost is in the core's own emulation
+  or defaults, not the Z80; its options are the next thing to list and vary.
+
+Every core passes `RETRO_ENVIRONMENT` 17 (`GET_VARIABLE_UPDATE`), which `retro_bench` refuses.
 
 - **ep128emu advances only by the time `SET_FRAME_TIME_CALLBACK` reports** (`core/main.cpp:600`, `run_for(curr_frame_time, …)`):
   a frontend that refuses that command gets 0 µs per frame, a blank frame and no audio at ~400 "fps". `retro_bench` now
@@ -239,12 +257,14 @@ for that core. Every core passes `RETRO_ENVIRONMENT` 17 (`GET_VARIABLE_UPDATE`),
 **Frame budget (arithmetic from the two tables; CPU only, no audio, no colour conversion).** At 60 Hz a frame is
 16.7 ms. FCEUmm 8.97 ms + Sharp (software 16bpp scale + memcpy, 8.22 ms) = **17.2 ms: does not fit**; with the
 overlay instead (0.19 ms) = 9.2 ms, which fits. FCEUmm also emits XRGB8888, so a 16bpp path adds a conversion that is
-not measured. Fuse at 50 Hz (20 ms): 3.8 + 8.4 = 12.2 ms with software scaling. VICE fails before the display path.
+not measured. Fuse at 50 Hz (20 ms): 3.8 + 8.4 = 12.2 ms with software scaling. VICE (384×272, 20 ms) with defaults: 14.6 + 8.6 = 23.2 ms in software, 14.9 ms via the
+overlay; with FastSID + 22 kHz + no TDE: 18.7 / 10.4 ms.
 
 **Decision rule (proposed, not yet decided):** a core goes ahead on a display path if core ms/frame + that path's
 ms/frame ≤ 80% of the frame period (13.3 ms at 60 Hz, 16 ms at 50 Hz), leaving the rest for audio and input.
-By that rule today: Fuse passes both paths; FCEUmm passes only via the overlay; VICE, ep128emu and MAME 2003-Plus
-(Hard Hat) pass neither, since each misses real time before any display cost.
+By that rule today: Fuse passes both paths; FCEUmm and VICE (idle, either option set) pass only via the overlay;
+VICE while loading with TDE, ep128emu and MAME 2003-Plus (Hard Hat) pass neither, since each misses real time before
+any display cost.
 
 ## 10. Open questions
 
