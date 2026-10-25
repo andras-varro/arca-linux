@@ -1,0 +1,40 @@
+diff --git a/src/sndhrdw/exidy_sndhrdw.c b/src/sndhrdw/exidy_sndhrdw.c
+index 0811541..1fa34d5 100644
+--- a/src/sndhrdw/exidy_sndhrdw.c
++++ b/src/sndhrdw/exidy_sndhrdw.c
+@@ -225,17 +225,33 @@ static INLINE void sh6840_apply_clock(struct sh6840_timer_channel *t, int clocks
+  *
+  *************************************/
+ 
++static UINT32 noise_rng = 0x2545F491;
++static UINT32 noise_bits;
++static int noise_bits_left;
++
+ static INLINE int sh6840_update_noise(int clocks)
+ {
+ 	UINT8 history = sh6840_noise_history;
+ 	int noise_clocks = 0;
+ 	int i;
+ 
+-	/* loop over clocks */
++	/* loop over clocks; the noise bits come from a xorshift32 generator,
++	   32 bits per step: libc rand() was ~40% of the whole frame on a
++	   600 MHz Cortex-A8 (the sequence only needs to be white, not exact) */
+ 	for (i = 0; i < clocks * 2; i++)
+ 	{
+ 		/* keep a history of the last few noise samples */
+-		history = (history << 1) | (rand() & 1);
++		if (noise_bits_left == 0)
++		{
++			noise_rng ^= noise_rng << 13;
++			noise_rng ^= noise_rng >> 17;
++			noise_rng ^= noise_rng << 5;
++			noise_bits = noise_rng;
++			noise_bits_left = 32;
++		}
++		history = (history << 1) | (noise_bits & 1);
++		noise_bits >>= 1;
++		noise_bits_left--;
+ 
+ 		/* if we clocked 0->1, that will serve as an external clock */
+ 		if ((history & 0x03) == 0x01)

@@ -153,6 +153,9 @@ static int get_var(struct retro_variable *v)
 static void logfn(int level, const char *fmt, ...)
 {
     va_list ap; va_start(ap, fmt);
+    static int minlvl = -1;
+    if (minlvl < 0) minlvl = getenv("RETRO_LOGLEVEL") ? atoi(getenv("RETRO_LOGLEVEL")) : 0;
+    if (level < minlvl) { va_end(ap); return; }
     printf("[core log %d] ", level); vprintf(fmt, ap); va_end(ap);
 }
 
