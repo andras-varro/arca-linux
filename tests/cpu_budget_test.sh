@@ -104,7 +104,7 @@ while IFS='|' read -r name _; do
     printf '%s\n' "$b" | grep -Eq '^[1-9][0-9]*$' || miss="$miss $name"
 done <<< "$(smoke_targets)"
 assert_eq "" "${miss# }" "D1 every smoke target has a positive integer budget"
-assert_eq 16 "$n" "D2 16 targets were looked at (a zero-subject loop is not a pass)"
+assert_eq 17 "$n" "D2 17 targets were looked at (a zero-subject loop is not a pass)"
 if cpu_budget no_such_app >/dev/null; then bad "D3 an unknown app has no budget"; else ok "D3 an unknown app has no budget"; fi
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -198,7 +198,7 @@ assert_eq 2 "$RC" "E25 no <ip> is a usage error"
 
 scenario "$(mk_out 0 0 0 1)"
 run_runner 1.2.3.4
-assert_eq 16 "$(printf '%s\n' "$OUT" | grep -cE '^  [a-z_]+ +pass ')" "E26 no subset: every one of the 16 targets is graded"
+assert_eq 17 "$(printf '%s\n' "$OUT" | grep -cE '^  [a-z_]+ +pass ')" "E26 no subset: every one of the 17 targets is graded"
 assert_eq 0 "$RC" "E27 ...and all passing exits 0"
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -104,7 +104,7 @@ T=$(smoke_targets)
 has "$T" '^app_launcher|/opt/arca/app_launcher|$'  "A7 app_launcher runs bare, as the init script starts it"
 has "$T" '^control_panel|/opt/games/control_panel|/dev/fb0 /dev/input/touchscreen0$' "A8 control_panel's empty args= becomes fb,touch"
 has "$T" '^snake|/opt/games/snake|/dev/fb0 /dev/input/touchscreen0$' "A9 a game gets <fb> <touch>"
-assert_eq 16 "$(printf '%s\n' "$T" | grep -c .)" "A11 16 targets: launcher + 13 manifests + 2 tools"
+assert_eq 17 "$(printf '%s\n' "$T" | grep -c .)" "A11 17 targets: launcher + 14 manifests + 2 tools"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo ""; echo "B. the five outcomes"
@@ -312,7 +312,7 @@ assert_eq 0 "$RC" "F30 ...and exits 0"
 
 scenario "$ALIVE" "$I32" "$TMP/c32.raw"
 run_runner 1.2.3.4
-assert_eq 16 "$(printf '%s\n' "$OUT" | grep -cE '^  [a-z_]+ +pass ')" "F31 no subset: every one of the 16 targets is graded"
+assert_eq 17 "$(printf '%s\n' "$OUT" | grep -cE '^  [a-z_]+ +pass ')" "F31 no subset: every one of the 17 targets is graded"
 run_runner
 assert_eq 2 "$RC" "F32 no <ip> is a usage error"
 

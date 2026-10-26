@@ -68,6 +68,7 @@ cpu_budget() {
         platformer)     echo 75 ;;   # 54 53 55
         brick_breaker)  echo 75 ;;   # 53 54 53
         audio_mix_test) echo 25 ;;   # 13 13 14
+        retro_picker)   echo 60 ;;   # 42 41 43  (measured 2026-10-26, idle list, no input)
         theremin)       echo 960 ;;  # 872 862 863: synthesises continuously, ~87% of the core
         touch_raw)      echo 760 ;;  # 682 683 686: polls its input flat out, ~68%
         *) return 1 ;;
