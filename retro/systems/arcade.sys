@@ -2,3 +2,4 @@
 name=Arcade
 core=mame2003_plus_libretro.so
 exts=zip
+video=overlay

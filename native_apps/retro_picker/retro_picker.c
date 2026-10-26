@@ -11,6 +11,7 @@
  *     exts=d64,t64,prg,crt,zip     content extensions, comma separated, case-insensitive, no dot
  *     opts=key=value,key=value     optional core options, passed to retro as RETRO_OPTS
  *     roms=/some/dir               optional; default <data>/roms/<id>
+ *                                  (a subfolder there is one game, named by the folder)
  *     video=sw|overlay             optional; passed as retro -v
  *
  * A system whose core file is missing is left out (not greyed).  Cores and
@@ -121,20 +122,52 @@ static int parse_sys(const char *path, const char *id, System *s)
     return 0;
 }
 
-/* Does the file name end in one of the comma separated extensions? */
-static int ext_match(const char *exts, const char *name)
+/* Which of the comma separated extensions does the file name end in?  1 for
+ * the first, 2 for the second, ...; 0 for none. */
+static int ext_rank(const char *exts, const char *name)
 {
     const char *dot = strrchr(name, '.');
     if (!dot || !dot[1]) return 0;
     dot++;
     size_t dl = strlen(dot);
-    while (*exts) {
+    for (int rank = 1; *exts; rank++) {
         size_t n = strcspn(exts, ",");
-        if (n == dl && !strncasecmp(exts, dot, n)) return 1;
+        if (n == dl && !strncasecmp(exts, dot, n)) return rank;
         exts += n;
         if (*exts) exts++;
     }
     return 0;
+}
+
+/* A game folder (e.g. CAULDRON/ holding CAULDRON.COM and its data files) is
+ * one game.  Its program is the matching file named like the folder, else the
+ * one whose extension comes first in exts, else the first by name.  Writes the
+ * path into out; returns 0 if the folder holds no matching file. */
+static int pick_in_folder(const char *exts, const char *dir, const char *folder,
+                          char *out, size_t outsz)
+{
+    DIR *d = opendir(dir);
+    if (!d) return 0;
+    char best[256] = "";
+    int best_score = 0;
+    size_t fl = strlen(folder);
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        int rank = e->d_name[0] == '.' ? 0 : ext_rank(exts, e->d_name);
+        if (!rank) continue;
+        const char *dot = strrchr(e->d_name, '.');
+        int named = (size_t)(dot - e->d_name) == fl && !strncasecmp(e->d_name, folder, fl);
+        int score = (named ? 1000 : 0) + 100 - rank;
+        if (score > best_score ||
+            (score == best_score && strcasecmp(e->d_name, best) < 0)) {
+            best_score = score;
+            copy_str(best, sizeof best, e->d_name);
+        }
+    }
+    closedir(d);
+    if (!best_score) return 0;
+    int k = snprintf(out, outsz, "%s/%s", dir, best);
+    return k > 0 && (size_t)k < outsz;
 }
 
 static int cmp_game(const void *a, const void *b)
@@ -144,7 +177,8 @@ static int cmp_game(const void *a, const void *b)
 
 static void free_games(void) { free(g_games); g_games = NULL; g_ngames = 0; }
 
-/* Fill g_games from s->roms (flat directory); returns the count. */
+/* Fill g_games from s->roms: each matching file, and each subfolder holding
+ * one (titled by the folder, see pick_in_folder); returns the count. */
 static int scan_games(const System *s, int keep)
 {
     if (!keep) free_games();
@@ -154,11 +188,19 @@ static int scan_games(const System *s, int keep)
     Game *arr = NULL;
     struct dirent *e;
     while ((e = readdir(d))) {
-        if (e->d_name[0] == '.' || !ext_match(s->exts, e->d_name)) continue;
+        if (e->d_name[0] == '.') continue;
         char full[600];
         struct stat st;
         snprintf(full, sizeof full, "%s/%s", s->roms, e->d_name);
-        if (stat(full, &st) != 0 || !S_ISREG(st.st_mode)) continue;
+        if (stat(full, &st) != 0) continue;
+        int folder = S_ISDIR(st.st_mode);
+        if (folder) {
+            char dir[600];
+            copy_str(dir, sizeof dir, full);
+            if (!pick_in_folder(s->exts, dir, e->d_name, full, sizeof full)) continue;
+        } else if (!S_ISREG(st.st_mode) || !ext_rank(s->exts, e->d_name)) {
+            continue;
+        }
         if (n == cap) {
             cap = cap ? cap * 2 : 32;
             Game *na = realloc(arr, (size_t)cap * sizeof *arr);
@@ -168,7 +210,7 @@ static int scan_games(const System *s, int keep)
         copy_str(arr[n].file, sizeof arr[n].file, full);
         copy_str(arr[n].title, sizeof arr[n].title, e->d_name);
         char *dot = strrchr(arr[n].title, '.');
-        if (dot) *dot = 0;
+        if (dot && !folder) *dot = 0;
         n++;
     }
     closedir(d);

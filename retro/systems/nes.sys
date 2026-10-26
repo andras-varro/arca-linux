@@ -2,3 +2,4 @@
 name=NES
 core=fceumm_libretro.so
 exts=nes,fds,unf,zip
+video=overlay

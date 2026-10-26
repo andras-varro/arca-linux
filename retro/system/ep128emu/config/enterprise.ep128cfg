@@ -1,0 +1,13 @@
+# ep128emu-core system-wide config for every Enterprise game, installed to
+# <libretro system dir>/ep128emu/config/ (core/sample.ep128cfg in the core's
+# source has every key).  A <game>.ep128cfg beside a game overrides it.
+#
+# Names are retropad buttons; the frontend lays an Xbox pad out SNES-style
+# (Xbox A = retropad b, Xbox B = a, Xbox X = y, Xbox Y = x).  The core's own
+# default puts fire on retropad x (Xbox Y) and Enter on y (Xbox X), and leaves
+# Xbox A and B dead.  Here: Xbox A = fire, Xbox B = Enter.  The d-pad stays the
+# internal joystick, whose fire is the Space key; L/R/L2/R2 stay keys 0-3.
+joypad.b "space"
+joypad.a "enter"
+joypad.x "none"
+joypad.y "none"
