@@ -1,6 +1,7 @@
-# Retro station system definition; keys: name core exts opts roms video (see native_apps/retro_picker/retro_picker.c)
+# Retro station system definition; keys: name core exts opts roms video nogame (see native_apps/retro_picker/retro_picker.c)
 name=Enterprise 128
 core=ep128emu_core_libretro.so
 exts=tap,dsk,img,vhd,com,prg,bas
 opts=ep128emu_wait=5,ep128emu_sdhq=0
 video=overlay
+nogame=BASIC

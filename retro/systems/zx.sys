@@ -1,5 +1,6 @@
-# Retro station system definition; keys: name core exts opts roms video (see native_apps/retro_picker/retro_picker.c)
+# Retro station system definition; keys: name core exts opts roms video nogame (see native_apps/retro_picker/retro_picker.c)
 name=ZX Spectrum
 core=fuse_libretro.so
 exts=tzx,tap,z80,sna,szx,zip
 video=overlay
+nogame=BASIC

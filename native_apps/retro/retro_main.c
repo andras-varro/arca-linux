@@ -48,6 +48,7 @@ static struct ftcb_ ftcb;
 static struct avinfo av;
 static const VideoBackend *vb = &video_sw;
 static bool want_video, quit_core, vars_changed;
+static bool no_game_ok;                 /* the core declared SET_SUPPORT_NO_GAME (cmd 18) */
 static unsigned long st_vframes;
 
 struct var { const char *key; char val[64]; };
@@ -122,7 +123,7 @@ static int env_cb(unsigned cmd, void *data)
         v->value = NULL; return 0; }
     case 16: store_vars(data); return 1;
     case 17: *(bool *)data = vars_changed; vars_changed = false; return 1;
-    case 18: return 1;                                               /* SET_SUPPORT_NO_GAME */
+    case 18: no_game_ok = true; return 1;                            /* SET_SUPPORT_NO_GAME */
     case 21: ftcb = *(struct ftcb_ *)data; return 1;
     case 24: *(uint64_t *)data = (1u << RDEV_JOYPAD) | (1u << RDEV_KEYBOARD) | (1u << RDEV_ANALOG); return 1;
     case 27: ((void (**)(int, const char *, ...))data)[0] = logfn; return 1;
@@ -215,6 +216,10 @@ int main(int argc, char **argv)
     fprintf(stderr, "retro: core %s %s\n", si.name, si.version);
 
     struct gameinfo gi, *gp = NULL; void *buf = NULL;
+    if (!strcmp(content, "-") && !no_game_ok) {
+        fprintf(stderr, "retro: core %s does not support running without content\n", corename);
+        vb->close(); return 1;
+    }
     if (strcmp(content, "-")) {
         memset(&gi, 0, sizeof gi); gi.path = content;
         FILE *f = fopen(content, "rb"); if (!f) { perror(content); vb->close(); return 1; }

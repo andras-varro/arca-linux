@@ -13,6 +13,8 @@
  *     roms=/some/dir               optional; default <data>/roms/<id>
  *                                  (a subfolder there is one game, named by the folder)
  *     video=sw|overlay             optional; passed as retro -v
+ *     nogame=BASIC                 optional; a first list entry with this label that starts
+ *                                  retro with no content ("-"), for cores that run without a game
  *
  * A system whose core file is missing is left out (not greyed).  Cores and
  * content are not part of any image.  Adding a system = dropping a .sys file.
@@ -54,9 +56,11 @@
 
 typedef struct {
     char id[32], name[48], core[256], corepath[400], exts[96], opts[256], roms[256], video[16];
+    char nogame[48];
     int  ngames;
 } System;
 
+/* file is empty for the nogame entry: retro is started with no content. */
 typedef struct { char file[600]; char title[256]; } Game;
 
 static System  g_sys[MAX_SYSTEMS];
@@ -112,6 +116,7 @@ static int parse_sys(const char *path, const char *id, System *s)
         else if (!strcmp(k, "opts"))  copy_str(s->opts,  sizeof s->opts,  v);
         else if (!strcmp(k, "roms"))  copy_str(s->roms,  sizeof s->roms,  v);
         else if (!strcmp(k, "video")) copy_str(s->video, sizeof s->video, v);
+        else if (!strcmp(k, "nogame")) copy_str(s->nogame, sizeof s->nogame, v);
     }
     fclose(f);
     if (!s->core[0] || !s->exts[0]) return -1;
@@ -221,6 +226,19 @@ static int scan_games(const System *s, int keep)
     return n;
 }
 
+/* Put the nogame entry first in g_games (after scan_games, which fills the rest). */
+static void add_nogame(const System *s)
+{
+    if (!s->nogame[0]) return;
+    Game *arr = realloc(g_games, (size_t)(g_ngames + 1) * sizeof *arr);
+    if (!arr) return;
+    memmove(arr + 1, arr, (size_t)g_ngames * sizeof *arr);
+    arr[0].file[0] = 0;
+    copy_str(arr[0].title, sizeof arr[0].title, s->nogame);
+    g_games = arr;
+    g_ngames++;
+}
+
 static int cmp_sys(const void *a, const void *b)
 {
     return strcasecmp(((const System *)a)->name, ((const System *)b)->name);
@@ -245,7 +263,7 @@ static void load_systems(void)
         System s;
         if (parse_sys(path, id, &s) != 0) continue;
         if (access(s.corepath, R_OK) != 0) continue;          /* no core: omitted, not greyed */
-        s.ngames = scan_games(&s, 1);
+        s.ngames = scan_games(&s, 1) + (s.nogame[0] ? 1 : 0);
         g_sys[g_nsys++] = s;
     }
     closedir(d);
@@ -316,7 +334,7 @@ static void run_game(Dev *d, const System *s, const Game *g)
         av[n++] = g_bin;
         if (s->video[0]) { av[n++] = "-v"; av[n++] = s->video; }
         av[n++] = s->corepath;
-        av[n++] = g->file;
+        av[n++] = g->file[0] ? g->file : "-";           /* "-" = no content (retro_main) */
         av[n] = NULL;
         execv(g_bin, (char *const *)av);
         _exit(127);
@@ -457,6 +475,7 @@ int main(int argc, char **argv)
             if (scr == SCR_SYSTEMS && i >= 0 && i < g_nsys) {
                 g_cur_sys = i;
                 scan_games(&g_sys[i], 0);
+                add_nogame(&g_sys[i]);
                 g_sys[i].ngames = g_ngames;
                 lv_reset(&lv_games);
                 scr = SCR_GAMES;
