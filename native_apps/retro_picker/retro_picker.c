@@ -44,6 +44,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -319,6 +320,39 @@ static void dev_close(Dev *d)
     fb_close(&d->fb);
 }
 
+/* retro_video.c's ov_init enables the overlay plane on fb1 and sets omapdss
+ * scale_mode to 1; ov_close undoes both, but only when retro exits through its
+ * own cleanup. After a crash the saved state (the plane as it was, the previous
+ * scale_mode) died with the child, so this undo cannot restore it. It does the
+ * closest thing: disable the plane as it now stands (query, clear enabled, set),
+ * and write scale_mode back to the stock 0 if the file exists. The plane memory
+ * and vscreen are not restored. Same ioctl numbers and struct as retro_video.c. */
+#define OMAP_IOW_P(nr, t)  _IOW('O', nr, t)
+struct ofb_plane_p { uint32_t pos_x, pos_y; uint8_t enabled, channel_out, mirror, mem_idx;
+    uint32_t out_width, out_height; uint32_t reserved2[12]; };
+#define OMAPFB_SETUP_PLANE_P  OMAP_IOW_P(52, struct ofb_plane_p)
+#define OMAPFB_QUERY_PLANE_P  OMAP_IOW_P(53, struct ofb_plane_p)
+#define SCALE_MODE_PATH "/sys/module/omapdss/parameters/scale_mode"
+
+static void retro_overlay_undo(const char *why)
+{
+    int fd1 = open("/dev/fb1", O_RDWR);
+    if (fd1 >= 0) {
+        struct ofb_plane_p pl;
+        memset(&pl, 0, sizeof pl);
+        if (ioctl(fd1, OMAPFB_QUERY_PLANE_P, &pl) == 0 && pl.enabled) {
+            pl.enabled = 0;
+            ioctl(fd1, OMAPFB_SETUP_PLANE_P, &pl);
+        }
+        close(fd1);
+    }
+    if (access(SCALE_MODE_PATH, F_OK) == 0) {
+        FILE *f = fopen(SCALE_MODE_PATH, "w");
+        if (f) { fputs("0", f); fclose(f); }
+    }
+    fprintf(stderr, "retro_picker: retro ended %s; overlay disabled, scale_mode reset to 0\n", why);
+}
+
 static void run_game(Dev *d, const System *s, const Game *g)
 {
     dev_close(d);
@@ -347,6 +381,12 @@ static void run_game(Dev *d, const System *s, const Game *g)
         do { r = waitpid(pid, &st, 0); } while (r == -1 && errno == EINTR);
         g_child = 0;
         ok = r > 0 && WIFEXITED(st) && WEXITSTATUS(st) == 0;
+        if (r > 0 && !ok) {
+            char why[32];
+            if (WIFSIGNALED(st)) snprintf(why, sizeof why, "after signal %d", WTERMSIG(st));
+            else snprintf(why, sizeof why, "with status %d", WEXITSTATUS(st));
+            retro_overlay_undo(why);
+        }
     }
     if (dev_open(d) < 0) { g_running = 0; return; }
     if (!ok) { snprintf(g_msg, sizeof g_msg, "RETRO ENDED WITH AN ERROR - SEE LAST.LOG"); g_msg_ms = get_time_ms(); }
