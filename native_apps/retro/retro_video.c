@@ -211,6 +211,28 @@ static unsigned ov_w, ov_h, ov_page; static float ov_aspect;
 static int ov_ready; static double ov_pan_t;
 static uint16_t ov_row[4096];
 
+/* The patched kernel's omapdss has scale_mode (0 stock, 1 sharp, 2 soft-sharp),
+ * read at the next overlay setup.  Sharp is clearly best for emulators (stock
+ * and soft ring on edges); set it for our run and put the old value back on
+ * exit, since other apps may rely on it.  The stock kernel lacks the file: skip. */
+#define SCALE_MODE "/sys/module/omapdss/parameters/scale_mode"
+static char scale_prev[16];
+static void scale_mode_set(int on)
+{
+    if (on) {
+        FILE *f = fopen(SCALE_MODE, "r");
+        if (!f) return;
+        if (!fgets(scale_prev, sizeof scale_prev, f)) scale_prev[0] = 0;
+        fclose(f);
+        scale_prev[strcspn(scale_prev, "\r\n")] = 0;
+    }
+    const char *v = on ? "1" : scale_prev;
+    if (!v[0]) return;
+    FILE *f = fopen(SCALE_MODE, "w");
+    if (f) { fputs(v, f); fclose(f); }
+    if (!on) scale_prev[0] = 0;
+}
+
 static int ov_init(void)
 {
     if (fb0_open()) return -1;
@@ -221,6 +243,7 @@ static int ov_init(void)
         perror("retro: overlay fb1"); return -1;
     }
     ov_saved = 1;
+    scale_mode_set(1);
     return 0;
 }
 
@@ -304,6 +327,7 @@ static void ov_close(void)
         ioctl(fd1, FBIOPUT_VSCREENINFO, &ov_orig);
         ioctl(fd1, OMAPFB_SETUP_PLANE, &ov_porig);
         ov_saved = 0;
+        scale_mode_set(0);
     }
     fb0_restore();
 }
