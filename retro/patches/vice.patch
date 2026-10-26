@@ -1,0 +1,73 @@
+diff --git a/vice/src/6510core.c b/vice/src/6510core.c
+index a109492e75..e3beb33b68 100644
+--- a/vice/src/6510core.c
++++ b/vice/src/6510core.c
+@@ -375,7 +375,7 @@
+ #endif
+ #endif
+ 
+-#if !defined(DRIVE_CPU)
++#if 0 && !defined(DRIVE_CPU)
+ #define CHECK_PROFILE_INTERRUPT(dest_addr, handler)                        \
+ do {                                                                   \
+         profile_int(dest_addr, handler, reg_sp + 1, CLK - profiling_clock_start); \
+diff --git a/vice/src/6510dtvcore.c b/vice/src/6510dtvcore.c
+index d00e6ba208..96a3e20bd2 100644
+--- a/vice/src/6510dtvcore.c
++++ b/vice/src/6510dtvcore.c
+@@ -255,7 +255,7 @@
+ 
+ #endif /* C64DTV */
+ 
+-#if !defined(DRIVE_CPU)
++#if 0 && !defined(DRIVE_CPU)
+ #define CHECK_PROFILE_INTERRUPT(dest_addr, handler)                        \
+     do {                                                                   \
+             profile_int(dest_addr, handler, reg_sp + 1, CLK - profiling_clock_start); \
+diff --git a/vice/src/autostart.c b/vice/src/autostart.c
+index 866b7b2198..8c758637c6 100644
+--- a/vice/src/autostart.c
++++ b/vice/src/autostart.c
+@@ -159,7 +159,7 @@ static int handle_drive_true_emulation_overridden;
+ static int handle_drive_true_emulation_by_machine;
+ 
+ /* Flag: autostart is initialized.  */
+-static int autostart_enabled = 0;
++int autostart_enabled = 0;
+ 
+ /* Flag: Autostart the file or just load it?  */
+ static unsigned int autostart_run_mode;
+diff --git a/vice/src/autostart.h b/vice/src/autostart.h
+index 9c0c583bed..da8a758f22 100644
+--- a/vice/src/autostart.h
++++ b/vice/src/autostart.h
+@@ -67,6 +67,7 @@ int autostart_snapshot(const char *file_name, const char *program_name);
+ int autostart_tapecart(const char *file_name, void *unused);
+ 
+ void autostart_disable(void);
++extern int autostart_enabled;
+ void autostart_advance(void);
+ 
+ /* int autostart_device(int unit); */
+diff --git a/vice/src/mainc64cpu.c b/vice/src/mainc64cpu.c
+index 99360d7683..812344f473 100644
+--- a/vice/src/mainc64cpu.c
++++ b/vice/src/mainc64cpu.c
+@@ -821,7 +821,7 @@ if (!retro_mainloop)
+             archdep_vice_exit(EXIT_FAILURE);
+         }
+ 
+-        autostart_advance();
++        if (autostart_enabled) autostart_advance();
+ #if 0
+         if (CLK > 246171754) {
+             debug.maincpu_traceflg = 1;
+@@ -919,7 +919,7 @@ void maincpu_mainloop(void)
+             archdep_vice_exit(EXIT_FAILURE);
+         }
+ 
+-        autostart_advance();
++        if (autostart_enabled) autostart_advance();
+ #if 0
+         if (CLK > 246171754) {
+             debug.maincpu_traceflg = 1;
