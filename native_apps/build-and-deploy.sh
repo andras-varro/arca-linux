@@ -370,7 +370,7 @@ $CC "${WARN[@]}" -O2 -I. -Icommon -Ijfvideo -Ijf_shared jfvideo/jfvideo.c common
 
 # retro: libretro frontend (retro/ sources).  Loads a core .so with dlopen, hence -ldl; the cores themselves are device data, not built here.
 step "37/38" "retro"
-$CC "${WARN[@]}" -O2 -I. -Icommon retro/retro_main.c retro/retro_video.c retro/retro_audio.c retro/retro_input.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/retro -lm "${AUDIO_LIBS[@]}" -ldl
+$CC "${WARN[@]}" -O2 -I. -Icommon retro/retro_main.c retro/retro_video.c retro/retro_audio.c retro/retro_input.c retro/retro_menu.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/retro -lm "${AUDIO_LIBS[@]}" -ldl
 
 # retro_picker: the launcher-side list of installed cores and their content; it execs /opt/games/retro.
 step "38/38" "retro_picker"

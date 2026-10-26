@@ -100,3 +100,8 @@ void aud_close(void)
     audio_out_close(&out);
     open_ok = 0;
 }
+
+void aud_pause(void)
+{
+    r_r = r_w; primed = 0; pos = 0; last_s = prev_s = 0;   /* silence until aud_push reaches the target again */
+}

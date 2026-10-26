@@ -2,7 +2,8 @@
  * Pads -> RETRO_DEVICE_JOYPAD/ANALOG ports 0..1 (SNES layout: Xbox A = B,
  * B = A, X = Y, Y = X).  Keyboard -> RETRO_DEVICE_KEYBOARD and the keyboard
  * callback; for a core that never asks for the keyboard it doubles as pad 0.
- * Quit: pad Select+Start, or F12 (Esc too, unless the core is a computer with a keyboard). */
+ * Pause menu: pad Select+Start, or F12 (Esc too, unless the core is a computer with a keyboard);
+ * while it is up, keys and pad edges become menu events (in_menu_ev) and the core sees nothing. */
 #include "retro.h"
 #include "input_scan.h"
 #include <errno.h>
@@ -18,7 +19,10 @@ static uint16_t joy[2]; static int16_t ana[2][2][2];
 static int amin[MAXN][8], amax[MAXN][8];
 static uint8_t key[512];                  /* by RETROK */
 static int kjoy;                          /* keyboard-as-pad bits */
-static bool quit_req;
+static bool menu_req, menu_on;
+static uint8_t mq[16]; static int mq_n;     /* menu event queue */
+static uint16_t pm[2];                      /* pad bits (incl. left stick) last poll, for edges */
+static void mq_push(int e) { if (mq_n < 16) mq[mq_n++] = (uint8_t)e; }
 static double last_scan;
 bool in_computer;
 void (*in_kbd_cb)(bool, unsigned, uint32_t, uint16_t);
@@ -156,9 +160,17 @@ void in_poll(void)
                     unsigned rk = kmap[x->code];
                     if (!rk) continue;
                     bool down = x->value != 0;
+                    /* F12 and (pad-style cores only: a computer core needs Esc as a key) Esc open the
+                     * menu and never reach the core; in the menu every key is a menu event */
+                    if (menu_on || rk == 293 || (rk == 27 && !in_computer)) {
+                        if (down && menu_on) {
+                            int ev = rk == 273 ? MEV_UP : rk == 274 ? MEV_DOWN : rk == 276 ? MEV_LEFT : rk == 275 ? MEV_RIGHT :
+                                     rk == 13 || rk == 271 ? MEV_OK : rk == 27 || rk == 293 ? MEV_BACK : 0;
+                            if (ev) mq_push(ev);
+                        } else if (down) menu_req = true;
+                        continue;
+                    }
                     key[rk] = down;
-                    if (rk == 293 && down) quit_req = true;       /* F12 */
-                    if (rk == 27 && down && !in_computer) quit_req = true;   /* Esc, pad-style cores only: a computer core needs it as a key */
                     if (!in_computer) kbd_joy(rk, down);
                     if (in_kbd_cb) in_kbd_cb(down, rk, down ? ch_of(rk) : 0, mods());
                 }
@@ -172,8 +184,39 @@ void in_poll(void)
             nn = input_scan_drop(nodes, nn, i); i--;
         }
     }
-    for (int p = 0; p < 2; p++)
-        if ((joy[p] & 0xC) == 0xC) quit_req = true;          /* Select+Start */
+    for (int p = 0; p < 2; p++) {
+        uint16_t m = joy[p];
+        if (ana[p][0][0] < -16000) m |= 1 << 6;
+        if (ana[p][0][0] > 16000) m |= 1 << 7;
+        if (ana[p][0][1] < -16000) m |= 1 << 4;
+        if (ana[p][0][1] > 16000) m |= 1 << 5;
+        uint16_t e = (uint16_t)(m & ~pm[p]);
+        if ((m & 0xC) == 0xC && (pm[p] & 0xC) != 0xC) {        /* Select+Start, on the press edge */
+            if (menu_on) mq_push(MEV_BACK); else menu_req = true;
+        } else if (menu_on) {
+            if (e & 0x10) mq_push(MEV_UP);
+            if (e & 0x20) mq_push(MEV_DOWN);
+            if (e & 0x40) mq_push(MEV_LEFT);
+            if (e & 0x80) mq_push(MEV_RIGHT);
+            if (e & 0x01) mq_push(MEV_OK);                      /* Xbox A */
+            if (e & 0x100) mq_push(MEV_BACK);                   /* Xbox B */
+        }
+        pm[p] = m;
+    }
+}
+
+void in_release(void)
+{
+    for (unsigned rk = 0; rk < 512; rk++)
+        if (key[rk]) { key[rk] = 0; if (in_kbd_cb) in_kbd_cb(false, rk, 0, 0); }
+    kjoy = 0; memset(joy, 0, sizeof joy); memset(ana, 0, sizeof ana);
+}
+
+void in_menu_mode(bool on) { menu_on = on; menu_req = false; mq_n = 0; }
+int in_menu_ev(void)
+{
+    if (!mq_n) return 0;
+    int e = mq[0]; memmove(mq, mq + 1, (size_t)--mq_n); return e;
 }
 
 int16_t in_state(unsigned port, unsigned dev, unsigned idx, unsigned id)
@@ -192,6 +235,6 @@ int16_t in_state(unsigned port, unsigned dev, unsigned idx, unsigned id)
     return 0;
 }
 
-bool in_quit(void) { return quit_req; }
+bool in_menu_req(void) { return menu_req; }
 
 void in_close(void) { while (nn > 0) nn = input_scan_drop(nodes, nn, nn - 1); }

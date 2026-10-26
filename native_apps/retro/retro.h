@@ -41,13 +41,25 @@ void aud_push(const int16_t *stereo, size_t frames);
 void aud_service(void);
 void aud_stats(unsigned *ring_underruns, unsigned *dev_starved, double *level_ms, double *ratio);
 void aud_close(void);
+void aud_pause(void);       /* drop the ring and fall silent until the next push refills it */
 
 /* input */
 void in_open(void);
 void in_poll(void);
 int16_t in_state(unsigned port, unsigned dev, unsigned idx, unsigned id);
-bool in_quit(void);
+bool in_menu_req(void);    /* pad Select+Start, F12 (Esc on pad-style cores) asked for the menu */
+void in_menu_mode(bool on); /* on: input goes to the menu queue, not the core */
+int  in_menu_ev(void);      /* next MEV_*, 0 when none */
+void in_release(void);      /* let go of every key and button the core holds */
 extern bool in_computer;   /* keyboard goes to the core's keyboard, not the joypad */
 extern void (*in_kbd_cb)(bool down, unsigned keycode, uint32_t ch, uint16_t mods);
 void in_close(void);
+enum { MEV_UP = 1, MEV_DOWN, MEV_LEFT, MEV_RIGHT, MEV_OK, MEV_BACK };
+
+/* menu (retro_menu.c) */
+struct menu_core { size_t (*size)(void); bool (*ser)(void *, size_t); bool (*unser)(const void *, size_t); };
+/* returns 1 to quit, 0 to resume */
+int menu_run(const VideoBackend *vb, const struct menu_core *c, const uint16_t *bg, unsigned w, unsigned h,
+             float aspect, const char *sys, const char *content, const volatile int *stop);
+void video_row565(uint16_t *d, const void *s, unsigned w, int fmt);
 #endif

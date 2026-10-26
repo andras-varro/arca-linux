@@ -333,3 +333,5 @@ static void ov_close(void)
 }
 
 const VideoBackend video_overlay = { "overlay", ov_init, ov_frame, ov_present, fb0_fill, ov_close };
+
+void video_row565(uint16_t *d, const void *s, unsigned w, int fmt) { row_to_565(d, s, w, fmt); }

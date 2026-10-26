@@ -5,7 +5,7 @@
  * Runs the core at its own fps against the 60.5 Hz panel and shows the newest
  * frame (video backends: retro_video.c), downmixes and resamples its audio to
  * the one audio_out stream (retro_audio.c), maps USB pads/keyboards
- * (retro_input.c).  Quit: pad Select+Start, keyboard F12.
+ * (retro_input.c).  Pause menu (save/load state, quit): pad Select+Start, keyboard F12.
  *
  * Env: RETRO_VIDEO=sw|overlay (the -v flag wins; default from
  * /home/root/data/retro/retro.cfg line "video=...", else sw), RETRO_SYS
@@ -50,6 +50,8 @@ static const VideoBackend *vb = &video_sw;
 static bool want_video, quit_core, vars_changed;
 static bool no_game_ok;                 /* the core declared SET_SUPPORT_NO_GAME (cmd 18) */
 static unsigned long st_vframes;
+static bool grab;                       /* video_cb keeps the next frame as RGB565 for the pause menu */
+static uint16_t *bgbuf; static unsigned bg_w, bg_h; static float bg_aspect;
 
 struct var { const char *key; char val[64]; };
 static struct var vars[512]; static int nvars;
@@ -149,6 +151,11 @@ static void video_cb(const void *data, unsigned w, unsigned h, size_t pitch)
 {
     st_vframes++;
     if (!data || !want_video) return;
+    if (grab && w <= 4096 && h <= 4096) {
+        free(bgbuf); bgbuf = malloc((size_t)w * h * 2);
+        if (bgbuf) { for (unsigned j = 0; j < h; j++) video_row565(bgbuf + (size_t)j * w, (const unsigned char *)data + j * pitch, w, pixfmt);
+                     bg_w = w; bg_h = h; bg_aspect = cur_aspect(w, h); }
+    }
     vb->frame(data, w, h, pitch, pixfmt, cur_aspect(w, h));
 }
 
@@ -195,6 +202,7 @@ int main(int argc, char **argv)
     void (*get_av)(struct avinfo *), (*unload)(void), (*set_cdev)(unsigned, unsigned);
     void *(*mem_data)(unsigned); size_t (*mem_size)(unsigned);
     bool (*load)(const struct gameinfo *);
+    size_t (*ser_size)(void); bool (*ser)(void *, size_t), (*unser)(const void *, size_t);
     SYM(set_env, "retro_set_environment"); SYM(set_video, "retro_set_video_refresh");
     SYM(set_as, "retro_set_audio_sample"); SYM(set_asb, "retro_set_audio_sample_batch");
     SYM(set_poll, "retro_set_input_poll"); SYM(set_state, "retro_set_input_state");
@@ -203,6 +211,7 @@ int main(int argc, char **argv)
     SYM(load, "retro_load_game"); SYM(unload, "retro_unload_game");
     SYM(mem_data, "retro_get_memory_data"); SYM(mem_size, "retro_get_memory_size");
     SYM(set_cdev, "retro_set_controller_port_device");
+    SYM(ser_size, "retro_serialize_size"); SYM(ser, "retro_serialize"); SYM(unser, "retro_unserialize");
 
     signal(SIGINT, on_sig); signal(SIGTERM, on_sig); signal(SIGHUP, on_sig);
     if (vb->init()) { fprintf(stderr, "retro: video backend %s failed\n", vb->name); vb->close(); return 1; }
@@ -251,7 +260,26 @@ int main(int argc, char **argv)
     unsigned st_runs = 0, st_pres = 0, st_late = 0;
     long total = 0;
     double c0, c1, cp0 = 0, pp0 = 0;
-    while (!got_sig && !quit_core && !in_quit()) {
+    while (!got_sig && !quit_core) {
+        if (in_menu_req()) {
+            /* Pause menu: let go of everything the core holds, run one more frame to have a picture
+             * of the moment (the opening key never reaches the core), then stop the core and the audio. */
+            in_release(); aud_service();
+            if (ftcb.cb) ftcb.cb(ftcb.ref ? ftcb.ref : (int64_t)(1e6 / fps));
+            grab = true; want_video = true; run(); grab = false;
+            aud_pause();
+            struct menu_core mc = { ser_size, ser, unser };
+            const char *sn = getenv("RETRO_SYSID");
+            if (bgbuf) {
+                fprintf(stderr, "retro: menu open\n");
+                if (menu_run(vb, &mc, bgbuf, bg_w, bg_h, bg_aspect, sn && *sn ? sn : corename, content,
+                             (const volatile int *)&got_sig)) quit_core = true;
+                fprintf(stderr, "retro: menu closed%s\n", quit_core ? " (quit)" : "");
+            } else in_menu_mode(false);
+            in_release(); aud_pause();
+            next = now_s(); st_t = next;               /* no catch-up burst after the pause */
+            continue;
+        }
         double t = now_s();
         if (t < next) {
             aud_service();

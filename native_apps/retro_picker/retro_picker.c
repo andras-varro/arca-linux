@@ -363,6 +363,7 @@ static void run_game(Dev *d, const System *s, const Game *g)
         int fd = open(logp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd >= 0) { dup2(fd, 1); dup2(fd, 2); close(fd); }
         if (s->opts[0]) setenv("RETRO_OPTS", s->opts, 1);
+        setenv("RETRO_SYSID", s->id, 1);                /* state files are kept per system */
         const char *av[6];
         int n = 0;
         av[n++] = g_bin;
