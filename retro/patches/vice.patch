@@ -71,3 +71,16 @@ index 99360d7683..812344f473 100644
  #if 0
          if (CLK > 246171754) {
              debug.maincpu_traceflg = 1;
+diff --git a/Makefile b/Makefile
+index 108edba0dd..51d597c606 100644
+--- a/Makefile
++++ b/Makefile
+@@ -411,7 +411,7 @@ endif
+ ifeq ($(DEBUG), 1)
+    COMMONFLAGS += -O0 -g
+ else
+-   COMMONFLAGS += -O3 -DNDEBUG -Wno-format -Wno-format-security
++   COMMONFLAGS += -O2 -DNDEBUG -Wno-format -Wno-format-security
+    LDFLAGS     += -s
+ endif
+ 
