@@ -10,10 +10,11 @@
 # writes content/ or roms/, and it deletes nothing except symlinks in cores/.
 #
 # Usage:
-#   retro/build-and-deploy.sh <ip> [--no-build] [core ...]
+#   retro/build-and-deploy.sh <ip> [--no-build] [--no-pgo] [core ...]
 #   retro/build-and-deploy.sh --help
 #     <ip>          unit IPv4 address; deploys as root over SSH key auth
 #     --no-build    skip the build; deploy what is already in the out dir
+#     --no-pgo      build vice plain -O2 even if a profile exists (see pgo-vice.sh)
 #     core ...      build only these (default: all). Ids: ep128emu-core fuse fceumm vice mame2003-plus
 #
 # Runs in WSL, because the cores are cross-built there:
@@ -42,12 +43,13 @@ REMOTE_DIR=/home/root/data/retro
 
 usage() {
     cat <<'EOF'
-Usage: retro/build-and-deploy.sh <ip> [--no-build] [core ...]
+Usage: retro/build-and-deploy.sh <ip> [--no-build] [--no-pgo] [core ...]
        retro/build-and-deploy.sh --help
 
   <ip>          Unit IPv4 address (deploys as root over SSH key auth).
   --no-build    Skip the build; deploy what is already in the out dir
                 (default ~/retro-build/out, or $RETRO_OUT).
+  --no-pgo      Build vice plain -O2 even if a PGO profile exists (retro/pgo-vice.sh).
   core ...      Build only these cores (default: all). Ids: ep128emu-core fuse
                 fceumm vice mame2003-plus. Not allowed with --no-build.
 
@@ -73,9 +75,11 @@ IP="$1"; shift
 
 NO_BUILD=0
 CORES=()
+BUILD_OPTS=()
 for a in "$@"; do
     case "$a" in
         --no-build) NO_BUILD=1 ;;
+        --no-pgo) BUILD_OPTS+=(--no-pgo) ;;
         -h|--help) usage; exit 0 ;;
         -*) usage >&2; die "unknown option: $a" ;;
         *) CORES+=("$a") ;;
@@ -90,7 +94,7 @@ DEVICE="root@$IP"
 # ── 1. build ────────────────────────────────────────────────────────────────
 if [ "$NO_BUILD" -eq 0 ]; then
     ts "building ${CORES[*]:-all cores} into $OUT"
-    bash "$SCRIPT_DIR/build-cores.sh" --out "$OUT" "${CORES[@]}" \
+    bash "$SCRIPT_DIR/build-cores.sh" --out "$OUT" "${BUILD_OPTS[@]}" "${CORES[@]}" \
         || die "build-cores.sh failed; nothing deployed"
 else
     ts "--no-build: deploying what is in $OUT"

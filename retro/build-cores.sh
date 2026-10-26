@@ -9,10 +9,14 @@
 # Runs inside WSL. Never builds in ~/retro-src (other workers' clones).
 #
 # Usage:
-#   retro/build-cores.sh [--out DIR] [--work DIR] [core ...]
+#   retro/build-cores.sh [--out DIR] [--work DIR] [--pgo-gen|--no-pgo] [core ...]
 #     --out DIR   output directory for the stripped .so files (default ~/retro-build/out)
 #     --work DIR  clone/build area, one subdirectory per core (default ~/retro-build)
 #     core ...    any of: ep128emu-core fuse fceumm vice mame2003-plus (default: all)
+#     --pgo-gen   vice only: instrumented build (-fprofile-generate), used by retro/pgo-vice.sh
+#     --no-pgo    vice: ignore the profile, build plain -O2
+#   A vice build is profile-guided (-fprofile-use) when $RETRO_PGO_DIR (default
+#   ~/retro-build/pgo/vice, written by retro/pgo-vice.sh) holds .gcda files, else plain -O2.
 #
 # Pins are the HEAD commits of the hand-made clones in ~/retro-src, each on
 # its upstream libretro branch.
@@ -63,7 +67,7 @@ AR="$TC-ar"
 STRIP="$TC-strip"
 
 usage() {
-    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n "2,22p" "$0" | sed 's/^# \{0,1\}//'
 }
 
 die() {
@@ -73,11 +77,15 @@ die() {
 
 OUT="$HOME/retro-build/out"
 WORK="$HOME/retro-build"
+PGO_MODE=auto   # auto: use the profile if there is one; gen: instrument; off: never
+PGO_DIR="${RETRO_PGO_DIR:-$HOME/retro-build/pgo/vice}"
 SEL=()
 while [ $# -gt 0 ]; do
     case $1 in
         --out)  OUT=${2:?--out needs a directory}; shift 2 ;;
         --work) WORK=${2:?--work needs a directory}; shift 2 ;;
+        --pgo-gen) PGO_MODE=gen; shift ;;
+        --no-pgo)  PGO_MODE=off; shift ;;
         -h|--help) usage; exit 0 ;;
         -*) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
         *)
@@ -89,6 +97,7 @@ if [ ${#SEL[@]} -eq 0 ]; then
     SEL=("${CORES[@]}")
 fi
 
+if [ "$PGO_MODE" = gen ] && { [ ${#SEL[@]} -ne 1 ] || [ "${SEL[0]}" != vice ]; }; then die "--pgo-gen needs exactly the core: vice"; fi
 command -v "$TC-gcc" >/dev/null || die "$TC-gcc not found (run inside WSL with the ARM toolchain)"
 command -v git >/dev/null || die "git not found"
 
@@ -102,7 +111,6 @@ case "$WORK/" in "$HOME/retro-src"/*) die "--work must not be ~/retro-src (other
 
 mkdir -p "$OUT" "$WORK"
 
-MAKE_VARS=("platform=unix" "CC=$CC" "CXX=$CXX" "AR=$AR")
 JOBS=$(nproc)
 
 build_core() {
@@ -140,8 +148,31 @@ build_core() {
         echo "   no patch (retro/patches/$core.patch absent)"
     fi
 
+    # Profile-guided vice. The flags ride on CC/CXX (compile and link both see them; gen needs
+    # -fprofile-generate at link time or dlopen fails on __gcov_indirect_call). The profile is a
+    # tree of .gcda files relative to the source root; gcc finds them next to the objects, so
+    # they are copied in after the clean + patch, and the tree must sit at the path the
+    # instrumented build used (--work). A source that no longer matches the profile is a gcc error.
+    local cc=$CC cxx=$CXX
+    if [ "$core" = vice ]; then
+        local have=0
+        if [ -d "$PGO_DIR" ] && [ -n "$(find "$PGO_DIR" -name '*.gcda' -print -quit)" ]; then have=1; fi
+        if [ "$PGO_MODE" = gen ]; then
+            cc="$CC -fprofile-generate"; cxx="$CXX -fprofile-generate"
+            echo "   PGO: instrumented build (-fprofile-generate)"
+        elif [ "$PGO_MODE" = auto ] && [ "$have" = 1 ]; then
+            cp -R "$PGO_DIR"/. "$src"/
+            cc="$CC -fprofile-use -fprofile-correction -Wno-missing-profile"
+            cxx="$CXX -fprofile-use -fprofile-correction -Wno-missing-profile"
+            echo "   PGO: -fprofile-use, profile $PGO_DIR"
+        else
+            echo "   PGO: none (plain -O2)"
+        fi
+    fi
+    local make_vars=("platform=unix" "CC=$cc" "CXX=$cxx" "AR=$AR")
+
     # shellcheck disable=SC2086  # $extra is a space-separated list of VAR=value words
-    (cd "$src" && make -j"$JOBS" "${MAKE_VARS[@]}" $extra) >"$blog" 2>&1 \
+    (cd "$src" && make -j"$JOBS" "${make_vars[@]}" $extra) >"$blog" 2>&1 \
         || die "$core: make failed, see $blog"
     [ -f "$src/$so" ] || die "$core: $so not produced, see $blog"
 

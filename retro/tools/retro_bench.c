@@ -6,7 +6,9 @@
  *   arm-linux-gnueabi-gcc -march=armv7-a -mtune=cortex-a8 -mfpu=neon \
  *     -mfloat-abi=softfp -O2 retro/tools/retro_bench.c -o retro_bench -ldl
  *
- * Env: RETRO_SYS = system/save directory (default "."). Runs N frames with no
+ * Env: RETRO_SYS = system/save directory (default "."). RETRO_STATE=<file>: a
+ * retro_serialize image (a frontend ".sN" state file) loaded right after the
+ * warm-up frames, before the timed ones. Runs N frames with no
  * input, prints timing and audio/video statistics, optionally dumps the last
  * frame as a P6 PPM. Not a real frontend: no video output, audio or input.
  * RETRO_PROF=<file>: sample the PC of whichever thread is on the CPU (SIGPROF,
@@ -273,6 +275,7 @@ int main(int argc, char **argv)
     /* Cores may defer their init to the first retro_run (VICE: ~20 s on the
      * device), so the first RETRO_WARMUP frames (default 1) are timed apart
      * and the speed is the steady state over the rest. */
+    int (*unser_)(const void *, size_t) = dlsym(h, "retro_unserialize");
     int warm = getenv("RETRO_WARMUP") ? atoi(getenv("RETRO_WARMUP")) : 1;
     if (warm < 0 || warm >= nframes) warm = 0;
     struct timespec t0, tw, t1; clock_gettime(CLOCK_MONOTONIC, &t0); tw = t0;
@@ -280,6 +283,13 @@ int main(int argc, char **argv)
      * is told, and by nothing if never told: report the nominal frame period. */
     for (int i = 0; i < nframes; i++) {
         if (i == warm) {
+            if (getenv("RETRO_STATE")) {
+                static char sb[1 << 20];
+                FILE *sf = fopen(getenv("RETRO_STATE"), "rb");
+                if (!sf || !unser_) { fprintf(stderr, "RETRO_STATE: cannot load\n"); return 1; }
+                size_t sn = fread(sb, 1, sizeof sb, sf); fclose(sf);
+                printf("unser %zu -> %d\n", sn, unser_(sb, sn));
+            }
             clock_gettime(CLOCK_MONOTONIC, &tw);
             if (getenv("RETRO_PROF")) prof_start();
         }

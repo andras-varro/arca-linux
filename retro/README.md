@@ -130,6 +130,11 @@ Same toolchain and flags as ScummVM ([building](../SYSTEM_ANALYSIS.md#6-building
   [why](../SYSTEM_ANALYSIS.md#61-cortex-a8-has-no-hardware-integer-divide)).
 - **Blind spot:** code generated at run time by a dynarec is invisible to that gate. Pandora-era dynarecs target
   ARMv7 without idiv (**inferred**), so the risk is low but not zero.
+- **Profile-guided VICE:** `retro/pgo-vice.sh <ip> --pair CONTENT:STATE [--pair ...] [--frames 3000]` (WSL) builds an
+  instrumented core, trains it on the unit with `retro_bench` (both paths of a pair are on the unit, e.g. a game and its
+  saved `states/c64/<game>.s1`; nothing copyrighted reaches the host), stores the `.gcda` profile in
+  `~/retro-build/pgo/vice` (`$RETRO_PGO_DIR`) and rebuilds vice with it. It refuses to run if `retro` is running on the
+  unit. Afterwards `retro/build-and-deploy.sh <ip>` uses the profile by itself; `--no-pgo` forces plain `-O2`.
 - **Loading:** `dlopen` is used nowhere in the tree yet; the device has `/lib/libdl.so.2` and `retro_bench` loads
   cores with it (**measured**, section 9). The fallback, one statically linked `arca_retro_<core>` each, is not needed.
 
