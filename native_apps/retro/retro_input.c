@@ -65,9 +65,13 @@ static uint32_t ch_of(unsigned rk)
 
 static void scan(void)
 {
-    int cap[INPUT_KIND_COUNT] = { 0, 4, 0, 2 };
+    /* A BT keyboard with a pointer interface (the 5.1 combos) is one node classified MOUSE: allow
+     * mice through the scan, then keep only those that also carry the letter keys. */
+    int cap[INPUT_KIND_COUNT] = { 0, 4, 2, 2 };
     int old = nn;
     nn = input_scan(nodes, nn, MAXN, cap);
+    for (int i = old; i < nn; i++)
+        if (nodes[i].kind == INPUT_KIND_MOUSE && !nodes[i].keys) { nn = input_scan_drop(nodes, nn, i); i--; }
     for (int i = old; i < nn; i++) {
         pad_of[i] = -1;
         if (nodes[i].kind == INPUT_KIND_PAD) {
