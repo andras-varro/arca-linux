@@ -1,11 +1,13 @@
 #!/bin/bash
-# build-and-deploy.sh — deploy the retro station's libretro cores and system
-# definitions to a unit: /home/root/data/retro/cores and /home/root/data/retro/systems.
+# build-and-deploy.sh — deploy the retro station's libretro cores, system
+# definitions and libretro system-dir config to a unit: /home/root/data/retro/cores,
+# /home/root/data/retro/systems (the *.sys files) and /home/root/data/retro/system (the
+# files under retro/system/, relative paths kept).
 #
 # ⚠️ Cores and content never go into an image or a release. The VICE build
 # (vice_x64_libretro.so) embeds Commodore ROMs, so it is device-only, for test use.
-# This script writes only /home/root/data/retro/{cores,systems} on the unit. It never
-# writes content/ or roms/.
+# This script writes only /home/root/data/retro/{cores,systems,system} on the unit. It never
+# writes content/ or roms/, and it deletes nothing except symlinks in cores/.
 #
 # Usage:
 #   retro/build-and-deploy.sh <ip> [--no-build] [core ...]
@@ -20,8 +22,9 @@
 # Steps: build (retro/build-cores.sh, unless --no-build) -> check that every core=
 # named in retro/systems/*.sys exists in the out dir -> SSH gate -> replace the test
 # symlinks in cores/ (they point into retro-bench; only the links are removed, never
-# their targets) -> copy every *_libretro.so from the out dir and every *.sys ->
-# compare md5 on the unit against the host.
+# their targets) -> copy every *_libretro.so from the out dir, every *.sys, and every
+# file under retro/system/ (mkdir -p for its directories) -> compare md5 on the unit
+# against the host.
 #
 # Out dir: $RETRO_OUT, default $HOME/retro-build/out (build-cores.sh's default). A
 # core-restricted build leaves the other cores in the out dir, and they are deployed too.
@@ -49,8 +52,9 @@ Usage: retro/build-and-deploy.sh <ip> [--no-build] [core ...]
                 fceumm vice mame2003-plus. Not allowed with --no-build.
 
 Cores and content never go into an image or a release. The VICE build embeds
-Commodore ROMs: device-only, for test use. Writes only /home/root/data/retro/cores
-and /home/root/data/retro/systems on the unit; never content/ or roms/.
+Commodore ROMs: device-only, for test use. Writes only /home/root/data/retro/cores,
+/home/root/data/retro/systems and /home/root/data/retro/system on the unit; never content/
+or roms/.
 
 Run it in WSL: wsl.exe -e bash -lc "cd /mnt/c/work/roomwizard && retro/build-and-deploy.sh <ip>"
 EOF
@@ -98,6 +102,12 @@ SOS=("$OUT"/*_libretro.so)
 SYSS=("$SCRIPT_DIR"/systems/*.sys)
 [ "${#SOS[@]}" -gt 0 ] || die "no *_libretro.so in $OUT"
 [ "${#SYSS[@]}" -gt 0 ] || die "no *.sys in $SCRIPT_DIR/systems"
+# system/ is the libretro system dir: every regular file under it, relative paths kept
+SYS_DIR="$SCRIPT_DIR/system"
+CFGS=()
+if [ -d "$SYS_DIR" ]; then
+    while IFS= read -r -d '' f; do CFGS+=("$f"); done < <(find "$SYS_DIR" -type f -print0 | sort -z)
+fi
 for sys in "${SYSS[@]}"; do
     core=$(sed -n 's/^core=//p' "$sys" | tr -d '\r')
     [ -n "$core" ] || die "$(basename "$sys") has no core= line"
@@ -114,9 +124,21 @@ ts "removing symlinks in $REMOTE_DIR/cores (test copies in retro-bench are left 
 ssh "$DEVICE" "mkdir -p $REMOTE_DIR/cores $REMOTE_DIR/systems; for f in $REMOTE_DIR/cores/*; do if [ -L \"\$f\" ]; then rm -f \"\$f\"; fi; done" \
     || die "could not prepare $REMOTE_DIR on $DEVICE"
 
-ts "copying ${#SOS[@]} core(s) and ${#SYSS[@]} system file(s)"
+ts "copying ${#SOS[@]} core(s), ${#SYSS[@]} system file(s) and ${#CFGS[@]} system-dir file(s)"
 scp -q "${SOS[@]}" "$DEVICE:$REMOTE_DIR/cores/" || die "scp of cores failed"
 scp -q "${SYSS[@]}" "$DEVICE:$REMOTE_DIR/systems/" || die "scp of systems failed"
+if [ "${#CFGS[@]}" -gt 0 ]; then
+    cfg_dirs=()
+    for f in "${CFGS[@]}"; do
+        cfg_dirs+=("$REMOTE_DIR/system/$(dirname "${f#"$SYS_DIR"/}")")
+    done
+    # shellcheck disable=SC2029  # the quoted dir list is ours, expanded on purpose
+    ssh "$DEVICE" "mkdir -p $(printf '%q ' "${cfg_dirs[@]}")" || die "could not create system dirs on $DEVICE"
+    for f in "${CFGS[@]}"; do
+        rel="${f#"$SYS_DIR"/}"
+        scp -q "$f" "$DEVICE:$REMOTE_DIR/system/$rel" || die "scp of $rel failed"
+    done
+fi
 
 # ── 5. verify: md5 on the unit against the host ─────────────────────────────
 want=$(cd "$OUT" && md5sum -- *_libretro.so | sort -k2)
@@ -134,4 +156,12 @@ got_sys=$(ssh "$DEVICE" "cd $REMOTE_DIR/systems && md5sum -- *.sys" | sort -k2) 
     || die "could not read md5 of systems on $DEVICE"
 [ "$want_sys" = "$got_sys" ] || die "md5 mismatch for systems on $DEVICE"
 
-ts "deployed and verified: $(echo "$want" | wc -l) core(s), $(echo "$want_sys" | wc -l) system file(s) on $DEVICE"
+if [ "${#CFGS[@]}" -gt 0 ]; then
+    want_cfg=$(cd "$SYS_DIR" && find . -type f | sort | xargs md5sum)
+    # shellcheck disable=SC2029
+    got_cfg=$(ssh "$DEVICE" "cd $REMOTE_DIR/system && find . -type f | sort | xargs md5sum") \
+        || die "could not read md5 of system dir on $DEVICE"
+    [ "$want_cfg" = "$got_cfg" ] || die "md5 mismatch for system dir on $DEVICE"
+fi
+
+ts "deployed and verified: $(echo "$want" | wc -l) core(s), $(echo "$want_sys" | wc -l) system file(s), ${#CFGS[@]} system-dir file(s) on $DEVICE"
