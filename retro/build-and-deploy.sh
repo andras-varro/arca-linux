@@ -157,9 +157,12 @@ got_sys=$(ssh "$DEVICE" "cd $REMOTE_DIR/systems && md5sum -- *.sys" | sort -k2) 
 [ "$want_sys" = "$got_sys" ] || die "md5 mismatch for systems on $DEVICE"
 
 if [ "${#CFGS[@]}" -gt 0 ]; then
-    want_cfg=$(cd "$SYS_DIR" && find . -type f | sort | xargs md5sum)
+    # Only the files we ship: cores keep their own files (keymaps, hiscore.dat) in the same dir.
+    cfg_list=$(cd "$SYS_DIR" && find . -type f | sort | tr '\n' ' ')
+    # shellcheck disable=SC2086
+    want_cfg=$(cd "$SYS_DIR" && md5sum -- $cfg_list)
     # shellcheck disable=SC2029
-    got_cfg=$(ssh "$DEVICE" "cd $REMOTE_DIR/system && find . -type f | sort | xargs md5sum") \
+    got_cfg=$(ssh "$DEVICE" "cd $REMOTE_DIR/system && md5sum -- $cfg_list") \
         || die "could not read md5 of system dir on $DEVICE"
     [ "$want_cfg" = "$got_cfg" ] || die "md5 mismatch for system dir on $DEVICE"
 fi
