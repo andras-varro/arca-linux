@@ -300,7 +300,7 @@ pause menu (Left/Right or OK: eject, select, insert). The grouping is data, not 
 Amiga, PS1). Measured: `vice_x64_libretro` loads `.m3u` natively and reports `Disk 1/3`.
 Playlists name copyrighted content, so they live on the device only.
 
-**Per-game core options.** `<data>/options/games/<content file name>.opt` (for example
+**Per-game core options.** `<content path>.opt`, beside the content in `roms/<system>/` (for example
 `P47 Thunderbolt (...).d64.opt`, `Last Ninja 2.m3u.opt`): `key=value` lines, `#` comments; layered LAST, so it wins
 over `<core>.opt`, the `.sys` `opts=` and the built-in defaults. Device data, never in the repo.
 Known: `vice_joyport=1` (Ghostbusters wants port 1), `vice_drive_true_emulation=enabled` (P47, Last Ninja 2).

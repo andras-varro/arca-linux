@@ -13,7 +13,7 @@
  * threshold 0 debug..3 error, default 2), RETRO_FRAMES=N (exit after N frames).
  * Core options: legacy SET_VARIABLES defaults, then built-in defaults for the
  * slow cores below, then <opts dir>/<core>.opt (key=value lines), then RETRO_OPTS, then
- * <opts dir>/games/<content file name>.opt (per game, key=value lines, wins over all).
+ * <content path>.opt (per game, beside the content, key=value lines, wins over all).
  * One stats line per second on stderr. */
 #define _GNU_SOURCE
 #include "retro.h"
@@ -90,10 +90,9 @@ static void load_overrides(const char *content)
         if (n < sizeof kv) { memcpy(kv, e, n); kv[n] = 0; add_ovr(kv); }
         e += n; if (*e) e++;
     }
-    /* per game, last so it wins over the system's opts=: <opts dir>/games/<content file name>.opt */
+    /* per game, last so it wins over the system opts=: <content path>.opt, beside the content */
     if (strcmp(content, "-")) {
-        const char *cb = strrchr(content, '/'); cb = cb ? cb + 1 : content;
-        snprintf(p, sizeof p, "%s/games/%s.opt", od, cb);
+        snprintf(p, sizeof p, "%s.opt", content);
         opt_file(p);
     }
 }
