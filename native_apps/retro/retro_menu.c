@@ -1,4 +1,4 @@
-/* retro pause menu: Resume / Save state / Load state / Slot / Quit.
+/* retro pause menu: Resume / Save state / Load state / Slot / [Disk n/m] / Quit.
  * Drawn INTO a dimmed copy of the core's last frame at core resolution (6x9 font from
  * common/font.c) and sent through the active video backend, so overlay and sw show it
  * unchanged and no plane, scale_mode or page state has to be touched.  The core is not
@@ -16,7 +16,7 @@
 
 #define STATES "/home/root/data/retro/states"
 #define NSLOT 3
-#define NITEM 5
+enum { I_RESUME, I_SAVE, I_LOAD, I_SLOT, I_DISK, I_QUIT, NITEM_MAX };
 
 static uint16_t *img;
 static unsigned iw, ih;
@@ -113,28 +113,40 @@ static int do_load(const struct menu_core *c, const char *path, char *msg, size_
     return ok;
 }
 
+static void disk_step(const struct menu_core *c, unsigned n, int dir, char *msg, size_t mn)
+{
+    unsigned to = (c->disk_cur() + n + (unsigned)dir) % n;
+    if (c->disk_set(to)) snprintf(msg, mn, "Inserted disk %u of %u", to + 1, n);
+    else snprintf(msg, mn, "Disk change refused");
+}
+
 int menu_run(const VideoBackend *vb, const struct menu_core *c, const uint16_t *bg, unsigned w, unsigned h,
              float aspect, const char *sys, const char *content, const volatile int *stop)
 {
     free(img); img = malloc((size_t)w * h * 2); iw = w; ih = h;
     if (!img) return 0;
     int sc = w >= 640 ? 2 : 1, sel = 0, slot = 1, dirty = 1, ret = 0, done = 0;
+    int item[NITEM_MAX], nitem = 0;      /* Disk only for a core that has more than one image */
+    unsigned ndisk = c->disk_n ? c->disk_n() : 0;
+    for (int k = 0; k < NITEM_MAX; k++) if (k != I_DISK || ndisk > 1) item[nitem++] = k;
     char msg[96] = "";
     in_menu_mode(true);
     while (!done && !*stop) {
         if (dirty) {
             for (size_t i = 0; i < (size_t)w * h; i++) img[i] = (uint16_t)((bg[i] >> 1) & 0x7BEF);
-            int lh = 12 * sc, bw = 30 * FONT_ADVANCE * sc + 8 * sc, bh = (NITEM + 4) * lh + 8 * sc;
+            int lh = 12 * sc, bw = 30 * FONT_ADVANCE * sc + 8 * sc, bh = (nitem + 4) * lh + 8 * sc;
             int bx = ((int)w - bw) / 2, by = ((int)h - bh) / 2;
             box(bx, by, bw, bh, 0x0010); box(bx, by, bw, sc, 0xFFE0); box(bx, by + bh - sc, bw, sc, 0xFFE0);
             text(bx + 4 * sc, by + 4 * sc, "PAUSED", 0xFFE0, sc);
-            static const char *name[NITEM] = { "Resume", "Save state", "Load state", "", "Quit" };
-            for (int i = 0; i < NITEM; i++) {
+            static const char *name[NITEM_MAX] = { "Resume", "Save state", "Load state", "", "", "Quit" };
+            for (int i = 0; i < nitem; i++) {
                 char line[64], p[420], when[24];
-                if (i == 3) {
+                if (item[i] == I_SLOT) {
                     slot_path(p, sizeof p, sys, content, slot); slot_when(p, when, sizeof when);
                     snprintf(line, sizeof line, "< Slot %d: %s >", slot, when);
-                } else snprintf(line, sizeof line, "%s", name[i]);
+                } else if (item[i] == I_DISK) {
+                    snprintf(line, sizeof line, "< Disk %u/%u >", c->disk_cur() + 1, ndisk);
+                } else snprintf(line, sizeof line, "%s", name[item[i]]);
                 text(bx + 4 * sc, by + 4 * sc + (i + 2) * lh, i == sel ? "\x10" : " ", 0xFFFF, sc);
                 text(bx + 4 * sc + 2 * FONT_ADVANCE * sc, by + 4 * sc + (i + 2) * lh, line, i == sel ? 0xFFFF : 0xAD55, sc);
             }
@@ -147,16 +159,18 @@ int menu_run(const VideoBackend *vb, const struct menu_core *c, const uint16_t *
         if (!ev) { usleep(20000); continue; }
         char p[420]; slot_path(p, sizeof p, sys, content, slot);
         dirty = 1;
-        if (ev == MEV_UP) sel = (sel + NITEM - 1) % NITEM;
-        else if (ev == MEV_DOWN) sel = (sel + 1) % NITEM;
-        else if (ev == MEV_LEFT && sel == 3) slot = (slot + NSLOT - 2) % NSLOT + 1;
-        else if (ev == MEV_RIGHT && sel == 3) slot = slot % NSLOT + 1;
+        if (ev == MEV_UP) sel = (sel + nitem - 1) % nitem;
+        else if (ev == MEV_DOWN) sel = (sel + 1) % nitem;
+        else if (ev == MEV_LEFT && item[sel] == I_SLOT) slot = (slot + NSLOT - 2) % NSLOT + 1;
+        else if (ev == MEV_RIGHT && item[sel] == I_SLOT) slot = slot % NSLOT + 1;
+        else if ((ev == MEV_LEFT || ev == MEV_RIGHT) && item[sel] == I_DISK) disk_step(c, ndisk, ev == MEV_RIGHT ? 1 : -1, msg, sizeof msg);
         else if (ev == MEV_BACK) done = 1;
         else if (ev == MEV_OK) {
-            if (sel == 0) done = 1;
-            else if (sel == 1) do_save(c, p, msg, sizeof msg, slot);
-            else if (sel == 2) do_load(c, p, msg, sizeof msg, slot);
-            else if (sel == 3) slot = slot % NSLOT + 1;
+            if (item[sel] == I_RESUME) done = 1;
+            else if (item[sel] == I_SAVE) do_save(c, p, msg, sizeof msg, slot);
+            else if (item[sel] == I_LOAD) do_load(c, p, msg, sizeof msg, slot);
+            else if (item[sel] == I_SLOT) slot = slot % NSLOT + 1;
+            else if (item[sel] == I_DISK) disk_step(c, ndisk, 1, msg, sizeof msg);
             else { ret = 1; done = 1; }
         } else dirty = 0;
     }

@@ -12,7 +12,8 @@
  * (system dir), RETRO_SAVES, RETRO_OPTS="k=v,k=v", RETRO_LOGLEVEL (core log
  * threshold 0 debug..3 error, default 2), RETRO_FRAMES=N (exit after N frames).
  * Core options: legacy SET_VARIABLES defaults, then built-in defaults for the
- * slow cores below, then <opts dir>/<core>.opt (key=value lines), then RETRO_OPTS.
+ * slow cores below, then <opts dir>/<core>.opt (key=value lines), then RETRO_OPTS, then
+ * <opts dir>/games/<content file name>.opt (per game, key=value lines, wins over all).
  * One stats line per second on stderr. */
 #define _GNU_SOURCE
 #include "retro.h"
@@ -63,25 +64,37 @@ static const char *builtin_defaults[] = {
 
 static void add_ovr(const char *kv) { if (novr < 256 && strchr(kv, '=')) ovr[novr++] = strdup(kv); }
 
-static void load_overrides(void)
+static void opt_file(const char *p)
+{
+    char line[256];
+    FILE *f = fopen(p, "r");
+    if (!f) return;
+    while (fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        char *s = line; while (*s == ' ' || *s == '\t') s++;
+        if (*s && *s != '#') add_ovr(s);
+    }
+    fclose(f); fprintf(stderr, "retro: options from %s\n", p);
+}
+
+static void load_overrides(const char *content)
 {
     for (int i = 0; builtin_defaults[i]; i++) add_ovr(builtin_defaults[i]);
-    char p[256], line[256];
-    snprintf(p, sizeof p, "%s/%s.opt", getenv("RETRO_OPTDIR") ? getenv("RETRO_OPTDIR") : DATA "/options", corename);
-    FILE *f = fopen(p, "r");
-    if (f) {
-        while (fgets(line, sizeof line, f)) {
-            line[strcspn(line, "\r\n")] = 0;
-            char *s = line; while (*s == ' ' || *s == '\t') s++;
-            if (*s && *s != '#') add_ovr(s);
-        }
-        fclose(f); fprintf(stderr, "retro: options from %s\n", p);
-    }
+    char p[512];
+    const char *od = getenv("RETRO_OPTDIR") ? getenv("RETRO_OPTDIR") : DATA "/options";
+    snprintf(p, sizeof p, "%s/%s.opt", od, corename);
+    opt_file(p);
     const char *e = getenv("RETRO_OPTS");
     while (e && *e) {
         size_t n = strcspn(e, ","); char kv[160];
         if (n < sizeof kv) { memcpy(kv, e, n); kv[n] = 0; add_ovr(kv); }
         e += n; if (*e) e++;
+    }
+    /* per game, last so it wins over the system's opts=: <opts dir>/games/<content file name>.opt */
+    if (strcmp(content, "-")) {
+        const char *cb = strrchr(content, '/'); cb = cb ? cb + 1 : content;
+        snprintf(p, sizeof p, "%s/games/%s.opt", od, cb);
+        opt_file(p);
     }
 }
 
@@ -109,9 +122,37 @@ static void logfn(int level, const char *fmt, ...)
     fprintf(stderr, "[core %d] ", level); vfprintf(stderr, fmt, ap); va_end(ap);
 }
 
+/* libretro disk control (cmd 13 legacy = first 7 members, 58 ext = all 10); NULL members are tolerated */
+struct diskcb_ {
+    bool (*set_eject)(bool); bool (*get_eject)(void); unsigned (*get_index)(void); bool (*set_index)(unsigned);
+    unsigned (*get_num)(void); bool (*replace)(unsigned, const void *); bool (*add)(void);
+    bool (*set_initial)(unsigned, const char *); bool (*get_path)(unsigned, char *, size_t);
+    bool (*get_label)(unsigned, char *, size_t);
+};
+static struct diskcb_ disk;
+static unsigned disk_n(void) { return disk.get_num ? disk.get_num() : 0; }
+static unsigned disk_cur(void) { return disk.get_index ? disk.get_index() : 0; }
+/* eject -> select -> insert, as a frontend must; the core attaches the image on insert */
+static bool disk_set(unsigned i)
+{
+    if (!disk.set_eject || !disk.set_index || i >= disk_n()) return false;
+    disk.set_eject(true);
+    bool ok = disk.set_index(i);
+    disk.set_eject(false);
+    fprintf(stderr, "retro: disk %u/%u %s\n", i + 1, disk_n(), ok ? "inserted" : "REFUSED");
+    return ok;
+}
+
 static int env_cb(unsigned cmd, void *data)
 {
     switch (cmd & 0xffff) {
+    case 13: memset(&disk, 0, sizeof disk);                         /* SET_DISK_CONTROL_INTERFACE */
+             if (data) memcpy(&disk, data, 7 * sizeof(void *));
+             return 1;
+    case 58: memset(&disk, 0, sizeof disk);                         /* SET_DISK_CONTROL_EXT_INTERFACE */
+             if (data) memcpy(&disk, data, sizeof disk);
+             return 1;
+    case 57: *(unsigned *)data = 1; return 1;                       /* GET_DISK_CONTROL_INTERFACE_VERSION */
     case 3: *(bool *)data = true; return 1;                         /* GET_CAN_DUPE */
     case 6: fprintf(stderr, "retro: core message: %s\n", *(const char **)data); return 1;
     case 7: quit_core = true; return 1;                              /* SHUTDOWN */
@@ -191,7 +232,7 @@ int main(int argc, char **argv)
     const char *b = strrchr(core, '/'); b = b ? b + 1 : core;
     snprintf(corename, sizeof corename, "%s", b);
     char *cut = strstr(corename, "_libretro"); if (!cut) cut = strstr(corename, ".so"); if (cut) *cut = 0;
-    load_overrides();
+    load_overrides(content);
 
     void *h = dlopen(core, RTLD_NOW);
     if (!h) { fprintf(stderr, "retro: dlopen: %s\n", dlerror()); return 1; }
@@ -268,7 +309,7 @@ int main(int argc, char **argv)
             if (ftcb.cb) ftcb.cb(ftcb.ref ? ftcb.ref : (int64_t)(1e6 / fps));
             grab = true; want_video = true; run(); grab = false;
             aud_pause();
-            struct menu_core mc = { ser_size, ser, unser };
+            struct menu_core mc = { ser_size, ser, unser, disk_n, disk_cur, disk_set };
             const char *sn = getenv("RETRO_SYSID");
             if (bgbuf) {
                 fprintf(stderr, "retro: menu open\n");

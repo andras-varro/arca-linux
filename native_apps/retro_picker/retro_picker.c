@@ -8,7 +8,8 @@
  *
  *     name=Commodore 64            display name
  *     core=vice_x64_libretro.so    bare file name -> <data>/cores/<name>; a path with '/' is used as is
- *     exts=d64,t64,prg,crt,zip     content extensions, comma separated, case-insensitive, no dot
+ *     exts=m3u,d64,t64,prg,crt,zip content extensions, comma separated, case-insensitive, no dot
+ *                                  (a .m3u playlist is one game; the files it lists are hidden from the list)
  *     opts=key=value,key=value     optional core options, passed to retro as RETRO_OPTS
  *     roms=/some/dir               optional; default <data>/roms/<id>
  *                                  (a subfolder there is one game, named by the folder)
@@ -183,6 +184,34 @@ static int cmp_game(const void *a, const void *b)
 
 static void free_games(void) { free(g_games); g_games = NULL; g_ngames = 0; }
 
+/* Is `name` listed by a .m3u playlist in dir?  A playlist is one game with several
+ * disks/sides; the disks it lists are not offered on their own (the playlist is).
+ * Lines are matched by file name only, '#' lines and blanks are skipped. */
+static int listed_by_m3u(const char *dir, const char *name)
+{
+    DIR *d = opendir(dir);
+    if (!d) return 0;
+    struct dirent *e;
+    int hit = 0;
+    while (!hit && (e = readdir(d))) {
+        if (e->d_name[0] == '.' || !ext_rank("m3u", e->d_name) || !strcasecmp(e->d_name, name)) continue;
+        char p[600], line[600];
+        snprintf(p, sizeof p, "%s/%s", dir, e->d_name);
+        FILE *f = fopen(p, "r");
+        if (!f) continue;
+        while (!hit && fgets(line, sizeof line, f)) {
+            line[strcspn(line, "\r\n")] = 0;
+            if (!line[0] || line[0] == '#') continue;
+            char *b = line, *s;
+            while ((s = strpbrk(b, "/\\"))) b = s + 1;
+            hit = !strcmp(b, name);
+        }
+        fclose(f);
+    }
+    closedir(d);
+    return hit;
+}
+
 /* Fill g_games from s->roms: each matching file, and each subfolder holding
  * one (titled by the folder, see pick_in_folder); returns the count. */
 static int scan_games(const System *s, int keep)
@@ -204,7 +233,8 @@ static int scan_games(const System *s, int keep)
             char dir[600];
             copy_str(dir, sizeof dir, full);
             if (!pick_in_folder(s->exts, dir, e->d_name, full, sizeof full)) continue;
-        } else if (!S_ISREG(st.st_mode) || !ext_rank(s->exts, e->d_name)) {
+        } else if (!S_ISREG(st.st_mode) || !ext_rank(s->exts, e->d_name) ||
+                   listed_by_m3u(s->roms, e->d_name)) {
             continue;
         }
         if (n == cap) {

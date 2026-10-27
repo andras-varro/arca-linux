@@ -1,7 +1,7 @@
 # Retro station system definition; keys: name core exts opts roms video nogame (see native_apps/retro_picker/retro_picker.c)
 name=Commodore 64
 core=vice_x64_libretro.so
-exts=d64,t64,prg,crt,zip
+exts=m3u,d64,t64,prg,crt,zip
 video=overlay
 nogame=BASIC
 opts=vice_drive_true_emulation=disabled,vice_sound_sample_rate=11025

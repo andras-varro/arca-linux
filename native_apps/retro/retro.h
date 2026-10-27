@@ -57,7 +57,10 @@ void in_close(void);
 enum { MEV_UP = 1, MEV_DOWN, MEV_LEFT, MEV_RIGHT, MEV_OK, MEV_BACK };
 
 /* menu (retro_menu.c) */
-struct menu_core { size_t (*size)(void); bool (*ser)(void *, size_t); bool (*unser)(const void *, size_t); };
+/* disk_n: images the core has (0 or 1: no disk item in the menu); disk_cur: current index;
+ * disk_set: eject, select, insert (libretro disk control); all NULL-safe */
+struct menu_core { size_t (*size)(void); bool (*ser)(void *, size_t); bool (*unser)(const void *, size_t);
+                   unsigned (*disk_n)(void); unsigned (*disk_cur)(void); bool (*disk_set)(unsigned); };
 /* returns 1 to quit, 0 to resume */
 int menu_run(const VideoBackend *vb, const struct menu_core *c, const uint16_t *bg, unsigned w, unsigned h,
              float aspect, const char *sys, const char *content, const volatile int *stop);
