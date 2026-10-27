@@ -1,7 +1,12 @@
 /*
- * retro_picker — the "Retro" station front end: system list -> game list ->
+ * retro_picker — the "Retro" station front end: one screen, one game list;
  * runs the libretro frontend `retro` on the chosen game and comes back to the
- * game list when it exits.
+ * list when it exits.
+ *
+ * Screen: the common top bar (X exits) whose title is a drop-down: "All games"
+ * plus one entry per installed system.  The list below shows the chosen view
+ * (in All games each row carries its system name as a right-aligned detail).
+ * The last view is kept in <data>/last-view and restored on the next start.
  *
  * Systems are DATA, not code: one INI-like file per system in
  * <data>/systems/<id>.sys (default data dir /home/root/data/retro):
@@ -20,9 +25,11 @@
  * A system whose core file is missing is left out (not greyed).  Cores and
  * content are not part of any image.  Adding a system = dropping a .sys file.
  *
- * Input on every screen: touch (tap a row, drag to scroll, BACK button),
- * keyboard and pad (Up/Down/PgUp/PgDn move, Enter/Space/A/X open,
- * Esc/Backspace/B/Start/Select back).
+ * Input: touch (tap a row, drag to scroll, tap the title for the drop-down, X to
+ * exit); keyboard and pad: Up/Down move (Up on the first row opens the drop-down),
+ * Left/Right and PgUp/PgDn page, RB/LB or Tab/Shift+Tab cycle the views,
+ * Enter/Space/A/X launch, Esc/Backspace/B/Start/Select close the drop-down if
+ * open, else exit.  B never launches.
  *
  * Launch model mirrors app_launcher: release pad, touch and framebuffer, fork +
  * exec, waitpid, restore 32bpp, re-open everything, swallow the keys still held.
@@ -36,6 +43,8 @@
 #include "../common/common.h"
 #include "../common/gamepad.h"
 #include "../common/list_view.h"
+#include "../common/top_bar.h"
+#include "../common/top_pick.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -59,17 +68,17 @@
 typedef struct {
     char id[32], name[48], core[256], corepath[400], exts[96], opts[256], roms[256], video[16];
     char nogame[48];
-    int  ngames;
+
 } System;
 
 /* file is empty for the nogame entry: retro is started with no content. */
-typedef struct { char file[600]; char title[256]; } Game;
+typedef struct { char file[600]; char title[256]; int sys; } Game;   /* sys: index into g_sys */
 
 static System  g_sys[MAX_SYSTEMS];
 static int     g_nsys;
 static Game   *g_games;
 static int     g_ngames;
-static int     g_cur_sys = -1;
+static int     g_view;                 /* 0 = All games, n = g_sys[n - 1] */
 static char    g_data[200] = DEFAULT_DATA;
 static char    g_bin[200]  = DEFAULT_BIN;
 static char    g_msg[80];
@@ -212,11 +221,11 @@ static int listed_by_m3u(const char *dir, const char *name)
     return hit;
 }
 
-/* Fill g_games from s->roms: each matching file, and each subfolder holding
- * one (titled by the folder, see pick_in_folder); returns the count. */
-static int scan_games(const System *s, int keep)
+/* Scan s->roms (system index sidx): each matching file, and each subfolder holding
+ * one (titled by the folder, see pick_in_folder), sorted by title; returns the count and,
+ * when out is not NULL, a malloc'd array in *out (the caller frees it). */
+static int scan_games(const System *s, int sidx, Game **out)
 {
-    if (!keep) free_games();
     DIR *d = opendir(s->roms);
     if (!d) return 0;
     int cap = 0, n = 0;
@@ -243,6 +252,7 @@ static int scan_games(const System *s, int keep)
             if (!na) break;
             arr = na;
         }
+        arr[n].sys = sidx;
         copy_str(arr[n].file, sizeof arr[n].file, full);
         copy_str(arr[n].title, sizeof arr[n].title, e->d_name);
         char *dot = strrchr(arr[n].title, '.');
@@ -251,20 +261,20 @@ static int scan_games(const System *s, int keep)
     }
     closedir(d);
     if (n > 1) qsort(arr, (size_t)n, sizeof *arr, cmp_game);
-    if (keep) { free(arr); return n; }
-    g_games = arr;
-    g_ngames = n;
+    if (!out) { free(arr); return n; }
+    *out = arr;
     return n;
 }
 
 /* Put the nogame entry first in g_games (after scan_games, which fills the rest). */
-static void add_nogame(const System *s)
+static void add_nogame(const System *s, int sidx)
 {
     if (!s->nogame[0]) return;
     Game *arr = realloc(g_games, (size_t)(g_ngames + 1) * sizeof *arr);
     if (!arr) return;
     memmove(arr + 1, arr, (size_t)g_ngames * sizeof *arr);
     arr[0].file[0] = 0;
+    arr[0].sys = sidx;
     copy_str(arr[0].title, sizeof arr[0].title, s->nogame);
     g_games = arr;
     g_ngames++;
@@ -294,36 +304,89 @@ static void load_systems(void)
         System s;
         if (parse_sys(path, id, &s) != 0) continue;
         if (access(s.corepath, R_OK) != 0) continue;          /* no core: omitted, not greyed */
-        s.ngames = scan_games(&s, 1) + (s.nogame[0] ? 1 : 0);
         g_sys[g_nsys++] = s;
     }
     closedir(d);
     qsort(g_sys, (size_t)g_nsys, sizeof g_sys[0], cmp_sys);
 }
 
-/* ── list sources ───────────────────────────────────────────────────────── */
+/* ── views ──────────────────────────────────────────────────────────────── */
+/* View 0 is "All games"; view n >= 1 is g_sys[n - 1].  The choice is kept in
+ * <data>/last-view (the system id, or "all") and restored on the next start. */
 
-static int  sys_count(void *c)  { (void)c; return g_nsys; }
-static int  game_count(void *c) { (void)c; return g_ngames; }
-
-static char g_detail[MAX_SYSTEMS][16];
-
-static void sys_row(void *c, int i, LvRow *out)
+static int cmp_game_all(const void *a, const void *b)
 {
-    (void)c;
-    out->title = g_sys[i].name;
-    snprintf(g_detail[i], sizeof g_detail[i], "%d", g_sys[i].ngames);
-    out->detail = g_detail[i];
-    out->glyph = LV_GLYPH_FOLDER;
-    if (!g_sys[i].ngames) out->flags = LV_ROW_DIM;
+    const Game *x = a, *y = b;
+    int c = strcasecmp(x->title, y->title);
+    return c ? c : strcasecmp(g_sys[x->sys].name, g_sys[y->sys].name);
 }
+
+/* Fill g_games for view v.  "nogame" entries (BASIC...) belong to their own system view only. */
+static void build_view(int v)
+{
+    free_games();
+    if (v == 0) {
+        for (int i = 0; i < g_nsys; i++) {
+            Game *a = NULL;
+            int n = scan_games(&g_sys[i], i, &a);
+            if (n > 0) {
+                Game *na = realloc(g_games, (size_t)(g_ngames + n) * sizeof *na);
+                if (!na) { free(a); break; }
+                memcpy(na + g_ngames, a, (size_t)n * sizeof *a);
+                g_games = na;
+                g_ngames += n;
+            }
+            free(a);
+        }
+        if (g_ngames > 1) qsort(g_games, (size_t)g_ngames, sizeof *g_games, cmp_game_all);
+    } else {
+        g_ngames = scan_games(&g_sys[v - 1], v - 1, &g_games);
+        add_nogame(&g_sys[v - 1], v - 1);
+    }
+}
+
+static void view_path(char *p, size_t n) { snprintf(p, n, "%s/last-view", g_data); }
+
+static void save_view(void)
+{
+    char p[260];
+    view_path(p, sizeof p);
+    FILE *f = fopen(p, "w");
+    if (!f) return;
+    fprintf(f, "%s\n", g_view > 0 ? g_sys[g_view - 1].id : "all");
+    fclose(f);
+}
+
+static int load_view(void)
+{
+    char p[260], line[64] = "";
+    view_path(p, sizeof p);
+    FILE *f = fopen(p, "r");
+    if (!f) return 0;
+    if (!fgets(line, sizeof line, f)) line[0] = 0;
+    fclose(f);
+    char *id = trim(line);
+    for (int i = 0; i < g_nsys; i++) if (!strcmp(id, g_sys[i].id)) return i + 1;
+    return 0;
+}
+
+static const char *view_name(int v) { return v == 0 ? "All games" : g_sys[v - 1].name; }
+
+/* ── list and drop-down sources ─────────────────────────────────────────── */
+
+static int game_count(void *c) { (void)c; return g_ngames; }
 
 static void game_row(void *c, int i, LvRow *out)
 {
     (void)c;
     out->title = g_games[i].title;
     out->glyph = LV_GLYPH_FILE;
+    if (g_view == 0) out->detail = g_sys[g_games[i].sys].name;   /* All games: say which system */
 }
+
+static int         pick_count(void *c) { (void)c; return g_nsys + 1; }
+static const char *pick_name(void *c, int i) { (void)c; return view_name(i); }
+
 
 /* ── launching ──────────────────────────────────────────────────────────── */
 
@@ -433,33 +496,78 @@ static void run_game(Dev *d, const System *s, const Game *g)
     }
 }
 
-/* ── screens ────────────────────────────────────────────────────────────── */
+/* ── screen ─────────────────────────────────────────────────────────────── */
 
-#define ROW_H 48
+#define ROW_H   48
+#define MSG_H   18          /* the strip under the list for the error message */
 #define COLOR_BG RGB(20, 20, 30)
 
-enum { SCR_SYSTEMS, SCR_GAMES };
+static TopBar   g_bar;
+static TopPick  g_pick;
+static ListView g_lv;
 
-static void draw_screen(Dev *d, int scr, ListView *lv, Button *back, uint32_t now)
+static TpExt pick_ext(void)
+{
+    TpExt te = { SCREEN_SAFE_LEFT, SCREEN_SAFE_TOP, SCREEN_SAFE_RIGHT, SCREEN_SAFE_BOTTOM };
+    return te;
+}
+
+/* Bar and list against the live screen: call after fb_init() + touch_init() and after every dev_open(). */
+static void layout(void)
+{
+    g_bar.title = g_nsys ? view_name(g_view) : "RETRO";
+    g_bar.title_extra = g_nsys ? TP_EXTRA : 0;
+    top_bar_layout(&g_bar);
+    int top = g_bar.L.bottom + 7, bot = SCREEN_SAFE_BOTTOM - MSG_H;
+    g_lv.rect = (UiRect){ SCREEN_SAFE_LEFT + 8, top, SCREEN_SAFE_WIDTH - 16, bot - top };
+}
+
+static UiRect head_rect(void)
+{
+    layout();
+    TpExt te = pick_ext();
+    const TopBarLayout *L = &g_bar.L;
+    return tp_head_rect(L->title_x, L->title_w, L->top, L->bottom, &te, true);
+}
+
+static void open_pick(void)
+{
+    if (!g_nsys) return;
+    TpExt te = pick_ext();
+    g_pick.sel = g_view;
+    tp_open(&g_pick, head_rect(), &te);
+}
+
+/* The frame shown while the games are scanned (the file manager's "LOADING..."). */
+static void loading_frame(Dev *d)
+{
+    fb_clear(&d->fb, COLOR_BG);
+    text_draw_centered(&d->fb, d->fb.width / 2, d->fb.height / 2, "LOADING...", COLOR_WHITE, 3);
+    fb_swap(&d->fb);
+}
+
+static void set_view(Dev *d, int v)
+{
+    loading_frame(d);
+    g_view = v;
+    build_view(v);
+    lv_reset(&g_lv);
+    g_msg[0] = 0;
+    save_view();
+    layout();
+}
+
+static void draw_screen(Dev *d, uint32_t now)
 {
     Framebuffer *fb = &d->fb;
     fb_clear(fb, COLOR_BG);
-    int left = SCREEN_SAFE_LEFT + 8, top = SCREEN_SAFE_TOP + 6;
-    fb_draw_text(fb, left, top, "RETRO", COLOR_WHITE, 3);
-    if (scr == SCR_GAMES) {
-        char t[80];
-        snprintf(t, sizeof t, "%s", g_sys[g_cur_sys].name);
-        fb_draw_text(fb, left + 6 * 3 * 6 + 20, top + 4, t, RGB(120, 200, 255), 2);
-    } else {
-        fb_draw_text(fb, left + 6 * 3 * 6 + 20, top + 4, "CHOOSE A SYSTEM", RGB(120, 200, 255), 2);
-    }
-    lv_sync(lv);
-    lv_draw(fb, lv, scr == SCR_SYSTEMS ? "NO SYSTEMS INSTALLED" : "NO GAMES FOUND");
-    button_draw(fb, back);
-    const char *hint = scr == SCR_GAMES ? "ENTER/A: PLAY   ESC/B: BACK" : "ENTER/A: OPEN   ESC/B: EXIT";
-    int hx = back->x + back->width + 14, hy = back->y + back->height / 2 - 4;
-    if (g_msg[0] && now - g_msg_ms < 8000) fb_draw_text(fb, hx, hy, g_msg, COLOR_ORANGE, 1);
-    else fb_draw_text(fb, hx, hy, hint, RGB(130, 130, 150), 1);
+    lv_sync(&g_lv);
+    lv_draw(fb, &g_lv, g_nsys ? "NO GAMES FOUND" : "NO SYSTEMS INSTALLED");
+    top_bar_draw(fb, &g_bar);
+    if (g_nsys) tp_draw_arrow(fb, g_bar.L.title_x, g_bar.L.title_w, g_bar.L.top, g_bar.L.h);
+    if (g_msg[0] && now - g_msg_ms < 8000)
+        fb_draw_text(fb, SCREEN_SAFE_LEFT + 8, SCREEN_SAFE_BOTTOM - MSG_H + 6, g_msg, COLOR_ORANGE, 1);
+    tp_draw(fb, &g_pick);
     fb_swap(fb);
 }
 
@@ -484,33 +592,32 @@ int main(int argc, char **argv)
     Dev dev;
     memset(&dev, 0, sizeof dev);
     if (dev_open(&dev) < 0) { fprintf(stderr, "retro_picker: cannot open framebuffer %s\n", g_fb_dev); return 1; }
+    loading_frame(&dev);
+
+    top_bar_init(&g_bar, false, true);
+    g_bar.title_color = COLOR_WHITE;
+    g_bar.title_cut = true;
+    LvSource gs = { game_count, game_row, NULL };
+    lv_init(&g_lv, gs, (UiRect){ 0, 0, 0, 0 }, ROW_H);
+    g_lv.active = true;
+    g_lv.tap2_any = true;
+    TpSource ps = { pick_count, pick_name, NULL };
+    tp_init(&g_pick, ps);
 
     load_systems();
     printf("retro_picker: %d system(s) from %s/systems\n", g_nsys, g_data);
+    g_view = load_view();
+    build_view(g_view);
+    lv_reset(&g_lv);
+    layout();
 
-    int bar_h = 44;
-    UiRect rect = { SCREEN_SAFE_LEFT + 8, SCREEN_SAFE_TOP + 44,
-                    SCREEN_SAFE_WIDTH - 16, SCREEN_SAFE_HEIGHT - 44 - bar_h - 10 };
-    ListView lv_sys, lv_games;
-    LvSource ss = { sys_count, sys_row, NULL }, gs = { game_count, game_row, NULL };
-    lv_init(&lv_sys, ss, rect, ROW_H);
-    lv_init(&lv_games, gs, rect, ROW_H);
-    lv_sys.active = lv_games.active = true;
-    lv_sys.tap2_any = lv_games.tap2_any = true;
-
-    Button back;
-    button_init_full(&back, rect.x, SCREEN_SAFE_BOTTOM - bar_h - 2, 110, bar_h, "EXIT",
-                     BTN_COLOR_SECONDARY, COLOR_WHITE, BTN_COLOR_HIGHLIGHT, 2);
-
-    int scr = SCR_SYSTEMS;
-    bool redraw = true, back_press = false;
+    bool redraw = true, exit_press = false, swallow_touch = false;
     uint32_t cooldown_until = 0;
     InputState in;
     memset(&in, 0, sizeof in);
 
     while (g_running) {
         uint32_t now = get_time_ms();
-        ListView *lv = scr == SCR_SYSTEMS ? &lv_sys : &lv_games;
 
         touch_poll(&dev.touch);
         TouchState ts = touch_get_state(&dev.touch);
@@ -520,44 +627,81 @@ int main(int argc, char **argv)
 
         if (now < cooldown_until) { usleep(16000); continue; }
 
-        bool go_back = bt[BTN_ID_BACK].pressed || bt[BTN_ID_RUN].pressed ||
-                       bt[BTN_ID_CANCEL].pressed || bt[BTN_ID_PAUSE].pressed;
-        bool in_back = ts.x >= back.x && ts.x < back.x + back.width &&
-                       ts.y >= back.y && ts.y < back.y + back.height;
-        if (ts.pressed && in_back) back_press = true;
-        if (ts.released) { if (back_press && in_back) go_back = true; back_press = false; }
+        if (top_bar_info_due(&g_bar, now) && top_bar_info_sample(&g_bar)) redraw = true;
 
-        LvEvent ev = lv_input(lv, &ts, &in, now);
-        if (ev != LV_EV_NONE) redraw = true;
-        bool open = ev == LV_EV_TAP || ev == LV_EV_ACTIVATE || bt[BTN_ID_JUMP].pressed;
-        if (lv_needs_frames(lv) || go_back) redraw = true;
+        bool go_back = bt[BTN_ID_BACK].pressed || bt[BTN_ID_CANCEL].pressed || bt[BTN_ID_PAUSE].pressed;
+        bool was_up = g_pick.up, open = false, quit = false;
+        int  want_view = -1;
 
-        if (go_back) {
-            if (scr == SCR_GAMES) {
-                scr = SCR_SYSTEMS;
-                button_init_full(&back, back.x, back.y, back.width, back.height, "EXIT",
-                                 BTN_COLOR_SECONDARY, COLOR_WHITE, BTN_COLOR_HIGHLIGHT, 2);
-                g_msg[0] = 0;
-            } else {
-                break;
+        if (was_up) {
+            /* The drop-down owns every input (Back / Start close it). */
+            TpEvent ev = tp_input(&g_pick, &ts, &in, now);
+            if (ev != TP_NONE || ts.pressed || ts.released || ts.held ||
+                bt[BTN_ID_UP].pressed || bt[BTN_ID_DOWN].pressed || bt[BTN_ID_JUMP].pressed || bt[BTN_ID_ACTION].pressed)
+                redraw = true;
+            if (ev == TP_PICKED) {
+                int v = tp_take(&g_pick);
+                if (v >= 0 && v <= g_nsys) want_view = v;
             }
-        } else if (open && lv->count > 0) {
-            int i = lv->cursor;
-            if (scr == SCR_SYSTEMS && i >= 0 && i < g_nsys) {
-                g_cur_sys = i;
-                scan_games(&g_sys[i], 0);
-                add_nogame(&g_sys[i]);
-                g_sys[i].ngames = g_ngames;
-                lv_reset(&lv_games);
-                scr = SCR_GAMES;
-                button_init_full(&back, back.x, back.y, back.width, back.height, "BACK",
-                                 BTN_COLOR_SECONDARY, COLOR_WHITE, BTN_COLOR_HIGHLIGHT, 2);
-                g_msg[0] = 0;
-            } else if (scr == SCR_GAMES && i >= 0 && i < g_ngames) {
-                run_game(&dev, &g_sys[g_cur_sys], &g_games[i]);
+            if (ev == TP_PICKED || ev == TP_CLOSED) swallow_touch = ts.held || ts.released;   /* the finger that closed it acts on nothing below */
+            exit_press = false;
+        } else {
+            TouchState tz;
+            memset(&tz, 0, sizeof tz);
+            const TouchState *lts = &ts;
+            if (swallow_touch) {
+                if (!ts.held && !ts.released) swallow_touch = false;
+                else lts = &tz;
+            }
+            if (lts == &ts) {
+                TbHit h = top_bar_hit(&g_bar.L, ts.x, ts.y);
+                if (ts.pressed) exit_press = h == TB_EXIT;
+                if (ts.released) { if (exit_press && h == TB_EXIT) quit = true; exit_press = false; }
+                if (g_nsys && !quit) {
+                    InputState nokeys;
+                    memset(&nokeys, 0, sizeof nokeys);
+                    TpExt te = pick_ext();
+                    g_pick.sel = g_view;
+                    if (tp_head_input(&g_pick, head_rect(), &te, &ts, &nokeys) == TP_OPENED) {
+                        open_pick();
+                        redraw = true;
+                    }
+                }
+            }
+            if (!go_back && !quit && !g_pick.up) {
+                if (g_nsys && bt[BTN_ID_UP].pressed && g_lv.cursor == 0) {
+                    /* Up on the first row: the header drop-down */
+                    open_pick();
+                    redraw = true;
+                } else {
+                    int step = 0;
+                    if (g_nsys && bt[BTN_ID_NEXT].pressed)
+                        step = (bt[BTN_ID_RUN].held && !bt[BTN_ID_CANCEL].held) ? -1 : 1;   /* Tab / RB next, Shift+Tab previous */
+                    if (g_nsys && bt[BTN_ID_PREV].pressed) step = -1;
+                    if (step) want_view = (g_view + step + g_nsys + 1) % (g_nsys + 1);
+                    if (bt[BTN_ID_LEFT].pressed)  { lv_key(&g_lv, LV_KEY_PGUP); redraw = true; }
+                    if (bt[BTN_ID_RIGHT].pressed) { lv_key(&g_lv, LV_KEY_PGDN); redraw = true; }
+                    LvEvent ev = lv_input(&g_lv, lts, &in, now);
+                    if (ev != LV_EV_NONE) redraw = true;
+                    open = ev == LV_EV_TAP || ev == LV_EV_ACTIVATE || bt[BTN_ID_JUMP].pressed;
+                }
+            }
+        }
+        if (lv_needs_frames(&g_lv) || go_back) redraw = true;
+
+        if ((go_back && !was_up) || quit) break;      /* with the drop-down open, Back only closed it */
+        if (want_view >= 0 && want_view != g_view) {
+            set_view(&dev, want_view);
+            redraw = true;
+        } else if (open && g_lv.count > 0) {
+            int i = g_lv.cursor;
+            if (i >= 0 && i < g_ngames) {
+                run_game(&dev, &g_sys[g_games[i].sys], &g_games[i]);
                 memset(&in, 0, sizeof in);
                 cooldown_until = get_time_ms() + RETURN_COOLDOWN_MS;
-                back_press = false;
+                exit_press = false;
+                top_bar_info_invalidate(&g_bar);
+                layout();
             }
             redraw = true;
         }
@@ -566,15 +710,15 @@ int main(int argc, char **argv)
         if (now - last_draw > 1000) redraw = true;      /* something else may have taken the panel */
         if (redraw) {
             last_draw = now;
-            draw_screen(&dev, scr, scr == SCR_SYSTEMS ? &lv_sys : &lv_games, &back, now);
+            draw_screen(&dev, now);
             redraw = false;
         }
-        usleep(lv_needs_frames(lv) ? 8000 : 16000);
+        usleep(lv_needs_frames(&g_lv) || g_pick.up ? 8000 : 16000);
     }
 
     free_games();
-    lv_free(&lv_sys);
-    lv_free(&lv_games);
+    lv_free(&g_lv);
+    tp_free(&g_pick);
     hw_leds_off();
     hw_reload_config();
     hw_set_backlight(100);
