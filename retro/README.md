@@ -289,6 +289,25 @@ By that rule today: Fuse passes both paths; FCEUmm and VICE (idle, either option
 VICE while loading with TDE and MAME 2003-Plus (Hard Hat) pass neither, since each misses real time before any display
 cost; patched ep128emu is real time (19.6 of 20 ms) but over the 16 ms line before any display cost.
 
+### Multi-disk games (.m3u) and per-game options
+
+**Disks.** The frontend implements libretro disk control (`SET_DISK_CONTROL_INTERFACE`, `..._EXT_INTERFACE`,
+`GET_DISK_CONTROL_INTERFACE_VERSION`). A core that reports more than one image gets a `< Disk n/m >` line in the
+pause menu (Left/Right or OK: eject, select, insert). The grouping is data, not code: the operator writes a plain
+`.m3u` playlist next to the images in `roms/<system>/`, one file name per line (`#` lines ignored), e.g.
+`Last Ninja 2.m3u` listing its three `.d64`. The picker lists the playlist as one game and **hides the files any
+`.m3u` in that folder names**; `m3u` is in `exts=` of `c64.sys` (add it to any system whose core loads playlists:
+Amiga, PS1). Measured: `vice_x64_libretro` loads `.m3u` natively and reports `Disk 1/3`.
+Playlists name copyrighted content, so they live on the device only.
+
+**Per-game core options.** `<data>/options/games/<content file name>.opt` (for example
+`P47 Thunderbolt (...).d64.opt`, `Last Ninja 2.m3u.opt`): `key=value` lines, `#` comments; layered LAST, so it wins
+over `<core>.opt`, the `.sys` `opts=` and the built-in defaults. Device data, never in the repo.
+Known: `vice_joyport=1` (Ghostbusters wants port 1), `vice_drive_true_emulation=enabled` (P47, Last Ninja 2).
+Warning: a state saved under one true-drive setting does not load under the other.
+Measured on `.115`: true drive emulation costs about 29-30 ms/frame (33 fps of 50.1, budget 19.95 ms) on P47 and
+Last Ninja 2, against about 9 ms with it off.
+
 ## 10. Open questions
 
 - Pin-to-launcher: launcher extension or generated wrapper (argv is fixed today).
