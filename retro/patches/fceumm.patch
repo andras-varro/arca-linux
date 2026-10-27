@@ -1,0 +1,24 @@
+diff --git a/src/ppu.c b/src/ppu.c
+index fb78963..95c673c 100644
+--- a/src/ppu.c
++++ b/src/ppu.c
+@@ -154,9 +154,19 @@ uint8_t UPALRAM[0x03];/* for 0x4/0x8/0xC addresses in palette, the ones in
+  *       that hits Pal[0x04/0x08/0x0C] (e.g. Mega Man 3 sprites). */
+ static uint16_t fceu_bg_pair_lut[256];
+ 
++static uint8_t fceu_bg_pair_key[16];
++static int fceu_bg_pair_valid;
++
+ static void FCEU_BuildBgPairLUT(void)
+ {
+ 	int b;
++	/* The table depends only on PALRAM[0..15]: a game that polls $2002 or writes
++	 * PPU registers mid-scanline calls RefreshLine many times a line, and rebuilding
++	 * 256 entries each time cost 6 ms of a 16.7 ms frame on Prince of Persia. */
++	if (fceu_bg_pair_valid && !memcmp(fceu_bg_pair_key, PALRAM, 16))
++		return;
++	memcpy(fceu_bg_pair_key, PALRAM, 16);
++	fceu_bg_pair_valid = 1;
+ 	for (b = 0; b < 256; b++)
+ 	{
+ #ifdef MSB_FIRST

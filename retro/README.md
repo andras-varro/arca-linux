@@ -130,6 +130,7 @@ Same toolchain and flags as ScummVM ([building](../SYSTEM_ANALYSIS.md#6-building
   [why](../SYSTEM_ANALYSIS.md#61-cortex-a8-has-no-hardware-integer-divide)).
 - **Blind spot:** code generated at run time by a dynarec is invisible to that gate. Pandora-era dynarecs target
   ARMv7 without idiv (**inferred**), so the risk is low but not zero.
+- **FCEUmm and Prince of Persia (measured 2026-10-27, `.115`):** the audio break-up was the core. Gameplay costs 16.7 ms/frame (budget 16.64; 534 underruns in 30 s) while Super Mario Bros. 3 is 9.4 ms; the first 18 s (title) is 8.5 ms. `RETRO_PROF`: `RefreshLine` 48% of samples, because upstream `ac0d00a` rebuilds a 256-entry background palette table on every call and PoP calls it many times a line ($2002 polling). `patches/fceumm.patch` rebuilds only when `PALRAM[0..15]` changed: 10.7 ms in `retro_bench` (video and audio hashes identical), 0 underruns in the frontend. `-O3` 10.55 ms (1%), `-Os` 12.8 ms: left at `-O2`. PGO not pursued (36% headroom).
 - **Profile-guided VICE:** `retro/pgo-vice.sh <ip> --pair CONTENT:STATE[:OPTS] [--pair ...] [--frames 3000]` (WSL) builds an
   instrumented core, trains it on the unit with `retro_bench` (both paths of a pair are on the unit, e.g. a game and its
   saved `states/c64/<game>.s1`; nothing copyrighted reaches the host), stores the `.gcda` profile in
