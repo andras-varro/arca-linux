@@ -49,6 +49,7 @@ static struct ftcb_ ftcb;
 static struct avinfo av;
 static const VideoBackend *vb = &video_sw;
 static bool want_video, quit_core, vars_changed;
+static bool ff_on;      /* core asked for fast-forward (VICE warp while loading): unthrottled, sparse picture, no audio */
 static bool no_game_ok;                 /* the core declared SET_SUPPORT_NO_GAME (cmd 18) */
 static unsigned long st_vframes;
 static bool grab;                       /* video_cb keeps the next frame as RGB565 for the pause menu */
@@ -153,6 +154,9 @@ static int env_cb(unsigned cmd, void *data)
              return 1;
     case 57: *(unsigned *)data = 1; return 1;                       /* GET_DISK_CONTROL_INTERFACE_VERSION */
     case 3: *(bool *)data = true; return 1;                         /* GET_CAN_DUPE */
+    case 49: if (data) *(bool *)data = ff_on; return 1;              /* GET_FASTFORWARDING */
+    case 64: if (data) ff_on = ((struct { float ratio; bool ff, notify, inhibit; } *)data)->ff;   /* SET_FASTFORWARDING_OVERRIDE */
+             return 1;
     case 6: fprintf(stderr, "retro: core message: %s\n", *(const char **)data); return 1;
     case 7: quit_core = true; return 1;                              /* SHUTDOWN */
     case 8: return 1;                                                /* SET_PERFORMANCE_LEVEL */
@@ -173,7 +177,7 @@ static int env_cb(unsigned cmd, void *data)
     case 32: { struct avinfo *a = data; av = *a; return 1; }       /* SET_SYSTEM_AV_INFO */
     case 35: return 1;                                               /* SET_CONTROLLER_INFO */
     case 37: av.g = *(struct geom *)data; return 1;                 /* SET_GEOMETRY */
-    case 47: if (data) *(int *)data = 3; return 1;                  /* GET_AUDIO_VIDEO_ENABLE */
+    case 47: if (data) *(int *)data = ff_on ? (want_video ? 1 : 0) : 3; return 1;                  /* GET_AUDIO_VIDEO_ENABLE */
     case 52: *(unsigned *)data = 0; return 1;                       /* legacy options only */
     }
     return 0;
@@ -200,8 +204,8 @@ static void video_cb(const void *data, unsigned w, unsigned h, size_t pitch)
 }
 
 static int16_t abuf[2 * 4096];
-static void audio_cb(int16_t l, int16_t r) { int16_t s[2] = { l, r }; aud_push(s, 1); }
-static size_t audio_batch_cb(const int16_t *d, size_t n) { aud_push(d, n); return n; }
+static void audio_cb(int16_t l, int16_t r) { if (ff_on) return; int16_t s[2] = { l, r }; aud_push(s, 1); }
+static size_t audio_batch_cb(const int16_t *d, size_t n) { if (!ff_on) aud_push(d, n); return n; }
 static void poll_cb(void) {}
 
 static volatile sig_atomic_t got_sig;
@@ -296,7 +300,7 @@ int main(int argc, char **argv)
 
     /* Main loop: run every core frame that is due (at most 3 per pass), the
      * last with video enabled, present it, keep audio serviced. */
-    double next = now_s(), st_t = next, st_core = 0, st_cmax = 0;
+    double next = now_s(), st_t = next, st_core = 0, st_cmax = 0, ff_pres = 0;
     unsigned st_runs = 0, st_pres = 0, st_late = 0;
     long total = 0;
     double c0, c1, cp0 = 0, pp0 = 0;
@@ -321,17 +325,17 @@ int main(int argc, char **argv)
             continue;
         }
         double t = now_s();
-        if (t < next) {
+        if (t < next && !ff_on) {
             aud_service();
             double d = next - t;
             if (d > 0.0005) usleep((useconds_t)(d * 1e6 > 4000 ? 4000 : d * 1e6));
             continue;
         }
-        int due = (int)((t - next) / period) + 1;
-        if (due > 3) { st_late += (unsigned)(due - 3); next = t - 2 * period; due = 3; }
+        int due = ff_on ? 1 : (int)((t - next) / period) + 1;
+        if (!ff_on && due > 3) { st_late += (unsigned)(due - 3); next = t - 2 * period; due = 3; }
         for (int k = 0; k < due; k++) {
             in_poll();
-            want_video = k == due - 1;
+            want_video = ff_on ? t - ff_pres >= 0.1 : k == due - 1;
             if (ftcb.cb) ftcb.cb(ftcb.ref ? ftcb.ref : (int64_t)(1e6 / fps));
             c0 = now_s(); run(); c1 = now_s();
             double cv = vstat_conv - cp0; cp0 = vstat_conv;  /* conversion runs inside run() */
@@ -340,7 +344,8 @@ int main(int argc, char **argv)
             st_runs++; next += period; total++;
             aud_service();
         }
-        double p0 = vstat_present; vb->present(); if (vstat_present != p0) st_pres++;
+        if (!ff_on || want_video) { double p0 = vstat_present; vb->present(); if (vstat_present != p0) st_pres++; if (ff_on) ff_pres = t; }
+        if (ff_on) next = now_s();                  /* no catch-up burst when the core leaves warp */
         (void)pp0;
         aud_service();
         if (max_frames && total >= max_frames) break;

@@ -16,10 +16,12 @@
 # and the resulting .so are build artifacts and stay outside the repo.
 #
 # Usage (WSL):
-#   retro/pgo-vice.sh <ip> --pair CONTENT:STATE [--pair ...] [--frames N] [--opts K=V,...]
+#   retro/pgo-vice.sh <ip> --pair CONTENT:STATE[:OPTS] [--pair ...] [--frames N] [--opts K=V,...]
 #                          [--work DIR] [--out DIR]
-#     --pair      content and state, both paths on the unit, separated by ':' (so neither
-#                 may contain one, nor a single quote); a relative path is under
+#     --pair      content, state and optional options, separated by ':' (so none of them
+#                 may contain one, nor a single quote); STATE "-" (or empty) means no state: the run boots and
+#                 loads the content itself, which is how the drive CPU gets trained (with OPTS
+#                 vice_drive_true_emulation=enabled, replacing --opts for that pair). A relative path is under
 #                 /home/root/data/retro.
 #     --frames N  frames per pair (default 3000, ~64 ms each when instrumented)
 #     --opts      core options for the run (default: drive emulation off, 11025 Hz,
@@ -62,7 +64,7 @@ done
 [ ${#PAIRS[@]} -gt 0 ] || die "need at least one --pair CONTENT:STATE"
 case $FRAMES in ''|*[!0-9]*) die "--frames must be a number" ;; esac
 for p in "${PAIRS[@]}"; do
-    case $p in *:*) ;; *) die "pair '$p' is not CONTENT:STATE" ;; esac
+    case $p in *:*) ;; *) die "pair '$p' is not CONTENT:STATE[:OPTS]" ;; esac
     case $p in *\'*) die "pair '$p' contains a single quote" ;; esac
 done
 
@@ -113,16 +115,18 @@ ssh "$DEVICE" '/etc/init.d/arca-app stop' >/dev/null 2>&1 || true
 n=0
 for p in "${PAIRS[@]}"; do
     n=$((n + 1))
-    content=${p%%:*}; state=${p#*:}
+    content=${p%%:*}; rest=${p#*:}; state=${rest%%:*}; popts=$OPTS
+    case $rest in *:*) popts=${rest#*:} ;; esac
     case $content in /*) ;; *) content="$REMOTE_DIR/$content" ;; esac
-    case $state in /*) ;; *) state="$REMOTE_DIR/$state" ;; esac
-    ts "pair $n/${#PAIRS[@]}: $FRAMES frames  $(basename "$content")"
+    case $state in -|"") state="" ;; /*) ;; *) state="$REMOTE_DIR/$state" ;; esac
+    ts "pair $n/${#PAIRS[@]}: $FRAMES frames  $(basename "$content")${state:+ (state)}"
     # One process at a time; the run ends by itself. GCOV_PREFIX keeps the .gcda off the read-only-ish tree.
+    # A pair with no state boots and loads the content itself (needed to train the drive CPU).
     # shellcheck disable=SC2029
-    ssh "$DEVICE" "cd $REMOTE_DIR && GCOV_PREFIX=$TMP/gcov RETRO_SYS=$REMOTE_DIR/system RETRO_STATE='$state' RETRO_OPTS='$OPTS' $TMP/retro_bench $TMP/vice_x64_libretro.so '$content' $FRAMES" \
+    ssh "$DEVICE" "cd $REMOTE_DIR && GCOV_PREFIX=$TMP/gcov RETRO_SYS=$REMOTE_DIR/system ${state:+RETRO_STATE='$state'} RETRO_OPTS='$popts' $TMP/retro_bench $TMP/vice_x64_libretro.so '$content' $FRAMES" \
         >"$WORK/pgo/run$n.log" 2>&1 || die "training run $n failed, see $WORK/pgo/run$n.log"
     grep -E 'unser|frames run' "$WORK/pgo/run$n.log" || true
-    grep -q 'unser [0-9]* -> 1' "$WORK/pgo/run$n.log" || die "state of pair $n did not load (see $WORK/pgo/run$n.log)"
+    [ -z "$state" ] || grep -q 'unser [0-9]* -> 1' "$WORK/pgo/run$n.log" || die "state of pair $n did not load (see $WORK/pgo/run$n.log)"
 done
 
 # ── 4. fetch the profile ────────────────────────────────────────────────────

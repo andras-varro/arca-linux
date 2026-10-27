@@ -130,11 +130,15 @@ Same toolchain and flags as ScummVM ([building](../SYSTEM_ANALYSIS.md#6-building
   [why](../SYSTEM_ANALYSIS.md#61-cortex-a8-has-no-hardware-integer-divide)).
 - **Blind spot:** code generated at run time by a dynarec is invisible to that gate. Pandora-era dynarecs target
   ARMv7 without idiv (**inferred**), so the risk is low but not zero.
-- **Profile-guided VICE:** `retro/pgo-vice.sh <ip> --pair CONTENT:STATE [--pair ...] [--frames 3000]` (WSL) builds an
+- **Profile-guided VICE:** `retro/pgo-vice.sh <ip> --pair CONTENT:STATE[:OPTS] [--pair ...] [--frames 3000]` (WSL) builds an
   instrumented core, trains it on the unit with `retro_bench` (both paths of a pair are on the unit, e.g. a game and its
   saved `states/c64/<game>.s1`; nothing copyrighted reaches the host), stores the `.gcda` profile in
   `~/retro-build/pgo/vice` (`$RETRO_PGO_DIR`) and rebuilds vice with it. It refuses to run if `retro` is running on the
   unit. Afterwards `retro/build-and-deploy.sh <ip>` uses the profile by itself; `--no-pgo` forces plain `-O2`.
+  A pair with STATE `-` has no state: it boots and loads the content itself, which trains the drive CPU (OPTS
+  `vice_drive_true_emulation=enabled,...`). Measured with a profile that adds P47 and Last Ninja 2 loads (TDE) to the
+  Impossible Mission state: loading with TDE 24.5 -> 22.0 ms/frame (P47), 22.9 -> 21.0 (Last Ninja 2); the TDE-off
+  fixture 13.22 -> 13.57 ms/frame.
 - **Loading:** `dlopen` is used nowhere in the tree yet; the device has `/lib/libdl.so.2` and `retro_bench` loads
   cores with it (**measured**, section 9). The fallback, one statically linked `arca_retro_<core>` each, is not needed.
 
@@ -307,6 +311,12 @@ Known: `vice_joyport=1` (Ghostbusters wants port 1), `vice_drive_true_emulation=
 Warning: a state saved under one true-drive setting does not load under the other.
 Measured on `.115`: true drive emulation costs about 29-30 ms/frame (33 fps of 50.1, budget 19.95 ms) on P47 and
 Last Ninja 2, against about 9 ms with it off.
+**Measured later (`.115`):** the 29-30 ms is the load phase only; once a TDE game is running the core is 12.9-14 ms and 51 fps
+(Last Ninja 2 in-game, Street Rod parts shop). Loading stays at 34-36 fps: the core asks for fast-forward
+(`vice_autoloadwarp=disk`, `SET_FASTFORWARDING_OVERRIDE`), which the frontend honours (unthrottled, a picture every 100 ms, audio
+dropped), but warp does not make a frame cheaper, so it gains about 10% and only silences the load noise. With true drive
+emulation on: Last Ninja 2 and Creatures run, Street Rod gets past the copy-protection check to the parts shop (TDE off
+it ends in DISK ERROR). The drive idle method is a VICE resource with no libretro option; not measured.
 
 ## 10. Open questions
 
