@@ -80,7 +80,7 @@ static void scan(void)
         pad_of[i] = -1;
         if (nodes[i].kind == INPUT_KIND_PAD) {
             int used[2] = { 0, 0 };
-            for (int j = 0; j < nn; j++) if (j != i && pad_of[j] >= 0) used[pad_of[j]] = 1;
+            for (int j = 0; j < i; j++) if (pad_of[j] >= 0) used[pad_of[j]] = 1;   /* only nodes already assigned: later slots hold stale 0 */
             pad_of[i] = used[0] ? (used[1] ? -2 : 1) : 0;
             for (int a = 0; a < 8; a++) {
                 struct input_absinfo ai;
