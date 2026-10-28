@@ -166,6 +166,12 @@ Boot-console errors are defects here. Every line the current image logs (`grep -
 
 **Measured:** eth0 is 100 Mbit full duplex (driver `smsc911x`). An SSH copy of 32 MB from the host ran at ~3.1 MB/s with `aes128-ctr` and `chacha20-poly1305`, ~2.1 MB/s with `aes128-gcm`. `/proc/stat` over 6 s during a transfer: ~60% softirq, ~22% system, ~20% user, 0% idle. A 64 MB card write with `conv=fsync` took 4.16 s (~15 MB/s), so the card is not the limit. **Read from source:** vanilla 4.14.52 `drivers/net/ethernet/smsc/smsc911x.c` has no DMA path (no occurrence of "dma"); RX copies with `ioread32_rep`. **[inferred, not measured]** A DMA path via the OMAP sDMA may gain little for ~1.5 KB frames; the GPMC timings the bootloader left for the Ethernet chip select (`HARDWARE.md` names the part: LAN9221, `U15`) may be slower than the chip needs, and PIO cost scales with them. **Done when** the GPMC timing registers for that chip select are read on the device and compared with the LAN9221 datasheet minimum, and either tightened and the copy re-measured, or recorded as already at minimum.
 
+### B74. The 8BitDo pad does not reconnect after it powers itself off for inactivity (`.115`) — open, reported 2026-10-27, not reproduced
+
+**Reported, not measured** (operator, unit `.115`, no capture). The 8BitDo gamepad (Bluetooth) turns itself off after inactivity; turning it on again does not reconnect it. Two workarounds work: reboot the unit with the pad in re-pairing mode, or remove the device in the Bluetooth settings, search again and connect. Pressing Pair on the existing entry gives a Bluetooth error (text not captured). The pad model on `.115` is not confirmed to be the 8BitDo Pro 2 of B52. Unlike B52, where a pad power-cycle reconnects within 1 s after a `bluetoothd` restart, here the power-cycle after idle-off is what fails. **No cause is established.**
+
+**Next steps.** On `.115`, capture `btmon` during the failing power-on and during the failing Pair. Record `bluetoothctl info <pad MAC>` (Paired, Bonded, Trusted, link key present) before and after the idle-off. Confirm the pad model and compare the capture with B52's. **Done when** the failing power-on is attributed by capture, or the workaround is documented.
+
 ## Features
 
 Userspace except F101, which is the image build.
