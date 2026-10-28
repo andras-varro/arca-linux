@@ -12,7 +12,7 @@
 #   retro/build-cores.sh [--out DIR] [--work DIR] [--pgo-gen|--no-pgo] [core ...]
 #     --out DIR   output directory for the stripped .so files (default ~/retro-build/out)
 #     --work DIR  clone/build area, one subdirectory per core (default ~/retro-build)
-#     core ...    any of: ep128emu-core fuse fceumm vice mame2003-plus snes9x2002 snes9x2005 (default: all)
+#     core ...    any of: ep128emu-core fuse fceumm vice mame2003-plus snes9x2002 snes9x2005 pcsx_rearmed (default: all)
 #     --pgo-gen   vice only: instrumented build (-fprofile-generate), used by retro/pgo-vice.sh
 #     --no-pgo    vice: ignore the profile, build plain -O2
 #   A vice build is profile-guided (-fprofile-use) when $RETRO_PGO_DIR (default
@@ -26,7 +26,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 
 # ── Table: core key, upstream URL, pinned commit, extra make args, output .so ──
-CORES=(ep128emu-core fuse fceumm vice mame2003-plus snes9x2002 snes9x2005)
+CORES=(ep128emu-core fuse fceumm vice mame2003-plus snes9x2002 snes9x2005 pcsx_rearmed)
 
 declare -A CORE_URL=(
     [ep128emu-core]=https://github.com/libretro/ep128emu-core
@@ -36,6 +36,7 @@ declare -A CORE_URL=(
     [mame2003-plus]=https://github.com/libretro/mame2003-plus-libretro
     [snes9x2002]=https://github.com/libretro/snes9x2002
     [snes9x2005]=https://github.com/libretro/snes9x2005
+    [pcsx_rearmed]=https://github.com/libretro/pcsx_rearmed
 )
 declare -A CORE_COMMIT=(
     [ep128emu-core]=6af5d03de220e6effcd0ffcd99e0fb8e8c77cc9e
@@ -45,6 +46,7 @@ declare -A CORE_COMMIT=(
     [mame2003-plus]=505733a2df272a0eaa46c143628bd30d6fafb232
     [snes9x2002]=6ffbf9ef4f0063e1f1b78a40d10c50fc52f2524c
     [snes9x2005]=a79dfe9047e7fec58808aefe48ad2bf499c7af11
+    [pcsx_rearmed]=c8816799b50388e61cfe237fe2cdbb7d8175f20a
 )
 # Extra make variables beyond platform=unix and the toolchain.
 declare -A CORE_MAKE_EXTRA=(
@@ -55,6 +57,7 @@ declare -A CORE_MAKE_EXTRA=(
     [mame2003-plus]=""
     [snes9x2002]=""
     [snes9x2005]=""
+    [pcsx_rearmed]="-f Makefile.libretro"
 )
 declare -A CORE_SO=(
     [ep128emu-core]=ep128emu_core_libretro.so
@@ -64,6 +67,7 @@ declare -A CORE_SO=(
     [mame2003-plus]=mame2003_plus_libretro.so
     [snes9x2002]=snes9x2002_libretro.so
     [snes9x2005]=snes9x2005_libretro.so
+    [pcsx_rearmed]=pcsx_rearmed_libretro.so
 )
 
 # ── Toolchain (same as ~/retro-src/env.sh, kept here so the script is self-contained)
