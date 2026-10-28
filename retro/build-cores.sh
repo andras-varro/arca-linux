@@ -12,7 +12,7 @@
 #   retro/build-cores.sh [--out DIR] [--work DIR] [--pgo-gen|--no-pgo] [core ...]
 #     --out DIR   output directory for the stripped .so files (default ~/retro-build/out)
 #     --work DIR  clone/build area, one subdirectory per core (default ~/retro-build)
-#     core ...    any of: ep128emu-core fuse fceumm vice mame2003-plus snes9x2002 snes9x2005 pcsx_rearmed uae4arm (default: all)
+#     core ...    any of: ep128emu-core fuse fceumm vice mame2003-plus snes9x2002 snes9x2005 pcsx_rearmed uae4arm dosbox-pure (default: all)
 #     --pgo-gen   vice only: instrumented build (-fprofile-generate), used by retro/pgo-vice.sh
 #     --no-pgo    vice: ignore the profile, build plain -O2
 #   A vice build is profile-guided (-fprofile-use) when $RETRO_PGO_DIR (default
@@ -26,7 +26,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 
 # ── Table: core key, upstream URL, pinned commit, extra make args, output .so ──
-CORES=(ep128emu-core fuse fceumm vice mame2003-plus snes9x2002 snes9x2005 pcsx_rearmed uae4arm)
+CORES=(ep128emu-core fuse fceumm vice mame2003-plus snes9x2002 snes9x2005 pcsx_rearmed uae4arm dosbox-pure)
 
 declare -A CORE_URL=(
     [ep128emu-core]=https://github.com/libretro/ep128emu-core
@@ -38,6 +38,7 @@ declare -A CORE_URL=(
     [snes9x2005]=https://github.com/libretro/snes9x2005
     [pcsx_rearmed]=https://github.com/libretro/pcsx_rearmed
     [uae4arm]=https://github.com/libretro/uae4arm-libretro
+    [dosbox-pure]=https://codeberg.org/schelling/dosbox-pure
 )
 declare -A CORE_COMMIT=(
     [ep128emu-core]=6af5d03de220e6effcd0ffcd99e0fb8e8c77cc9e
@@ -49,6 +50,7 @@ declare -A CORE_COMMIT=(
     [snes9x2005]=a79dfe9047e7fec58808aefe48ad2bf499c7af11
     [pcsx_rearmed]=c8816799b50388e61cfe237fe2cdbb7d8175f20a
     [uae4arm]=26f444f01771f0dfa2fa652906ff8222e92e476e
+    [dosbox-pure]=d9c1356a6376fc35bd9a900b46c4666b3f4500e6
 )
 # Extra make variables beyond platform=unix and the toolchain.
 declare -A CORE_MAKE_EXTRA=(
@@ -61,6 +63,7 @@ declare -A CORE_MAKE_EXTRA=(
     [snes9x2005]=""
     [pcsx_rearmed]="-f Makefile.libretro"
     [uae4arm]="-f Makefile.libretro HAVE_NEON=1 USE_PICASSO96=1 MORE_CFLAGS=-DARMV6T2 CPU_FLAGS=-marm CAPS= EXTRA_INCLUDES=-I./deps"
+    [dosbox-pure]="STRIPCMD=true"
 )
 declare -A CORE_SO=(
     [ep128emu-core]=ep128emu_core_libretro.so
@@ -72,6 +75,7 @@ declare -A CORE_SO=(
     [snes9x2005]=snes9x2005_libretro.so
     [pcsx_rearmed]=pcsx_rearmed_libretro.so
     [uae4arm]=uae4arm_libretro.so
+    [dosbox-pure]=dosbox_pure_libretro.so
 )
 
 # ── Toolchain (same as ~/retro-src/env.sh, kept here so the script is self-contained)

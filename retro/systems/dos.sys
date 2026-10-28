@@ -1,0 +1,5 @@
+# Retro station system definition; keys: name core exts opts roms video (see native_apps/retro_picker/retro_picker.c)
+name=DOS
+core=dosbox_pure_libretro.so
+exts=zip,dosz,exe,com,bat,iso,chd,cue,ins,img,ima,vhd,jrc,m3u,m3u8,conf
+video=overlay
