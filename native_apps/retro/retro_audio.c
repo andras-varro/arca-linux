@@ -37,6 +37,7 @@ int aud_open(double core_rate, double core_fps)
 {
     (void)core_fps;
     audio_out_set_device_pref(config_audio_device_stored());
+    audio_out_set_bt_addr(config_audio_bt_addr_stored());   /* the pinned headset, as audio.c does; without it plug:bluealsa picks the most recently connected sink */
     const char *path = NULL;
     if (audio_out_open_resolved(&out, 44100, 1, &path) != 0) {
         fprintf(stderr, "retro: audio open failed, running silent\n"); return -1;
