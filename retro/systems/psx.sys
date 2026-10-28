@@ -1,5 +1,5 @@
 # Retro station system definition; keys: name core exts opts roms video (see native_apps/retro_picker/retro_picker.c)
 name=PlayStation
 core=pcsx_rearmed_libretro.so
-exts=m3u,cue,chd,pbp,iso,exe
+exts=m3u,cue,chd,pbp,iso,mdf,exe
 video=overlay
