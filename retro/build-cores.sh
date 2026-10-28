@@ -162,7 +162,7 @@ build_core() {
     [ "$(git -C "$src" rev-parse HEAD)" = "$commit" ] || die "$core: HEAD is not $commit"
 
     if [ -f "$patch" ]; then
-        git -C "$src" apply "$patch"
+        git -C "$src" apply --ignore-whitespace "$patch"   # uae4arm sources are CRLF; the patch is LF (.gitattributes)
         echo "   applied $(basename "$patch")"
     else
         echo "   no patch (retro/patches/$core.patch absent)"

@@ -39,3 +39,55 @@ index 0000000..8cad88b
 +STUB(FLAC__stream_decoder_set_metadata_respond)
 +STUB(mpg123_close) STUB(mpg123_decode) STUB(mpg123_decoders) STUB(mpg123_delete)
 +STUB(mpg123_exit) STUB(mpg123_init) STUB(mpg123_new) STUB(mpg123_open_feed)
+diff --git a/libretro/core/libretro-core.cpp b/libretro/core/libretro-core.cpp
+index 3e34a7f..b1db49f 100644
+--- a/libretro/core/libretro-core.cpp
++++ b/libretro/core/libretro-core.cpp
+@@ -126,6 +126,9 @@ void retro_set_environment(retro_environment_t cb)
+   struct retro_variable variables[] = {
+       { "uae4arm_model",          "Model; Auto|A500|A600|A1200|CDTV|CD32", },
+       { "uae4arm_fastmem",        "Fast Mem; None|1 MB|2 MB|4 MB|8 MB", },
++      { "uae4arm_jit",            "JIT (68k to ARM); off|on", },
++      { "uae4arm_cpu",            "CPU; 68000|68020", },
++      { "uae4arm_cpu_speed",      "CPU speed; cycle|max", },
+       { "uae4arm_resolution",     "Internal resolution; 768x270|320x240|320x256|320x262|640x240|640x256|640x262|640x270|768x270", },
+       { "uae4arm_leds_on_screen", "Leds on screen; on|off", },
+       { "uae4arm_floppy_speed",   "Floppy speed; 100|200|400|800", },
+@@ -906,6 +909,37 @@ void update_prefs_retrocfg(struct uae_prefs * prefs)
+       if (strcmp(var.value, "off") == 0) prefs->fast_copper = 0;
+    }
+ 
++   var.key = "uae4arm_cpu";
++   var.value = NULL;
++   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
++   {
++      /* Arca: the JIT only runs a 68020 or later (newcpu.cpp run_func), so it needs this. */
++      if (strcmp(var.value, "68020") == 0)
++      {
++         prefs->cpu_model = 68020;
++         prefs->address_space_24 = 1;
++      }
++   }
++
++   var.key = "uae4arm_cpu_speed";
++   var.value = NULL;
++   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
++   {
++      if (strcmp(var.value, "max") == 0) prefs->m68k_speed = -1;
++   }
++
++   var.key = "uae4arm_jit";
++   var.value = NULL;
++   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
++   {
++      /* Arca: the core never set cachesize, so the compiled-in JIT stayed off. */
++      if (strcmp(var.value, "on") == 0)
++      {
++         prefs->cachesize = 16384; /* MAX_JIT_CACHE */
++         prefs->cpu_compatible = 0;
++      }
++   }
++
+    set_config_changed();
+ 
+ }

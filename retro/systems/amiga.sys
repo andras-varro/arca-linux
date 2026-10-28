@@ -2,4 +2,5 @@
 name=Amiga
 core=uae4arm_libretro.so
 exts=adf,dms,zip,hdf,lha,m3u,uae
+opts=uae4arm_resolution=320x240
 video=overlay
