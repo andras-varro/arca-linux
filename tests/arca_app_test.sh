@@ -101,6 +101,23 @@ assert_eq "$(loops)" 0 "D stop reaches a wrapper the pidfile does not name"
 sleep 3
 assert_eq "$(apps)" 0 "D2 and its app is gone"
 
+# E  arcamond, the Monitor history daemon in /opt/games, is not an app: stop leaves it running.
+# It is a copy of sleep, so its exe is the path under $T/opt/games, as on the device.
+exe_count() {
+    local n=0 p
+    for p in /proc/[0-9]*; do
+        [ "$(readlink "$p/exe" 2>/dev/null)" = "$1" ] && n=$((n+1))
+    done
+    echo "$n"
+}
+mkdir -p "$T/opt/games"
+cp "$(command -v sleep)" "$T/opt/games/arcamond"
+"$T/opt/games/arcamond" 600 >/dev/null 2>&1 &
+sleep 1
+timeout 60 "$T/arca-app" start >"$T/out6" 2>&1; sleep 1
+timeout 60 "$T/arca-app" stop >"$T/out7" 2>&1
+assert_eq "$(exe_count "$T/opt/games/arcamond")" 1 "E stop leaves arcamond running"
+
 echo "passed $pass, failed $fail"
-[ $((pass+fail)) -ge 6 ] || { echo "FLOOR: fewer than 6 cases ran"; exit 1; }
+[ $((pass+fail)) -ge 7 ] || { echo "FLOOR: fewer than 7 cases ran"; exit 1; }
 [ "$fail" -eq 0 ]

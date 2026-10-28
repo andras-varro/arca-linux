@@ -69,6 +69,9 @@ app_pids() {
     for _p in /proc/[0-9]*; do
         _exe=$(readlink "$_p/exe" 2>/dev/null)
         [ -n "$_exe" ] || continue
+        # Not an app: the Monitor history daemon (/etc/init.d/arcamond) lives in /opt/games,
+        # opens no framebuffer, and must survive a stop; its init script owns its lifetime.
+        [ "$_exe" = /opt/games/arcamond ] && continue
         for _d in $APP_DIRS; do
             case "$_exe" in
                 "$_d"/*) echo "${_p#/proc/}"; break ;;

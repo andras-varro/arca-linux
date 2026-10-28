@@ -634,6 +634,12 @@ else
 fi' || warn "stop reported a failure - a surviving process may hold the binaries"
 ok "Launcher stopped"
 
+# arca-app stop leaves arcamond (the Monitor history daemon) running, and scp cannot
+# overwrite a running binary ("Text file busy"), so stop it here.  Wait for the pid to
+# exit before the upload; it is started again after the launcher restart.
+info "Stopping arcamond (Monitor history daemon)..."
+ssh "$DEVICE" '_p=$(cat /var/run/arcamond.pid 2>/dev/null); if [ -x /etc/init.d/arcamond ]; then /etc/init.d/arcamond stop; fi; for _i in 1 2 3 4 5; do [ -n "$_p" ] && kill -0 "$_p" 2>/dev/null || break; sleep 1; done' || warn "arcamond stop reported a failure"
+
 # Ensure target directory exists
 info "Ensuring target directories exist..."
 ssh "$DEVICE" "mkdir -p $GAMES_DIR /var/log/arca"
@@ -893,8 +899,8 @@ if ssh "$DEVICE" '[ -f /etc/init.d/arca-app ]' 2>/dev/null; then
     info "Restarting app launcher..."
     ssh "$DEVICE" '/etc/init.d/arca-app start' 2>&1 | grep -v '^$'
     ok "Launcher running"
-    # arca-app stop ends every process running out of $GAMES_DIR, arcamond
-    # included (it has to, or scp could not replace the binary), so restart it.
+    # arca-app stop leaves arcamond running, so it is stopped before the upload (above);
+    # start it again here, after the launcher.
     ssh "$DEVICE" 'if [ -x /etc/init.d/arcamond ]; then /etc/init.d/arcamond start; fi' 2>&1 | grep -v '^$' || true
 else
     echo ""

@@ -7,8 +7,8 @@
 # on a unit without it this prints one line and does nothing.  It niced itself
 # to 19 and opens no framebuffer or input device.
 #
-# native_apps/build-and-deploy.sh stops it with everything else in /opt/games
-# (arca-app stop matches on the executable) and calls "start" again.
+# arca-app stop leaves it running (app_pids skips it), so native_apps/build-and-deploy.sh
+# stops it itself before the upload and calls "start" again after the launcher restart.
 
 DAEMON=/opt/games/arcamond
 PIDFILE=/var/run/arcamond.pid
