@@ -15,7 +15,7 @@
 #     <ip>          unit IPv4 address; deploys as root over SSH key auth
 #     --no-build    skip the build; deploy what is already in the out dir
 #     --no-pgo      build vice plain -O2 even if a profile exists (see pgo-vice.sh)
-#     core ...      build only these (default: all). Ids: ep128emu-core fuse fceumm vice mame2003-plus snes9x2002 snes9x2005 pcsx_rearmed
+#     core ...      build only these (default: all). Ids: ep128emu-core fuse fceumm vice mame2003-plus snes9x2002 snes9x2005 pcsx_rearmed uae4arm
 #
 # Runs in WSL, because the cores are cross-built there:
 #   wsl.exe -e bash -lc "cd /mnt/c/work/roomwizard && retro/build-and-deploy.sh <ip>"
@@ -51,7 +51,7 @@ Usage: retro/build-and-deploy.sh <ip> [--no-build] [--no-pgo] [core ...]
                 (default ~/retro-build/out, or $RETRO_OUT).
   --no-pgo      Build vice plain -O2 even if a PGO profile exists (retro/pgo-vice.sh).
   core ...      Build only these cores (default: all). Ids: ep128emu-core fuse
-                fceumm vice mame2003-plus snes9x2002 snes9x2005 pcsx_rearmed. Not allowed with --no-build.
+                fceumm vice mame2003-plus snes9x2002 snes9x2005 pcsx_rearmed uae4arm. Not allowed with --no-build.
 
 Cores and content never go into an image or a release. The VICE build embeds
 Commodore ROMs: device-only, for test use. Writes only /home/root/data/retro/cores,

@@ -1,0 +1,41 @@
+diff --git a/Makefile.common b/Makefile.common
+index 5ad2835..29e4b10 100755
+--- a/Makefile.common
++++ b/Makefile.common
+@@ -11,6 +11,7 @@ OBJS =	\
+ 	$(EMU)/akiko.o \
+ 	$(EMU)/ar.o \
+ 	$(EMU)/aros.rom.o \
++	$(EMU)/codec_stubs.o \
+ 	$(EMU)/audio.o \
+ 	$(EMU)/autoconf.o \
+ 	$(EMU)/blitfunc.o \
+diff --git a/Makefile.libretro b/Makefile.libretro
+index cf4d4d0..5d504de 100644
+--- a/Makefile.libretro
++++ b/Makefile.libretro
+@@ -14,7 +14,7 @@ ROOT_DIR  := .
+ ifneq (,$(findstring unix,$(platform)))
+ 	TARGET := $(TARGET_NAME)_libretro.so
+ 	fpic := -fPIC
+-	LDFLAGS := -lz -lpthread -lFLAC -lmpg123 -ldl
++	LDFLAGS := -Wl,-z,noexecstack -lm -lpthread -ldl
+ 	SHARED := -shared -Wl,--version-script=$(CORE_DIR)/libretro/link.T 
+ 	ifneq (,$(findstring neon,$(platform)))
+ 		# Uncomment below for compilation on rpi
+diff --git a/src/codec_stubs.c b/src/codec_stubs.c
+new file mode 100644
+index 0000000..8cad88b
+--- /dev/null
++++ b/src/codec_stubs.c
+@@ -0,0 +1,10 @@
++/* Arca: the Amiga core calls FLAC and mpg123 directly (CD32/CDTV audio tracks only). The
++ * device has neither library, and floppy/hard-disk Amiga content never reaches these, so
++ * each is a stub that reports failure: new() returns NULL and the callers stop there. */
++#define STUB(n) long n() { return 0; }
++STUB(FLAC__stream_decoder_delete) STUB(FLAC__stream_decoder_init_stream)
++STUB(FLAC__stream_decoder_new) STUB(FLAC__stream_decoder_process_until_end_of_metadata)
++STUB(FLAC__stream_decoder_process_until_end_of_stream) STUB(FLAC__stream_decoder_set_md5_checking)
++STUB(FLAC__stream_decoder_set_metadata_respond)
++STUB(mpg123_close) STUB(mpg123_decode) STUB(mpg123_decoders) STUB(mpg123_delete)
++STUB(mpg123_exit) STUB(mpg123_init) STUB(mpg123_new) STUB(mpg123_open_feed)
