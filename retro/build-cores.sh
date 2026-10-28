@@ -59,7 +59,7 @@ declare -A CORE_MAKE_EXTRA=(
     [fceumm]=""
     [vice]="EMUTYPE=x64"
     [mame2003-plus]=""
-    [snes9x2002]=""
+    [snes9x2002]="ARM_ASM=1 ASM_CPU=0 ASM_SPC700=0"   # ARM tile/mode7 renderers only: the CPU and SPC700 asm segfault Super Mario Kart
     [snes9x2005]=""
     [pcsx_rearmed]="-f Makefile.libretro"
     [uae4arm]="-f Makefile.libretro HAVE_NEON=1 USE_PICASSO96=1 MORE_CFLAGS=-DARMV6T2 CPU_FLAGS=-marm CAPS= EXTRA_INCLUDES=-I./deps"
