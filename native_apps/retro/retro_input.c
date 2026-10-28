@@ -110,8 +110,8 @@ static int jbit_of(int code)
 
 static int16_t norm(int i, int a, int v)
 {
-    long r = amax[i][a] - amin[i][a];
-    long n = ((long)(v - amin[i][a]) * 65535) / (r ? r : 1) - 32768;   /* soft divide, rare */
+    long long r = amax[i][a] - amin[i][a];   /* 64-bit: long is 32 here and (v - min) * 65535 overflows past centre */
+    long long n = ((long long)(v - amin[i][a]) * 65535) / (r ? r : 1) - 32768;   /* soft divide, rare */
     return (int16_t)(n < -32768 ? -32768 : n > 32767 ? 32767 : n);
 }
 
