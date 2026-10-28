@@ -1,0 +1,5 @@
+# Retro station system definition; keys: name core exts opts roms video (see native_apps/retro_picker/retro_picker.c)
+name=SNES
+core=snes9x2002_libretro.so
+exts=sfc,smc,swc,fig,bs,st,zip
+video=overlay
