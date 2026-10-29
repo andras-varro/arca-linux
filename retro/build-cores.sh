@@ -12,7 +12,7 @@
 #   retro/build-cores.sh [--out DIR] [--work DIR] [--pgo-gen|--no-pgo] [core ...]
 #     --out DIR   output directory for the stripped .so files (default ~/retro-build/out)
 #     --work DIR  clone/build area, one subdirectory per core (default ~/retro-build)
-#     core ...    any of: ep128emu-core fuse fceumm vice mame2003-plus snes9x2002 snes9x2005 pcsx_rearmed uae4arm dosbox-pure (default: all)
+#     core ...    any of: ep128emu-core fuse fceumm vice mame2003-plus snes9x2002 snes9x2005 pcsx_rearmed uae4arm dosbox-pure picodrive (default: all)
 #     --pgo-gen   vice only: instrumented build (-fprofile-generate), used by retro/pgo-vice.sh
 #     --no-pgo    vice: ignore the profile, build plain -O2
 #   A vice build is profile-guided (-fprofile-use) when $RETRO_PGO_DIR (default
@@ -26,7 +26,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 
 # ── Table: core key, upstream URL, pinned commit, extra make args, output .so ──
-CORES=(ep128emu-core fuse fceumm vice mame2003-plus snes9x2002 snes9x2005 pcsx_rearmed uae4arm dosbox-pure)
+CORES=(ep128emu-core fuse fceumm vice mame2003-plus snes9x2002 snes9x2005 pcsx_rearmed uae4arm dosbox-pure picodrive)
 
 declare -A CORE_URL=(
     [ep128emu-core]=https://github.com/libretro/ep128emu-core
@@ -39,6 +39,7 @@ declare -A CORE_URL=(
     [pcsx_rearmed]=https://github.com/libretro/pcsx_rearmed
     [uae4arm]=https://github.com/libretro/uae4arm-libretro
     [dosbox-pure]=https://codeberg.org/schelling/dosbox-pure
+    [picodrive]=https://github.com/libretro/picodrive
 )
 declare -A CORE_COMMIT=(
     [ep128emu-core]=6af5d03de220e6effcd0ffcd99e0fb8e8c77cc9e
@@ -51,6 +52,7 @@ declare -A CORE_COMMIT=(
     [pcsx_rearmed]=c8816799b50388e61cfe237fe2cdbb7d8175f20a
     [uae4arm]=26f444f01771f0dfa2fa652906ff8222e92e476e
     [dosbox-pure]=d9c1356a6376fc35bd9a900b46c4666b3f4500e6
+    [picodrive]=1890c2932234c9d30f4cd3851d02228baae8f09e
 )
 # Extra make variables beyond platform=unix and the toolchain.
 declare -A CORE_MAKE_EXTRA=(
@@ -64,6 +66,7 @@ declare -A CORE_MAKE_EXTRA=(
     [pcsx_rearmed]="-f Makefile.libretro"
     [uae4arm]="-f Makefile.libretro HAVE_NEON=1 USE_PICASSO96=1 MORE_CFLAGS=-DARMV6T2 CPU_FLAGS=-marm CAPS= EXTRA_INCLUDES=-I./deps"
     [dosbox-pure]="STRIPCMD=true"
+    [picodrive]="-f Makefile.libretro platform=armv-neon-softfloat-armasm"   # ARM asm cores (Cyclone 68K, DrZ80, SVP/SH2 DRC); the platform name carries no -mcpu, so our -march=armv7-a is not contradicted
 )
 declare -A CORE_SO=(
     [ep128emu-core]=ep128emu_core_libretro.so
@@ -76,6 +79,7 @@ declare -A CORE_SO=(
     [pcsx_rearmed]=pcsx_rearmed_libretro.so
     [uae4arm]=uae4arm_libretro.so
     [dosbox-pure]=dosbox_pure_libretro.so
+    [picodrive]=picodrive_libretro.so
 )
 
 # ── Toolchain (same as ~/retro-src/env.sh, kept here so the script is self-contained)
@@ -161,6 +165,16 @@ build_core() {
     git -C "$src" clean -fdxq
     [ "$(git -C "$src" rev-parse HEAD)" = "$commit" ] || die "$core: HEAD is not $commit"
 
+    # picodrive: submodules (Cyclone, libchdr, emu2413, dr_libs, libpicofe) at the pinned gitlinks, cleaned
+    # (git clean -fdx above does not enter them), then the Cyclone 68K core is generated with the HOST
+    # compiler. Its generator runs at build time, and the cross build would make an ARM generator the host cannot run.
+    if [ "$core" = picodrive ]; then
+        git -C "$src" submodule update --init --recursive -q
+        git -C "$src" submodule foreach --recursive -q 'git clean -ffdxq'
+        (cd "$src/cpu/cyclone" && make CONFIG_FILE=../cyclone_config.h HAVE_ARMv6= CC=gcc CXX=g++ \
+            && rm -f ./*.o Disa/*.o cyclone_gen) >"$blog" 2>&1 || die "$core: host Cyclone generation failed, see $blog"
+    fi
+
     if [ -f "$patch" ]; then
         git -C "$src" apply --ignore-whitespace "$patch"   # uae4arm sources are CRLF; the patch is LF (.gitattributes)
         echo "   applied $(basename "$patch")"
@@ -189,6 +203,9 @@ build_core() {
             echo "   PGO: none (plain -O2)"
         fi
     fi
+    # picodrive's .s/.S files carry no .note.GNU-stack, so the linked .so asks for an executable stack and
+    # the unit's dlopen refuses it ("cannot enable executable stack"); mark every assembled object instead.
+    if [ "$core" = picodrive ]; then cc="$CC -Wa,--noexecstack"; cxx="$CXX -Wa,--noexecstack"; fi
     local make_vars=("platform=unix" "CC=$cc" "CXX=$cxx" "AR=$AR")
 
     # shellcheck disable=SC2086  # $extra is a space-separated list of VAR=value words

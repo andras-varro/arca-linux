@@ -1,0 +1,5 @@
+# Retro station system definition; keys: name core exts opts roms video (see native_apps/retro_picker/retro_picker.c)
+name=Mega Drive
+core=picodrive_libretro.so
+exts=md,gen,smd,bin,32x,sms,gg,sg,zip
+video=overlay
