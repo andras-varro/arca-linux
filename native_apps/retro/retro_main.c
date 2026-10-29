@@ -321,8 +321,16 @@ int main(int argc, char **argv)
             /* Pause menu: let go of everything the core holds, run one more frame to have a picture
              * of the moment (the opening key never reaches the core), then stop the core and the audio. */
             in_release(); aud_service();
-            if (ftcb.cb) ftcb.cb(ftcb.ref ? ftcb.ref : (int64_t)(1e6 / fps));
-            grab = true; want_video = true; run_core(run); grab = false;
+            /* A core told it may dupe (GET_CAN_DUPE) passes NULL for an unchanged frame, so a static
+             * screen grabs nothing: try a few frames, then open over black rather than not at all. */
+            free(bgbuf); bgbuf = NULL;
+            grab = true; want_video = true;
+            for (int k = 0; k < 4 && !bgbuf; k++) { if (ftcb.cb) ftcb.cb(ftcb.ref ? ftcb.ref : (int64_t)(1e6 / fps)); run_core(run); }
+            grab = false;
+            if (!bgbuf && av.g.bw && av.g.bh && (bgbuf = calloc((size_t)av.g.bw * av.g.bh, 2)) != NULL) {
+                bg_w = av.g.bw; bg_h = av.g.bh; bg_aspect = cur_aspect(bg_w, bg_h);
+                fprintf(stderr, "retro: menu: no frame from the core, black background\n");
+            }
             aud_pause();
             struct menu_core mc = { ser_size, ser, unser, disk_n, disk_cur, disk_set };
             const char *sn = getenv("RETRO_SYSID");
@@ -331,7 +339,7 @@ int main(int argc, char **argv)
                 if (menu_run(vb, &mc, bgbuf, bg_w, bg_h, bg_aspect, sn && *sn ? sn : corename, content,
                              (const volatile int *)&got_sig)) quit_core = true;
                 fprintf(stderr, "retro: menu closed%s\n", quit_core ? " (quit)" : "");
-            } else in_menu_mode(false);
+            } else { fprintf(stderr, "retro: menu: no background buffer, not opened\n"); in_menu_mode(false); }
             in_release(); aud_pause();
             next = now_s(); st_t = next;               /* no catch-up burst after the pause */
             continue;
