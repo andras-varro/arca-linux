@@ -133,6 +133,16 @@ multiarch, so each component builds its own copies
 is that *nothing here is redistributed as source by this repository* — the obligations attach to the
 **binaries** a release publishes, which is the next section.
 
+**The libretro emulator cores are built and never distributed.** `retro/build-cores.sh` builds each from a
+pinned upstream commit, and `retro/build-and-deploy.sh` copies the `.so` files to a unit's data partition;
+neither an image nor a release carries a core. Each core's licence, read at its pin, is in the
+[candidate cores table](retro/README.md#3-content-and-licensing-policy-operator-rule): GPL, or a non-commercial
+licence named there (MAME 2003-Plus, Snes9x, PicoDrive), which this non-commercial project accepts. **uae4arm is
+taken as GPL-2.0-or-later, by assumption (operator, 2026-10-29).** The repository has no `COPYING`; 27 of its
+source files at `26f444f` carry the GPL-2.0-or-later header (measured by grep) and the rest carry UAE copyright
+lines with no grant, which we read as parts of the same GPL work. Its bundled `capsimg` (non-commercial,
+"not free software") is not built: the build passes `CAPS=` empty.
+
 ### The root filesystem (`rootfs/`, Buildroot 2025.02.18)
 
 Every package in the card's p3 comes from one Buildroot build (`rootfs/configs/arca_defconfig`,
