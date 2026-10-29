@@ -42,6 +42,7 @@ void aud_service(void);
 void aud_stats(unsigned *ring_underruns, unsigned *dev_starved, double *level_ms, double *ratio);
 void aud_close(void);
 void aud_pause(void);       /* drop the ring and fall silent until the next push refills it */
+bool aud_buffer_status(unsigned *pct, bool *underrun);   /* env 62: fill % of target, underrun since last call; false = audio not running */
 
 /* input */
 void in_open(void);

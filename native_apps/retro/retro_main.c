@@ -35,6 +35,7 @@ struct gameinfo { const char *path; const void *data; size_t size; const char *m
 struct var_ { const char *key, *value; };
 struct ftcb_ { void (*cb)(int64_t); int64_t ref; };
 struct kbcb_ { void (*cb)(bool, unsigned, uint32_t, uint16_t); };
+struct absc_ { void (*cb)(bool, unsigned, bool); };
 
 double now_s(void)
 {
@@ -46,6 +47,7 @@ static int pixfmt = PF_0RGB1555, loglevel = 2;
 static const char *sysdir = DATA "/system", *savedir = DATA "/saves";
 static char corename[64];
 static struct ftcb_ ftcb;
+static void (*abs_cb)(bool, unsigned, bool);   /* core's audio-buffer-status callback (env 62): lets "auto" frameskip skip only when audio runs low */
 static struct avinfo av;
 static const VideoBackend *vb = &video_sw;
 static bool want_video, quit_core, vars_changed;
@@ -61,7 +63,9 @@ static char *ovr[256]; static int novr;   /* "key=value" overrides, in priority 
 
 static const char *builtin_defaults[] = {
     "vice_sid_engine=FastSID", "vice_sound_sample_rate=22050",   /* reSID: 19.5 s first frame */
-    "ep128emu_wait=5", "ep128emu_sdhq=0", NULL };
+    "ep128emu_wait=5", "ep128emu_sdhq=0",
+    "pcsx_rearmed_frameskip_type=auto",   /* skip rendering only when the audio ring runs low (env 62) */
+    NULL };
 
 static void add_ovr(const char *kv) { if (novr < 256 && strchr(kv, '=')) ovr[novr++] = strdup(kv); }
 
@@ -179,6 +183,7 @@ static int env_cb(unsigned cmd, void *data)
     case 37: av.g = *(struct geom *)data; return 1;                 /* SET_GEOMETRY */
     case 47: if (data) *(int *)data = ff_on ? (want_video ? 1 : 0) : 3; return 1;                  /* GET_AUDIO_VIDEO_ENABLE */
     case 52: *(unsigned *)data = 0; return 1;                       /* legacy options only */
+    case 62: abs_cb = data ? ((struct absc_ *)data)->cb : NULL; return 1;   /* SET_AUDIO_BUFFER_STATUS_CALLBACK */
     }
     return 0;
 }
@@ -356,6 +361,7 @@ int main(int argc, char **argv)
         for (int k = 0; k < due; k++) {
             in_poll();
             want_video = ff_on ? t - ff_pres >= 0.1 : k == due - 1;
+            if (abs_cb && !ff_on) { unsigned pc; bool ur; bool on = aud_buffer_status(&pc, &ur); abs_cb(on, pc, ur || (on && pc < 25)); }
             if (ftcb.cb) ftcb.cb(ftcb.ref ? ftcb.ref : (int64_t)(1e6 / fps));
             c0 = now_s(); run_core(run); c1 = now_s();
             double cv = vstat_conv - cp0; cp0 = vstat_conv;  /* conversion runs inside run() */

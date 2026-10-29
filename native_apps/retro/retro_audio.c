@@ -15,7 +15,7 @@ static int live, want, primed;      /* live: a device is open; want: the session
 static double core_rate_s, retry_at;
 static double step, ratio = 1.0, pos;   /* source samples per device sample */
 static int16_t last_s, prev_s;
-static unsigned target, underruns;
+static unsigned target, underruns, underruns_all, ub_seen;   /* underruns_all: never reset, for aud_buffer_status */
 static uint32_t starved0;
 
 static unsigned level(void) { return r_w - r_r; }
@@ -30,7 +30,7 @@ static long fill(void *ctx, int16_t *buf, long frames, int ch)
         for (int c = 0; c < ch; c++) buf[got * ch + c] = s;
         got++;
     }
-    if (got < frames) underruns++;
+    if (got < frames) { underruns++; underruns_all++; }
     return got;
 }
 
@@ -127,4 +127,17 @@ void aud_close(void) { want = 0; dev_close(); }
 void aud_pause(void)
 {
     r_r = r_w; primed = 0; pos = 0; last_s = prev_s = 0;   /* silence until aud_push reaches the target again */
+}
+
+/* For the core's audio-buffer-status callback (env 62): fill as % of the ring target, clamped to 100;
+ * *underrun = the device drained the ring dry since the last call.  Returns false until a device is open and primed.
+ * One divide per call, once per core run (~50/s). */
+bool aud_buffer_status(unsigned *pct, bool *underrun)
+{
+    unsigned u = underruns_all;
+    *underrun = u != ub_seen; ub_seen = u;
+    if (!live || !primed || !target) { *pct = 0; return false; }
+    unsigned p = level() * 100 / target;
+    *pct = p > 100 ? 100 : p;
+    return true;
 }
