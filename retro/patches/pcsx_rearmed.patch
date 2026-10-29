@@ -1,0 +1,20 @@
+diff --git a/libpcsxcore/gte_neon.S b/libpcsxcore/gte_neon.S
+index 6bc24792..bfb10b42 100644
+--- a/libpcsxcore/gte_neon.S
++++ b/libpcsxcore/gte_neon.S
+@@ -209,6 +209,7 @@ FUNCTION(gteRTPT_sf1lm0_neon): @ r0=CP2 (d,c),
+     bls         gteRTPT_sf1lm0 @ if MAC123 can overflow, don't bother
+ 
+     push        {r4-r11,lr}
++    vpush       {d8-d15}       @ AAPCS: q4-q6 are used below
+     vmov        q1, q2
+     mov         r2, #0
+     vmov        q3, q2
+@@ -485,6 +486,7 @@ FUNCTION(gteRTPT_sf1lm0_neon): @ r0=CP2 (d,c),
+     orrne       lr, #(1<<31)
+     str         lr, [r0, #4*(32+31)] @ gteFLAG
+ #endif
++    vpop        {d8-d15}
+     pop         {r4-r11,pc}
+     .size	gteRTPT_sf1lm0_neon, .-gteRTPT_sf1lm0_neon
+ 
