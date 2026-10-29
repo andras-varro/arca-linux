@@ -11,7 +11,8 @@
 static AudioOut out;
 static int16_t ring[RING];
 static volatile unsigned r_w, r_r;     /* free-running indices */
-static int open_ok, primed;
+static int live, want, primed;      /* live: a device is open; want: the session wants one (reopen when lost) */
+static double core_rate_s, retry_at;
 static double step, ratio = 1.0, pos;   /* source samples per device sample */
 static int16_t last_s, prev_s;
 static unsigned target, underruns;
@@ -33,32 +34,50 @@ static long fill(void *ctx, int16_t *buf, long frames, int ch)
     return got;
 }
 
+static void dev_close(void)
+{
+    if (!live) return;
+    audio_out_set_fill(&out, NULL, NULL, NULL);
+    audio_out_close(&out);
+    live = 0;
+}
+
+static int dev_open(void)
+{
+    const char *path = NULL;
+    /* 2 ch, as the games ask: mono on plug:bluealsa broke up on a VT360 speaker and was clean as
+     * stereo (heard on the panel, 2026-10-29); fill() copies each sample to every channel */
+    if (audio_out_open_resolved(&out, 44100, 2, &path) != 0) return -1;
+    audio_out_set_shift(&out, 1);        /* the -6 dB every client here applies */
+    int rate = audio_out_rate(&out);
+    step = core_rate_s / rate;           /* the resampler follows whatever this sink granted */
+    long per = audio_out_period(&out);
+    target = (unsigned)(per > 0 ? per * 3 / 2 : 3072) + (unsigned)(rate / 25);
+    if (target > RING / 2) target = RING / 2;
+    r_r = r_w; primed = 0; pos = 0;
+    audio_out_set_fill(&out, fill, NULL, "retro");
+    starved0 = audio_out_starved(&out);
+    live = 1;
+    fprintf(stderr, "retro: audio %s %d Hz x%d (core %.0f Hz), period %ld, ring target %u\n",
+            path ? path : "?", rate, audio_out_channels(&out), core_rate_s, per, target);
+    return 0;
+}
+
 int aud_open(double core_rate, double core_fps)
 {
     (void)core_fps;
     audio_out_set_device_pref(config_audio_device_stored());
     audio_out_set_bt_addr(config_audio_bt_addr_stored());   /* the pinned headset, as audio.c does; without it plug:bluealsa picks the most recently connected sink */
-    const char *path = NULL;
-    if (audio_out_open_resolved(&out, 44100, 1, &path) != 0) {
-        fprintf(stderr, "retro: audio open failed, running silent\n"); return -1;
-    }
-    audio_out_set_shift(&out, 1);        /* the -6 dB every client here applies */
-    int rate = audio_out_rate(&out);
-    step = core_rate / rate;
-    long per = audio_out_period(&out);
-    target = (unsigned)(per > 0 ? per * 3 / 2 : 3072) + (unsigned)(rate / 25);
-    if (target > RING / 2) target = RING / 2;
-    audio_out_set_fill(&out, fill, NULL, "retro");
-    starved0 = audio_out_starved(&out);
-    open_ok = 1;
-    fprintf(stderr, "retro: audio %s %d Hz x%d (core %.0f Hz), period %ld, ring target %u\n",
-            path ? path : "?", rate, audio_out_channels(&out), core_rate, per, target);
-    return 0;
+    core_rate_s = core_rate; want = 1;
+    if (dev_open() == 0) return 0;
+    fprintf(stderr, "retro: audio open failed, retrying each second\n");
+    retry_at = now_s() + 1.0;
+    return -1;
 }
 
 void aud_push(const int16_t *st, size_t frames)
 {
-    if (!open_ok) return;
+    if (!live) return;
     /* rate correction: +-0.5 % pulling the ring toward its target */
     double err = ((double)target - (double)level()) / (double)target;
     if (err > 1) err = 1;
@@ -80,27 +99,30 @@ void aud_push(const int16_t *st, size_t frames)
 
 void aud_service(void)
 {
-    if (!open_ok) return;
-    if (audio_out_device_lost(&out)) { fprintf(stderr, "retro: audio device lost\n"); aud_close(); return; }
+    if (!want) return;
+    /* Failover and take-back, ScummVM's oss-mixer.cpp loop: audio_out decides (the lost flag, and
+     * audio_out_usb_returned() for a replugged USB card or the pinned headset coming back); the
+     * owner closes and reopens through its own path.  No device: one open attempt per second. */
+    if (live && audio_out_device_lost(&out)) { fprintf(stderr, "retro: audio device lost, reopening\n"); dev_close(); }
+    else if (live && audio_out_usb_returned(&out)) dev_close();
+    if (!live) {
+        double t = now_s();
+        if (t < retry_at) return;
+        if (dev_open() != 0) { retry_at = t + 1.0; return; }
+    }
     audio_out_service(&out);
 }
 
 void aud_stats(unsigned *ru, unsigned *ds, double *lms, double *rt)
 {
     *ru = underruns; underruns = 0;
-    uint32_t s = open_ok ? audio_out_starved(&out) : 0;
+    uint32_t s = live ? audio_out_starved(&out) : 0;
     *ds = s - starved0; starved0 = s;
-    *lms = open_ok ? 1000.0 * level() / audio_out_rate(&out) : 0;
+    *lms = live ? 1000.0 * level() / audio_out_rate(&out) : 0;
     *rt = ratio;
 }
 
-void aud_close(void)
-{
-    if (!open_ok) return;
-    audio_out_set_fill(&out, NULL, NULL, NULL);
-    audio_out_close(&out);
-    open_ok = 0;
-}
+void aud_close(void) { want = 0; dev_close(); }
 
 void aud_pause(void)
 {
