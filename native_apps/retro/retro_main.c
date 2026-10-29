@@ -214,6 +214,18 @@ static void on_sig(int s) { got_sig = s; }
 #define SYM(var, name) do { *(void **)&var = dlsym(h, name); \
     if (!var) { fprintf(stderr, "retro: missing symbol %s\n", name); return 1; } } while (0)
 
+/* AAPCS makes d8-d15 callee-saved, but a core's hand-written NEON (pcsx_rearmed's gte_neon.S uses q4-q7 and
+ * saves only r4-r10) may return with them changed; the main loop keeps its timing doubles there. */
+__attribute__((noinline)) static void run_core(void (*f)(void))
+{
+    __asm__ volatile("vpush {d8-d15}\n\tblx %0\n\tvpop {d8-d15}"
+                     : : "r"(f)
+                     : "r0", "r1", "r2", "r3", "r12", "lr", "cc", "memory",
+                       "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7",
+                       "d16", "d17", "d18", "d19", "d20", "d21", "d22", "d23",
+                       "d24", "d25", "d26", "d27", "d28", "d29", "d30", "d31");
+}
+
 int main(int argc, char **argv)
 {
     const char *vname = getenv("RETRO_VIDEO");
@@ -310,7 +322,7 @@ int main(int argc, char **argv)
              * of the moment (the opening key never reaches the core), then stop the core and the audio. */
             in_release(); aud_service();
             if (ftcb.cb) ftcb.cb(ftcb.ref ? ftcb.ref : (int64_t)(1e6 / fps));
-            grab = true; want_video = true; run(); grab = false;
+            grab = true; want_video = true; run_core(run); grab = false;
             aud_pause();
             struct menu_core mc = { ser_size, ser, unser, disk_n, disk_cur, disk_set };
             const char *sn = getenv("RETRO_SYSID");
@@ -337,7 +349,7 @@ int main(int argc, char **argv)
             in_poll();
             want_video = ff_on ? t - ff_pres >= 0.1 : k == due - 1;
             if (ftcb.cb) ftcb.cb(ftcb.ref ? ftcb.ref : (int64_t)(1e6 / fps));
-            c0 = now_s(); run(); c1 = now_s();
+            c0 = now_s(); run_core(run); c1 = now_s();
             double cv = vstat_conv - cp0; cp0 = vstat_conv;  /* conversion runs inside run() */
             double cm = (c1 - c0) - cv;
             st_core += cm; if (cm > st_cmax) st_cmax = cm;
