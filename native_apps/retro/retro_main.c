@@ -308,10 +308,15 @@ int main(int argc, char **argv)
     }
     if (strcmp(content, "-")) {
         memset(&gi, 0, sizeof gi); gi.path = content;
-        FILE *f = fopen(content, "rb"); if (!f) { perror(content); vb->close(); return 1; }
-        fseek(f, 0, SEEK_END); gi.size = (size_t)ftell(f); fseek(f, 0, SEEK_SET);
-        if (!si.need_fullpath) { buf = malloc(gi.size); if (!buf || fread(buf, 1, gi.size, f) != gi.size) return 1; gi.data = buf; }
-        fclose(f); gp = &gi;
+        /* A core that loads by path may take a path that is no file: DOSBox Pure's GAME.ZIP#PROG.EXE starts PROG. */
+        FILE *f = fopen(content, "rb");
+        if (!f && !si.need_fullpath) { perror(content); vb->close(); return 1; }
+        if (f) {
+            fseek(f, 0, SEEK_END); gi.size = (size_t)ftell(f); fseek(f, 0, SEEK_SET);
+            if (!si.need_fullpath) { buf = malloc(gi.size); if (!buf || fread(buf, 1, gi.size, f) != gi.size) return 1; gi.data = buf; }
+            fclose(f);
+        }
+        gp = &gi;
     }
     if (!load(gp)) { fprintf(stderr, "retro: retro_load_game failed\n"); vb->close(); return 1; }
     get_av(&av);
