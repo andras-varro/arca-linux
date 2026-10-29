@@ -91,3 +91,22 @@ index 3e34a7f..b1db49f 100644
     set_config_changed();
  
  }
+diff --git a/libretro/core/core-mapper.cpp b/libretro/core/core-mapper.cpp
+--- a/libretro/core/core-mapper.cpp
++++ b/libretro/core/core-mapper.cpp
+@@ -658,6 +658,15 @@ int Retro_PollEvent()
+    if (abs(analog_right[1]) > analog_deadzone)
+       rmouse_y += analog_right[1] * 10 *  0.7 / (32768 );
+ 
++   /* Arca: the left stick moves the mouse too. Upstream reads only the right stick, and a pad
++    * whose right stick is absent or unmapped (the frontend feeds the left stick to the d-pad
++    * as well, so port 2 keeps its joystick) left the pointer unreachable on a pad. */
++   int analog_left[2];
++   analog_left[0] = input_state_cb(0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X);
++   analog_left[1] = input_state_cb(0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y);
++   if (abs(analog_left[0]) > analog_deadzone) rmouse_x += analog_left[0] * 10 / 32768;
++   if (abs(analog_left[1]) > analog_deadzone) rmouse_y += analog_left[1] * 10 / 32768;
++
+    // L2 & R2 as mouse button...
+    mouse_l    |= input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2);
+    mouse_r    |= input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2);
