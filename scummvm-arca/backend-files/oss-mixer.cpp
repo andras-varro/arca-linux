@@ -170,7 +170,9 @@ bool OssMixerManager::openDevice() {
 	// Request what the mixer runs at: 22050 before init has built it, the granted
 	// rate on every reopen, so a reopen asks for exactly what OPL is counting in.
 	const char *path = nullptr;
-	if (audio_out_open_resolved(&_out, (int)_outputRate, 1, &path) != 0)
+	// Stereo, as the games ask: a mono stream on plug:bluealsa broke up on a VT360 speaker and
+	// was clean as 2 ch (heard on the panel, 2026-10-29); the fill copies the mix to each channel.
+	if (audio_out_open_resolved(&_out, (int)_outputRate, 2, &path) != 0)
 		return false;
 
 	// ⚠️ Use the GRANTED rate, never the requested one.  If _outputRate does not
