@@ -475,6 +475,14 @@ bool        audio_out_bt_addr_valid(const char *addr);
  *  is valid, else (or if `buf` is too small) the literal `"plug:bluealsa"`. */
 const char *audio_out_bt_pcm_for(const char *pref, const char *addr,
                                  char *buf, size_t n);
+/** The channel count to REQUEST on ALSA PCM `pcm`, given what the client asked
+ *  for: a Bluetooth PCM (`plug:bluealsa`, or the pinned `bluealsa:DEV=…` form)
+ *  never gets fewer than 2, whatever the client wants, because a 1-channel A2DP
+ *  stream broke up on a Sony VT360 speaker (clean on a WI-C310; 2 ch clean on
+ *  both, measured 2026-10-29).  Any other PCM, a NULL name and a request of 0 or
+ *  less pass through.  Pure: no device in it.  Callers read the GRANT back
+ *  through audio_out_channels() and must not assume the count they asked for. */
+int         audio_out_channels_for_pcm(const char *pcm, int channels_req);
 /** Whether a SAVED choice + address prefers the device `dev_addr`: BLUETOOTH or
  *  AUTO and the same valid address, compared case-insensitively.  A settings
  *  page offers USE FOR AUDIO while this is false. */

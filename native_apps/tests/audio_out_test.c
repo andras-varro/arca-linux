@@ -1795,6 +1795,27 @@ int main(void)
         check(vol_from_file(NULL) == AUDIO_VOLUME_DEFAULT, "V6f empty file: default 10");
     }
 
+    /* ── CH: a Bluetooth PCM never opens 1 channel ─────────────────────────
+     * A 1-channel stream broke up on a Sony VT360 (clean on a WI-C310); 2 ch
+     * was clean on both.  The decision is a pure function of the PCM name. */
+    {
+        char pbuf[64];
+        const char *pin = audio_out_bt_pcm_for("bluetooth", "AA:BB:CC:DD:EE:FF",
+                                               pbuf, sizeof(pbuf));
+        check(audio_out_channels_for_pcm("plug:bluealsa", 1) == 2,
+              "CH1 plug:bluealsa: 1 ch requested -> 2");
+        check(audio_out_channels_for_pcm(pin, 1) == 2,
+              "CH2 the pinned bluealsa:DEV=...,PROFILE=a2dp form: 1 ch requested -> 2");
+        check(audio_out_channels_for_pcm("plug:bluealsa", 2) == 2,
+              "CH3 a stereo request stays 2");
+        check(audio_out_channels_for_pcm("plughw:0,0", 1) == 1 &&
+              audio_out_channels_for_pcm("plughw:1,0", 1) == 1,
+              "CH4 onboard and USB keep a mono request mono");
+        check(audio_out_channels_for_pcm(NULL, 1) == 1 &&
+              audio_out_channels_for_pcm("plug:bluealsa", 0) == 0,
+              "CH5 NULL name and a zero request pass through unchanged");
+    }
+
     printf("\n%s  %d checks, %d failure(s)\n",
            failures ? "FAILED" : "PASSED", checks, failures);
     return failures ? 1 : 0;

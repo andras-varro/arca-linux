@@ -694,7 +694,7 @@ Four rules live there:
   BLUETOOTH and AUTO: pinned headset (`bluealsa-pin`) > any BT sink (`plug:bluealsa`) > USB DAC > onboard, from the pure
   `audio_out_device_for_bt()` (`audio_out_device_for` wraps it); the open fails fast. The probe
   opens `plug:bluealsa` only while the pin is absent; with the stream on another sink, `audio_out_reprobe_due_pin()`
-  keeps re-probing and the two-sighting move returns it. OUT cycling keeps the pin; only USE FOR AUDIO on another headset or REMOVE of the pinned one changes it.
+  keeps re-probing and the two-sighting move returns it. A Bluetooth PCM never opens mono (`audio_out_channels_for_pcm()`, applied in `alsa_open()`): 1 ch broke up on a VT360, 2 ch was clean. OUT cycling keeps the pin; only USE FOR AUDIO on another headset or REMOVE of the pinned one changes it.
 - **The fade-out is a MODE of the one oscillator, not a second copy.** `AUDIO_OSC_FADE_OUT` holds frequency and
   amplitude still, so deleting it while collapsing the duplicated generators deletes the fade.
   `AUDIO_OSC_GLIDE` reproduces the old stream generator byte for byte, and split calls equal one long call —

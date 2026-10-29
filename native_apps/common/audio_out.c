@@ -781,6 +781,19 @@ const char *audio_out_bt_pcm_for(const char *pref, const char *addr,
     return (w > 0 && (size_t)w < n) ? buf : AUDIO_BT_PCM;
 }
 
+int audio_out_channels_for_pcm(const char *pcm, int channels_req)
+{
+    /* ⚠️ Mono on a Bluetooth PCM is not a safe request: a 1-channel A2DP stream
+     * broke up on a Sony VT360 speaker and was clean on a WI-C310, while 2 ch
+     * was clean on both (measured 2026-10-29).  Both BlueALSA names are matched
+     * by prefix — "plug:bluealsa" and the pinned "bluealsa:DEV=…,PROFILE=a2dp".
+     * The one home for it is alsa_open(), which every open (first, reopen,
+     * failover, the move to or from the pinned headset) goes through. */
+    bool bt = pcm && (strncmp(pcm, "plug:bluealsa", 13) == 0 ||
+                      strncmp(pcm, "bluealsa:", 9) == 0);
+    return (bt && channels_req == 1) ? 2 : channels_req;
+}
+
 const char *audio_out_device_pref(void)
 {
     return audio_dev_pref;
@@ -1231,7 +1244,8 @@ static int alsa_open(void *ctx, int rate_req, int channels_req,
 
     snd_pcm_hw_params_t *hw;
     snd_pcm_hw_params_alloca(&hw);
-    unsigned int rate = (unsigned int)rate_req, ch = (unsigned int)channels_req;
+    unsigned int rate = (unsigned int)rate_req;
+    unsigned int ch   = (unsigned int)audio_out_channels_for_pcm(a->name, channels_req);
     snd_pcm_uframes_t period = ALSA_PERIOD_REQ;
     snd_pcm_uframes_t buffer = ALSA_PERIOD_REQ * ALSA_PERIODS_REQ;
     int dir = 0;

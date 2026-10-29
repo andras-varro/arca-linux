@@ -98,6 +98,11 @@ run "9 serviced policy given a non-zero wait" \
 run "10 CONTROL: audio_out_starved() always returns 0" \
     sed -i 's|return out ? out->starved     : 0;|return 0;|' audio_out.c
 
+# 11 A Bluetooth PCM is no longer lifted from mono to stereo: a 1-channel A2DP
+#    stream is what broke up on a Sony VT360.
+run "11 Bluetooth PCM keeps a mono request" \
+    sed -i 's|return (bt \&\& channels_req == 1) ? 2 : channels_req;|return channels_req;|' audio_out.c
+
 rm -rf "$W"
 # A stanza that edited nothing is a harness error, not a verdict: fail the run.
 [ "$HARNESS_ERR" -eq 0 ] || { echo "HARNESS ERROR: a sabotage matched nothing"; exit 1; }
