@@ -94,7 +94,7 @@ binary on the device, the native apps included.
 ScummVM Core -> OSystem_Arca
   |- ArcaGraphicsManager -> /dev/fb0   (RGB565, double-buffered)
   |- ArcaEventSource     -> /dev/input/event*  (touch, keyboard, mouse, gamepad)
-  |- OssMixerManager           -> audio_out.c -> ALSA plughw:N,0 (22050 Hz mono) -> TWL4030 or USB DAC
+  |- OssMixerManager           -> audio_out.c -> ALSA plughw:N,0 (22050 Hz stereo) -> TWL4030 or USB DAC
   \- Default managers (timer, events, saves, filesystem)
 ```
 
@@ -183,9 +183,9 @@ Numbers and method: [`../SYSTEM_ANALYSIS.md#33-touch`](../SYSTEM_ANALYSIS.md#33-
 The device facts are documented in
 [`../SYSTEM_ANALYSIS.md`](../SYSTEM_ANALYSIS.md#34-audio). The backend-specific consequences:
 
-- **Mono request, 22050 Hz.** Mono halves OPL synthesis load, but it is a REQUEST: `hw:0,0` is
-  stereo-only, and `fillFromMixer()` honours whatever count is granted — a fill that ignored the
-  grant would play at the wrong speed. ScummVM's mixer downmixes automatically.
+- **Stereo request, 22050 Hz** — mono on `plug:bluealsa` breaks up on some speakers (link above). It
+  is a REQUEST: `fillFromMixer()` honours whatever count is granted — a fill that ignored the grant
+  would play at the wrong speed.
 - **Use the GRANTED rate for `_outputRate`** — `audio_out_rate()` after the open, never the request;
   a wrong `_outputRate` makes OPL run at the wrong tempo.
 - **The device half is not this file's.** The ALSA open, the negotiation and read-backs, the ring
