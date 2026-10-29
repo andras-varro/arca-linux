@@ -65,9 +65,25 @@ static const char *builtin_defaults[] = {
     "vice_sid_engine=FastSID", "vice_sound_sample_rate=22050",   /* reSID: 19.5 s first frame */
     "ep128emu_wait=5", "ep128emu_sdhq=0",
     "pcsx_rearmed_frameskip_type=auto",   /* skip rendering only when the audio ring runs low (env 62) */
+    "dosbox_pure_audiorate=44100",        /* our output rate; the core's 48000 default costs a resample */
     NULL };
 
-static void add_ovr(const char *kv) { if (novr < 256 && strchr(kv, '=')) ovr[novr++] = strdup(kv); }
+/* Takes "key=value" and RetroArch's own .opt form, key = "value": blanks round '=' and the quotes go. */
+static void add_ovr(const char *kv)
+{
+    const char *eq = strchr(kv, '=');
+    if (novr >= 256 || !eq) return;
+    size_t kn = (size_t)(eq - kv);
+    while (kn && (kv[kn - 1] == ' ' || kv[kn - 1] == '\t')) kn--;
+    const char *v = eq + 1; while (*v == ' ' || *v == '\t') v++;
+    size_t vn = strlen(v);
+    while (vn && (v[vn - 1] == ' ' || v[vn - 1] == '\t')) vn--;
+    if (vn >= 2 && v[0] == '"' && v[vn - 1] == '"') { v++; vn -= 2; }
+    char *s = malloc(kn + 1 + vn + 1);
+    if (!s) return;
+    memcpy(s, kv, kn); s[kn] = '='; memcpy(s + kn + 1, v, vn); s[kn + 1 + vn] = 0;
+    ovr[novr++] = s;
+}
 
 static void opt_file(const char *p)
 {
