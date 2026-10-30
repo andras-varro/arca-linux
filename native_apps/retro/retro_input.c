@@ -9,6 +9,7 @@
 #include "input_scan.h"
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -27,6 +28,8 @@ static void mq_push(int e) { if (mq_n < 16) mq[mq_n++] = (uint8_t)e; }
 static double last_scan;
 static int mrx, mry, mx, my;              /* mouse: deltas gathering since the last poll, and the poll's */
 static uint8_t mbtn, mwh, mwhp;           /* buttons L|R<<1|M<<2; wheel up|down<<1 gathering, and the poll's */
+static int macy;                          /* menu: vertical mouse motion not yet turned into a step */
+#define MENU_STEP 24                      /* mouse counts per menu step */
 bool in_computer;
 void (*in_kbd_cb)(bool, unsigned, uint32_t, uint16_t);
 
@@ -139,7 +142,11 @@ void in_poll(void)
                 struct input_event *x = &ev[e];
                 int p = pad_of[i];
                 if (x->type == EV_REL && p < 0) {       /* any mouse or keyboard-with-pointer node */
-                    if (menu_on) continue;
+                    if (menu_on) {          /* the menu: wheel and motion step the selection */
+                        if (x->code == REL_WHEEL) mq_push(x->value > 0 ? MEV_UP : MEV_DOWN);
+                        else if (x->code == REL_Y && (macy += x->value) && abs(macy) >= MENU_STEP) { mq_push(macy > 0 ? MEV_DOWN : MEV_UP); macy = 0; }
+                        continue;
+                    }
                     if (x->code == REL_X) mrx += x->value;
                     else if (x->code == REL_Y) mry += x->value;
                     else if (x->code == REL_WHEEL) mwh |= x->value > 0 ? 1 : 2;
@@ -147,7 +154,9 @@ void in_poll(void)
                 }
                 if (x->type == EV_KEY && p < 0 && x->code >= BTN_LEFT && x->code <= BTN_MIDDLE) {
                     int b = 1 << (x->code - BTN_LEFT);   /* BTN_LEFT, BTN_RIGHT, BTN_MIDDLE are consecutive */
-                    if (x->value && !menu_on) mbtn |= (uint8_t)b; else if (!x->value) mbtn &= (uint8_t)~b;
+                    if (menu_on) { if (x->value && x->code == BTN_LEFT) mq_push(MEV_OK); else if (x->value && x->code == BTN_RIGHT) mq_push(MEV_BACK); }   /* left = OK, right = Back */
+                    else if (x->value) mbtn |= (uint8_t)b;
+                    else mbtn &= (uint8_t)~b;
                     continue;
                 }
                 if (x->type == EV_KEY && p >= 0) {
@@ -227,7 +236,7 @@ void in_release(void)
     mrx = mry = mx = my = 0; mbtn = mwh = mwhp = 0;
 }
 
-void in_menu_mode(bool on) { menu_on = on; menu_req = false; mq_n = 0; }
+void in_menu_mode(bool on) { menu_on = on; menu_req = false; mq_n = 0; macy = 0; }
 int in_menu_ev(void)
 {
     if (!mq_n) return 0;

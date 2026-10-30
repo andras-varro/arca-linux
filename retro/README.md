@@ -332,6 +332,67 @@ dropped), but warp does not make a frame cheaper, so it gains about 10% and only
 emulation on: Last Ninja 2 and Creatures run, Street Rod gets past the copy-protection check to the parts shop (TDE off
 it ends in DISK ERROR). The drive idle method is a VICE resource with no libretro option; not measured.
 
+### How core options are applied
+
+`native_apps/retro/retro_main.c` (header comment, `builtin_defaults[]`, `add_ovr`, `ovr_get`) builds one option
+set per run from these layers, **last wins**:
+
+1. the core's own defaults (what it declares through `SET_VARIABLES`);
+2. `builtin_defaults[]` in `retro_main.c`, only for cores that are too slow at their own default;
+3. `/home/root/data/retro/options/<core>.opt`, all games of that core;
+4. `RETRO_OPTS` (comma-separated `k=v`); the launcher fills it from the `opts=` line of `systems/<system>.sys`;
+5. `<content path>.opt` beside the game file in `roms/<system>/`, one game.
+
+A `.opt` file takes `key=value` and RetroArch's own `key = "value"` form; `#` starts a comment line. Option
+files are device data and never go in the repo.
+
+**A key the core never sees:** `retro_start=PROG.EXE`, for a core that loads by path. The frontend appends it to the
+content, so DOSBox Pure loads `GAME.ZIP#PROG.EXE` and skips its program list.
+
+**Mouse:** a USB mouse (or a Bluetooth keyboard's touchpad) is `RETRO_DEVICE_MOUSE` on port 0 (deltas, left/right/middle,
+wheel; `retro_input.c`).
+
+Keys that matter per core, as far as this document and `builtin_defaults[]` already record:
+
+| Core | Keys |
+|---|---|
+| VICE (Commodore 64) | `vice_sid_engine=FastSID` and `vice_sound_sample_rate=22050` by built-in default (reSID is far too slow); `vice_drive_true_emulation` and `vice_joyport` per game, see above |
+| Enterprise 128 | `ep128emu_wait=5`, `ep128emu_sdhq=0` by built-in default |
+| PlayStation (`pcsx_rearmed`) | `pcsx_rearmed_frameskip_type=auto` by built-in default: it skips rendering only when the audio ring runs low |
+| Amiga (`uae4arm`) | `uae4arm_resolution=320x240` from `amiga.sys`; `uae4arm_jit`, `uae4arm_cpu`, `uae4arm_cpu_speed` (off by default, see the Amiga build note in section 9) |
+| DOS (DOSBox Pure) | `dosbox_pure_audiorate=44100` by built-in default (our output rate; the core's 48000 costs a resample); `dosbox_pure_cpu_core`, `dosbox_pure_cycles`; next section |
+
+### Proposed settings for DOS games (DOSBox Pure)
+
+These are starting points for a game of a given kind and era, written by the user into `<game>.zip.opt` beside the
+zip in `roms/dos/`. They are not shipped with anything. Measured on this CPU (OMAP3, 600 MHz): `dosbox_pure_cpu_core=dynamic`
+is the main win, the normal core costs far more per frame; `dosbox_pure_cycles=auto` overruns the 14.3 ms frame of a 70 Hz
+VGA mode. The conversion of a 640x400 XRGB frame is NEON and cheap, but a 640x400 mode still costs more than 320x200.
+
+| Game (public title) | Proposed |
+|---|---|
+| Alley Cat (8088 era) | `dosbox_pure_cycles=315` |
+| Stunts / 4D Sports Driving | `dosbox_pure_cpu_core=dynamic`, `dosbox_pure_cycles=1320` |
+| Prehistorik 2 | dynamic, 1320 |
+| Micro Machines 2 | dynamic, 4720 (higher cycles measured slower) |
+| Alone in the Dark 3 | dynamic, 7800 |
+| Scorched Earth | dynamic, 2750 as a compromise: it is bound by the guest CPU at 640x400, where 1320 is smoother but draws slower and 4720 draws faster at about 35 fps |
+
+**Rule of thumb:** start at the era's CPU (286 = 1320; 386 = 4720 or 7800), lower the cycles if the sound breaks up, raise
+them if the game is slow while the sound is clean. An example `<game>.zip.opt`:
+
+```
+# start PROG.EXE directly instead of the DOSBox Pure program list
+retro_start=PROG.EXE
+dosbox_pure_cpu_core=dynamic
+dosbox_pure_cycles=1320
+```
+
+### Not supported yet: per-app CPU clock
+
+The unit has no overclock support, so no setting here changes the CPU clock. A per-game or per-core clock would be one more
+frontend key (like `retro_start`) read through the same `.opt` layering; this is a proposal and nothing implements it.
+
 ## 10. Open questions
 
 - Pin-to-launcher: launcher extension or generated wrapper (argv is fixed today).

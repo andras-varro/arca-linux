@@ -42,6 +42,7 @@
 #include "../common/hardware.h"
 #include "../common/common.h"
 #include "../common/gamepad.h"
+#include "../common/pointer.h"
 #include "../common/list_view.h"
 #include "../common/top_bar.h"
 #include "../common/top_pick.h"
@@ -390,7 +391,7 @@ static const char *pick_name(void *c, int i) { (void)c; return view_name(i); }
 
 /* ── launching ──────────────────────────────────────────────────────────── */
 
-typedef struct { Framebuffer fb; TouchInput touch; GamepadManager gp; } Dev;
+typedef struct { Framebuffer fb; TouchInput touch; GamepadManager gp; Pointer ptr; } Dev;
 
 static const char *g_fb_dev = "/dev/fb0", *g_touch_dev = "/dev/input/touchscreen0";
 
@@ -403,6 +404,7 @@ static int dev_open(Dev *d)
         touch_drain_events(&d->touch);
     }
     gamepad_init(&d->gp);
+    pointer_init(&d->ptr);        /* after touch_init: SCREEN_SAFE_* */
     return 0;
 }
 
@@ -627,6 +629,16 @@ int main(int argc, char **argv)
 
         if (now < cooldown_until) { usleep(16000); continue; }
 
+        /* The mouse: motion moves the arrow, a left click becomes this frame's
+         * touch at it (pointer.h), so everything below takes it as a tap. */
+        {
+            bool nav = bt[BTN_ID_UP].pressed   || bt[BTN_ID_DOWN].pressed  ||
+                       bt[BTN_ID_LEFT].pressed || bt[BTN_ID_RIGHT].pressed ||
+                       bt[BTN_ID_JUMP].pressed || bt[BTN_ID_ACTION].pressed ||
+                       bt[BTN_ID_BACK].pressed || bt[BTN_ID_PAUSE].pressed;
+            pointer_update(&dev.ptr, &in, ts.pressed, nav, &ts);
+        }
+
         if (top_bar_info_due(&g_bar, now) && top_bar_info_sample(&g_bar)) redraw = true;
 
         bool go_back = bt[BTN_ID_BACK].pressed || bt[BTN_ID_CANCEL].pressed || bt[BTN_ID_PAUSE].pressed;
@@ -698,6 +710,7 @@ int main(int argc, char **argv)
             if (i >= 0 && i < g_ngames) {
                 run_game(&dev, &g_sys[g_games[i].sys], &g_games[i]);
                 memset(&in, 0, sizeof in);
+                pointer_drain(&dev.ptr);      /* the click that launched it must not replay */
                 cooldown_until = get_time_ms() + RETURN_COOLDOWN_MS;
                 exit_press = false;
                 top_bar_info_invalidate(&g_bar);
@@ -711,9 +724,11 @@ int main(int argc, char **argv)
         if (redraw) {
             last_draw = now;
             draw_screen(&dev, now);
+            pointer_invalidate(&dev.ptr);   /* the frame lacks the arrow */
             redraw = false;
         }
-        usleep(lv_needs_frames(&g_lv) || g_pick.up ? 8000 : 16000);
+        bool moved = pointer_paint(&dev.ptr, &dev.fb);   /* the arrow alone, a moving mouse keeps the active rate */
+        usleep(moved || lv_needs_frames(&g_lv) || g_pick.up ? 8000 : 16000);
     }
 
     free_games();

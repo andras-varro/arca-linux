@@ -374,7 +374,7 @@ $CC "${WARN[@]}" -O2 -I. -Icommon retro/retro_main.c retro/retro_video.c retro/r
 
 # retro_picker: the launcher-side list of installed cores and their content; it execs /opt/games/retro.
 step "38/38" "retro_picker"
-$CC "${WARN[@]}" -O2 -I. -Icommon retro_picker/retro_picker.c build/list_view.o build/ui_focus.o build/top_bar.o build/top_pick.o build/icon_grid.o build/ppm.o common/icons.c common/status_line.c control_panel/cpu_load.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/retro_picker -lm "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. -Icommon retro_picker/retro_picker.c build/list_view.o build/ui_focus.o build/top_bar.o build/top_pick.o build/icon_grid.o build/ppm.o build/pointer.o common/icons.c common/status_line.c control_panel/cpu_load.c "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/retro_picker -lm "${AUDIO_LIBS[@]}"
 
 # Collect icon files from source dirs → build/icons/.  control_panel/icons/ holds
 # the control panel's home-grid icons (gen_cp_icons.py); control_panel reads them
