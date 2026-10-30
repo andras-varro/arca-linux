@@ -14,6 +14,7 @@
  * Core options: legacy SET_VARIABLES defaults, then built-in defaults for the
  * slow cores below, then <opts dir>/<core>.opt (key=value lines), then RETRO_OPTS, then
  * <content path>.opt (per game, beside the content, key=value lines, wins over all).
+ * A key the frontend reads itself: retro_start=PROG.EXE (content becomes <content>#PROG.EXE).
  * One stats line per second on stderr. */
 #define _GNU_SOURCE
 #include "retro.h"
@@ -116,6 +117,15 @@ static void load_overrides(const char *content)
         snprintf(p, sizeof p, "%s.opt", content);
         opt_file(p);
     }
+}
+
+/* The last override for key, or NULL: also how a frontend key (retro_*) is read, which no core asks for. */
+static const char *ovr_get(const char *key)
+{
+    size_t kl = strlen(key);
+    for (int i = novr - 1; i >= 0; i--)
+        if (!strncmp(ovr[i], key, kl) && ovr[i][kl] == '=') return ovr[i] + kl + 1;
+    return NULL;
 }
 
 static void store_vars(const struct var_ *v)
@@ -307,8 +317,15 @@ int main(int argc, char **argv)
         vb->close(); return 1;
     }
     if (strcmp(content, "-")) {
-        memset(&gi, 0, sizeof gi); gi.path = content;
-        /* A core that loads by path may take a path that is no file: DOSBox Pure's GAME.ZIP#PROG.EXE starts PROG. */
+        /* A core that loads by path may take a path that is no file: DOSBox Pure's GAME.ZIP#PROG.EXE starts PROG.
+         * retro_start=PROG.EXE in the game's .opt appends it, so the launcher skips the program list. */
+        static char gpath[600];
+        const char *rs = ovr_get("retro_start");
+        if (rs && *rs && si.need_fullpath && !strchr(content, '#')) {
+            snprintf(gpath, sizeof gpath, "%s#%s", content, rs);
+            fprintf(stderr, "retro: starting %s\n", gpath);
+        } else snprintf(gpath, sizeof gpath, "%s", content);
+        memset(&gi, 0, sizeof gi); gi.path = gpath;
         FILE *f = fopen(content, "rb");
         if (!f && !si.need_fullpath) { perror(content); vb->close(); return 1; }
         if (f) {

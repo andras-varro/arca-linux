@@ -2,6 +2,7 @@
  * Pads -> RETRO_DEVICE_JOYPAD/ANALOG ports 0..1 (SNES layout: Xbox A = B,
  * B = A, X = Y, Y = X).  Keyboard -> RETRO_DEVICE_KEYBOARD and the keyboard
  * callback; for a core that never asks for the keyboard it doubles as pad 0.
+ * Mice (and a BT keyboard's touchpad) -> RETRO_DEVICE_MOUSE port 0: summed deltas, L/R/M, wheel.
  * Pause menu: pad Select+Start, or F12 (Esc too, unless the core is a computer with a keyboard);
  * while it is up, keys and pad edges become menu events (in_menu_ev) and the core sees nothing. */
 #include "retro.h"
@@ -24,6 +25,8 @@ static uint8_t mq[16]; static int mq_n;     /* menu event queue */
 static uint16_t pm[2];                      /* pad bits (incl. left stick) last poll, for edges */
 static void mq_push(int e) { if (mq_n < 16) mq[mq_n++] = (uint8_t)e; }
 static double last_scan;
+static int mrx, mry, mx, my;              /* mouse: deltas gathering since the last poll, and the poll's */
+static uint8_t mbtn, mwh, mwhp;           /* buttons L|R<<1|M<<2; wheel up|down<<1 gathering, and the poll's */
 bool in_computer;
 void (*in_kbd_cb)(bool, unsigned, uint32_t, uint16_t);
 
@@ -69,15 +72,13 @@ static uint32_t ch_of(unsigned rk)
 
 static void scan(void)
 {
-    /* A BT keyboard with a pointer interface (the 5.1 combos) is one node classified MOUSE: allow
-     * mice through the scan, then keep only those that also carry the letter keys. */
+    /* A BT keyboard with a pointer interface (the 5.1 combos) is one node classified MOUSE and is read
+     * as a keyboard; its pointer events reach the mouse like a plain mouse's (pad_of -3). */
     int cap[INPUT_KIND_COUNT] = { 0, 4, 2, 2 };
     int old = nn;
     nn = input_scan(nodes, nn, MAXN, cap);
-    for (int i = old; i < nn; i++)
-        if (nodes[i].kind == INPUT_KIND_MOUSE && !nodes[i].keys) { nn = input_scan_drop(nodes, nn, i); i--; }
     for (int i = old; i < nn; i++) {
-        pad_of[i] = -1;
+        pad_of[i] = nodes[i].kind == INPUT_KIND_MOUSE && !nodes[i].keys ? -3 : -1;
         if (nodes[i].kind == INPUT_KIND_PAD) {
             int used[2] = { 0, 0 };
             for (int j = 0; j < i; j++) if (pad_of[j] >= 0) used[pad_of[j]] = 1;   /* only nodes already assigned: later slots hold stale 0 */
@@ -90,7 +91,7 @@ static void scan(void)
             }
         }
         fprintf(stderr, "retro: input %s %s \"%s\"%s\n", nodes[i].path,
-                nodes[i].kind == INPUT_KIND_PAD ? "pad" : "keyboard", nodes[i].name,
+                nodes[i].kind == INPUT_KIND_PAD ? "pad" : pad_of[i] == -3 ? "mouse" : "keyboard", nodes[i].name,
                 pad_of[i] >= 0 ? (pad_of[i] ? " -> port 1" : " -> port 0") : "");
     }
 }
@@ -137,6 +138,18 @@ void in_poll(void)
             for (int e = 0; e < (int)(r / (ssize_t)sizeof ev[0]); e++) {
                 struct input_event *x = &ev[e];
                 int p = pad_of[i];
+                if (x->type == EV_REL && p < 0) {       /* any mouse or keyboard-with-pointer node */
+                    if (menu_on) continue;
+                    if (x->code == REL_X) mrx += x->value;
+                    else if (x->code == REL_Y) mry += x->value;
+                    else if (x->code == REL_WHEEL) mwh |= x->value > 0 ? 1 : 2;
+                    continue;
+                }
+                if (x->type == EV_KEY && p < 0 && x->code >= BTN_LEFT && x->code <= BTN_MIDDLE) {
+                    int b = 1 << (x->code - BTN_LEFT);   /* BTN_LEFT, BTN_RIGHT, BTN_MIDDLE are consecutive */
+                    if (x->value && !menu_on) mbtn |= (uint8_t)b; else if (!x->value) mbtn &= (uint8_t)~b;
+                    continue;
+                }
                 if (x->type == EV_KEY && p >= 0) {
                     int b = jbit_of(input_pad_key(nodes[i].pad_layout, x->code));
                     if (b >= 0) { if (x->value) joy[p] |= (uint16_t)(1 << b); else joy[p] &= (uint16_t)~(1 << b); }
@@ -184,6 +197,7 @@ void in_poll(void)
             nn = input_scan_drop(nodes, nn, i); i--;
         }
     }
+    mx = mrx; my = mry; mrx = mry = 0; mwhp = mwh; mwh = 0;   /* libretro mouse X/Y are deltas since the last poll */
     for (int p = 0; p < 2; p++) {
         uint16_t m = joy[p];
         if (ana[p][0][0] < -16000) m |= 1 << 6;
@@ -210,6 +224,7 @@ void in_release(void)
     for (unsigned rk = 0; rk < 512; rk++)
         if (key[rk]) { key[rk] = 0; if (in_kbd_cb) in_kbd_cb(false, rk, 0, 0); }
     kjoy = 0; memset(joy, 0, sizeof joy); memset(ana, 0, sizeof ana);
+    mrx = mry = mx = my = 0; mbtn = mwh = mwhp = 0;
 }
 
 void in_menu_mode(bool on) { menu_on = on; menu_req = false; mq_n = 0; }
@@ -222,6 +237,15 @@ int in_menu_ev(void)
 int16_t in_state(unsigned port, unsigned dev, unsigned idx, unsigned id)
 {
     if (dev == RDEV_KEYBOARD) { in_computer = true; return port == 0 && id < 512 ? key[id] : 0; }
+    if (dev == RDEV_MOUSE) {                 /* ids: X, Y, LEFT, RIGHT, WHEELUP, WHEELDOWN, MIDDLE */
+        if (port != 0) return 0;
+        switch (id) {
+        case 0: return (int16_t)mx;  case 1: return (int16_t)my;
+        case 2: return mbtn & 1;     case 3: return (mbtn >> 1) & 1;  case 6: return (mbtn >> 2) & 1;
+        case 4: return mwhp & 1;     case 5: return (mwhp >> 1) & 1;
+        }
+        return 0;
+    }
     if (port > 1) return 0;
     unsigned bits = joy[port] | (port == 0 && !in_computer ? (unsigned)kjoy : 0);
     /* left stick also drives the d-pad, for cores that only read digital */

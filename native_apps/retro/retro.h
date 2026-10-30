@@ -10,6 +10,7 @@ enum { PF_0RGB1555 = 0, PF_XRGB8888 = 1, PF_RGB565 = 2 };
 #define RDEV_JOYPAD 1
 #define RDEV_ANALOG 5
 #define RDEV_KEYBOARD 3
+#define RDEV_MOUSE 2
 #define RJ_SELECT 2
 #define RJ_START 3
 
