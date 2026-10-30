@@ -49,6 +49,7 @@ file_manager|Files|/opt/games/file_manager|/opt/arca/icons/file_manager.ppm|fb,t
 ludfin|Ludfin|/opt/games/ludfin|/opt/arca/icons/ludfin.ppm|fb,touch
 ludkino|Ludkino|/opt/games/ludkino|/opt/arca/icons/ludkino.ppm|fb,touch
 retro_picker|Retro|/opt/games/retro_picker|/opt/arca/icons/retro_picker.ppm|fb,touch
+frame|Pictures|/opt/games/frame|/opt/arca/icons/frame.ppm|fb,touch
 control_panel|Control Panel|/opt/games/control_panel|/opt/arca/icons/control_panel.ppm|
 '
 
