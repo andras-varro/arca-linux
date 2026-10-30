@@ -425,14 +425,13 @@ The app is in `native_apps/frame/` (library `/home/root/data/pictures/`, stick i
 
 **Done when** a live Jellyfin album downloads at the server-resized size and skips on a second run, cancel works in both import and download, a stick import lands in the library with progress, every frame screen works with pad and keyboard and Esc, shuffle works, Files shows a stick picture unoptimised, and night dimming follows the F162 schedule.
 
-### F162. Digital clock app — open, operator idea 2026-10-30, not started
+### F162. Digital clock app — open, built 2026-10-30, panel checks left
 
-A full-screen clock: time and date, an optional alarm that plays a sound and flashes an LED, night dimming, and a timer
-(countdown or pomodoro intervals) that ends with the same sound and LED. **Reuse:**
-`common/top_bar.c` (the clock text and the 12/24-hour choice, with the format entry above), `common/framebuffer.c`,
-`common/audio.c` / `common/audio_gen.c` (alarm tone), `hw_set_led()` and `hw_set_backlight()` in `common/hardware.h`.
-**Done when** the clock shows the right time on the panel, an alarm set a minute ahead sounds and flashes the LED, a timer set
-for a minute does the same, and the backlight dims on the configured schedule and returns to the configured maximum afterwards.
+The app is in `native_apps/clock/` (core `clock_core.c` with host test `clock_core_test`; settings
+`/home/root/data/clock.conf`). **Left:** pomodoro
+on the panel (WORK 25:00, the phase ring); pad, keyboard and mouse on every screen (no input device was attached); one scripted
+tap on TIME FORMAT did not switch it back to 24 h, so reproduce it before calling it a bug. The 12/24-hour choice is the app's own
+(`/home/root/data/clock_fmt.conf`) until F146 gives one system setting; then the clock reads that. **Done when** those pass.
 
 ### F163. Edit and view text files in the Files app with nano — open, operator decision 2026-10-30, not started
 
