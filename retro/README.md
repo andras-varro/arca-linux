@@ -116,6 +116,21 @@ Bluetooth/USB keyboards, pads and audio are solved in the platform; the frontend
   R3 (`input_scan` already reads shoulders). This rebuilds every app, so it is its own change with the full redeploy.
 - **Computer emulators need a raw key-event stream** (precedent: `native_apps/terminal/terminal.c` about lines 488-500).
 - **Arcade defaults to the game controller.**
+- **Pad mapping (`native_apps/retro/retro_input.c`).** Pads fill RetroPad ports 0 and 1 in the SNES layout; a keyboard
+  doubles as pad 0 when the core never asks for the keyboard.
+
+  | RetroPad | Xbox pad | Keyboard as pad |
+  |---|---|---|
+  | B / A | A / B | `z` / `x` |
+  | Y / X | X / Y | `a` / `s` |
+  | L / R, L2 / R2 | LB / RB, LT / RT | `q` / `w`, none |
+  | Select / Start | Select / Start | Backspace / Enter |
+  | D-pad | D-pad | arrow keys |
+
+  Pause menu: pad Select+Start, or F12; Esc too, except on a computer core with a keyboard. What a RetroPad button does is
+  the core's: the core's default mapping applies, except Mega Drive (`picodrive`), whose descriptors name RetroPad
+  B = B, A = C, Y = A, X = Y, L = X, R = Z, Select = Mode (`platform/libretro/libretro.c`), so Xbox A = B, Xbox B = C,
+  Xbox X = A.
 - **On-screen keyboard only as a fallback** for special cases. `keyboard.c` is a modal text-entry box; a
   computer-keyboard overlay would be new code. **The first version assumes a physical keyboard and a controller
   are attached** (operator, 2026-10-25), so it has no on-screen keyboard and no touch play.
@@ -343,6 +358,18 @@ set per run from these layers, **last wins**:
 4. `RETRO_OPTS` (comma-separated `k=v`); the launcher fills it from the `opts=` line of `systems/<system>.sys`;
 5. `<content path>.opt` beside the game file in `roms/<system>/`, one game.
 
+**System file keys** (`<data>/systems/<id>.sys`, one INI-like file per system; `native_apps/retro_picker/retro_picker.c` header is the authority):
+
+| Key | Does | Default |
+|---|---|---|
+| `name` | display name in the picker | none (required) |
+| `core` | core file: a bare name resolves to `<data>/cores/<name>`, a path with `/` is used as is; a system whose core file is missing is left out | none (required) |
+| `exts` | content extensions, comma separated, no dot, case-insensitive; a `.m3u` is one game and hides the files it lists | none (required) |
+| `opts` | core options `key=value,key=value`, passed as `RETRO_OPTS` | none |
+| `roms` | content directory; a subfolder is one game | `<data>/roms/<id>` |
+| `video` | `sw` or `overlay`, passed as `retro -v` | frontend default |
+| `nogame` | label of a first list entry that starts the core with no content, for cores that run without one | none |
+
 A `.opt` file takes `key=value` and RetroArch's own `key = "value"` form; `#` starts a comment line. Option
 files are device data and never go in the repo.
 
@@ -352,12 +379,17 @@ content, so DOSBox Pure loads `GAME.ZIP#PROG.EXE` and skips its program list.
 **Mouse:** a USB mouse (or a Bluetooth keyboard's touchpad) is `RETRO_DEVICE_MOUSE` on port 0 (deltas, left/right/middle,
 wheel; `retro_input.c`).
 
-Keys that matter per core, as far as this document and `builtin_defaults[]` already record:
+Keys that matter per core. A `.sys` `opts=` overrides a built-in default. Names are taken from each core's own option source in the pinned clone:
 
 | Core | Keys |
 |---|---|
-| VICE (Commodore 64) | `vice_sid_engine=FastSID` and `vice_sound_sample_rate=22050` by built-in default (reSID is far too slow); `vice_drive_true_emulation` and `vice_joyport` per game, see above |
-| Enterprise 128 | `ep128emu_wait=5`, `ep128emu_sdhq=0` by built-in default |
+| VICE (Commodore 64) | built-in default `vice_sid_engine=FastSID` and `vice_sound_sample_rate=22050` (reSID is far too slow); `c64.sys` `opts=` sets `vice_drive_true_emulation=disabled,vice_sound_sample_rate=11025`, which wins over the built-in 22050; `vice_joyport` and `vice_drive_true_emulation` per game, see above. `nogame=BASIC` starts it with no content |
+| Enterprise 128 | `ep128emu_wait=5`, `ep128emu_sdhq=0` by built-in default and again in `ep128.sys` `opts=`; `nogame=BASIC` |
+| NES (`fceumm_`) | `fceumm_sndquality` (`Low` default, `High`, `Very High`: more CPU), `fceumm_sndlowpass`, `fceumm_nospritelimit`, `fceumm_region`; the core declares no frameskip key. Source: `libretro_core_options.h` of the pinned fceumm clone |
+| ZX Spectrum (`fuse_`) | `fuse_machine`, `fuse_fast_load`, `fuse_load_sound`, `fuse_speaker_type`, `fuse_emulation_speed` (machine and speed need a content load). Source: `src/libretro.c` of the fuse clone |
+| SNES (`snes9x2002_`) | `snes9x2002_frameskip` (`disabled`, `auto`, `auto_threshold`, `fixed_interval`), `snes9x2002_frameskip_threshold`, `snes9x2002_frameskip_interval`, `snes9x2002_transparency`. Source: `libretro/libretro_core_options.h` |
+| Arcade (`mame2003-plus_`) | `mame2003-plus_frameskip`, `mame2003-plus_sample_rate`, `mame2003-plus_cpu_clock_scale`. Source: `src/mame2003/core_options.c` (prefix `APPNAME` in `mame2003.h`) |
+| Mega Drive (`picodrive_`) | `picodrive_renderer` (`accurate` default, `good`, `fast`), `picodrive_sound_rate` (`16000`, `22050`, `32000`, `44100`, `native`), `picodrive_frameskip`, `picodrive_region`, `picodrive_drc`. Source: `platform/libretro/libretro_core_options.h` |
 | PlayStation (`pcsx_rearmed`) | `pcsx_rearmed_frameskip_type=auto` by built-in default: it skips rendering only when the audio ring runs low |
 | Amiga (`uae4arm`) | `uae4arm_resolution=320x240` from `amiga.sys`; `uae4arm_jit`, `uae4arm_cpu`, `uae4arm_cpu_speed` (off by default, see the Amiga build note in section 9) |
 | DOS (DOSBox Pure) | `dosbox_pure_audiorate=44100` by built-in default (our output rate; the core's 48000 costs a resample); `dosbox_pure_cpu_core`, `dosbox_pure_cycles`; next section |
