@@ -46,7 +46,7 @@ Shipped cores. Licences **read from each repository LICENSE/COPYING file** at th
 | System | Core | Licence | ROMs and shippability |
 |---|---|---|---|
 | NES | FCEUmm | GPL-2.0 | bundles no ROM (FDS BIOS `disksys.rom` is user-supplied) |
-| ZX Spectrum | Fuse | GPL-3.0 | Spectrum 48/128 ROMs built into the core; Amstrad's 1999 permission lets emulator writers include the ROM images if the copyright messages stay unaltered (attribution required). Whether that covers a platform bundle is **open** |
+| ZX Spectrum | Fuse | GPL-3.0 | Spectrum 48/128 ROMs built into the core. Amstrad's permission (Cliff Lawson, comp.sys.sinclair, 1999-08-31, as quoted at `github.com/mward-sudo/spec_chum/issues/189`) reads "Amstrad are happy for emulator writers to include images of our copyrighted code as long as the (c)opyright messages are not altered", with a request for the note "Amstrad have kindly given their permission for the redistribution of their copyrighted material but retain that copyright". It is addressed to emulator writers, not to a platform that bundles an emulator, and Debian files the ROM package `spectrum-roms` in `non-free` (`packages.debian.org/sid/spectrum-roms`). **Verdict: UNCLEAR**, so by the operator rule Spectrum is left out of any image or release. The core is built and deployed to a unit only for testing. Sources read 2026-10-30; the original post and Debian's copyright file were **not** read; Fedora, Lakka and Batocera practice was **not** checked |
 | C64 | VICE x64 | GPL-2.0-or-later | Commodore ROMs are (c) Commodore Business Machines with no redistribution grant: **not shippable**, user supplies them |
 | Enterprise 128 | ep128emu-core | GPL-2.0-or-later | has built-in default ROMs and a `roms/` dir, no ROM licence statement found: **not shippable until checked** |
 | Arcade | MAME 2003-Plus | classic MAME 0.78 non-commercial licence (`LICENSE.md:9`) | `:45` forbids distributing a modified version of the official MAME archive; `:51` allows non-commercial use of the source if full source is made available. Fits the operator rule only as a **named non-commercial exception** |
@@ -210,4 +210,3 @@ The unit has no overclock support, so no setting here changes the CPU clock.
 ## 8. Open questions
 
 - Enterprise 128 ROMs: licence status unknown.
-- Spectrum ROMs: whether Amstrad's permission covers a platform bundle.

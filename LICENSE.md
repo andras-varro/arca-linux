@@ -141,7 +141,9 @@ licence named there (MAME 2003-Plus, Snes9x, PicoDrive), which this non-commerci
 taken as GPL-2.0-or-later, by assumption (operator, 2026-10-29).** The repository has no `COPYING`; 27 of its
 source files at `26f444f` carry the GPL-2.0-or-later header (measured by grep) and the rest carry UAE copyright
 lines with no grant, which we read as parts of the same GPL work. Its bundled `capsimg` (non-commercial,
-"not free software") is not built: the build passes `CAPS=` empty.
+"not free software") is not built: the build passes `CAPS=` empty. **Fuse embeds the Spectrum 48/128 ROMs, whose
+redistribution grant (Amstrad, 1999) names emulator writers only; Debian files the ROM package in `non-free`. The
+status is UNCLEAR (read 2026-10-30), so Spectrum stays out of every image and release** (see the table row).
 
 ### The root filesystem (`rootfs/`, Buildroot 2025.02.18)
 

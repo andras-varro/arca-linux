@@ -432,33 +432,61 @@ panel at the set interval, a tap or pad button steps it, and the unit blanks as 
 
 ### F162. Digital clock app — open, operator idea 2026-10-30, not started
 
-A full-screen clock: time and date, an optional alarm that plays a sound and flashes an LED, and night dimming. **Reuse:**
+A full-screen clock: time and date, an optional alarm that plays a sound and flashes an LED, night dimming, and a timer
+(countdown or pomodoro intervals) that ends with the same sound and LED. **Reuse:**
 `common/top_bar.c` (the clock text and the 12/24-hour choice, with the format entry above), `common/framebuffer.c`,
 `common/audio.c` / `common/audio_gen.c` (alarm tone), `hw_set_led()` and `hw_set_backlight()` in `common/hardware.h`.
-**Done when** the clock shows the right time on the panel, an alarm set a minute ahead sounds and flashes the LED, and the
-backlight dims on the configured schedule and returns to the configured maximum afterwards.
+**Done when** the clock shows the right time on the panel, an alarm set a minute ahead sounds and flashes the LED, a timer set
+for a minute does the same, and the backlight dims on the configured schedule and returns to the configured maximum afterwards.
 
-### F163. A text editor in the Files app — open, operator idea 2026-10-30, not started
+### F163. Edit and view text files in the Files app with nano — open, operator decision 2026-10-30, not started
 
-Open, edit and save a small text file from `native_apps/file_manager` without SSH: a game's `.opt` or the files under
-`/home/root/data/retro/options/` first, then a short list of system files. **Reuse:** `common/keyboard.c` (on-screen entry),
-`gamepad_take_keys()` in `common/gamepad.h` (physical keyboard), `common/list_view.c`. **To decide:** the size limit; a backup
-copy written before every save; which paths are allowed and whether system files need an explicit unlock. **Done when** an
-option file edited on the panel, with either keyboard, is saved with a backup beside it and the next game start uses it.
+Operator prefers not writing our own editor: **nano** is both editor and viewer (`nano -v` is its read-only view mode), started
+from `native_apps/file_manager` on the selected file, for a game's `.opt`, the files under `/home/root/data/retro/options/`,
+and a short list of system files. **Measured 2026-10-30 (grep):** `rootfs/configs/arca_defconfig` names neither nano nor
+ncurses, so the package is missing; `native_apps/terminal/terminal.c` is an on-device terminal (login in a pty, drawn with
+libvterm, physical keyboard through `common/term_keymap.h`, a touch toolbar with arrows, Ctrl, Esc and the on-screen keyboard),
+so a terminal surface exists; `file_manager` has no call that starts another program, so the launch hook is missing.
+**Missing:** the nano package (and the terminfo entry for the terminal's `TERM`) in the rootfs, a way to start the terminal app
+running `nano <path>` instead of `/bin/login` and return to Files on exit, and the launch hook in `file_manager`.
+**To decide:** which paths are allowed and whether system files need an explicit unlock; whether `nano` runs as root.
+**Done when** an option file opened from Files edits and saves in nano on the panel, with either keyboard, and the next game
+start uses it; and `nano -v` on a file refuses writes.
+
+### F164. Take the ZX Spectrum system out of what we build and deploy — open, operator rule 2026-10-30
+
+The Spectrum ROM licence is UNCLEAR (verdict and sources: the ZX Spectrum row in `retro/README.md`), and the operator rule is
+that a system whose licence cannot be clarified is left out. Cores are not distributed in any image or release today
+(`LICENSE.md`), so this concerns the build and the test deploy. **Files that carry it (grep, 2026-10-30):**
+`retro/build-cores.sh` (the `fuse` entry in `CORES`, its URL, commit and output name), the two `Ids:` help lines in
+`retro/build-and-deploy.sh`, `retro/systems/zx.sys`, and the ZX Spectrum row and the `ZX Spectrum` mentions in `retro/README.md`.
+**Done when** none of them names Fuse or the Spectrum, or the licence is clarified in writing and the entry is closed that way.
+
+### F165. Internet radio, Spotify and YouTube — feasibility, open, operator question 2026-10-30
+
+All verdicts **[inferred]** unless marked; nothing here was built or measured on a unit. A grep of `native_apps` (2026-10-30)
+found no MP3, AAC or Vorbis decoder, so every stream below needs one first.
+- **Internet radio: yes.** `common/http.c` already streams a body (`http_take_fd`, `http_stream_read`) into `AudioFdIo`; the
+  missing part is an MP3/AAC decoder, for example minimp3 (header-only, CC0 **[unverified]**: read its licence before use).
+  MP3 decode is light for a 600 MHz Cortex-A8 **[inferred]**.
+- **Spotify: probably, as a Spotify Connect receiver** (the phone controls it, the unit plays) through librespot (Rust, MIT
+  **[unverified]**). Needs a Premium account **[inferred]**, a Rust cross-build for soft-float ARMv7, and Ogg Vorbis decode at
+  the stream rate on this CPU; the first question is whether librespot builds for this ABI and the glibc it links.
+- **YouTube: video no, audio-only maybe.** Software H.264 or VP9 at 800x480 on this CPU, with no GPU and no usable DSP, is
+  unrealistic **[inferred]**. Audio-only through `yt-dlp` needs Python on the unit and breaks whenever YouTube changes;
+  an Invidious or Piped instance's API is the alternative **[inferred]**.
+**Done when** the decoder question is answered by a measurement (decode time per second of audio on a unit) for the first
+stream chosen.
 
 ### Potential ideas (not planned)
 
 Recorded so they are not lost; none has an owner or a design.
 
 - Meeting or home dashboard: clock, weather and a calendar (ICS) feed, with the red and green LEDs as busy and free, the device's original role.
-- Home Assistant or MQTT control panel: buttons on the touch screen, state shown on the LEDs.
-- Internet radio: `common/http.c` plus audio streaming; a grep of `native_apps` found no MP3 decoder, so a decoder is the first question.
-- Timer and pomodoro with LED and sound.
+- Home Assistant or MQTT control panel: buttons on the touch screen, state shown on the LEDs. Operator decision: Alexa integration is not a goal (no public local API).
 - Notification display: an HTTP push (for example ntfy) shown on screen with an LED flash.
 - Touch drawing board or whiteboard.
-- Network or host uptime dashboard.
 - Ambient sound or white-noise generator on `common/audio_gen.c`.
-- Text or e-book reader reusing the Files viewer.
 
 ## Structural and cleanup
 
