@@ -929,7 +929,7 @@ group_c() {
 # 2026-10-15 (operator-approved): README.md became the USER guide and the old walkthrough moved, with history, to DEVELOPING.md (git mv).
 # DEVELOPING.md gets a NEW entry at its measured 206 non-blank, its SSH steps replaced by a pointer to README.md (the old README.md ceiling was 215 against 208); the new README.md is 162
 # non-blank and gets zero margin, same as the old one: a user guide that grows without a decision is the shape this group bounds.
-#
+# 2026-10-30: README.md 162 -> 163 for the Retro tile row (the user guide listed no retro app; the save-state caveat lives only there).
 #
 ceilings() {
     # `CEILINGS_FILE` exists only so --self-test can drive this group over a fixture table.
@@ -938,7 +938,7 @@ ceilings() {
 1850	SYSTEM_ANALYSIS.md
 1362	IMPROVEMENT_PLAN.md
 224	HARDWARE.md
-162	README.md
+163	README.md
 208	DEVELOPING.md
 342	CLAUDE.md
 780	native_apps/CLAUDE.md

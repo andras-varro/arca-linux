@@ -202,6 +202,14 @@ simulated drop, the hub returns without a replug, square and bars show during th
 fault retries no faster than the 120 s cap, and a previously connected BT pad reconnects without a power cycle.
 Redeploy: `framebuffer.c` is linked by all three components.
 
+### B76. A USB mouse does nothing in the retro picker or the retro pause menu — open, confirmed 2026-10-30 on `.115`
+
+**Operator-tested at the panel:** a USB mouse does nothing in the picker (`native_apps/retro_picker/retro_picker.c`, which
+links `common/pointer.c` through `native_apps/build-and-deploy.sh`) and nothing in the pause menu (`native_apps/retro/retro_input.c`,
+whose `menu_on` branch turns `REL_WHEEL`, `REL_Y` and `BTN_LEFT`/`BTN_RIGHT` into menu events), while the same mouse works inside a
+core (DOS). **Cause unknown, not investigated.** **Done when** the mouse selects and starts a game in the picker and
+drives the pause menu on the panel.
+
 ## Features
 
 Userspace except F101, which is the image build.
@@ -411,6 +419,46 @@ rest committed as bare PPMs with no generator — and collected by the `*//*.ppm
 `native_apps/build-and-deploy.sh:307`; manifests name them in `app-manifests.sh:39-47`. **Fix:** one generator in
 the style of `gen_cp_icons.py` for all ten apps, so every PPM has a source, then delete the three old scripts.
 **Done when** the launcher grid on the panel reads as the same family as the Control Panel's. Operator 2026-10-07 also wants a better icon for the Control Panel's System page, done with this rework: its page has `.icon = NULL` (`system_page.c:563`) and `ICONS` in `gen_cp_icons.py:178` has no System entry.
+
+### F161. Picture viewer / digital picture frame — open, operator idea 2026-10-30, not started
+
+A slideshow of the pictures in a data folder or on a USB stick (`/media/usb0`), stepped by touch or pad, fitted to 800x480,
+with an interval setting and a manual step. **Reuse:** `common/framebuffer.c` (drawing), `common/list_view.c` (folder list),
+`common/usb_watch.c` (stick in and out), `common/ppm.c` (PPM only). **First decision:** `common/stb_image.h` is already linked
+for `common/jf_img.c`, which decodes a JPEG to a square tile; whether to extend it to full-frame JPEG and PNG, and what a 600 MHz
+core with 234 MB RAM can afford per picture, decides the format list. **Blanking:** the slideshow keeps the panel awake only
+while it runs, through `hw_blank_set_enabled()` (`common/hardware.h`). **Done when** a folder of pictures plays on the
+panel at the set interval, a tap or pad button steps it, and the unit blanks as configured once the app exits.
+
+### F162. Digital clock app — open, operator idea 2026-10-30, not started
+
+A full-screen clock: time and date, an optional alarm that plays a sound and flashes an LED, and night dimming. **Reuse:**
+`common/top_bar.c` (the clock text and the 12/24-hour choice, with the format entry above), `common/framebuffer.c`,
+`common/audio.c` / `common/audio_gen.c` (alarm tone), `hw_set_led()` and `hw_set_backlight()` in `common/hardware.h`.
+**Done when** the clock shows the right time on the panel, an alarm set a minute ahead sounds and flashes the LED, and the
+backlight dims on the configured schedule and returns to the configured maximum afterwards.
+
+### F163. A text editor in the Files app — open, operator idea 2026-10-30, not started
+
+Open, edit and save a small text file from `native_apps/file_manager` without SSH: a game's `.opt` or the files under
+`/home/root/data/retro/options/` first, then a short list of system files. **Reuse:** `common/keyboard.c` (on-screen entry),
+`gamepad_take_keys()` in `common/gamepad.h` (physical keyboard), `common/list_view.c`. **To decide:** the size limit; a backup
+copy written before every save; which paths are allowed and whether system files need an explicit unlock. **Done when** an
+option file edited on the panel, with either keyboard, is saved with a backup beside it and the next game start uses it.
+
+### Potential ideas (not planned)
+
+Recorded so they are not lost; none has an owner or a design.
+
+- Meeting or home dashboard: clock, weather and a calendar (ICS) feed, with the red and green LEDs as busy and free, the device's original role.
+- Home Assistant or MQTT control panel: buttons on the touch screen, state shown on the LEDs.
+- Internet radio: `common/http.c` plus audio streaming; a grep of `native_apps` found no MP3 decoder, so a decoder is the first question.
+- Timer and pomodoro with LED and sound.
+- Notification display: an HTTP push (for example ntfy) shown on screen with an LED flash.
+- Touch drawing board or whiteboard.
+- Network or host uptime dashboard.
+- Ambient sound or white-noise generator on `common/audio_gen.c`.
+- Text or e-book reader reusing the Files viewer.
 
 ## Structural and cleanup
 
