@@ -202,14 +202,6 @@ simulated drop, the hub returns without a replug, square and bars show during th
 fault retries no faster than the 120 s cap, and a previously connected BT pad reconnects without a power cycle.
 Redeploy: `framebuffer.c` is linked by all three components.
 
-### B76. A USB mouse does nothing in the retro picker or the retro pause menu — open, confirmed 2026-10-30 on `.115`
-
-**Operator-tested at the panel:** a USB mouse does nothing in the picker (`native_apps/retro_picker/retro_picker.c`, which
-links `common/pointer.c` through `native_apps/build-and-deploy.sh`) and nothing in the pause menu (`native_apps/retro/retro_input.c`,
-whose `menu_on` branch turns `REL_WHEEL`, `REL_Y` and `BTN_LEFT`/`BTN_RIGHT` into menu events), while the same mouse works inside a
-core (DOS). **Cause unknown, not investigated.** **Done when** the mouse selects and starts a game in the picker and
-drives the pause menu on the panel.
-
 ## Features
 
 Userspace except F101, which is the image build.
@@ -420,15 +412,23 @@ rest committed as bare PPMs with no generator — and collected by the `*//*.ppm
 the style of `gen_cp_icons.py` for all ten apps, so every PPM has a source, then delete the three old scripts.
 **Done when** the launcher grid on the panel reads as the same family as the Control Panel's. Operator 2026-10-07 also wants a better icon for the Control Panel's System page, done with this rework: its page has `.icon = NULL` (`system_page.c:563`) and `ICONS` in `gen_cp_icons.py:178` has no System entry.
 
-### F161. Picture viewer / digital picture frame — open, operator idea 2026-10-30, not started
+### F161. Picture viewer / digital picture frame — open, operator design 2026-10-30, not started
 
-A slideshow of the pictures in a data folder or on a USB stick (`/media/usb0`), stepped by touch or pad, fitted to 800x480,
-with an interval setting and a manual step. **Reuse:** `common/framebuffer.c` (drawing), `common/list_view.c` (folder list),
-`common/usb_watch.c` (stick in and out), `common/ppm.c` (PPM only). **First decision:** `common/stb_image.h` is already linked
-for `common/jf_img.c`, which decodes a JPEG to a square tile; whether to extend it to full-frame JPEG and PNG, and what a 600 MHz
-core with 234 MB RAM can afford per picture, decides the format list. **Blanking:** the slideshow keeps the panel awake only
-while it runs, through `hw_blank_set_enabled()` (`common/hardware.h`). **Done when** a folder of pictures plays on the
-panel at the set interval, a tap or pad button steps it, and the unit blanks as configured once the app exits.
+**Operator design:** the slideshow plays from a **library of pictures stored already optimised for the panel** (fitted to
+800x480, EXIF rotation applied, re-encoded), so it costs little space and little decode time; the user is told once, at
+import, that the stored copy loses quality and the original is not kept. Pictures enter the library two ways: **imported
+from a USB stick** (`common/usb_watch.c`; decode, rotate, scale on the unit, with progress, as slow as it needs to be), and
+**downloaded from Jellyfin** photo libraries, with the server resizing (`maxWidth`/`maxHeight` on its image endpoint
+**[inferred]**: confirm on the operator's server) and the client code in `native_apps/jellyfin/` reused. Separately,
+**Files views an image from a stick as it is**, unoptimised and slower — the same "Files starts a program" hook as F163.
+**Reuse:** `common/framebuffer.c`, `common/list_view.c`, `common/stb_image.h` (JPEG and PNG, full-size decode only; already
+linked for `common/jf_img.c`). **To decide by measurement on a unit:** the stored format (800x480 JPEG, decode time to
+measure, vs raw pixels, ~1.5 MB each); whether full-size stb decode of a 12 MP photo is tolerable for the Files view or
+needs libjpeg-turbo's scaled decode. **To decide by the operator:** fit or fill at import (fit assumed); shuffle or sequential.
+**Blanking:** the slideshow keeps the panel awake only while it runs (`hw_blank_set_enabled()`, `common/hardware.h`); night
+dimming shares one schedule with F162. **Done when** a stick import and a Jellyfin album land in the library, the slideshow
+plays them at the set interval and steps on tap or pad, Files shows a stick picture unoptimised, and the unit blanks as
+configured once the app exits.
 
 ### F162. Digital clock app — open, operator idea 2026-10-30, not started
 
