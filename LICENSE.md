@@ -144,6 +144,13 @@ lines with no grant, which we read as parts of the same GPL work. Its bundled `c
 "not free software") is not built: the build passes `CAPS=` empty. **Fuse embeds the Spectrum 48/128 ROMs, whose
 redistribution grant (Amstrad, 1999) names emulator writers only; Debian files the ROM package in `non-free`. The
 status is UNCLEAR (read 2026-10-30), so Spectrum stays out of every image and release** (see the table row).
+**ep128emu-core embeds the Enterprise EXOS, IS-BASIC and EXDOS ROMs, and the ZX Spectrum 48/128, Amstrad CPC and
+Videoton TVC ROMs too** (`roms/roms.hpp` at its pin, measured by grep); the file's only licence note is the Amstrad
+one above. The Enterprise ROMs were written for Intelligent Software Ltd, which collapsed with Enterprise Computers
+by 1986; no current rights holder and no redistribution grant was found (web search, 2026-10-30, partial: the
+Enterprise Forever forum refused the fetch, and Companies House online lists no 1980s company of that name). **Their
+status is UNCLEAR, so the Enterprise stays out of every image and release** too. Both systems stay in the source and
+the test build (operator, 2026-10-30).
 
 ### The root filesystem (`rootfs/`, Buildroot 2025.02.18)
 

@@ -453,15 +453,6 @@ running `nano <path>` instead of `/bin/login` and return to Files on exit, and t
 **Done when** an option file opened from Files edits and saves in nano on the panel, with either keyboard, and the next game
 start uses it; and `nano -v` on a file refuses writes.
 
-### F164. Take the ZX Spectrum system out of what we build and deploy — open, operator rule 2026-10-30
-
-The Spectrum ROM licence is UNCLEAR (verdict and sources: the ZX Spectrum row in `retro/README.md`), and the operator rule is
-that a system whose licence cannot be clarified is left out. Cores are not distributed in any image or release today
-(`LICENSE.md`), so this concerns the build and the test deploy. **Files that carry it (grep, 2026-10-30):**
-`retro/build-cores.sh` (the `fuse` entry in `CORES`, its URL, commit and output name), the two `Ids:` help lines in
-`retro/build-and-deploy.sh`, `retro/systems/zx.sys`, and the ZX Spectrum row and the `ZX Spectrum` mentions in `retro/README.md`.
-**Done when** none of them names Fuse or the Spectrum, or the licence is clarified in writing and the entry is closed that way.
-
 ### Potential ideas (not planned)
 
 Recorded so they are not lost; none has an owner or a design.
