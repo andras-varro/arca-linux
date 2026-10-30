@@ -462,22 +462,6 @@ that a system whose licence cannot be clarified is left out. Cores are not distr
 `retro/build-and-deploy.sh`, `retro/systems/zx.sys`, and the ZX Spectrum row and the `ZX Spectrum` mentions in `retro/README.md`.
 **Done when** none of them names Fuse or the Spectrum, or the licence is clarified in writing and the entry is closed that way.
 
-### F165. Internet radio, Spotify and YouTube — feasibility, open, operator question 2026-10-30
-
-All verdicts **[inferred]** unless marked; nothing here was built or measured on a unit. A grep of `native_apps` (2026-10-30)
-found no MP3, AAC or Vorbis decoder, so every stream below needs one first.
-- **Internet radio: yes.** `common/http.c` already streams a body (`http_take_fd`, `http_stream_read`) into `AudioFdIo`; the
-  missing part is an MP3/AAC decoder, for example minimp3 (header-only, CC0 **[unverified]**: read its licence before use).
-  MP3 decode is light for a 600 MHz Cortex-A8 **[inferred]**.
-- **Spotify: probably, as a Spotify Connect receiver** (the phone controls it, the unit plays) through librespot (Rust, MIT
-  **[unverified]**). Needs a Premium account **[inferred]**, a Rust cross-build for soft-float ARMv7, and Ogg Vorbis decode at
-  the stream rate on this CPU; the first question is whether librespot builds for this ABI and the glibc it links.
-- **YouTube: video no, audio-only maybe.** Software H.264 or VP9 at 800x480 on this CPU, with no GPU and no usable DSP, is
-  unrealistic **[inferred]**. Audio-only through `yt-dlp` needs Python on the unit and breaks whenever YouTube changes;
-  an Invidious or Piped instance's API is the alternative **[inferred]**.
-**Done when** the decoder question is answered by a measurement (decode time per second of audio on a unit) for the first
-stream chosen.
-
 ### Potential ideas (not planned)
 
 Recorded so they are not lost; none has an owner or a design.
