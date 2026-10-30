@@ -234,6 +234,68 @@ static void test_load_bars(void)
     CHECK(frame_load("/tmp/fc_src.jpg", buf, 32, 16, 32, NULL) == FRAME_OK, "clip load");
     CHECK(near_col(buf[4 * 32 + 8], COL[0], 40) && near_col(buf[12 * 32 + 24], COL[3], 40), "clipped load not centred");
 }
+static uint8_t *slurp(const char *p, size_t *n)
+{
+    FILE *f = fopen(p, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END); *n = (size_t)ftell(f); fseek(f, 0, SEEK_SET);
+    uint8_t *b = malloc(*n ? *n : 1);
+    if (fread(b, 1, *n, f) != *n) { free(b); b = NULL; }
+    fclose(f);
+    return b;
+}
+
+static void test_store(void)
+{
+    frame_info_t in;
+    uint8_t *rgb = quad_rgb(64, 32);
+    buf_t j; jpeg_of(rgb, 64, 32, &j);
+    write_file("/tmp/fc_src.jpg", j.b, j.n);
+    unlink("/tmp/fc_st.jpg");
+
+    /* fits, orientation 1: byte-identical */
+    int rc = frame_store("/tmp/fc_src.jpg", "/tmp/fc_st.jpg", 64, 64, 0, &in);
+    size_t n = 0; uint8_t *got = slurp("/tmp/fc_st.jpg", &n);
+    CHECK(rc == FRAME_OK && got && n == j.n && memcmp(got, j.b, n) == 0, "fitted jpeg not copied unchanged rc=%d n=%zu", rc, n);
+    CHECK(in.src_w == 64 && in.src_h == 32 && in.out_w == 64 && in.out_h == 32 && in.out_bytes == (long)j.n && in.orient == 1, "store info");
+    CHECK(access("/tmp/fc_st.jpg.tmp", F_OK) != 0, "store tmp left behind");
+    free(got);
+
+    /* oversize: re-encoded, smaller dimensions */
+    unlink("/tmp/fc_st.jpg");
+    rc = frame_store("/tmp/fc_src.jpg", "/tmp/fc_st.jpg", 32, 32, 0, &in);
+    got = slurp("/tmp/fc_st.jpg", &n);
+    CHECK(rc == FRAME_OK && got && !(n == j.n && memcmp(got, j.b, n) == 0), "oversize jpeg was copied unchanged");
+    CHECK(in.out_w == 32 && in.out_h == 16, "oversize fit %dx%d", in.out_w, in.out_h);
+    free(got);
+
+    /* orientation 6: goes through import, dimensions swap */
+    insert_exif(&j, 2, 6, 0);
+    write_file("/tmp/fc_src.jpg", j.b, j.n);
+    rc = frame_store("/tmp/fc_src.jpg", "/tmp/fc_st.jpg", 64, 64, 0, &in);
+    CHECK(rc == FRAME_OK && in.out_w == 32 && in.out_h == 64 && in.orient == 6, "rotated store rc=%d %dx%d o=%d", rc, in.out_w, in.out_h, in.orient);
+
+    /* PNG goes through import */
+    buf_t pn = {0};
+    stbi_write_png_to_func(buf_put, &pn, 64, 32, 3, rgb, 64 * 3);
+    write_file("/tmp/fc_src.png", pn.b, pn.n); free(pn.b);
+    rc = frame_store("/tmp/fc_src.png", "/tmp/fc_st.jpg", 64, 64, 0, &in);
+    got = slurp("/tmp/fc_st.jpg", &n);
+    CHECK(rc == FRAME_OK && got && n > 2 && got[0] == 0xFF && got[1] == 0xD8, "png store rc=%d", rc);
+    free(got); unlink("/tmp/fc_src.png");
+
+    /* truncated: fails like import, leaves nothing */
+    unlink("/tmp/fc_st.jpg");
+    write_file("/tmp/fc_src.jpg", j.b, j.n / 2);
+    rc = frame_store("/tmp/fc_src.jpg", "/tmp/fc_st.jpg", 64, 64, 0, NULL);
+    CHECK(rc == FRAME_E_FORMAT, "truncated store rc=%d", rc);
+    CHECK(access("/tmp/fc_st.jpg", F_OK) != 0 && access("/tmp/fc_st.jpg.tmp", F_OK) != 0, "truncated store left output");
+    CHECK(frame_store("/tmp/fc_nonexistent.jpg", "/tmp/fc_st.jpg", 64, 64, 0, NULL) == FRAME_E_IO, "store missing");
+    CHECK(frame_store("/tmp/fc_src.jpg", "/tmp/fc_st.jpg", 0, 64, 0, NULL) == FRAME_E_ARG, "store bad arg");
+    free(j.b); free(rgb);
+    unlink("/tmp/fc_st.jpg");
+}
+
 
 int main(void)
 {
@@ -243,6 +305,7 @@ int main(void)
     test_png_and_tail();
     test_failures();
     test_load_bars();
+    test_store();
     unlink("/tmp/fc_src.jpg"); unlink("/tmp/fc_out.jpg"); unlink("/tmp/fc_bad.jpg");
     printf("%s: %d checks, %d failed\n", fails ? "FAIL" : "PASS", checks, fails);
     return fails ? 1 : 0;

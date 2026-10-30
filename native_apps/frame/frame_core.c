@@ -327,6 +327,32 @@ int frame_import(const char *src, const char *dst, int max_w, int max_h, int qua
     return rc;
 }
 
+int frame_store(const char *src, const char *dst, int max_w, int max_h, int quality, frame_info_t *info)
+{
+    if (!src || !dst || max_w < 1 || max_h < 1) return FRAME_E_ARG;
+    if (max_w > FRAME_MAX_W) max_w = FRAME_MAX_W;
+    if (max_h > FRAME_MAX_H) max_h = FRAME_MAX_H;
+
+    int rc = FRAME_OK;
+    size_t flen = 0;
+    uint8_t *file = read_file(src, &flen, &rc);
+    if (!file) return rc;
+
+    int w = 0, h = 0, n = 0;
+    int keep = flen >= 4 && file[0] == 0xFF && file[1] == 0xD8 && jpeg_complete(file, flen) &&
+               stbi_info_from_memory(file, (int)flen, &w, &h, &n) && w >= 1 && h >= 1 &&
+               w <= max_w && h <= max_h && frame_exif_orientation(file, flen) == 1;
+    if (!keep) { free(file); return frame_import(src, dst, max_w, max_h, quality, info); }
+
+    rc = write_atomic(dst, file, flen);
+    free(file);
+    if (rc == FRAME_OK && info) {
+        info->src_w = w; info->src_h = h; info->orient = 1;
+        info->out_w = w; info->out_h = h; info->out_bytes = (long)flen;
+    }
+    return rc;
+}
+
 /* ── load ──────────────────────────────────────────────────────────────── */
 
 int frame_load(const char *path, uint32_t *dst, int dst_w, int dst_h, int stride, frame_info_t *out)

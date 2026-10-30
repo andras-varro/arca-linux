@@ -1,13 +1,18 @@
 /*
  * frame — the picture frame.  A library of panel-sized JPEG copies in /home/root/data/pictures/,
- * filled from a USB stick (the originals are not kept), shown as a slideshow.
+ * filled from a USB stick or from a Jellyfin photo library (the originals are not kept), shown as a
+ * slideshow.
  *
- *   frame                    start menu: START SLIDESHOW, INTERVAL, ORDER, IMPORT FROM USB, EXIT
+ *   frame                    start menu: START SLIDESHOW, INTERVAL, ORDER, IMPORT FROM USB, FROM JELLYFIN, EXIT
  *   frame --import <dir>     import <dir> without the stick lookup or the notice, then the menu
+ *   frame --session <conf>   read the saved Jellyfin sign-in from <conf> (default /opt/ludfin/ludfin.conf);
+ *                            the file is only read, this app never signs in
  *
  * The decode and the stored format are frame_core.c; the file key and the walk order are
- * frame_logic.c (host tests for both).  Each import runs in a forked child so this process keeps
- * polling input and redrawing; the child never touches the framebuffer.
+ * frame_logic.c; the Jellyfin wire strings and reply parsers are frame_jf.c (host tests for all three).
+ * Each import or download runs in a forked child so this process keeps polling input and redrawing; the
+ * child never touches the framebuffer.  The server listings (libraries, albums, photos) run in this process,
+ * polled between frames, and Back cancels them.
  */
 
 #include <dirent.h>
@@ -31,6 +36,11 @@
 #include "../common/config.h"
 #include "frame_core.h"
 #include "frame_logic.h"
+#include "frame_jf.h"
+#include "../common/http.h"
+#include "../common/list_view.h"
+#include "../jf_shared/jf_login.h"
+#include "../jf_shared/jf_url.h"
 
 #define LIB_DIR        "/home/root/data/pictures"
 #define CONF_PATH      "/home/root/data/frame.conf"
@@ -39,6 +49,14 @@
 #define MAX_DEPTH      4
 #define MAX_MOUNTS     4
 #define HINT_MS        3000u
+#define SESSION_PATH   "/opt/ludfin/ludfin.conf"
+#define JF_CLIENT      "Ludfin"       /* the name the saved token was issued to (the server keys it on the device id) */
+#define JF_PAGE        100
+#define JF_MAX_ALBUMS  1000
+#define JF_MAX_PHOTOS  2000
+#define JF_MAX_DEPTH   6
+#define JF_IMG_MAX     (3u * 1024u * 1024u)
+#define JF_LIST_MAX    (512u * 1024u)
 
 static volatile sig_atomic_t g_running = 1;
 static volatile pid_t        g_child;
@@ -142,7 +160,7 @@ static void make_lib_dir(void)
     mkdir(LIB_DIR, 0755);
 }
 
-typedef struct { char src[300]; char key[100]; } Item;
+typedef struct { char src[300]; char key[100]; char id[33]; } Item;   /* id: the server item of a download (src is then its name) */
 
 static Item *g_items;
 static int   g_nitems, g_nskipped, g_ncandidates;
@@ -176,12 +194,114 @@ static void scan_dir(const char *dir, int depth)
     closedir(d);
 }
 
-static void draw_progress(int n, int m, const char *src, uint32_t now)
+/* ── Jellyfin: session and requests ─────────────────────────────────────── */
+
+static const char *g_session = SESSION_PATH;
+static bool        g_job_jf;                  /* import_items runs the Jellyfin fetch, not frame_import */
+static JfLogin     g_jl;
+static char        g_host[JF_HOST_MAX + 1], g_auth[512];
+static int         g_port;
+static bool        g_tls;
+
+/* Read the saved sign-in (never written here).  False when there is none usable. */
+static bool jf_session_load(void)
+{
+    memset(&g_jl, 0, sizeof g_jl);
+    if (jf_login_load(&g_jl, g_session, "") != 0 || !g_jl.server[0] || !g_jl.user_id[0] || !g_jl.token[0]) return false;
+    if (jf_parse_server(g_jl.server, g_host, sizeof g_host, &g_port, &g_tls) != JF_SERVER_OK) return false;
+    return jf_auth_header(g_auth, sizeof g_auth, JF_CLIENT, JF_CLIENT, g_jl.device_id, g_jl.token) > 0;
+}
+
+enum { JG_OK = 0, JG_FAIL, JG_CANCEL };
+
+/* One GET into buf.  ui: poll input and repaint the pointer, and cancel on Back.  *status = the HTTP status. */
+static int jf_http(const char *path, const char *accept, char *buf, size_t cap, size_t *len,
+                   int idle_ms, int total_ms, bool ui, int *status)
+{
+    char hdr[600];
+    snprintf(hdr, sizeof hdr, "%s%s", g_auth, accept);
+    HttpReq r;
+    http_init(&r);
+    *status = 0;
+    *len = 0;
+    http_begin(&r, g_host, g_port, g_tls, "GET", path, hdr, NULL, 0, HTTP_BUFFER, buf, cap);
+    r.timeout_ms = idle_ms;
+    r.total_timeout_ms = total_ms;
+    int res = JG_FAIL;
+    for (;;) {
+        HttpPoll p = http_poll(&r);
+        if (p == HTTP_DONE) { *status = http_status(&r); *len = http_body_len(&r); res = JG_OK; break; }
+        if (p == HTTP_ERROR) break;
+        if (ui) {
+            poll_input(get_time_ms());
+            if (!g_running || back_pressed()) { res = JG_CANCEL; break; }
+            pointer_paint(&g_dev.ptr, &g_dev.fb);
+        }
+        usleep(ui ? 20000 : 5000);
+    }
+    http_end(&r);
+    memset(hdr, 0, sizeof hdr);
+    return res;
+}
+
+/* A listing GET in the parent: LOADING screen once, outcomes mapped to a message.  True = body in buf. */
+static bool jf_get(const char *path, char *buf, size_t cap, size_t *len)
+{
+    fb_clear(&g_dev.fb, COLOR_BLACK);
+    draw_centered("LOADING...", SCREEN_VISIBLE_TOP + SCREEN_VISIBLE_HEIGHT / 2 - 10, 3, COLOR_WHITE);
+    present();
+    int st = 0;
+    int r = jf_http(path, "Accept: application/json\r\n", buf, cap - 1, len, 8000, 30000, true, &st);
+    if (r == JG_CANCEL) return false;
+    if (r != JG_OK) message_screen("CANNOT REACH THE JELLYFIN SERVER", "CHECK THE SERVER AND THE NETWORK.");
+    else if (st == 401 || st == 403) message_screen("JELLYFIN REFUSED THE SIGN-IN", "SIGN IN AGAIN WITH THE JELLYFIN APP");
+    else if (st != 200) { char t[48]; snprintf(t, sizeof t, "JELLYFIN ANSWERED %d", st); message_screen(t, "THE SERVER DID NOT LIST IT."); }
+    else { buf[*len] = 0; return true; }
+    return false;
+}
+
+/* Child: fetch one photo (server-resized to the panel) into dst.  0 = stored. */
+static int jf_fetch_one(const char *id, const char *key, const char *dst)
+{
+    char *buf = malloc(JF_IMG_MAX + 1);
+    if (!buf) return 1;
+    char path[300], dl[240];
+    snprintf(dl, sizeof dl, "%s.dl", dst);
+    int rc = 1;
+    for (int attempt = 0; attempt < 2 && rc != 0; attempt++) {
+        int n = attempt == 0 ? fj_path_image(path, sizeof path, id, SCREEN_VISIBLE_WIDTH, SCREEN_VISIBLE_HEIGHT)
+                             : fj_path_original(path, sizeof path, id);
+        if (n < 0) break;
+        uint32_t t0 = get_time_ms();
+        size_t len = 0;
+        int st = 0;
+        if (jf_http(path, "Accept: image/jpeg\r\n", buf, JF_IMG_MAX, &len, 8000, 60000, false, &st) != JG_OK) break;
+        if (st != 200 || len == 0) continue;           /* 404 or not an image: once more with the original */
+        FILE *f = fopen(dl, "wb");
+        if (!f) break;
+        bool ok = fwrite(buf, 1, len, f) == len;
+        ok = (fclose(f) == 0) && ok;
+        frame_info_t info;
+        memset(&info, 0, sizeof info);
+        if (ok && frame_store(dl, dst, SCREEN_VISIBLE_WIDTH, SCREEN_VISIBLE_HEIGHT, 0, &info) == 0) {
+            printf("frame: jf: %s recv %dx%d %lu bytes %lu ms%s\n", key, info.src_w, info.src_h, (unsigned long)len,
+                   (unsigned long)(get_time_ms() - t0), attempt ? " (original)" : "");
+            rc = 0;
+        }
+        unlink(dl);
+    }
+    unlink(dl);
+    free(buf);
+    fflush(stdout);
+    return rc;
+}
+
+static void draw_progress(const char *verb, int n, int m, const char *src, uint32_t now)
 {
     Framebuffer *fb = &g_dev.fb;
     char line[64];
     fb_clear(fb, COLOR_BLACK);
-    snprintf(line, sizeof line, "IMPORTING %d OF %d", n, m);
+    snprintf(line, sizeof line, "%s %d OF %d", verb, n, m);
     int cy = SCREEN_VISIBLE_TOP + SCREEN_VISIBLE_HEIGHT / 2;
     draw_centered(line, cy - 70, 3, COLOR_WHITE);
     int bw = SCREEN_VISIBLE_WIDTH * 3 / 5, bh = 24;
@@ -201,7 +321,7 @@ static void draw_progress(int n, int m, const char *src, uint32_t now)
     present();
 }
 
-/* Import everything pending in g_items.  Returns the imported/failed counts. */
+/* Import (USB) or download (g_job_jf) everything pending in g_items.  Returns the done/failed counts. */
 static void import_items(int *imported, int *failed, bool *cancelled)
 {
     *imported = *failed = 0;
@@ -212,14 +332,15 @@ static void import_items(int *imported, int *failed, bool *cancelled)
         char dst[220], tmp[230];
         snprintf(dst, sizeof dst, "%s/%s", LIB_DIR, g_items[i].key);
         snprintf(tmp, sizeof tmp, "%s.tmp", dst);
-        draw_progress(i + 1, g_nitems, g_items[i].src, get_time_ms());
+        draw_progress(g_job_jf ? "DOWNLOADING" : "IMPORTING", i + 1, g_nitems, g_items[i].src, get_time_ms());
         fflush(NULL);
         pid_t pid = fork();
         if (pid < 0) { (*failed)++; continue; }
         if (pid == 0) {
             signal(SIGTERM, SIG_DFL);
             signal(SIGINT, SIG_DFL);
-            int rc = frame_import(g_items[i].src, dst, SCREEN_VISIBLE_WIDTH, SCREEN_VISIBLE_HEIGHT, 0, NULL);
+            int rc = g_job_jf ? jf_fetch_one(g_items[i].id, g_items[i].key, dst)
+                             : frame_import(g_items[i].src, dst, SCREEN_VISIBLE_WIDTH, SCREEN_VISIBLE_HEIGHT, 0, NULL);
             _exit(rc == 0 ? 0 : 1);
         }
         g_child = pid;
@@ -232,6 +353,7 @@ static void import_items(int *imported, int *failed, bool *cancelled)
                 kill(pid, SIGKILL);
                 waitpid(pid, &st, 0);
                 unlink(tmp);
+                if (g_job_jf) { char dl[240]; snprintf(dl, sizeof dl, "%s.dl", dst); unlink(dl); }
                 *cancelled = true;
                 reaped = true;
                 g_child = 0;
@@ -242,7 +364,7 @@ static void import_items(int *imported, int *failed, bool *cancelled)
                 reaped = true;
                 g_child = 0;
                 if (WIFEXITED(st) && WEXITSTATUS(st) == 0) (*imported)++;
-                else { (*failed)++; unlink(tmp); }
+                else { (*failed)++; unlink(tmp); if (g_job_jf) { char dl[240]; snprintf(dl, sizeof dl, "%s.dl", dst); unlink(dl); } }
             } else if (w < 0 && errno != EINTR) {
                 reaped = true;
                 g_child = 0;
@@ -281,21 +403,26 @@ static void import_dirs(const char *const *dirs, int ndirs)
 
 static void save_conf(void) { config_save(&g_cfg); }
 
+/* The one-time quality notice.  False when the operator cancels. */
+static bool quality_notice(void)
+{
+    if (config_get_int(&g_cfg, "notice_ack", 0) != 0) return true;
+    StartMenu m;
+    start_menu_init(&m, "BEFORE YOU IMPORT",
+                    "PICTURES ARE STORED AT SCREEN RESOLUTION\n"
+                    "WITH SOME QUALITY LOSS.\n"
+                    "THE ORIGINALS ARE NOT KEPT.", get_time_ms());
+    start_menu_add_action(&m, "CONTINUE");
+    start_menu_add_action(&m, "CANCEL");
+    if (menu_run(&m, NULL) != 0) return false;
+    config_set_int(&g_cfg, "notice_ack", 1);
+    save_conf();
+    return true;
+}
+
 static void import_from_usb(void)
 {
-    if (config_get_int(&g_cfg, "notice_ack", 0) == 0) {
-        StartMenu m;
-        start_menu_init(&m, "BEFORE YOU IMPORT",
-                        "PICTURES ARE STORED AT SCREEN RESOLUTION\n"
-                        "WITH SOME QUALITY LOSS.\n"
-                        "THE ORIGINALS ARE NOT KEPT.", get_time_ms());
-        start_menu_add_action(&m, "CONTINUE");
-        start_menu_add_action(&m, "CANCEL");
-        int r = menu_run(&m, NULL);
-        if (r != 0) return;
-        config_set_int(&g_cfg, "notice_ack", 1);
-        save_conf();
-    }
+    if (!quality_notice()) return;
     static char mp[MAX_MOUNTS][64];
     const char *dirs[MAX_MOUNTS];
     int nd = 0;
@@ -318,6 +445,180 @@ static void import_from_usb(void)
         return;
     }
     import_dirs(dirs, nd);
+}
+
+/* ── Jellyfin: albums and download ──────────────────────────────────────── */
+
+/* List a parent's children (photos == false: albums only) or its photos, paged.  Returns the count kept
+ * (-1 = failed or cancelled, message shown); *others = rows of the other kind seen. */
+static int jf_list(const char *parent, bool photos, FjItem *out, int cap, int *others)
+{
+    char *buf = malloc(JF_LIST_MAX);
+    FjItem *page = malloc(sizeof(FjItem) * JF_PAGE);
+    int kept = 0, total = 0;
+    *others = 0;
+    if (!buf || !page) { free(buf); free(page); message_screen("JELLYFIN", "OUT OF MEMORY"); return -1; }
+    for (int start = 0; start == 0 || (start < total && kept < cap); start += JF_PAGE) {
+        char path[400];
+        size_t len;
+        int pl = photos ? fj_path_photos(path, sizeof path, g_jl.user_id, parent, start, JF_PAGE)
+                        : fj_path_children(path, sizeof path, g_jl.user_id, parent, start, JF_PAGE);
+        if (pl < 0) { message_screen("JELLYFIN", "BAD ITEM ID"); kept = -1; break; }
+        if (!jf_get(path, buf, JF_LIST_MAX, &len)) { kept = -1; break; }
+        int n = fj_parse_items(buf, len, page, JF_PAGE, &total);
+        if (n < 0) { message_screen("UNEXPECTED ANSWER FROM THE SERVER", "TRY AGAIN LATER."); kept = -1; break; }
+        for (int i = 0; i < n && kept < cap; i++) {
+            if (page[i].kind == (photos ? FJ_PHOTO : FJ_ALBUM)) out[kept++] = page[i];
+            else (*others)++;
+        }
+        if (n == 0) break;
+    }
+    free(buf);
+    free(page);
+    return kept;
+}
+
+typedef struct { const FjItem *it; int n; } AlbumSrc;
+static int  album_count(void *c) { return ((AlbumSrc *)c)->n; }
+static void album_row(void *c, int i, LvRow *o) { o->title = ((AlbumSrc *)c)->it[i].name; o->glyph = LV_GLYPH_FOLDER; }
+
+/* The album list: touch, pad, keyboard and mouse.  Returns the row, or -1 for Back. */
+static int album_list(const char *title, const FjItem *it, int n)
+{
+    Framebuffer *fb = &g_dev.fb;
+    AlbumSrc as = { it, n };
+    ListView lv;
+    int top = SCREEN_VISIBLE_TOP + 44, bh = 44;
+    UiRect back = { SCREEN_SAFE_LEFT + 10, SCREEN_SAFE_BOTTOM - bh - 4, 140, bh };
+    lv_init(&lv, (LvSource){ album_count, album_row, &as },
+            (UiRect){ SCREEN_SAFE_LEFT, top, SCREEN_SAFE_WIDTH, back.y - 8 - top }, 40);
+    lv.active = true;
+    int result = -1;
+    bool redraw = true;
+    while (g_running) {
+        uint32_t now = get_time_ms();
+        poll_input(now);
+        lv_sync(&lv);
+        LvEvent ev = lv_input(&lv, &g_ts, &g_in, now);
+        if (back_pressed()) break;
+        if (g_ts.released && g_ts.x >= back.x && g_ts.x < back.x + back.w && g_ts.y >= back.y && g_ts.y < back.y + back.h) break;
+        if (ev == LV_EV_ACTIVATE && lv.cursor >= 0) { result = lv.cursor; break; }
+        if (ev != LV_EV_NONE || g_ts.pressed || g_ts.released) redraw = true;
+        if (redraw) {
+            char t[64];
+            fb_clear(fb, COLOR_BLACK);
+            lv_fit(t, sizeof t, title, SCREEN_VISIBLE_WIDTH - 40, 3);
+            fb_draw_text(fb, SCREEN_VISIBLE_LEFT + 20, SCREEN_VISIBLE_TOP + 10, t, COLOR_WHITE, 3);
+            lv_draw(fb, &lv, "NO ALBUMS");
+            fb_draw_rect(fb, back.x, back.y, back.w, back.h, COLOR_WHITE);
+            fb_draw_text(fb, back.x + 30, back.y + 14, "BACK", COLOR_WHITE, 2);
+            present();
+            redraw = false;
+        }
+        bool moved = pointer_paint(&g_dev.ptr, fb);
+        usleep(moved ? 8000 : 16000);
+    }
+    lv_free(&lv);
+    return result;
+}
+
+/* Download every photo under `folder`; what the library already holds is skipped. */
+static void jf_download(const FjItem *folder)
+{
+    FjItem *ph = malloc(sizeof(FjItem) * JF_MAX_PHOTOS);
+    g_items = malloc(sizeof(Item) * JF_MAX_PHOTOS);
+    if (!ph || !g_items) { message_screen("DOWNLOAD", "OUT OF MEMORY"); goto out; }
+    int others, np = jf_list(folder->id, true, ph, JF_MAX_PHOTOS, &others);
+    if (np < 0) goto out;
+    if (np == 0) { message_screen("THIS ALBUM HAS NO PHOTOS", ""); goto out; }
+    make_lib_dir();
+    g_nitems = g_nskipped = 0;
+    for (int i = 0; i < np; i++) {
+        char key[48], dst[220];
+        struct stat st;
+        if (fj_key_from_id(key, sizeof key, ph[i].id) < 0) continue;
+        snprintf(dst, sizeof dst, "%s/%s", LIB_DIR, key);
+        if (stat(dst, &st) == 0) { g_nskipped++; continue; }
+        snprintf(g_items[g_nitems].src, sizeof g_items[g_nitems].src, "%s", ph[i].name);
+        snprintf(g_items[g_nitems].key, sizeof g_items[g_nitems].key, "%s", key);
+        snprintf(g_items[g_nitems].id, sizeof g_items[g_nitems].id, "%s", ph[i].id);
+        g_nitems++;
+    }
+    int done = 0, failed = 0;
+    bool cancelled = false;
+    g_job_jf = true;
+    if (g_nitems > 0) import_items(&done, &failed, &cancelled);
+    g_job_jf = false;
+    char text[160];
+    snprintf(text, sizeof text, "%sDOWNLOADED %d\nSKIPPED %d (ALREADY IN THE LIBRARY)\nFAILED %d",
+             cancelled ? "CANCELLED\n" : "", done, g_nskipped, failed);
+    printf("frame: jellyfin: downloaded %d skipped %d failed %d%s\n", done, g_nskipped, failed, cancelled ? " (cancelled)" : "");
+    if (g_running) message_screen("DOWNLOAD DONE", text);
+out:
+    free(ph);
+    free(g_items);
+    g_items = NULL;
+}
+
+static void jf_browse(const FjItem *it, int n, const char *title, int depth);
+
+/* Open one folder: its sub-albums as a list, or, with none, the offer to download its photos. */
+static void jf_open(const FjItem *folder, int depth)
+{
+    FjItem *al = malloc(sizeof(FjItem) * JF_MAX_ALBUMS);
+    if (!al) { message_screen("JELLYFIN", "OUT OF MEMORY"); return; }
+    int others, n = jf_list(folder->id, false, al, JF_MAX_ALBUMS, &others);
+    if (n > 0) jf_browse(al, n, folder->name, depth);
+    else if (n == 0) {
+        StartMenu m;
+        start_menu_init(&m, folder->name, others > 0 ? "THIS ALBUM HOLDS PHOTOS." : "THIS ALBUM IS EMPTY.", get_time_ms());
+        start_menu_add_action(&m, "DOWNLOAD ALL PHOTOS");
+        start_menu_add_action(&m, "BACK");
+        if (menu_run(&m, NULL) == 0) jf_download(folder);
+    }
+    free(al);
+}
+
+static void jf_browse(const FjItem *it, int n, const char *title, int depth)
+{
+    for (;;) {
+        int row = album_list(title, it, n);
+        if (row < 0 || !g_running) return;
+        StartMenu m;
+        start_menu_init(&m, it[row].name, NULL, get_time_ms());
+        start_menu_add_action(&m, "DOWNLOAD ALL PHOTOS");
+        int e_open = depth < JF_MAX_DEPTH ? start_menu_add_action(&m, "OPEN") : -1;
+        start_menu_add_action(&m, "BACK");
+        int r = menu_run(&m, NULL);
+        if (r == 0) jf_download(&it[row]);
+        else if (e_open >= 0 && r == e_open) jf_open(&it[row], depth + 1);
+        memset(&g_in, 0, sizeof g_in);
+        pointer_drain(&g_dev.ptr);
+    }
+}
+
+static void from_jellyfin(void)
+{
+    if (!quality_notice()) return;
+    if (!jf_session_load()) {
+        message_screen("NOT SIGNED IN TO JELLYFIN", "SIGN IN WITH THE JELLYFIN APP FIRST.");
+        return;
+    }
+    char path[200], *buf = malloc(JF_LIST_MAX);
+    FjItem libs[16];
+    size_t len;
+    if (!buf) return;
+    int n = -1;
+    if (fj_path_views(path, sizeof path, g_jl.user_id) > 0 && jf_get(path, buf, JF_LIST_MAX, &len)) {
+        n = fj_parse_libraries(buf, len, libs, 16);
+        if (n < 0) message_screen("UNEXPECTED ANSWER FROM THE SERVER", "TRY AGAIN LATER.");
+    }
+    free(buf);
+    if (n == 0) message_screen("NO PHOTO LIBRARY ON THE SERVER", "");
+    else if (n == 1) jf_open(&libs[0], 1);
+    else if (n > 1) jf_browse(libs, n, "PHOTO LIBRARIES", 1);
+    memset(g_auth, 0, sizeof g_auth);
+    memset(&g_jl, 0, sizeof g_jl);
 }
 
 /* ── slideshow ──────────────────────────────────────────────────────────── */
@@ -515,10 +816,13 @@ static int interval_index(int s)
 static void empty_library(void)
 {
     StartMenu m;
-    start_menu_init(&m, "NO PICTURES YET", "IMPORT PICTURES FROM A USB STICK.", get_time_ms());
+    start_menu_init(&m, "NO PICTURES YET", "IMPORT PICTURES FROM A USB STICK\nOR DOWNLOAD THEM FROM JELLYFIN.", get_time_ms());
     start_menu_add_action(&m, "IMPORT FROM USB");
+    start_menu_add_action(&m, "FROM JELLYFIN");
     start_menu_add_action(&m, "BACK");
-    if (menu_run(&m, NULL) == 0) import_from_usb();
+    int r = menu_run(&m, NULL);
+    if (r == 0) import_from_usb();
+    else if (r == 1) from_jellyfin();
 }
 
 int main(int argc, char *argv[])
@@ -527,6 +831,7 @@ int main(int argc, char *argv[])
     const char *import_dir = NULL;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--import") == 0 && i + 1 < argc) import_dir = argv[++i];
+        else if (strcmp(argv[i], "--session") == 0 && i + 1 < argc) g_session = argv[++i];
         else if (strcmp(argv[i], "--fb") == 0 && i + 1 < argc) g_fb_dev = argv[++i];
         else if (strcmp(argv[i], "--touch") == 0 && i + 1 < argc) g_touch_dev = argv[++i];
     }
@@ -566,6 +871,7 @@ int main(int argc, char *argv[])
     g_iv_idx    = start_menu_add_choice(&m, "INTERVAL", INTERVAL_NAMES, N_INTERVALS, iv);
     g_ord_idx   = start_menu_add_choice(&m, "ORDER", ORDER_NAMES, 2, od);
     int e_imp   = start_menu_add_action(&m, "IMPORT FROM USB");
+    int e_jf    = start_menu_add_action(&m, "FROM JELLYFIN");
     int e_exit  = start_menu_add_action(&m, "EXIT");
     start_menu_select(&m, e_start, get_time_ms());
 
@@ -577,6 +883,8 @@ int main(int argc, char *argv[])
             else slideshow(INTERVAL_S[start_menu_value(&m, g_iv_idx)], start_menu_value(&m, g_ord_idx) == 1);
         } else if (r == e_imp) {
             import_from_usb();
+        } else if (r == e_jf) {
+            from_jellyfin();
         }
         memset(&g_in, 0, sizeof g_in);
         pointer_drain(&g_dev.ptr);

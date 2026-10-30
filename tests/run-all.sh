@@ -181,6 +181,7 @@ CTEST_ROWS=(
     "jf_fmt_icon_test|-I common -I jellyfin -I jf_shared -fsanitize=undefined,address|jellyfin/jf_fmt_icon.c common/ppm.c"
     "jf_art_test|-I common -I jellyfin -I jf_shared -I tests -fsanitize=undefined,address -fno-sanitize=shift|common/jf_img.c common/http.c jf_shared/jf_art.c jf_shared/jf_url.c common/logger.c|-lssl -lcrypto"
     "frame_core_test|-I common -I frame -fsanitize=undefined,address -fno-sanitize=shift|frame/frame_core.c"
+    "frame_jf_test|-I common -I frame -I jf_shared -fsanitize=undefined,address|frame/frame_jf.c jf_shared/jf_url.c common/json.c"
     "frame_logic_test|-I frame -fsanitize=undefined,address|frame/frame_logic.c"
     "vid_ring_test|-I jfvideo -fsanitize=undefined,address|jfvideo/vid_ring.c|-lpthread"
     "vid_clock_test|-I jfvideo -fsanitize=undefined,address|jfvideo/vid_clock.c|-lm"

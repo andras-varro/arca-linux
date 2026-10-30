@@ -45,6 +45,12 @@ int frame_exif_orientation(const uint8_t *jpeg, size_t len);
  * dst and no tmp is left behind. */
 int frame_import(const char *src, const char *dst, int max_w, int max_h, int quality, frame_info_t *info);
 
+/* Put src into the library at dst.  A complete JPEG that already fits max_w x max_h with EXIF orientation 1
+ * (or none) is written byte for byte (atomically, like frame_import) and info says out == src; anything else
+ * (PNG, oversize, rotated, truncated) goes through frame_import, so the library keeps one format and a bad
+ * file fails exactly as it does there. */
+int frame_store(const char *src, const char *dst, int max_w, int max_h, int quality, frame_info_t *info);
+
 /* Decode a library picture into an XRGB8888 buffer: the whole dst_w x dst_h area is cleared to black,
  * then the picture is centred (clipped, centred, if it is larger than the buffer).  stride is in
  * PIXELS.  If out is non-NULL it receives the picture's own size (out_w/out_h).  Returns FRAME_OK or

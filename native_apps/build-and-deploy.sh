@@ -378,7 +378,7 @@ $CC "${WARN[@]}" -O2 -I. -Icommon retro_picker/retro_picker.c build/list_view.o 
 
 # frame: the picture frame (library import + slideshow). Carries its own stb_image in frame_core.c, so no common/jf_img.c.
 step "39/39" "frame"
-$CC "${WARN[@]}" -O2 -I. -Icommon -Iframe frame/frame.c frame/frame_core.c frame/frame_logic.c build/pointer.o "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/frame -lm "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. -Icommon -Iframe frame/frame.c frame/frame_core.c frame/frame_logic.c frame/frame_jf.c jf_shared/jf_url.c jf_shared/jf_login.c build/http.o build/json.o -Ijf_shared build/list_view.o build/pointer.o "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/frame -lm "${SSL_LIBS[@]}" "${AUDIO_LIBS[@]}"
 
 # Collect icon files from source dirs → build/icons/.  control_panel/icons/ holds
 # the control panel's home-grid icons (gen_cp_icons.py); control_panel reads them
