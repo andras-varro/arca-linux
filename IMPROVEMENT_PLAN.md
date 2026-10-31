@@ -125,9 +125,16 @@ Boot-console errors are defects here. Every line the current image logs (`grep -
 
 `kernel/dts/rw20.dts:550` has `cd-gpios = <&gpio4 31 GPIO_ACTIVE_LOW>` (gpio_127, the vendor's value, kept) while the pad it muxes as a GPIO (`rw20.dts:278`) is `sdmmc1_dat4` = gpio_126. **[unverified]** Whether the switch is read at all has not been checked; the card boots, so nothing observed depends on it. **Done when** a card insert and removal is observed in the kernel log, or the property is shown to be inert.
 
-### B73. Network copies run at ~3 MB/s with the CPU saturated — open, measured 2026-10-15 on unit .115
+### B73. Network copies run at ~3 MB/s with the CPU saturated — open, the GPMC timing fix is measured and waits on a DT change
 
-**Measured:** eth0 is 100 Mbit full duplex (driver `smsc911x`). An SSH copy of 32 MB from the host ran at ~3.1 MB/s with `aes128-ctr` and `chacha20-poly1305`, ~2.1 MB/s with `aes128-gcm`. `/proc/stat` over 6 s during a transfer: ~60% softirq, ~22% system, ~20% user, 0% idle. A 64 MB card write with `conv=fsync` took 4.16 s (~15 MB/s), so the card is not the limit. **Read from source:** vanilla 4.14.52 `drivers/net/ethernet/smsc/smsc911x.c` has no DMA path (no occurrence of "dma"); RX copies with `ioread32_rep`. **[inferred, not measured]** A DMA path via the OMAP sDMA may gain little for ~1.5 KB frames; the GPMC timings the bootloader left for the Ethernet chip select (`HARDWARE.md` names the part: LAN9221, `U15`) may be slower than the chip needs, and PIO cost scales with them. **Done when** the GPMC timing registers for that chip select are read on the device and compared with the LAN9221 datasheet minimum, and either tightened and the copy re-measured, or recorded as already at minimum.
+The LAN9221 sits on GPMC CS5 as a 16-bit bus read 32 bits at a time (two cycles per word), and our DT
+(`kernel/dts/rw20.dts`, the CS5 node) programs a 156 ns cycle, 120 ns access and 78 ns turnaround, about three times the
+datasheet minimum (Microchip DS00002416A: 45 ns cycle, 30 ns data valid). **Measured 2026-10-31 on `.115`, timings written at
+runtime with `devmem` and restored after, plain TCP 32 MB × 3 (busybox `inetd` sinks, host client):** RX 5.0–5.7 MB/s at the
+DT values, 6.3–7.5 at cycle 102 / access 66 / turnaround 36 ns, 7.2–9.0 at cs-off 54 / oe-we on 12 off 54 / cycle 72 /
+access 48 / cycle2cycle and turnaround 12 ns; TX 3.4 → 4.2 → 4.8; no eth0 errors, link and MAC sane. The tick (6.02 ns,
+166 MHz L3) is inferred. **To decide (operator):** the tight or the middle set. **Done when** the chosen `gpmc,*-ns` values are
+in the CS5 node, the image boots on `.115`, and a 32 MB copy shows the gain with no eth0 errors.
 
 ### B74. The 8BitDo pad does not reconnect after it powers itself off for inactivity (`.115`) — open, reported 2026-10-27, not reproduced
 
