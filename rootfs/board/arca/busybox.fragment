@@ -1,0 +1,4 @@
+# Applets Buildroot's stock busybox.config leaves out and our device scripts use.
+# stat -c %a (set-hostname keeps a file's mode) needs the format feature.
+CONFIG_STAT=y
+CONFIG_FEATURE_STAT_FORMAT=y
