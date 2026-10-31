@@ -47,6 +47,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #define STORAGE_HELPER  "/usr/sbin/arca-storage"
@@ -195,6 +196,7 @@ typedef struct {
     UiRect   hdr;
 } Pane;
 
+static const char *g_fb_path = "/dev/fb0", *g_touch_path = "/dev/input/touchscreen0";   /* for the program OPEN starts */
 static Pane P[2];
 static int  act;               /* the active pane */
 
@@ -414,6 +416,36 @@ static void pane_follow_link(Pane *p, const char *name) {
     pane_load(p, NULL, 0);
 }
 
+/* ── OPEN: a text file in nano (in the terminal), a picture in frame ─────── */
+
+static FmOpenCmd open_cmd;
+static bool      open_pending;
+
+/* Looks at the file and queues the command; the main loop runs it (it must give up the screen and the
+ * touch panel first).  False when the file is neither a small text file nor a picture. */
+static bool open_file(Pane *p, const FmEntry *e) {
+    if (e->type != FM_T_FILE) return false;
+    char path[FM_PATH_MAX];
+    if (!fm_path_join(p->path, e->name, path, sizeof path)) return false;
+    bool image = fm_name_is_image(e->name);
+    if (!image) {
+        if (!fm_name_is_text(e->name)) return false;
+        unsigned char buf[FM_SNIFF_BYTES];
+        int fd = open(path, O_RDONLY | O_NOFOLLOW);
+        if (fd < 0) return false;
+        ssize_t n = read(fd, buf, sizeof buf);
+        close(fd);
+        if (n < 0 || !fm_sniff_text(buf, (size_t)n, e->size)) return false;
+    }
+    const char *media[MAX_ROOTS];
+    int nm = 0;
+    for (int i = 0; i < n_roots; i++) if (roots[i].usb) media[nm++] = roots[i].path;
+    bool edit = fm_open_editable(path, media, nm);
+    if (!fm_open_cmd(&open_cmd, image, edit, g_fb_path, g_touch_path, path)) return false;
+    open_pending = true;
+    return true;
+}
+
 static void pane_activate(Pane *p) {
     int idx = p->lv.cursor;
     if (idx < 0) return;
@@ -428,6 +460,7 @@ static void pane_activate(Pane *p) {
     if (!e) return;
     if (e->type == FM_T_DIR) { pane_descend(p, e->name); return; }
     if (expert && e->type == FM_T_LINK && e->link_dir) { pane_follow_link(p, e->name); return; }
+    if (open_file(p, e)) return;
     char sz[16];
     fm_format_size(e->size, sz, sizeof sz);
     if (expert && e->type == FM_T_FILE) {          /* the row had room for only part of this */
@@ -1121,6 +1154,7 @@ int main(int argc, char *argv[]) {
 
     const char *fb_device = (argc > 1) ? argv[1] : "/dev/fb0";
     const char *touch_device = (argc > 2) ? argv[2] : "/dev/input/touchscreen0";
+    g_fb_path = fb_device; g_touch_path = touch_device;
 
     int lock_fd = acquire_instance_lock("file_manager");
     if (lock_fd < 0) {
@@ -1321,6 +1355,42 @@ int main(int argc, char *argv[]) {
                 else if (bt[BTN_ID_RUN].pressed || bt[BTN_ID_BACK].pressed || bt[BTN_ID_PAUSE].pressed) bar_focus = -1;
             }
             if (action != A_NONE) { do_action(action); needs_redraw = true; }
+        }
+
+        /* OPEN: give the screen, the panel and the pads to the child (the launcher's model), wait, take
+         * them back, and draw everything again.  Nothing here draws or reads input while it runs. */
+        if (open_pending) {
+            open_pending = false;
+            gamepad_close(&gp);
+            touch_close(&touch);
+            fb_close(&fb);
+            int cst = -1;
+            pid_t pid = fork();
+            if (pid == 0) {
+                execv(open_cmd.av[0], (char *const *)open_cmd.av);
+                perror("file_manager: exec");
+                _exit(127);
+            } else if (pid > 0) {
+                pid_t w;
+                do { w = waitpid(pid, &cst, 0); } while (w == -1 && errno == EINTR);
+            }
+            fb_set_bpp(fb_device, 32);                  /* the child may have left 16 bpp */
+            if (fb_init(&fb, fb_device) < 0 || touch_init(&touch, touch_device) < 0) {
+                fprintf(stderr, "file_manager: cannot reopen the screen or touch after OPEN\n");
+                break;
+            }
+            touch_set_screen_size(&touch, fb.width, fb.height);
+            touch_drain_events(&touch);
+            gamepad_init(&gp);
+            memset(&in, 0, sizeof in);
+            pointer_drain(&ptr);
+            top_bar_layout(&bar);
+            layout(&fb);
+            for (int k = 0; k < 2; k++) pane_reload(&P[k]);     /* the file may have changed; the cursor stays on it */
+            if (pid < 0 || (WIFEXITED(cst) && WEXITSTATUS(cst) == 127)) set_status(ST_WARN, "CANNOT START THE VIEWER");
+            hdr_press = -1; exit_press = false;
+            needs_redraw = true;
+            continue;
         }
 
         if (button_take_dirty()) needs_redraw = true;

@@ -5,6 +5,7 @@
  *
  *   frame                    start menu: START SLIDESHOW, INTERVAL, ORDER, IMPORT FROM USB, FROM JELLYFIN, EXIT
  *   frame --import <dir>     import <dir> without the stick lookup or the notice, then the menu
+ *   frame --show <file>      show that one picture fitted to the screen; a tap, Esc, B or Enter exits
  *   frame --session <conf>   read the saved Jellyfin sign-in from <conf> (default /opt/ludfin/ludfin.conf);
  *                            the file is only read, this app never signs in
  *
@@ -1222,13 +1223,43 @@ static void library_menu(int interval_s, bool shuffle)
     else if (r == e_del) delete_all();
 }
 
+/* --show <file>: the one picture, fitted to the screen, until a tap, Esc, B, Enter or Space.  The library, the
+ * saved settings and the slideshow are not touched.  Exit status 1 when the file cannot be decoded. */
+static int show_one(const char *path)
+{
+    Framebuffer *fb = &g_dev.fb;
+    uint32_t *px = malloc((size_t)fb->width * fb->height * 4);
+    if (!px) return 1;
+    memset(px, 0, (size_t)fb->width * fb->height * 4);
+    frame_info_t fi;
+    if (frame_load_mode(path, px, fb->width, fb->height, fb->width, 0, &fi) != 0) {
+        fprintf(stderr, "frame: cannot show %s\n", path);
+        free(px);
+        return 1;
+    }
+    memcpy(fb->back_buffer, px, (size_t)fb->width * fb->height * 4);
+    present();
+    free(px);
+    uint32_t t0 = get_time_ms();
+    while (g_running) {
+        uint32_t now = get_time_ms();
+        poll_input(now);
+        const ButtonState *bt = g_in.buttons;
+        bool key = back_pressed() || bt[BTN_ID_ACTION].pressed || bt[BTN_ID_JUMP].pressed;
+        if (key || (g_ts.pressed && now - t0 > 300)) break;      /* the tap that started it is not an exit */
+        usleep(FRAME_DELAY_IDLE_US / 2);
+    }
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     setvbuf(stdout, NULL, _IOLBF, 0);
-    const char *import_dir = NULL;
+    const char *import_dir = NULL, *show_path = NULL;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--import") == 0 && i + 1 < argc) import_dir = argv[++i];
         else if (strcmp(argv[i], "--session") == 0 && i + 1 < argc) g_session = argv[++i];
+        else if (strcmp(argv[i], "--show") == 0 && i + 1 < argc) show_path = argv[++i];
         else if (strcmp(argv[i], "--fb") == 0 && i + 1 < argc) g_fb_dev = argv[++i];
         else if (strcmp(argv[i], "--touch") == 0 && i + 1 < argc) g_touch_dev = argv[++i];
     }
@@ -1249,6 +1280,17 @@ int main(int argc, char *argv[])
     gamepad_init(&g_dev.gp);
     pointer_init(&g_dev.ptr);           /* after touch_init: SCREEN_SAFE_* */
     memset(&g_in, 0, sizeof g_in);
+
+    if (show_path) {
+        int rc = show_one(show_path);
+        hw_leds_off();
+        fb_clear(&g_dev.fb, COLOR_BLACK);
+        fb_swap(&g_dev.fb);
+        gamepad_close(&g_dev.gp);
+        touch_close(&g_dev.touch);
+        fb_close(&g_dev.fb);
+        return rc;
+    }
 
     config_init_path(&g_cfg, CONF_PATH);
     config_load(&g_cfg);

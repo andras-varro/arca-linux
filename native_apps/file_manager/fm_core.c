@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/statvfs.h>
 #include <unistd.h>
 
@@ -630,4 +631,71 @@ void fm_job_free(FmJob *j) {
     free(j->buf);
     j->buf = NULL;
     j->n_names = 0;
+}
+
+/* ── OPEN ────────────────────────────────────────────────────────────────── */
+
+static const char *const TEXT_EXT[] = {
+    "txt", "md", "conf", "cfg", "ini", "log", "sh", "c", "h", "py", "json", "xml", "csv",
+    "yml", "yaml", "toml", "lst", "service", "rules", "patch", "diff", "html", "css", "js",
+};
+
+/* The extension after the last dot, or NULL when there is none (a leading dot alone is not one). */
+static const char *name_ext(const char *name) {
+    const char *dot = strrchr(name, '.');
+    if (!dot || dot == name || !dot[1]) return NULL;
+    return dot + 1;
+}
+
+bool fm_name_is_text(const char *name) {
+    const char *x = name_ext(name);
+    if (!x) return true;
+    for (size_t i = 0; i < sizeof TEXT_EXT / sizeof TEXT_EXT[0]; i++)
+        if (!strcasecmp(x, TEXT_EXT[i])) return true;
+    return false;
+}
+
+bool fm_name_is_image(const char *name) {
+    const char *x = name_ext(name);
+    return x && (!strcasecmp(x, "jpg") || !strcasecmp(x, "jpeg") || !strcasecmp(x, "png"));
+}
+
+bool fm_sniff_text(const unsigned char *buf, size_t n, long long size) {
+    if (size < 0 || size >= FM_TEXT_MAX) return false;
+    for (size_t i = 0; i < n && i < FM_SNIFF_BYTES; i++)
+        if (buf[i] == 0) return false;
+    return true;
+}
+
+bool fm_open_editable(const char *path, const char *const *media, int n) {
+    if (fm_path_within("/home/root/data", path)) return true;
+    for (int i = 0; i < n; i++)
+        if (media[i] && fm_path_within(media[i], path)) return true;
+    return false;
+}
+
+bool fm_open_cmd(FmOpenCmd *c, bool image, bool edit, const char *fb, const char *touch, const char *path) {
+    memset(c, 0, sizeof *c);
+    if (snprintf(c->fb, sizeof c->fb, "%s", fb) >= (int)sizeof c->fb) return false;
+    if (snprintf(c->touch, sizeof c->touch, "%s", touch) >= (int)sizeof c->touch) return false;
+    if (!fm_path_normalise(path, c->path, sizeof c->path)) return false;
+    if (!fm_path_parent(c->path, c->cwd, sizeof c->cwd)) return false;
+    int n = 0;
+    if (image) {
+        c->av[n++] = "/opt/games/frame";
+        c->av[n++] = "--fb";    c->av[n++] = c->fb;
+        c->av[n++] = "--touch"; c->av[n++] = c->touch;
+        c->av[n++] = "--show";  c->av[n++] = c->path;
+    } else {
+        c->av[n++] = "/opt/games/terminal";
+        c->av[n++] = c->fb;
+        c->av[n++] = c->touch;
+        c->av[n++] = "--cwd";   c->av[n++] = c->cwd;
+        c->av[n++] = "--exec";  c->av[n++] = "nano";
+        if (!edit) c->av[n++] = "-v";
+        c->av[n++] = "--";      c->av[n++] = c->path;
+    }
+    c->av[n] = NULL;
+    c->ac = n;
+    return true;
 }

@@ -191,4 +191,35 @@ void fm_job_ack_error(FmJob *j, bool cancel);
 void fm_job_cancel(FmJob *j);
 void fm_job_free(FmJob *j);
 
+/* ── OPEN: what a file is, where it may be edited, the command that shows it ─ */
+
+#define FM_TEXT_MAX    (1024 * 1024)   /* a text file is opened only below this size */
+#define FM_SNIFF_BYTES 4096            /* leading bytes read to look for a NUL */
+
+/* A name nano is offered for: a known text extension (.txt .md .conf .cfg .ini .log
+ * .sh .c .h .py .json .xml .csv .yml .yaml .toml .lst .service .rules .patch .diff
+ * .html .css .js, case-insensitive), or no extension at all ("os-release", "fstab").
+ * A dotfile with no further dot counts as no extension.  False for any other
+ * extension; the content test (fm_sniff_text) is a second, separate condition. */
+bool fm_name_is_text(const char *name);
+/* .jpg .jpeg .png, case-insensitive. */
+bool fm_name_is_image(const char *name);
+/* The first `n` bytes of a file of `size` bytes: text when size < FM_TEXT_MAX and
+ * none of the bytes is NUL.  An empty file is text. */
+bool fm_sniff_text(const unsigned char *buf, size_t n, long long size);
+/* May `path` be edited?  Below /home/root/data, or below one of the `n` removable
+ * mount points in `media`; whole-component test.  Everything else is view only. */
+bool fm_open_editable(const char *path, const char *const *media, int n);
+
+typedef struct {
+    char        fb[128], touch[128];
+    char        cwd[FM_PATH_MAX], path[FM_PATH_MAX];
+    const char *av[16];       /* NULL-terminated; points into this struct, so do not copy it */
+    int         ac;
+} FmOpenCmd;
+/* The argv for opening `path` (absolute, normalised).  image: frame --show;
+ * else terminal --exec nano, with -v unless `edit`.  False when the path does not
+ * fit or has no directory part. */
+bool fm_open_cmd(FmOpenCmd *c, bool image, bool edit, const char *fb, const char *touch, const char *path);
+
 #endif /* FM_CORE_H */

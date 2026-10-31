@@ -741,6 +741,45 @@ static void group_o(void) {
     unsetenv("TZ"); tzset();
 }
 
+
+/* ── P: OPEN ─────────────────────────────────────────────────────────────── */
+static void group_p(void) {
+    const char *txt[] = { "a.txt", "A.TXT", "notes.md", "os-release", "fstab", ".profile", "x.conf", "run.sh", "m.json" };
+    for (size_t k = 0; k < sizeof txt / sizeof txt[0]; k++) CHECK(fm_name_is_text(txt[k]), "P text '%s'", txt[k]);
+    const char *bin[] = { "a.bin", "pic.jpg", "x.ko", "game.zip", "a.png", "v.mp4" };
+    for (size_t k = 0; k < sizeof bin / sizeof bin[0]; k++) CHECK(!fm_name_is_text(bin[k]), "P not text '%s'", bin[k]);
+    CHECK(fm_name_is_image("a.jpg") && fm_name_is_image("B.JPEG") && fm_name_is_image("c.Png"), "P image names");
+    CHECK(!fm_name_is_image("a.gif") && !fm_name_is_image("jpg") && !fm_name_is_image("a.txt"), "P not image names");
+
+    unsigned char t[8] = "hello", z[8] = { 'a', 0, 'b' };
+    CHECK(fm_sniff_text(t, 5, 5), "P sniff text");
+    CHECK(fm_sniff_text(t, 0, 0), "P sniff empty");
+    CHECK(!fm_sniff_text(z, 3, 3), "P sniff NUL");
+    CHECK(!fm_sniff_text(t, 5, FM_TEXT_MAX), "P sniff too big");
+    CHECK(fm_sniff_text(t, 5, FM_TEXT_MAX - 1), "P sniff just under");
+
+    const char *media[] = { "/media/usb0" };
+    CHECK(fm_open_editable("/home/root/data/a.txt", media, 1), "P edit data");
+    CHECK(fm_open_editable("/home/root/data/x/y.txt", NULL, 0), "P edit data deep");
+    CHECK(fm_open_editable("/media/usb0/a.txt", media, 1), "P edit media");
+    CHECK(!fm_open_editable("/media/usb01/a.txt", media, 1), "P media prefix only");
+    CHECK(!fm_open_editable("/home/root/database/a", media, 1), "P data prefix only");
+    CHECK(!fm_open_editable("/etc/os-release", media, 1), "P view etc");
+
+    FmOpenCmd c;
+    CHECK(fm_open_cmd(&c, false, true, "/dev/fb0", "/dev/input/touchscreen0", "/home/root/data/a.txt"), "P cmd ok");
+    const char *want_e[] = { "/opt/games/terminal", "/dev/fb0", "/dev/input/touchscreen0", "--cwd", "/home/root/data",
+                             "--exec", "nano", "--", "/home/root/data/a.txt" };
+    CHECK(c.ac == 9 && c.av[9] == NULL, "P edit argc %d", c.ac);
+    for (int i = 0; i < 9 && i < c.ac; i++) CHECK(!strcmp(c.av[i], want_e[i]), "P edit av[%d]=%s", i, c.av[i]);
+    CHECK(fm_open_cmd(&c, false, false, "/dev/fb0", "/dev/input/touchscreen0", "/etc/os-release"), "P view ok");
+    CHECK(c.ac == 10 && !strcmp(c.av[7], "-v") && !strcmp(c.av[8], "--") && !strcmp(c.av[9], "/etc/os-release") &&
+          !strcmp(c.av[4], "/etc"), "P view argv");
+    CHECK(fm_open_cmd(&c, true, false, "/dev/fb0", "/t", "/home/root/data/pictures/a.jpg"), "P img ok");
+    CHECK(c.ac == 7 && !strcmp(c.av[0], "/opt/games/frame") && !strcmp(c.av[5], "--show") &&
+          !strcmp(c.av[6], "/home/root/data/pictures/a.jpg"), "P img argv");
+    CHECK(!fm_open_cmd(&c, false, true, "/dev/fb0", "/t", "relative.txt"), "P relative refused");
+}
 /* ── main ────────────────────────────────────────────────────────────────── */
 
 int main(void) {
@@ -749,7 +788,7 @@ int main(void) {
 
     group_a(); group_b(); group_c(); group_d(); group_e(); group_f();
     group_g(); group_h(); group_i(); group_j(); group_k(); group_l();
-    group_m(); group_n(); group_o();
+    group_m(); group_n(); group_o(); group_p();
 
     rmtree(TMP);
     printf("%d checks, %d failures\n", checks, fails);
