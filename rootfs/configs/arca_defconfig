@@ -50,6 +50,8 @@ BR2_PACKAGE_LIBGLIB2=y
 BR2_PACKAGE_READLINE=y
 # nano: the Files app opens text files in it through the Terminal app (--exec).
 BR2_PACKAGE_NANO=y
+# Full nano: the size-optimised build drops undo (M-U), the mark (M-A) and search history.
+# BR2_PACKAGE_NANO_TINY is not set
 BR2_TARGET_TZ_INFO=y
 BR2_PACKAGE_ETHTOOL=y
 # First-boot growth of p3: resize2fs grows the mounted ext4; partx is util-linux's partition tool.

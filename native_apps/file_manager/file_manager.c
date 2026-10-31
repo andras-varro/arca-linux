@@ -422,14 +422,17 @@ static FmOpenCmd open_cmd;
 static bool      open_pending;
 
 /* Looks at the file and queues the command; the main loop runs it (it must give up the screen and the
- * touch panel first).  False when the file is neither a small text file nor a picture. */
+ * touch panel first).  False when the entry is not a regular file, or when it is not opened.
+ * Plain OPEN (force_edit false): a small text file goes to nano, read-only, and a picture goes to frame.
+ * EDIT (force_edit true): any regular file goes to nano for writing; the name and content tests and the
+ * picture branch are skipped. */
 static bool open_file(Pane *p, const FmEntry *e, bool force_edit) {
     if (e->type != FM_T_FILE) return false;
     if (force_edit && !fm_edit_ok(e->type, e->name)) return false;
     char path[FM_PATH_MAX];
     if (!fm_path_join(p->path, e->name, path, sizeof path)) return false;
-    bool image = fm_name_is_image(e->name);
-    if (!image) {
+    bool image = !force_edit && fm_name_is_image(e->name);
+    if (!force_edit && !image) {
         if (!fm_name_is_text(e->name)) return false;
         unsigned char buf[FM_SNIFF_BYTES];
         int fd = open(path, O_RDONLY | O_NOFOLLOW);

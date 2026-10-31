@@ -783,8 +783,8 @@ static void group_p(void) {
     /* EDIT: writable nano on any location; text-like regular files only, never a picture or a non-file. */
     CHECK(fm_edit_ok(FM_T_FILE, "notes.txt"), "P editok text");
     CHECK(fm_edit_ok(FM_T_FILE, "Makefile"), "P editok no extension");
-    CHECK(!fm_edit_ok(FM_T_FILE, "a.jpg"), "P editok picture refused");
-    CHECK(!fm_edit_ok(FM_T_FILE, "app.bin"), "P editok binary name refused");
+    CHECK(fm_edit_ok(FM_T_FILE, "4D-Sports.zip.opt"), "P editok any extension");
+    CHECK(fm_edit_ok(FM_T_FILE, "app.bin"), "P editok binary name allowed");
     CHECK(!fm_edit_ok(FM_T_DIR, "docs"), "P editok dir refused");
     CHECK(!fm_edit_ok(FM_T_LINK, "l.txt"), "P editok link refused");
     CHECK(!fm_edit_ok(FM_T_OTHER, "dev.txt"), "P editok other refused");

@@ -204,7 +204,7 @@ void fm_job_free(FmJob *j);
 bool fm_name_is_text(const char *name);
 /* .jpg .jpeg .png, case-insensitive. */
 bool fm_name_is_image(const char *name);
-/* The EDIT button applies: a regular file (not a link, directory or device) with a text-like name, never a picture.
+/* The EDIT button applies: any regular file (not a link, directory or device); the simple/expert view decides what is reachable.
  * The content sniff stays with the caller, as for OPEN. */
 bool fm_edit_ok(FmType type, const char *name);
 /* The first `n` bytes of a file of `size` bytes: text when size < FM_TEXT_MAX and

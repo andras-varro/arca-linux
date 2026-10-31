@@ -661,7 +661,8 @@ bool fm_name_is_image(const char *name) {
 }
 
 bool fm_edit_ok(FmType type, const char *name) {
-    return type == FM_T_FILE && !fm_name_is_image(name) && fm_name_is_text(name);
+    (void)name;   /* every regular file: the simple/expert view already decides what is reachable */
+    return type == FM_T_FILE;
 }
 
 bool fm_sniff_text(const unsigned char *buf, size_t n, long long size) {
