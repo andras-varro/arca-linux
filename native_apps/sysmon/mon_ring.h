@@ -15,7 +15,8 @@
  * Any field may be "-": no reading (the first second has no CPU share; a
  * kernel without the bandgap driver has no temperature).  flags is a bit set
  * for the daemon's state; bit 0 (MON_FLAG_OVERTEMP) is the over-temperature
- * warning, which framebuffer.c paints as a red square (common/overtemp.h).
+ * warning, which framebuffer.c paints as a red square (common/overtemp.h);
+ * bit 1 (MON_FLAG_USBFAULT) is a latched USB overload (common/usbfault.h).
  */
 #ifndef MON_RING_H
 #define MON_RING_H
@@ -26,6 +27,7 @@
 #define MON_RING_N     120                      /* 2 minutes at 1 Hz */
 #define MON_ABSENT     (-2147483647 - 1)        /* a "-" field */
 #define MON_FLAG_OVERTEMP 1u                    /* over-temperature warning */
+#define MON_FLAG_USBFAULT 2u                    /* USB overload not recovered */
 
 /* The buffer a formatted ring always fits: header + MON_RING_N lines of
  * three fields of at most 11 characters each. */

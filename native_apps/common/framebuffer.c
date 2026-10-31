@@ -674,10 +674,21 @@ static void fb_present_rect(Framebuffer *fb, int x, int y, int w, int h) {
 // so no app's content is touched and clearing is a copy back from it. The
 // ring is read at most once per OVERTEMP_CHECK_MS, per process; between reads
 // a present costs one clock_gettime and, while set, FB_OT_SIZE^2 stores.
+//
+// The USB-fault indicator rides the same read (MON_FLAG_USBFAULT, common/
+// usbfault.h): a square of the same size at the top-left corner, plus red
+// sidebars FB_UF_BAR px wide on both edges that show for three 200 ms
+// phases at the start of every 10 s (on, off, on, off, on, off). The bars
+// follow the clock but are only drawn or taken back when a present happens,
+// so an app that presents once a second shows them to that granularity.
 #define FB_OT_SIZE 16
+#define FB_UF_BAR 6
+#define FB_UF_PERIOD_MS 10000u
+#define FB_UF_PHASE_MS 200u
 
-static struct { long long last_ms; int on; } fb_ot = { -1, 0 };
+static struct { long long last_ms; int on; int usb; int bars; } fb_ot = { -1, 0, 0, 0 };
 
+// Bit 0: over-temperature, bit 1: USB fault; 0 when the ring is absent or stale.
 static int fb_overtemp_read(void) {
     int fd = open(MON_RING_PATH, O_RDONLY | O_CLOEXEC);
     if (fd < 0) return 0;
@@ -687,19 +698,18 @@ static int fb_overtemp_read(void) {
     close(fd);
     if (n <= 0) return 0;
     buf[n] = '\0';
-    return overtemp_fresh((long long)st.st_mtime, (long long)time(NULL))
-        && overtemp_ring_flag(buf) == 1;
+    if (!overtemp_fresh((long long)st.st_mtime, (long long)time(NULL))) return 0;
+    return (overtemp_ring_flag(buf) == 1 ? 1 : 0)
+         | (overtemp_ring_usbfault(buf) == 1 ? 2 : 0);
 }
 
-static void fb_overtemp_paint(Framebuffer *fb) {
+// Red w x h block at logical (x0, y0) into the front buffer.
+static void fb_mark_red(Framebuffer *fb, uint32_t x0, uint32_t y0, int w, int h) {
     const bool is16 = FB_IS_16BPP(fb);
     const uint32_t red = 0xFF0000;
-    const int s = FB_OT_SIZE;
-    if ((int)fb->width < s || (int)fb->height < s) return;
-    const uint32_t x0 = fb->width - (uint32_t)s;
-    for (int r = 0; r < s; r++) {
-        for (int c = 0; c < s; c++) {
-            const uint32_t lx = x0 + (uint32_t)c, ly = (uint32_t)r;
+    for (int r = 0; r < h; r++) {
+        for (int c = 0; c < w; c++) {
+            const uint32_t lx = x0 + (uint32_t)c, ly = y0 + (uint32_t)r;
             uint8_t *row;
             uint32_t px;
             if (fb->portrait_mode) {   // fb_swap()'s rotation, one pixel
@@ -716,19 +726,52 @@ static void fb_overtemp_paint(Framebuffer *fb) {
     }
 }
 
+static void fb_overtemp_paint(Framebuffer *fb) {
+    const int s = FB_OT_SIZE;
+    if ((int)fb->width < s || (int)fb->height < s) return;
+    fb_mark_red(fb, fb->width - (uint32_t)s, 0, s, s);
+}
+
+// Whether the sidebars are in an "on" phase at now_ms (even 200 ms slots of
+// the first 1200 ms of each 10 s).
+static int fb_usbfault_bars_on(uint32_t now_ms) {
+    const uint32_t t = now_ms % FB_UF_PERIOD_MS;
+    return t < 6u * FB_UF_PHASE_MS && ((t / FB_UF_PHASE_MS) & 1u) == 0;
+}
+
 void fb_overtemp_poll(Framebuffer *fb) {
     if (!fb->double_buffering || fb->back_buffer == NULL || fb->buffer == NULL)
         return;
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     long long now_ms = (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-    int was = fb_ot.on;
-    if (overtemp_due(now_ms, &fb_ot.last_ms))
-        fb_ot.on = fb_overtemp_read();
+    int was = fb_ot.on, was_usb = fb_ot.usb, was_bars = fb_ot.bars;
+    if (overtemp_due(now_ms, &fb_ot.last_ms)) {
+        int bits = fb_overtemp_read();
+        fb_ot.on = bits & 1;
+        fb_ot.usb = (bits >> 1) & 1;
+    }
+    const int bars = fb_ot.usb && fb_usbfault_bars_on((uint32_t)now_ms);
+    fb_ot.bars = bars;
+    const int s = FB_OT_SIZE;
+    const int small = (int)fb->width < s || (int)fb->height < s;
+    // Take back what is no longer shown first, so a repaint below wins.
+    if (was_bars && !bars && (int)fb->width > 2 * FB_UF_BAR) {
+        fb_present_rect(fb, 0, 0, FB_UF_BAR, (int)fb->height);
+        fb_present_rect(fb, (int)fb->width - FB_UF_BAR, 0, FB_UF_BAR, (int)fb->height);
+    }
+    if (was_usb && !fb_ot.usb && !small)
+        fb_present_rect(fb, 0, 0, s, s);
+    if (was && !fb_ot.on && !small)
+        fb_present_rect(fb, (int)fb->width - s, 0, s, s);
+    if (bars && (int)fb->width > 2 * FB_UF_BAR) {
+        fb_mark_red(fb, 0, 0, FB_UF_BAR, (int)fb->height);
+        fb_mark_red(fb, fb->width - FB_UF_BAR, 0, FB_UF_BAR, (int)fb->height);
+    }
+    if (fb_ot.usb && !small)
+        fb_mark_red(fb, 0, 0, s, s);
     if (fb_ot.on)
         fb_overtemp_paint(fb);
-    else if (was)
-        fb_present_rect(fb, (int)fb->width - FB_OT_SIZE, 0, FB_OT_SIZE, FB_OT_SIZE);
 }
 
 void fb_swap(Framebuffer *fb) {

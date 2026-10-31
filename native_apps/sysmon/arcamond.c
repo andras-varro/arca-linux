@@ -33,6 +33,7 @@
 #include "control_panel/soc_temp.h"
 #include "sysmon/mon_ring.h"
 #include "common/overtemp.h"
+#include "common/usbfault.h"
 #include "common/hardware.h"
 
 #include <errno.h>
@@ -40,6 +41,10 @@
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <dirent.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <sys/wait.h>
 #include <sys/resource.h>
 #include <time.h>
 #include <unistd.h>
@@ -117,6 +122,75 @@ static void warn_led(int on) {
     }
 }
 
+/* USB overload recovery (common/usbfault.h holds the decisions).  The kernel
+ * logs VBUS_ERROR when an overcurrent drops the musb session and never raises
+ * VBUS again; /etc/init.d/usb-host recover rebinds musb.  /dev/kmsg is opened
+ * once and positioned at its end, so lines from before the daemon started are
+ * ignored; EPIPE (records overwritten) just means read on. */
+#define USB_RECOVER "/etc/init.d/usb-host"
+
+static int kmsg_open(void) {
+    int fd = open("/dev/kmsg", O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd >= 0) lseek(fd, 0, SEEK_END);
+    return fd;
+}
+
+/* 1 when any record read since the last call carries VBUS_ERROR. */
+static int kmsg_vbus_error(int fd) {
+    char rec[1024];
+    int seen = 0;
+    if (fd < 0) return 0;
+    for (int i = 0; i < 64; i++) {
+        ssize_t n = read(fd, rec, sizeof(rec) - 1);
+        if (n < 0) {
+            if (errno == EPIPE || errno == EINTR) continue;
+            break;   /* EAGAIN: drained */
+        }
+        if (n == 0) break;
+        rec[n] = '\0';
+        if (strstr(rec, "VBUS_ERROR")) seen = 1;
+    }
+    return seen;
+}
+
+/* A non-hub device is enumerated: skip root hubs (usbN), interfaces (a name
+ * with ':') and devices whose bDeviceClass is 09. */
+static int usb_peripheral_present(void) {
+    DIR *d = opendir("/sys/bus/usb/devices");
+    if (!d) return 0;
+    int found = 0;
+    struct dirent *e;
+    while (!found && (e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.' || strncmp(e->d_name, "usb", 3) == 0
+            || strchr(e->d_name, ':'))
+            continue;
+        char path[300], cls[16];
+        snprintf(path, sizeof(path), "/sys/bus/usb/devices/%s/bDeviceClass", e->d_name);
+        if (read_text(path, cls, sizeof(cls)) < 2) continue;
+        if (strncmp(cls, "09", 2) != 0) found = 1;
+    }
+    closedir(d);
+    return found;
+}
+
+static pid_t recover_pid;
+
+/* Reaps a finished recover; 1 while one is alive. */
+static int recover_running(void) {
+    if (recover_pid > 0 && waitpid(recover_pid, NULL, WNOHANG) != 0)
+        recover_pid = 0;   /* exited, or no such child */
+    return recover_pid > 0;
+}
+
+static void recover_start(void) {
+    pid_t p = fork();
+    if (p == 0) {
+        execl(USB_RECOVER, "usb-host", "recover", (char *)NULL);
+        _exit(127);
+    }
+    if (p > 0) recover_pid = p;
+}
+
 int main(void) {
     static MonRing ring;
     static char text[MON_RING_TEXT_MAX];
@@ -140,6 +214,9 @@ int main(void) {
     CpuSnap prev, cur;
     snap(&prev);
     int hot = 0, warned = 0;
+    int kmsg = kmsg_open();
+    UsbFault uf;
+    usbf_init(&uf);
 
     struct timespec next;
     clock_gettime(CLOCK_MONOTONIC, &next);
@@ -171,7 +248,23 @@ int main(void) {
                    s.temp_mc, hot == warn ? "" : ", forced");
         warned = warn;
         warn_led(warn);
-        unsigned flags = warn ? MON_FLAG_OVERTEMP : 0u;
+        {
+            struct timespec tn;
+            clock_gettime(CLOCK_MONOTONIC, &tn);
+            uint32_t now_ms = (uint32_t)tn.tv_sec * 1000u + (uint32_t)(tn.tv_nsec / 1000000);
+            int err = kmsg_vbus_error(kmsg);
+            int was_f = usbf_flag(&uf);
+            int present = usbf_wants_scan(&uf, now_ms) ? usb_peripheral_present() : 0;
+            if (err) puts("arcamond: VBUS_ERROR in the kernel log");
+            if (usbf_step(&uf, now_ms, err, present, recover_running())) {
+                puts("arcamond: USB fault, running usb-host recover");
+                recover_start();
+            }
+            if (usbf_flag(&uf) != was_f)
+                puts(usbf_flag(&uf) ? "arcamond: USB fault indicator on"
+                                    : "arcamond: USB fault indicator off");
+        }
+        unsigned flags = (warn ? MON_FLAG_OVERTEMP : 0u) | (usbf_flag(&uf) ? MON_FLAG_USBFAULT : 0u);
         int len = cur.valid ? mon_ring_format(&ring, cur.wall_cs, flags, text, sizeof(text)) : -1;
         if (len > 0) publish(text, len);
 

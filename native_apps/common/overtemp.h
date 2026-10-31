@@ -40,6 +40,15 @@ static inline int overtemp_ring_flag(const char *text) {
     return (flags & MON_FLAG_OVERTEMP) ? 1 : 0;
 }
 
+/* The ring text's USB-fault bit (MON_FLAG_USBFAULT): 1 set, 0 clear, -1 not a
+ * ring header. */
+static inline int overtemp_ring_usbfault(const char *text) {
+    unsigned long long cs;
+    unsigned flags;
+    if (!text || sscanf(text, "arcamond 1 %llu %u", &cs, &flags) != 2) return -1;
+    return (flags & MON_FLAG_USBFAULT) ? 1 : 0;
+}
+
 /* Whether a file last written at mtime is live at now (both wall seconds;
  * the same clock, so an unsynced clock does not matter beyond one write). */
 static inline int overtemp_fresh(long long mtime, long long now) {
