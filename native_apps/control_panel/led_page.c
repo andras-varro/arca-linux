@@ -201,14 +201,20 @@ static void led_page_reset_defaults(Config *cfg) {
     led_page_load(cfg);
 }
 
-/* The -/+ preview: a ~500 ms flash of both LEDs at the chosen value.  Raw
- * sysfs on purpose, like the Display page's backlight preview: it shows the
- * brightness being CHOSEN, whether or not the LEDs are enabled, and the scaled
- * setters would gate it on the very switch next to it.  hw_leds_off() is
+/* The -/+ preview: both LEDs at the chosen value for ~500 ms.  Raw sysfs on
+ * purpose, like the Display page's backlight preview: it shows the brightness
+ * being CHOSEN, whether or not the LEDs are enabled, and the scaled setters
+ * would gate it on the very switch next to it.  hw_leds_off() is
  * config-independent, so it is the right way back to dark.
- * Known trait, accepted by the operator: the usleep() blocks the UI for ~500 ms
- * on every -/+ press. */
-static void led_preview(int brightness_pct) {
+ * Non-blocking: led_preview_poll() turns it off from input(), which runs every
+ * frame, so a run of -/+ presses steps at once and the LEDs stay lit at the
+ * newest value until 500 ms after the last press.  A sleep here froze the page
+ * for half a second per press. */
+#define LED_PREVIEW_MS 500
+static bool     preview_on;
+static uint32_t preview_off_at;
+
+static void led_preview(int brightness_pct, uint32_t now) {
     char buf[8];
     snprintf(buf, sizeof(buf), "%d", brightness_pct);
     FILE *f;
@@ -216,8 +222,16 @@ static void led_preview(int brightness_pct) {
     if (f) { fputs(buf, f); fclose(f); }
     f = fopen("/sys/class/leds/green_led/brightness", "w");
     if (f) { fputs(buf, f); fclose(f); }
-    usleep(500000);
-    hw_leds_off();
+    preview_on = true;
+    preview_off_at = now + LED_PREVIEW_MS;
+}
+
+/* force: end it now (leaving the page, or a test about to drive the LEDs). */
+static void led_preview_poll(uint32_t now, bool force) {
+    if (preview_on && (force || (int32_t)(now - preview_off_at) >= 0)) {
+        hw_leds_off();
+        preview_on = false;
+    }
 }
 
 /* ── Layout ─────────────────────────────────────────────────────────────── */
@@ -363,6 +377,8 @@ static CpPageResult led_page_input(Config *cfg, int tx, int ty,
     LedPageState *s = &led_state;
     CpPageResult act = CP_PAGE_IDLE;
 
+    led_preview_poll(now, false);
+
     led_toggle.state = s->enabled;      /* flip from the truth, not a stale widget */
     if (toggle_check_press(&led_toggle, tx, ty, touching, now)) {
         s->enabled = led_toggle.state;
@@ -382,17 +398,21 @@ static CpPageResult led_page_input(Config *cfg, int tx, int ty,
         int before = s->brightness;
         s->brightness = clamp_pct(s->brightness + step);
         led_persist(s, cfg);
-        led_preview(s->brightness);
+        led_preview(s->brightness, now);
         if (s->brightness != before) act = CP_PAGE_REDRAW;
     }
     for (int i = 0; i < LED_TEST_COUNT; i++) {
         if (button_update(&test_btns[i], tx, ty, touching, now)) {
             queued_test = i;
+            led_preview_poll(now, true);   /* the test drives the LEDs itself */
             act = CP_PAGE_FULLSCREEN;
         }
     }
     return act;
 }
+
+/* Leaving mid-preview must not leave the LEDs lit: input() stops running. */
+static void led_page_leave(void) { led_preview_poll(0, true); }
 
 /* Keyboard focus: what input() hit-tests, minus whatever is disabled. */
 static int led_page_focusables(UiRect *out, int max) {
@@ -412,6 +432,7 @@ const CpPage cp_led_page = {
     .draw           = led_page_draw,
     .input          = led_page_input,
     .focusables     = led_page_focusables,
+    .leave          = led_page_leave,
     .run_fullscreen = led_page_run_fullscreen,
     .reset_defaults = led_page_reset_defaults,
 };
