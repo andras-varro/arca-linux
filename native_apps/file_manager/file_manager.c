@@ -561,7 +561,10 @@ static void layout(Framebuffer *fb) {
         }
         P[k].hdr = (UiRect){ x, y, pw, HDR_H };
         LvSource src = { pane_count, pane_row, &P[k] };
-        lv_init(&P[k].lv, src, (UiRect){ x, y + HDR_H, pw, ph - HDR_H }, ROW_H);
+        UiRect lr = { x, y + HDR_H, pw, ph - HDR_H };
+        /* A second call (after OPEN) moves the rectangle only: lv_init would clear active, cursor and marks. */
+        if (P[k].lv.src.count) P[k].lv.rect = lr;
+        else lv_init(&P[k].lv, src, lr, ROW_H);
     }
 
     for (int row = 0; row < 2; row++) {
