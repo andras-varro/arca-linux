@@ -389,24 +389,37 @@
 		vddvario-supply = <&vddvario>;
 		vdd33a-supply = <&vdd33a>;
 
+		/*
+		 * Timings tightened from the vendor's (cs/oe/we off 150/140, cycles 155, access 120,
+		 * turnaround and cycle-to-cycle 75). Measured at runtime on a unit with the same registers
+		 * written by devmem: Ethernet RX 5.0-5.7 -> 7.2-9.0 MB/s, TX 3.4 -> 4.8 MB/s, no errors.
+		 * GPMC_FCLK is the 166 MHz L3 clock (6.024 ns/tick, inferred from "Core 332 MHz"; the
+		 * live registers matched the old values rounded up at that tick), and the driver rounds
+		 * every ns value up to whole ticks, so these give CONFIG2 00090901, CONFIG4 09020902,
+		 * CONFIG5 04080C0C, CONFIG6 800002C2. Against LAN9221 DS00002416A tables 6-3 and 6-7:
+		 * nCS+nRD (or nWR) asserted 42 ns (min 32); read and write cycle 72 (min 45);
+		 * deasserted 24 (min 13); read data is sampled at 48 and the chip has it 30 ns after nRD
+		 * falls at 12, i.e. by 42 (tcsdv max 30); write data setup >= 42 (min 7).
+		 * Read data margin is the tightest (6 ns): do not shorten access-ns or lengthen oe-on-ns.
+		 */
 		gpmc,device-width = <1>;
 		gpmc,cs-on-ns = <5>;
-		gpmc,cs-rd-off-ns = <150>;
-		gpmc,cs-wr-off-ns = <150>;
+		gpmc,cs-rd-off-ns = <54>;
+		gpmc,cs-wr-off-ns = <54>;
 		gpmc,adv-on-ns = <0>;
 		gpmc,adv-rd-off-ns = <15>;
 		gpmc,adv-wr-off-ns = <40>;
-		gpmc,oe-on-ns = <45>;
-		gpmc,oe-off-ns = <140>;
-		gpmc,we-on-ns = <45>;
-		gpmc,we-off-ns = <140>;
-		gpmc,rd-cycle-ns = <155>;
-		gpmc,wr-cycle-ns = <155>;
-		gpmc,access-ns = <120>;
+		gpmc,oe-on-ns = <12>;
+		gpmc,oe-off-ns = <54>;
+		gpmc,we-on-ns = <12>;
+		gpmc,we-off-ns = <54>;
+		gpmc,rd-cycle-ns = <72>;
+		gpmc,wr-cycle-ns = <72>;
+		gpmc,access-ns = <48>;
 		gpmc,wr-access-ns = <0>;
 		gpmc,page-burst-access-ns = <20>;
-		gpmc,bus-turnaround-ns = <75>;
-		gpmc,cycle2cycle-delay-ns = <75>;
+		gpmc,bus-turnaround-ns = <12>;
+		gpmc,cycle2cycle-delay-ns = <12>;
 		gpmc,cycle2cycle-samecsen = <1>;
 		gpmc,cycle2cycle-diffcsen = <1>;
 		gpmc,clk-activation-ns = <0>;
