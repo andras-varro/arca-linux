@@ -125,17 +125,6 @@ Boot-console errors are defects here. Every line the current image logs (`grep -
 
 `kernel/dts/rw20.dts:550` has `cd-gpios = <&gpio4 31 GPIO_ACTIVE_LOW>` (gpio_127, the vendor's value, kept) while the pad it muxes as a GPIO (`rw20.dts:278`) is `sdmmc1_dat4` = gpio_126. **[unverified]** Whether the switch is read at all has not been checked; the card boots, so nothing observed depends on it. **Done when** a card insert and removal is observed in the kernel log, or the property is shown to be inert.
 
-### B73. Network copies run at ~3 MB/s with the CPU saturated — open, the GPMC timing fix is measured and waits on a DT change
-
-The LAN9221 sits on GPMC CS5 as a 16-bit bus read 32 bits at a time (two cycles per word), and our DT
-(`kernel/dts/rw20.dts`, the CS5 node) programs a 156 ns cycle, 120 ns access and 78 ns turnaround, about three times the
-datasheet minimum (Microchip DS00002416A: 45 ns cycle, 30 ns data valid). **Measured 2026-10-31 on `.115`, timings written at
-runtime with `devmem` and restored after, plain TCP 32 MB × 3 (busybox `inetd` sinks, host client):** RX 5.0–5.7 MB/s at the
-DT values, 6.3–7.5 at cycle 102 / access 66 / turnaround 36 ns, 7.2–9.0 at cs-off 54 / oe-we on 12 off 54 / cycle 72 /
-access 48 / cycle2cycle and turnaround 12 ns; TX 3.4 → 4.2 → 4.8; no eth0 errors, link and MAC sane. The tick (6.02 ns,
-166 MHz L3) is inferred. **To decide (operator):** the tight or the middle set. **Done when** the chosen `gpmc,*-ns` values are
-in the CS5 node, the image boots on `.115`, and a 32 MB copy shows the gain with no eth0 errors.
-
 ### B74. The 8BitDo pad does not reconnect after it powers itself off for inactivity (`.115`) — open, reported 2026-10-27, not reproduced
 
 **Reported, not measured** (operator, unit `.115`, no capture). The 8BitDo gamepad (Bluetooth) turns itself off after inactivity; turning it on again does not reconnect it. Two workarounds work: reboot the unit with the pad in re-pairing mode, or remove the device in the Bluetooth settings, search again and connect. Pressing Pair on the existing entry gives a Bluetooth error (text not captured). The pad model on `.115` is not confirmed to be the 8BitDo Pro 2 of B52. Unlike B52, where a pad power-cycle reconnects within 1 s after a `bluetoothd` restart, here the power-cycle after idle-off is what fails. **No cause is established.**
@@ -159,6 +148,20 @@ never stop and the indicator stays; a recover does not wait for the launcher (th
 "powered hub" line; the BT window ~7 min.
 **Done when** on `.115`, after a real drop, the hub returns without a replug, square and bars show during the fault and
 vanish after, and a previously connected BT pad reconnects without a power cycle.
+**Operator test 2026-10-31 (`.115`, a real overload):** recover brought the port back at once and the load
+tripped it again in a loop; a BT pad reconnected ~20 s after the load was pulled. **Built since:** 3 errors in
+30 s → `usb-host off` + 120 s retries, red LED flashing while latched (simulated on `.115`, not yet a real overload).
+
+### B76. A plain `reboot` can hang in the shutdown scripts, and `provision.sh` reboots that way — open, seen once on `.115`
+
+**Measured 2026-10-31 on `.115`, n=1:** two `reboot` calls over SSH left the unit up; `/etc/init.d/rc 0` was asleep in
+`wait_woken` with fd 0–2 on `/dev/console` (a VT, 100×30, not the serial port), so the K scripts never ran (`sshd` still up).
+**Inferred:** a write to the console blocked. `sync; reboot -f` booted. `provision.sh` ends with a plain `ssh … reboot`,
+so an update can silently not take effect. **Next:** reproduce, read which K script or `rc` line writes, and why a VT write
+blocks (console scrolled-lock? `fbcon` blanked?). **Done when** a plain `reboot` reboots `.115` five times in a row from the
+launcher state, or `provision.sh` detects a reboot that did not happen. **Not reproduced** in 4 tries the same day (idle, just
+booted, during `rc 5`, two `reboot`s at once). Next capture before `reboot -f`: `/proc/<rc pid>/stack`, `stty -F /dev/console -a`
+and `stty -F /dev/ttyO1 -a`; `rc` echoes to the console (serial `ttyO1` + `tty0`) before each K script [inferred first write].
 
 ## Features
 
@@ -295,15 +298,13 @@ paths a launcher plus one game actually touch, listed from a BBB boot.
 
 **Future scope, operator-agreed, not scheduled:** mouse-only operation of the launcher, Control Panel and games, for a unit with no touch and no keyboard or pad. The operator has a RoomWizard whose touch is broken, and a BeagleBone has no touch. The mouse pointer in the launcher and the Control Panel exists and is operator-verified; the games still take no mouse pointer.
 
-### F163. Edit and view text files in the Files app with nano — open, built; the save and keyboard checks are left
+### F166. The on-screen keyboard has no Alt key, so nano's Alt commands cannot be typed by touch — open, reported 2026-10-31
 
-Files opens a text file in nano (`/opt/games/terminal … --exec nano`), editable under `/home/root/data` and on a USB stick and
-`nano -v` elsewhere, and a picture in `frame --show`; the rules are `fm_open_cmd` in `native_apps/file_manager/fm_core.c`.
-**Measured 2026-10-31 on .115 with synthetic taps:** edit mode on a data file, view mode on `/etc/passwd`, a picture shown and
-dismissed by a tap, a binary file not opened, and Files responsive after each return. **Not measured:** a save from nano,
-a physical keyboard in nano, Enter and pad X as the open key (`arca_tap` sends no keys), and a real finger.
-**Done when** an option file opened from Files is edited and saved on the panel with a physical keyboard and with the
-on-screen one, and the next game start uses it.
+**Reported** (operator, `.115`): in nano from the terminal, Ctrl commands work from the physical and the on-screen keyboard,
+but the on-screen one offers no Alt, so `M-` commands (`M-U` undo, `M-6` copy, …) are reachable only from a physical
+keyboard. The key layout is `native_apps/common/keyboard.c`; the terminal's key-to-byte mapping is its keymap
+(`term_keymap_test`). **Done when** an on-screen Alt (a latching modifier like Ctrl) sends `ESC` + key, and `M-U` undoes in
+nano on the panel by touch alone.
 
 ### Potential ideas (not planned)
 

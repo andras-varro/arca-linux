@@ -1288,17 +1288,10 @@ booted `mode` value was confirmed against the running kernel rather than against
 
 **`/etc/init.d/usb-host recover`** does the rebind — unbind, settle `RECOVER_SETTLE` (2 s) so VBUS can
 decay below VBusValid, bind — and retries up to `RECOVER_TRIES` (3), stopping the moment a **non-hub**
-device appears and exiting non-zero on exhaustion. Plug the device in **first**. Reachable from the panel
-as Control Panel → USB → **RESCAN**, which forks it when a scan finds nothing **or `mode` reads `b_*`**, and by opening that page with an
-empty or `b_*` port (one attempt, measured 6.0 s on `.188`); measured on `.188`
-2026-08-14 at ~5 s from one tap, leaving `Vbus on`, `1-1`, `event1` + `js0` and the pad playable. ⚠️ It is
-deliberately not on a timer, and the reason is not merely wasted rebinds: **unpatched, nothing in software can
-distinguish "nothing is plugged in" from "a pad is plugged into an unpowered port"** — VBUS is off either
-way and no connect interrupt can arrive in either — so an operator who has just plugged something in
-holds the one bit no poll can obtain.
-Full technical detail, including MUSB memory addresses, the `omap2430_ops` struct layout, why
-`mmap()` works where `write()` does not, and the approaches that failed:
-[`usb_host/README.md`](usb_host/README.md).
+device appears and exiting non-zero on exhaustion. Plug the device in **first**. Reachable from the panel as Control Panel → USB → **RESCAN**, which forks it when a scan finds nothing **or `mode` reads `b_*`**, and by opening that page with an empty or `b_*` port (one attempt, measured 6.0 s on `.188`); measured on `.188` 2026-08-14 at ~5 s from one tap, leaving `Vbus on`, `1-1`, `event1` + `js0` and the pad playable.
+⚠️ It is not on a free-running timer: **unpatched, nothing in software can distinguish "nothing is plugged in" from "a pad is plugged into an unpowered port"** — VBUS is off either way and no connect interrupt can arrive in either — so an operator who has just plugged something in holds the one bit no poll can obtain. The one automatic caller is `arcamond`, and only after the kernel logs `VBUS_ERROR` (rules: `native_apps/common/usbfault.h`).
+⚠️ **An overloaded port loops by itself:** musb's own `VBUS_ERROR` handler re-asserts the session, so a load the port cannot supply produces an error every few seconds, each logged as `retry #1` (measured 2026-10-31 on `.115`, 18 in a row). So three errors within 30 s make `arcamond` run **`usb-host off`** (unbinds `musb-hdrc.0.auto`, VBUS stays off, red LED and screen marker flash) and try `recover` again only every 120 s. While unbound, a replug cannot recover the port by itself [inferred]: RESCAN or the next retry does.
+Full technical detail, including MUSB memory addresses, the `omap2430_ops` struct layout, why `mmap()` works where `write()` does not, and the approaches that failed: [`usb_host/README.md`](usb_host/README.md).
 
 **Application-side input.** All input is evdev (`/dev/input/event0`–`event31`). Native apps use
 `native_apps/common/gamepad.c`, which abstracts touch + USB keyboard + USB mouse + Xbox pad behind
