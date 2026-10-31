@@ -1,5 +1,6 @@
 /* status_line.c — see status_line.h. */
 #include "common/status_line.h"
+#include "common/hour12.h"
 #include <stdio.h>
 
 static bool not_calibrated(const StatusCtx *ctx) { return !ctx->calibrated; }
@@ -37,7 +38,7 @@ int status_clock_text(char *buf, size_t n, int hour, int min, bool h24) {
     int w;
     if (hour < 0 || hour > 23 || min < 0 || min > 59) w = snprintf(buf, n, "--:--");
     else if (h24) w = snprintf(buf, n, "%02d:%02d", hour, min);
-    else w = snprintf(buf, n, "%d:%02d %s", hour % 12 ? hour % 12 : 12, min, hour < 12 ? "AM" : "PM");
+    else w = snprintf(buf, n, "%d:%02d %s", hour12_of(hour), min, hour12_ampm(hour));
     if (w < 0) { buf[0] = '\0'; return 0; }
     return (size_t)w >= n ? (int)n - 1 : w;
 }

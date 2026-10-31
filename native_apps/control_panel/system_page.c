@@ -19,6 +19,7 @@
 #include "cp_exec.h"
 #include "sys_settings.h"
 #include "../common/common.h"
+#include "../common/hour12.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -68,8 +69,8 @@ static void fmt_tm(const struct tm *tm, char *out, size_t len) {
         return;
     }
     snprintf(out, len, "%04d-%02d-%02d %d:%02d:%02d %s", tm->tm_year + 1900,
-             tm->tm_mon + 1, tm->tm_mday, tm->tm_hour % 12 ? tm->tm_hour % 12 : 12,
-             tm->tm_min, tm->tm_sec, tm->tm_hour < 12 ? "AM" : "PM");
+             tm->tm_mon + 1, tm->tm_mday, hour12_of(tm->tm_hour),
+             tm->tm_min, tm->tm_sec, hour12_ampm(tm->tm_hour));
 }
 
 /* The clock and the RTC; true when what is shown changed. */

@@ -1,5 +1,6 @@
 /* clock_core.c — see clock_core.h. */
 #include "clock_core.h"
+#include "../common/hour12.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -103,28 +104,28 @@ int clock_settings_serialise(const ClockSettings *s, char *out, size_t n)
 
 /* ---- text ---- */
 
-static int hour12(int h) { int x = h % 12; return x ? x : 12; }
+
 
 int clock_fmt_minute_of_day(char *out, size_t n, int minute, bool h24)
 {
     minute = clampi(minute, 0, 1439);
     int h = minute / 60, m = minute % 60;
     int w = h24 ? snprintf(out, n, "%02d:%02d", h, m)
-                : snprintf(out, n, "%d:%02d %s", hour12(h), m, h < 12 ? "AM" : "PM");
+                : snprintf(out, n, "%d:%02d %s", hour12_of(h), m, hour12_ampm(h));
     return (w < 0 || (size_t)w >= n) ? -1 : w;
 }
 
 int clock_fmt_time(char *out, size_t n, const ClockTime *t, bool h24)
 {
     int h = clampi(t->hour, 0, 23), m = clampi(t->min, 0, 59);
-    int w = h24 ? snprintf(out, n, "%02d:%02d", h, m) : snprintf(out, n, "%d:%02d", hour12(h), m);
+    int w = h24 ? snprintf(out, n, "%02d:%02d", h, m) : snprintf(out, n, "%d:%02d", hour12_of(h), m);
     return (w < 0 || (size_t)w >= n) ? -1 : w;
 }
 
 const char *clock_fmt_ampm(const ClockTime *t, bool h24)
 {
     if (h24) return "";
-    return t->hour < 12 ? "AM" : "PM";
+    return hour12_ampm(t->hour);
 }
 
 int clock_fmt_seconds(char *out, size_t n, const ClockTime *t)
