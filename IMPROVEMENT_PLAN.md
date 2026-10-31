@@ -298,13 +298,14 @@ paths a launcher plus one game actually touch, listed from a BBB boot.
 
 **Future scope, operator-agreed, not scheduled:** mouse-only operation of the launcher, Control Panel and games, for a unit with no touch and no keyboard or pad. The operator has a RoomWizard whose touch is broken, and a BeagleBone has no touch. The mouse pointer in the launcher and the Control Panel exists and is operator-verified; the games still take no mouse pointer.
 
-### F166. The on-screen keyboard has no Alt key, so nano's Alt commands cannot be typed by touch — open, reported 2026-10-31
+### F166. The on-screen keyboard has no Alt key, so nano's Alt commands cannot be typed by touch — open, built; the panel check is left
 
 **Reported** (operator, `.115`): in nano from the terminal, Ctrl commands work from the physical and the on-screen keyboard,
 but the on-screen one offers no Alt, so `M-` commands (`M-U` undo, `M-6` copy, …) are reachable only from a physical
 keyboard. The key layout is `native_apps/common/keyboard.c`; the terminal's key-to-byte mapping is its keymap
 (`term_keymap_test`). **Done when** an on-screen Alt (a latching modifier like Ctrl) sends `ESC` + key, and `M-U` undoes in
-nano on the panel by touch alone.
+nano on the panel by touch alone. **Built 2026-10-31, deployed to `.115`:** an ALT sticky button beside CTRL on the terminal's
+toolbar (`TermSticky` in `native_apps/common/term_keymap.h`); ASCII with Alt is sent as ESC + byte; host test only.
 
 ### Potential ideas (not planned)
 

@@ -144,4 +144,30 @@ static inline TermKeyOut term_keymap(int code, unsigned mods, bool caps) {
     return out;   /* modifiers, caps / num / scroll lock, media keys, ... */
 }
 
+/* The toolbar's sticky modifiers.  Each one is armed by a tap and applies to the
+ * next key only; term_sticky_take() returns the TMOD_* bits and releases them,
+ * setting *changed when something was released so the caller redraws the button. */
+typedef struct { bool ctrl, alt; } TermSticky;
+
+static inline unsigned term_sticky_take(TermSticky *s, bool *changed) {
+    unsigned m = (s->ctrl ? TMOD_CTRL : 0) | (s->alt ? TMOD_ALT : 0);
+    *changed = (m != 0);
+    s->ctrl = false;
+    s->alt = false;
+    return m;
+}
+
+/* The bytes for one ASCII character with modifiers: Alt is an ESC prefix (what
+ * nano reads as M-key), Ctrl clears bits 5-6 of '@'..'_' and lower case.  Returns
+ * the byte count (0 for a non-ASCII character, which the caller hands to libvterm). */
+static inline int term_char_bytes(uint32_t ch, unsigned mods, unsigned char out[3]) {
+    int n = 0;
+    if (ch >= 0x80) return 0;
+    if (mods & TMOD_ALT) out[n++] = 0x1b;
+    if ((mods & TMOD_CTRL) && ch >= 0x40 && ch <= 0x7f) ch &= 0x1f;
+    else if ((mods & TMOD_CTRL) && ch == ' ') ch = 0;
+    out[n++] = (unsigned char)ch;
+    return n;
+}
+
 #endif /* TERM_KEYMAP_H */

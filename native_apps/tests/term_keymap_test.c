@@ -119,6 +119,31 @@ int main(void) {
     CHECK(term_mod_bit(KEY_LEFTMETA) == 0, "meta is not mapped");
 
     /* F */
+
+    /* Sticky modifiers (the toolbar's CTRL and ALT): arm, apply to one key, release. */
+    {
+        TermSticky st = { false, true };       /* ALT armed */
+        bool changed = false;
+        unsigned m = term_sticky_take(&st, &changed);
+        CHECK(m == TMOD_ALT && changed && !st.alt, "alt latch: mods 0x%x changed %d alt %d", m, changed, st.alt);
+        TermKeyOut o = term_keymap(KEY_U, m, false);
+        unsigned char b[3];
+        int n = term_char_bytes(o.ch, o.mods, b);
+        CHECK(n == 2 && b[0] == 0x1b && b[1] == 'u', "alt+u bytes: n %d %02x %02x", n, b[0], b[1]);
+        changed = true;
+        m = term_sticky_take(&st, &changed);
+        CHECK(m == 0 && !changed, "alt released after one key: mods 0x%x changed %d", m, changed);
+        o = term_keymap(KEY_U, m, false);
+        n = term_char_bytes(o.ch, o.mods, b);
+        CHECK(n == 1 && b[0] == 'u', "plain u after release: n %d", n);
+        TermSticky both = { true, true };      /* both armed: one key takes both */
+        m = term_sticky_take(&both, &changed);
+        CHECK(m == (TMOD_CTRL | TMOD_ALT) && !both.ctrl && !both.alt, "ctrl+alt take both");
+        n = term_char_bytes('d', m, b);
+        CHECK(n == 2 && b[0] == 0x1b && b[1] == 0x04, "ctrl+alt+d bytes");
+        n = term_char_bytes('c', TMOD_CTRL, b);
+        CHECK(n == 1 && b[0] == 0x03, "ctrl+c byte");
+    }
     CHECK(term_keymap(KEY_LEFTSHIFT, 0, false).kind == TK_NONE, "shift types nothing");
     CHECK(term_keymap(KEY_LEFTCTRL, 0, false).kind == TK_NONE, "ctrl types nothing");
     CHECK(term_keymap(KEY_CAPSLOCK, 0, false).kind == TK_NONE, "caps lock types nothing");

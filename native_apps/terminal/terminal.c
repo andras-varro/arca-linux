@@ -15,7 +15,8 @@
  *     reduces a keyboard to nine buttons and has no letters); common/term_keymap.h turns
  *     a key code into the character or special key, libvterm into its bytes;
  *   - the toolbar along the bottom edge (touch): EXIT, KBD (the on-screen
- *     keyboard, one line at a time), CTRL (sticky, applies to the next key),
+ *     keyboard, one line at a time), CTRL and ALT (sticky, each applies to the next key; ALT sends ESC first, which
+ *     nano reads as M-key),
  *     ESC, TAB, ENT, ^C, the four arrows and FONT (6 x 9 or 12 x 18 cells);
  *   - a pad: D-pad = arrows, A = Enter, B = Escape, X = Tab, Start = the
  *     on-screen keyboard, Select tapped = Ctrl-C, Select held 1 s = leave.
@@ -413,7 +414,10 @@ static void send_out(TermKeyOut o) {
         /* libvterm maps Ctrl+letter to a control byte for lowercase only; the on-screen
          * keyboard types capitals, and a capital would arrive as an unknown CSI sequence. */
         if ((o.mods & TMOD_CTRL) && ch >= (uint32_t)'A' && ch <= (uint32_t)'Z') ch += 32;
-        vterm_keyboard_unichar(T.vt, ch, (VTermModifier)o.mods);
+        unsigned char b[3];
+        int n = (o.mods & TMOD_ALT) ? term_char_bytes(ch, o.mods, b) : 0;
+        if (n > 0) on_output((const char *)b, (size_t)n, NULL);   /* ESC + key: nano's M-key */
+        else       vterm_keyboard_unichar(T.vt, ch, (VTermModifier)o.mods);
     } else if (o.kind == TK_KEY) {
         VTermKey k = vkey_for(o.key);
         if (k != VTERM_KEY_NONE) vterm_keyboard_key(T.vt, k, (VTermModifier)o.mods);
@@ -431,13 +435,14 @@ static void send_char(uint32_t ch, unsigned mods) {
     send_out(o);
 }
 
-/* The sticky CTRL button: applies to the next key sent from the toolbar, the
+/* The sticky CTRL and ALT buttons: each applies to the next key sent from the toolbar, the
  * on-screen keyboard, a pad or a physical keyboard, then clears. */
-static bool sticky_ctrl;
+static TermSticky sticky;
 
 static unsigned take_sticky(void) {
-    unsigned m = sticky_ctrl ? TMOD_CTRL : 0;
-    if (sticky_ctrl) { sticky_ctrl = false; T.tb_dirty = true; }
+    bool changed;
+    unsigned m = term_sticky_take(&sticky, &changed);
+    if (changed) T.tb_dirty = true;
     return m;
 }
 
@@ -634,9 +639,9 @@ static void draw_cell(Framebuffer *fb, int row, int col) {
 
 /* ── toolbar ─────────────────────────────────────────────────────────────── */
 
-enum { B_EXIT, B_KBD, B_CTRL, B_ESC, B_TAB, B_ENT, B_INT, B_LEFT, B_UP, B_DOWN, B_RIGHT, B_FONT, B_COUNT };
+enum { B_EXIT, B_KBD, B_CTRL, B_ALT, B_ESC, B_TAB, B_ENT, B_INT, B_LEFT, B_UP, B_DOWN, B_RIGHT, B_FONT, B_COUNT };
 static const char *const btn_label[B_COUNT] = {
-    "EXIT", "KBD", "CTRL", "ESC", "TAB", "ENT", "^C", "<", "^", "v", ">", "FONT"
+    "EXIT", "KBD", "CTRL", "ALT", "ESC", "TAB", "ENT", "^C", "<", "^", "v", ">", "FONT"
 };
 static Button btns[B_COUNT];
 
@@ -652,7 +657,8 @@ static void tb_build(void) {
 
 static void tb_draw(Framebuffer *fb) {
     fb_fill_rect(fb, 0, T.tb_y - 2, fb->width, fb->height - (T.tb_y - 2), COLOR_BLACK);
-    btns[B_CTRL].bg_color = sticky_ctrl ? BTN_COLOR_WARNING : BTN_COLOR_SECONDARY;
+    btns[B_CTRL].bg_color = sticky.ctrl ? BTN_COLOR_WARNING : BTN_COLOR_SECONDARY;
+    btns[B_ALT].bg_color = sticky.alt ? BTN_COLOR_WARNING : BTN_COLOR_SECONDARY;
     for (int i = 0; i < B_COUNT; i++) button_draw(fb, &btns[i]);
 }
 
@@ -751,7 +757,7 @@ static void type_line(Framebuffer *fb, TouchInput *touch, GamepadManager *gp) {
     unsigned mods = take_sticky();
     for (const char *s = buf; *s; s++) {
         send_char((unsigned char)*s, mods);
-        mods = 0;                       /* CTRL applies to the first character only */
+        mods = 0;                       /* CTRL and ALT apply to the first character only */
     }
 }
 
@@ -856,7 +862,8 @@ int main(int argc, char *argv[]) {
                     T.need_full = true;
                     ignore_until = get_time_ms() + 300;   /* the OK tap must not land on a button */
                 }
-                if (tap[B_CTRL]) { sticky_ctrl = !sticky_ctrl; T.tb_dirty = true; }
+                if (tap[B_CTRL]) { sticky.ctrl = !sticky.ctrl; T.tb_dirty = true; }
+                if (tap[B_ALT])  { sticky.alt = !sticky.alt; T.tb_dirty = true; }
                 if (tap[B_ESC])   send_special(TKEY_ESCAPE, take_sticky());
                 if (tap[B_TAB])   send_special(TKEY_TAB, take_sticky());
                 if (tap[B_ENT])   send_special(TKEY_ENTER, take_sticky());
