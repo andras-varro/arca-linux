@@ -779,6 +779,18 @@ static void group_p(void) {
     CHECK(c.ac == 7 && !strcmp(c.av[0], "/opt/games/frame") && !strcmp(c.av[5], "--show") &&
           !strcmp(c.av[6], "/home/root/data/pictures/a.jpg"), "P img argv");
     CHECK(!fm_open_cmd(&c, false, true, "/dev/fb0", "/t", "relative.txt"), "P relative refused");
+
+    /* EDIT: writable nano on any location; text-like regular files only, never a picture or a non-file. */
+    CHECK(fm_edit_ok(FM_T_FILE, "notes.txt"), "P editok text");
+    CHECK(fm_edit_ok(FM_T_FILE, "Makefile"), "P editok no extension");
+    CHECK(!fm_edit_ok(FM_T_FILE, "a.jpg"), "P editok picture refused");
+    CHECK(!fm_edit_ok(FM_T_FILE, "app.bin"), "P editok binary name refused");
+    CHECK(!fm_edit_ok(FM_T_DIR, "docs"), "P editok dir refused");
+    CHECK(!fm_edit_ok(FM_T_LINK, "l.txt"), "P editok link refused");
+    CHECK(!fm_edit_ok(FM_T_OTHER, "dev.txt"), "P editok other refused");
+    CHECK(fm_open_cmd(&c, false, true, "/dev/fb0", "/t", "/opt/games/arca_config.conf"), "P edit opt ok");
+    CHECK(c.ac == 9 && !strcmp(c.av[6], "nano") && !strcmp(c.av[7], "--") && !strcmp(c.av[8], "/opt/games/arca_config.conf") &&
+          !strcmp(c.av[4], "/opt/games"), "P edit opt argv has no -v");
 }
 /* ── main ────────────────────────────────────────────────────────────────── */
 

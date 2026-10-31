@@ -660,6 +660,10 @@ bool fm_name_is_image(const char *name) {
     return x && (!strcasecmp(x, "jpg") || !strcasecmp(x, "jpeg") || !strcasecmp(x, "png"));
 }
 
+bool fm_edit_ok(FmType type, const char *name) {
+    return type == FM_T_FILE && !fm_name_is_image(name) && fm_name_is_text(name);
+}
+
 bool fm_sniff_text(const unsigned char *buf, size_t n, long long size) {
     if (size < 0 || size >= FM_TEXT_MAX) return false;
     for (size_t i = 0; i < n && i < FM_SNIFF_BYTES; i++)

@@ -423,8 +423,9 @@ static bool      open_pending;
 
 /* Looks at the file and queues the command; the main loop runs it (it must give up the screen and the
  * touch panel first).  False when the file is neither a small text file nor a picture. */
-static bool open_file(Pane *p, const FmEntry *e) {
+static bool open_file(Pane *p, const FmEntry *e, bool force_edit) {
     if (e->type != FM_T_FILE) return false;
+    if (force_edit && !fm_edit_ok(e->type, e->name)) return false;
     char path[FM_PATH_MAX];
     if (!fm_path_join(p->path, e->name, path, sizeof path)) return false;
     bool image = fm_name_is_image(e->name);
@@ -440,7 +441,7 @@ static bool open_file(Pane *p, const FmEntry *e) {
     const char *media[MAX_ROOTS];
     int nm = 0;
     for (int i = 0; i < n_roots; i++) if (roots[i].usb) media[nm++] = roots[i].path;
-    bool edit = fm_open_editable(path, media, nm);
+    bool edit = force_edit || fm_open_editable(path, media, nm);
     if (!fm_open_cmd(&open_cmd, image, edit, g_fb_path, g_touch_path, path)) return false;
     open_pending = true;
     return true;
@@ -460,7 +461,7 @@ static void pane_activate(Pane *p) {
     if (!e) return;
     if (e->type == FM_T_DIR) { pane_descend(p, e->name); return; }
     if (expert && e->type == FM_T_LINK && e->link_dir) { pane_follow_link(p, e->name); return; }
-    if (open_file(p, e)) return;
+    if (open_file(p, e, false)) return;
     char sz[16];
     fm_format_size(e->size, sz, sizeof sz);
     if (expert && e->type == FM_T_FILE) {          /* the row had room for only part of this */
@@ -502,22 +503,22 @@ static bool panes_revalidate(void) {
 /* ── layout and widgets ──────────────────────────────────────────────────── */
 
 typedef enum {
-    B_REN, B_COPY, B_MOVE, B_MKDIR, B_DEL, B_MARK,
+    B_REN, B_EDIT, B_COPY, B_MOVE, B_MKDIR, B_DEL, B_MARK,
     B_ALL, B_SORT, B_EJECT, B_SCAN, B_MODE, B_EXIT, B_COUNT
 } BarBtn;
-#define BAR_ROW1 6      /* buttons on the first bar row; the rest are on the second */
+#define BAR_ROW1 7      /* buttons on the first bar row; the rest are on the second */
 
 typedef enum {
-    A_NONE, A_REN, A_COPY, A_MOVE, A_MKDIR, A_DEL, A_MARK, A_ALL, A_SORT,
+    A_NONE, A_REN, A_EDIT, A_COPY, A_MOVE, A_MKDIR, A_DEL, A_MARK, A_ALL, A_SORT,
     A_EJECT, A_SCAN, A_EXIT, A_SWITCH, A_UP, A_CLEAR, A_MODE
 } Act;
 
 static const char *const btn_label[B_COUNT] = {
-    "RENAME", "COPY", "MOVE", "MKDIR", "DELETE", "MARK",
+    "RENAME", "EDIT", "COPY", "MOVE", "MKDIR", "DELETE", "MARK",
     "ALL", "SORT", "EJECT", "RESCAN", "EXPERT", "EXIT"
 };
 static const Act btn_act[B_COUNT] = {
-    A_REN, A_COPY, A_MOVE, A_MKDIR, A_DEL, A_MARK, A_ALL, A_SORT, A_EJECT, A_SCAN, A_MODE, A_EXIT
+    A_REN, A_EDIT, A_COPY, A_MOVE, A_MKDIR, A_DEL, A_MARK, A_ALL, A_SORT, A_EJECT, A_SCAN, A_MODE, A_EXIT
 };
 
 static Button  btn[B_COUNT];
@@ -1119,9 +1120,17 @@ static void toggle_expert(void) {
     else       set_status(ST_WARN, "%s - NOT SAVED", expert ? "EXPERT MODE" : "SIMPLE MODE");
 }
 
+static void do_edit(void) {
+    Pane *p = AP();
+    FmEntry *e = p->mode == PM_DIR ? entry_at(p, p->lv.cursor) : NULL;
+    if (!e || !fm_edit_ok(e->type, e->name)) return;
+    if (!open_file(p, e, true)) set_status(ST_WARN, "CANNOT EDIT %.60s", e->name);
+}
+
 static void do_action(Act a) {
     switch (a) {
     case A_REN:    do_rename(); break;
+    case A_EDIT:   do_edit(); break;
     case A_COPY:   start_transfer(FM_OP_COPY); break;
     case A_MOVE:   start_transfer(FM_OP_MOVE); break;
     case A_DEL:    start_transfer(FM_OP_DELETE); break;
@@ -1219,7 +1228,7 @@ int main(int argc, char *argv[]) {
     }
     set_status(have_helper ? COLOR_WHITE : ST_WARN, have_helper ? "%d USB STICK%s" : "NO USB SUPPORT ON THIS SYSTEM (NO HELPER)", sticks, sticks == 1 ? "" : "S");
 
-    bool needs_redraw = true, prev_eject_off = true;
+    bool needs_redraw = true, prev_eject_off = true, prev_edit_off = true;
     int  hdr_press = -1;
     bool exit_press = false;
     uint32_t last_job_draw = 0;
@@ -1241,6 +1250,12 @@ int main(int argc, char *argv[]) {
         bool eject_off = !(P[act].mode == PM_DIR && P[act].root_usb);
         btn[B_EJECT].disabled = eject_off;
         if (eject_off != prev_eject_off) { prev_eject_off = eject_off; needs_redraw = true; }
+        {   /* EDIT: only on a plain text file under the cursor of the active pane (greyed, as EJECT is) */
+            const FmEntry *ce = P[act].mode == PM_DIR ? entry_at(&P[act], P[act].lv.cursor) : NULL;
+            bool edit_off = !(ce && fm_edit_ok(ce->type, ce->name));
+            btn[B_EDIT].disabled = edit_off;
+            if (edit_off != prev_edit_off) { prev_edit_off = edit_off; needs_redraw = true; }
+        }
         if (bar_focus >= 0 && btn[bar_focus].disabled) bar_focus = bar_next(bar_focus, 1);
 
         /* A plug or pull in /dev: not while a copy runs or a dialog is open. */
