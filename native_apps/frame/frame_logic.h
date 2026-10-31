@@ -37,4 +37,18 @@ int  frame_order_prev(FrameOrder *o);               /* step back; before the sta
 int  frame_order_peek_next(const FrameOrder *o);    /* what next() will return, or -1 when it is not known yet
                                                        (the end of a shuffled round) */
 
+/* Fill-the-screen choice (start menu FILL, saved as "fill" in frame.conf). */
+enum { FRAME_FILL_OFF = 0, FRAME_FILL_LANDSCAPE, FRAME_FILL_ALL, FRAME_FILL_N };
+
+/* Does the setting fill a pw x ph picture on an sw x sh screen?  LANDSCAPE: only a picture whose orientation
+ * matches the screen's (wider-than-tall on a wider-than-tall screen, a square on a square one); ALL: every
+ * picture; anything else (OFF, a bad value): none. */
+static inline bool frame_fill_wanted(int setting, int pw, int ph, int sw, int sh)
+{
+    if (setting == FRAME_FILL_ALL) return true;
+    if (setting != FRAME_FILL_LANDSCAPE) return false;
+    int p = (pw > ph) - (pw < ph), s = (sw > sh) - (sw < sh);
+    return p == s;
+}
+
 #endif

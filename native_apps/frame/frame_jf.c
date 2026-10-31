@@ -35,7 +35,7 @@ int fj_path_photos(char *out, size_t cap, const char *uid, const char *parent, i
 int fj_path_image(char *out, size_t cap, const char *id, int max_w, int max_h)
 {
     if (!out || cap == 0 || !jf_id_valid(id) || max_w < 1 || max_h < 1) return -1;
-    return fin(snprintf(out, cap, "/Items/%s/Images/Primary?maxWidth=%d&maxHeight=%d&quality=90&format=Jpg",
+    return fin(snprintf(out, cap, "/Items/%s/Images/Primary?fillWidth=%d&fillHeight=%d&quality=90&format=Jpg",
                         id, max_w, max_h), cap);
 }
 
@@ -102,9 +102,11 @@ static int parse(const char *json, size_t len, FjItem *out, int max, int *total,
         char id[48], ty[32], ct[24];
         FjItem *it = &out[stored];
         FjKind k;
+        it->probe = 0;
         if (libs) {
-            if (!get_str(json, t, n, e, "CollectionType", ct, sizeof ct)) continue;
-            if (strcasecmp(ct, "photos") && strcasecmp(ct, "homevideos")) continue;
+            int typed = get_str(json, t, n, e, "CollectionType", ct, sizeof ct) > 0;
+            if (typed && strcasecmp(ct, "photos") && strcasecmp(ct, "homevideos")) continue;   /* movies, music, tv...: not photos */
+            it->probe = !(typed && !strcasecmp(ct, "photos"));
             k = FJ_ALBUM;
         } else {
             get_str(json, t, n, e, "Type", ty, sizeof ty);
@@ -114,6 +116,7 @@ static int parse(const char *json, size_t len, FjItem *out, int max, int *total,
         memcpy(it->id, id, JF_ID_LEN + 1);
         get_str(json, t, n, e, "Name", it->name, sizeof it->name);
         it->kind = k;
+        it->loose = 0;
         stored++;
     }
     if (total) {
@@ -133,4 +136,20 @@ int fj_parse_items(const char *json, size_t len, FjItem *out, int max, int *tota
 int fj_parse_libraries(const char *json, size_t len, FjItem *out, int max)
 {
     return parse(json, len, out, max, NULL, 1);
+}
+
+int fj_path_loose(char *out, size_t cap, const char *uid, const char *parent, int start, int limit)
+{
+    return items_path(out, cap, uid, parent, start, limit, "&IncludeItemTypes=Photo");
+}
+
+int fj_add_loose(FjItem *items, int n, int cap, const FjItem *lib, int loose_count)
+{
+    if (!items || !lib || n < 0 || n >= cap || loose_count <= 0) return n;
+    memmove(&items[1], &items[0], sizeof *items * (size_t)n);
+    items[0] = *lib;
+    items[0].kind = FJ_ALBUM;
+    items[0].probe = 0;
+    items[0].loose = 1;
+    return n + 1;
 }

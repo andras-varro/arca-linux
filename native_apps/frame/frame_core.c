@@ -13,6 +13,7 @@
  */
 #define _GNU_SOURCE
 #include "frame_core.h"
+#include "frame_logic.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -173,6 +174,35 @@ static void fit(int ow, int oh, int mw, int mh, int *dw, int *dh)
     *dw = (int)w; *dh = (int)h;
 }
 
+/* Cover size: scale so the copy covers sw x sh (the relatively shorter edge reaches the screen), never
+ * enlarged, neither side above FRAME_MAX_W/H (a very wide picture then no longer covers; the display
+ * step's fill upscales that case). */
+void frame_cover_size(int ow, int oh, int sw, int sh, int *dw, int *dh)
+{
+    long w = ow, h = oh;
+    if (ow > sw || oh > sh) {                           /* some downscale may be needed */
+        if ((long)sw * oh >= (long)sh * ow) { w = sw; h = ((long)oh * sw + ow / 2) / ow; }
+        else                                { h = sh; w = ((long)ow * sh + oh / 2) / oh; }
+        if (w > ow || h > oh) { w = ow; h = oh; }       /* the source is smaller on this axis: keep it */
+    }
+    if (w > FRAME_MAX_W || h > FRAME_MAX_H) fit((int)w, (int)h, FRAME_MAX_W, FRAME_MAX_H, dw, dh);
+    else { *dw = (int)w; *dh = (int)h; }
+    if (*dw < 1) *dw = 1;
+    if (*dh < 1) *dh = 1;
+}
+
+/* Fill geometry: the picture pw x ph shown over sw x sh is (fw x fh) after scaling, cropped at (cx, cy).
+ * A picture that already covers is not scaled; a smaller one is enlarged just enough to cover. */
+void frame_fill_geom(int pw, int ph, int sw, int sh, int *fw, int *fh, int *cx, int *cy)
+{
+    long w = pw, h = ph;
+    if (pw < sw || ph < sh) {
+        if ((long)sw * ph >= (long)sh * pw) { w = sw; h = ((long)ph * sw + pw - 1) / pw; }
+        else                                { h = sh; w = ((long)pw * sh + ph - 1) / ph; }
+    }
+    *fw = (int)w; *fh = (int)h;
+    *cx = (int)((w - sw) / 2); *cy = (int)((h - sh) / 2);
+}
 /* ── box-filter downscale, streamed ────────────────────────────────────── */
 
 /*
@@ -283,8 +313,6 @@ static int write_atomic(const char *dst, const uint8_t *data, size_t len)
 int frame_import(const char *src, const char *dst, int max_w, int max_h, int quality, frame_info_t *info)
 {
     if (!src || !dst || max_w < 1 || max_h < 1) return FRAME_E_ARG;
-    if (max_w > FRAME_MAX_W) max_w = FRAME_MAX_W;
-    if (max_h > FRAME_MAX_H) max_h = FRAME_MAX_H;
     if (quality < 1 || quality > 100) quality = FRAME_QUALITY;
 
     int rc = FRAME_OK;
@@ -305,7 +333,7 @@ int frame_import(const char *src, const char *dst, int max_w, int max_h, int qua
     if (!pix) return FRAME_E_FORMAT;                   /* truncated / corrupt (or, rarely, out of memory) */
 
     int ow = (o >= 5) ? h : w, oh = (o >= 5) ? w : h, dw, dh;
-    fit(ow, oh, max_w, max_h, &dw, &dh);
+    frame_cover_size(ow, oh, max_w, max_h, &dw, &dh);
 
     uint8_t *small = (uint8_t *)malloc((size_t)dw * dh * 3);
     if (!small) { stbi_image_free(pix); return FRAME_E_NOMEM; }
@@ -327,11 +355,17 @@ int frame_import(const char *src, const char *dst, int max_w, int max_h, int qua
     return rc;
 }
 
+/* True when a w x h picture is already its own cover size (nothing to downscale). */
+static int cover_same(int w, int h, int sw, int sh)
+{
+    int dw, dh;
+    frame_cover_size(w, h, sw, sh, &dw, &dh);
+    return dw == w && dh == h;
+}
+
 int frame_store(const char *src, const char *dst, int max_w, int max_h, int quality, frame_info_t *info)
 {
     if (!src || !dst || max_w < 1 || max_h < 1) return FRAME_E_ARG;
-    if (max_w > FRAME_MAX_W) max_w = FRAME_MAX_W;
-    if (max_h > FRAME_MAX_H) max_h = FRAME_MAX_H;
 
     int rc = FRAME_OK;
     size_t flen = 0;
@@ -341,7 +375,7 @@ int frame_store(const char *src, const char *dst, int max_w, int max_h, int qual
     int w = 0, h = 0, n = 0;
     int keep = flen >= 4 && file[0] == 0xFF && file[1] == 0xD8 && jpeg_complete(file, flen) &&
                stbi_info_from_memory(file, (int)flen, &w, &h, &n) && w >= 1 && h >= 1 &&
-               w <= max_w && h <= max_h && frame_exif_orientation(file, flen) == 1;
+               cover_same(w, h, max_w, max_h) && frame_exif_orientation(file, flen) == 1;
     if (!keep) { free(file); return frame_import(src, dst, max_w, max_h, quality, info); }
 
     rc = write_atomic(dst, file, flen);
@@ -383,4 +417,76 @@ int frame_load(const char *path, uint32_t *dst, int dst_w, int dst_h, int stride
     if (out) { memset(out, 0, sizeof *out); out->out_w = w; out->out_h = h; out->src_w = w; out->src_h = h; out->orient = 1; }
     stbi_image_free(pix);
     return FRAME_OK;
+}
+
+/* ── display step: fit or fill ─────────────────────────────────────────── */
+
+static void paint_xrgb(uint32_t *d, const uint8_t *s, int n)
+{
+    for (int x = 0; x < n; x++, s += 3) d[x] = ((uint32_t)s[0] << 16) | ((uint32_t)s[1] << 8) | s[2];
+}
+
+/* Fill: crop (cx, cy) of the picture scaled to fw x fh; a picture that covers is copied unscaled, a smaller
+ * (older, fit-size) one is enlarged by nearest neighbour through integer maps (one divide per column / row). */
+static int paint_fill(const uint8_t *pix, int w, int h, uint32_t *dst, int dw, int dh, int stride)
+{
+    int fw, fh, cx, cy;
+    frame_fill_geom(w, h, dw, dh, &fw, &fh, &cx, &cy);
+    if (fw == w && fh == h) {
+        for (int y = 0; y < dh; y++) paint_xrgb(dst + (size_t)y * stride, pix + ((size_t)(cy + y) * w + cx) * 3, dw);
+        return FRAME_OK;
+    }
+    int *xm = (int *)malloc((size_t)dw * sizeof(int));
+    if (!xm) return FRAME_E_NOMEM;
+    for (int x = 0; x < dw; x++) {
+        long sx = ((long)(cx + x) * w) / fw;
+        xm[x] = (int)(sx >= w ? w - 1 : sx);
+    }
+    for (int y = 0; y < dh; y++) {
+        long sy = ((long)(cy + y) * h) / fh;
+        const uint8_t *row = pix + (size_t)(sy >= h ? h - 1 : sy) * w * 3;
+        uint32_t *d = dst + (size_t)y * stride;
+        for (int x = 0; x < dw; x++) {
+            const uint8_t *s = row + 3 * (size_t)xm[x];
+            d[x] = ((uint32_t)s[0] << 16) | ((uint32_t)s[1] << 8) | s[2];
+        }
+    }
+    free(xm);
+    return FRAME_OK;
+}
+
+int frame_load_mode(const char *path, uint32_t *dst, int dst_w, int dst_h, int stride, int fill_setting, frame_info_t *out)
+{
+    if (!path || !dst || dst_w < 1 || dst_h < 1 || stride < dst_w) return FRAME_E_ARG;
+    int rc = FRAME_OK;
+    size_t flen = 0;
+    uint8_t *file = read_file(path, &flen, &rc);
+    if (!file) return rc;
+    int w = 0, h = 0, n = 0;
+    uint8_t *pix = stbi_load_from_memory(file, (int)flen, &w, &h, &n, 3);
+    free(file);
+    if (!pix) return FRAME_E_FORMAT;
+
+    int fill = frame_fill_wanted(fill_setting, w, h, dst_w, dst_h);
+    if (fill) {
+        rc = paint_fill(pix, w, h, dst, dst_w, dst_h, stride);
+    } else {
+        for (int y = 0; y < dst_h; y++) memset(dst + (size_t)y * stride, 0, (size_t)dst_w * 4);
+        int tw = w, th = h;
+        uint8_t *small = NULL;
+        const uint8_t *src = pix;
+        if (w > dst_w || h > dst_h) {                   /* the stored copy covers: area-average down to fit */
+            fit(w, h, dst_w, dst_h, &tw, &th);
+            small = (uint8_t *)malloc((size_t)tw * th * 3);
+            if (!small) { stbi_image_free(pix); return FRAME_E_NOMEM; }
+            if (!box_scale(pix, w, h, 1, tw, th, small)) { free(small); stbi_image_free(pix); return FRAME_E_NOMEM; }
+            src = small;
+        }
+        int ox = (dst_w - tw) / 2, oy = (dst_h - th) / 2;
+        for (int y = 0; y < th; y++) paint_xrgb(dst + (size_t)(oy + y) * stride + ox, src + (size_t)y * tw * 3, tw);
+        free(small);
+    }
+    if (out) { memset(out, 0, sizeof *out); out->out_w = w; out->out_h = h; out->src_w = w; out->src_h = h; out->orient = 1; }
+    stbi_image_free(pix);
+    return rc;
 }

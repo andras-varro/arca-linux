@@ -16,6 +16,7 @@
 #include "stb_image_write.h"      /* declarations only: frame_core.c holds the implementation */
 
 #include "frame_core.h"
+#include "frame_logic.h"
 
 static int fails = 0, checks = 0;
 #define CHECK(c, ...) do { checks++; if (!(c)) { fails++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
@@ -130,12 +131,12 @@ static void test_orientations(void)
 static void test_fit(void)
 {
     frame_info_t in;
-    uint8_t *flat = malloc(400 * 100 * 3);
-    memset(flat, 200, 400 * 100 * 3);
+    uint8_t *flat = malloc(400 * 800 * 3);
+    memset(flat, 200, 400 * 800 * 3);
     buf_t j; jpeg_of(flat, 400, 100, &j); write_file("/tmp/fc_src.jpg", j.b, j.n); free(j.b);
-    CHECK(frame_import("/tmp/fc_src.jpg", "/tmp/fc_out.jpg", 200, 100, 0, &in) == FRAME_OK && in.out_w == 200 && in.out_h == 50, "wide fit %dx%d", in.out_w, in.out_h);
-    jpeg_of(flat, 100, 400, &j); write_file("/tmp/fc_src.jpg", j.b, j.n); free(j.b);
-    CHECK(frame_import("/tmp/fc_src.jpg", "/tmp/fc_out.jpg", 200, 100, 0, &in) == FRAME_OK && in.out_w == 25 && in.out_h == 100, "tall fit %dx%d", in.out_w, in.out_h);
+    CHECK(frame_import("/tmp/fc_src.jpg", "/tmp/fc_out.jpg", 200, 100, 0, &in) == FRAME_OK && in.out_w == 400 && in.out_h == 100, "wide: already its own cover size %dx%d", in.out_w, in.out_h);
+    jpeg_of(flat, 400, 800, &j); write_file("/tmp/fc_src.jpg", j.b, j.n); free(j.b);
+    CHECK(frame_import("/tmp/fc_src.jpg", "/tmp/fc_out.jpg", 200, 100, 0, &in) == FRAME_OK && in.out_w == 200 && in.out_h == 400, "tall cover %dx%d", in.out_w, in.out_h);
     jpeg_of(flat, 40, 10, &j); write_file("/tmp/fc_src.jpg", j.b, j.n); free(j.b);
     CHECK(frame_import("/tmp/fc_src.jpg", "/tmp/fc_out.jpg", 200, 100, 0, &in) == FRAME_OK && in.out_w == 40 && in.out_h == 10, "small stays %dx%d", in.out_w, in.out_h);
     free(flat);
@@ -263,10 +264,10 @@ static void test_store(void)
 
     /* oversize: re-encoded, smaller dimensions */
     unlink("/tmp/fc_st.jpg");
-    rc = frame_store("/tmp/fc_src.jpg", "/tmp/fc_st.jpg", 32, 32, 0, &in);
+    rc = frame_store("/tmp/fc_src.jpg", "/tmp/fc_st.jpg", 16, 16, 0, &in);
     got = slurp("/tmp/fc_st.jpg", &n);
     CHECK(rc == FRAME_OK && got && !(n == j.n && memcmp(got, j.b, n) == 0), "oversize jpeg was copied unchanged");
-    CHECK(in.out_w == 32 && in.out_h == 16, "oversize fit %dx%d", in.out_w, in.out_h);
+    CHECK(in.out_w == 32 && in.out_h == 16, "oversize cover %dx%d", in.out_w, in.out_h);
     free(got);
 
     /* orientation 6: goes through import, dimensions swap */
@@ -297,6 +298,36 @@ static void test_store(void)
 }
 
 
+static void test_cover_fill(void)
+{
+    int w, h, fw, fh, cx, cy;
+    frame_cover_size(4000, 3000, 800, 480, &w, &h); CHECK(w == 800 && h == 600, "cover 4:3 %dx%d", w, h);
+    frame_cover_size(1920, 1080, 800, 480, &w, &h); CHECK(w == 853 && h == 480, "cover 16:9 %dx%d", w, h);
+    frame_cover_size(3000, 4000, 800, 480, &w, &h); CHECK(w == 768 && h == 1024, "cover portrait %dx%d", w, h);
+    frame_cover_size(400, 300, 800, 480, &w, &h);   CHECK(w == 400 && h == 300, "cover never enlarges %dx%d", w, h);
+    frame_cover_size(1000, 200, 800, 480, &w, &h);  CHECK(w == 1000 && h == 200, "cover keeps a small side %dx%d", w, h);
+    frame_cover_size(6000, 1000, 800, 480, &w, &h); CHECK(w == 1024 && h == 171, "cover capped at 1024 %dx%d", w, h);
+    frame_fill_geom(800, 600, 800, 480, &fw, &fh, &cx, &cy); CHECK(fw == 800 && fh == 600 && cx == 0 && cy == 60, "crop of a cover copy %d %d %d %d", fw, fh, cx, cy);
+    frame_fill_geom(640, 480, 800, 480, &fw, &fh, &cx, &cy); CHECK(fw == 800 && fh == 600 && cx == 0 && cy == 60, "old fit copy enlarged %d %d %d %d", fw, fh, cx, cy);
+    frame_fill_geom(800, 450, 800, 480, &fw, &fh, &cx, &cy); CHECK(fw == 854 && fh == 480 && cx == 27 && cy == 0, "short copy enlarged %d %d %d %d", fw, fh, cx, cy);
+
+    /* loaded: 64x48 quadrant picture on a 64x32 screen */
+    uint8_t *rgb = quad_rgb(64, 48);
+    buf_t j; jpeg_of(rgb, 64, 48, &j); free(rgb);
+    write_file("/tmp/fc_src.jpg", j.b, j.n); free(j.b);
+    CHECK(frame_load_mode("/tmp/fc_src.jpg", buf, 64, 32, 64, FRAME_FILL_OFF, NULL) == FRAME_OK, "fit load");
+    CHECK(buf[16 * 64 + 1] == 0 && buf[16 * 64 + 62] == 0 && buf[16 * 64 + 20] != 0, "fit: side bars and a picture expected");
+    CHECK(near_col(buf[2 * 64 + 12], COL[0], 60) && near_col(buf[28 * 64 + 50], COL[3], 60), "fit: quadrants not fitted");
+    CHECK(frame_load_mode("/tmp/fc_src.jpg", buf, 64, 32, 64, FRAME_FILL_ALL, NULL) == FRAME_OK, "fill load");
+    CHECK(buf[16 * 64 + 1] != 0 && buf[16 * 64 + 62] != 0 && buf[0] != 0 && buf[31 * 64 + 63] != 0, "fill: black pixels left");
+    CHECK(near_col(buf[2 * 64 + 4], COL[0], 60) && near_col(buf[29 * 64 + 60], COL[3], 60), "fill: cropped quadrants wrong");
+    CHECK(frame_load_mode("/tmp/fc_src.jpg", buf, 64, 32, 64, FRAME_FILL_LANDSCAPE, NULL) == FRAME_OK && buf[16 * 64 + 1] != 0, "landscape fills a landscape copy");
+    rgb = quad_rgb(32, 24); jpeg_of(rgb, 32, 24, &j); free(rgb);       /* a smaller (old fit-size) copy */
+    write_file("/tmp/fc_src.jpg", j.b, j.n); free(j.b);
+    CHECK(frame_load_mode("/tmp/fc_src.jpg", buf, 64, 32, 64, FRAME_FILL_ALL, NULL) == FRAME_OK && buf[16 * 64 + 1] != 0 && buf[31 * 64 + 63] != 0 && buf[0] != 0, "small copy not enlarged to fill");
+    CHECK(frame_load_mode("/tmp/fc_src.jpg", buf, 64, 32, 64, FRAME_FILL_OFF, NULL) == FRAME_OK && buf[16 * 64 + 1] == 0 && buf[16 * 64 + 32] != 0, "small copy fit: unscaled and centred");
+}
+
 int main(void)
 {
     test_orientations();
@@ -306,6 +337,7 @@ int main(void)
     test_failures();
     test_load_bars();
     test_store();
+    test_cover_fill();
     unlink("/tmp/fc_src.jpg"); unlink("/tmp/fc_out.jpg"); unlink("/tmp/fc_bad.jpg");
     printf("%s: %d checks, %d failed\n", fails ? "FAIL" : "PASS", checks, fails);
     return fails ? 1 : 0;

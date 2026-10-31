@@ -78,6 +78,7 @@ static const char *const INTERVAL_NAMES[] = { "5 SEC", "10 SEC", "20 SEC", "30 S
 static const int         INTERVAL_S[]     = { 5, 10, 20, 30, 60 };
 #define N_INTERVALS 5
 static const char *const ORDER_NAMES[] = { "SEQUENTIAL", "SHUFFLE" };
+static const char *const FILL_NAMES[]  = { "OFF", "LANDSCAPE", "ALL" };
 
 /* ── input and screens ──────────────────────────────────────────────────── */
 
@@ -451,7 +452,8 @@ static void import_from_usb(void)
 
 /* List a parent's children (photos == false: albums only) or its photos, paged.  Returns the count kept
  * (-1 = failed or cancelled, message shown); *others = rows of the other kind seen. */
-static int jf_list(const char *parent, bool photos, FjItem *out, int cap, int *others)
+/* kind: 0 sub-albums (others counts the photos), 1 every photo below parent, 2 only the photos directly in parent. */
+static int jf_list(const char *parent, int kind, FjItem *out, int cap, int *others)
 {
     char *buf = malloc(JF_LIST_MAX);
     FjItem *page = malloc(sizeof(FjItem) * JF_PAGE);
@@ -461,14 +463,15 @@ static int jf_list(const char *parent, bool photos, FjItem *out, int cap, int *o
     for (int start = 0; start == 0 || (start < total && kept < cap); start += JF_PAGE) {
         char path[400];
         size_t len;
-        int pl = photos ? fj_path_photos(path, sizeof path, g_jl.user_id, parent, start, JF_PAGE)
+        int pl = kind == 2 ? fj_path_loose(path, sizeof path, g_jl.user_id, parent, start, JF_PAGE)
+               : kind == 1 ? fj_path_photos(path, sizeof path, g_jl.user_id, parent, start, JF_PAGE)
                         : fj_path_children(path, sizeof path, g_jl.user_id, parent, start, JF_PAGE);
         if (pl < 0) { message_screen("JELLYFIN", "BAD ITEM ID"); kept = -1; break; }
         if (!jf_get(path, buf, JF_LIST_MAX, &len)) { kept = -1; break; }
         int n = fj_parse_items(buf, len, page, JF_PAGE, &total);
         if (n < 0) { message_screen("UNEXPECTED ANSWER FROM THE SERVER", "TRY AGAIN LATER."); kept = -1; break; }
         for (int i = 0; i < n && kept < cap; i++) {
-            if (page[i].kind == (photos ? FJ_PHOTO : FJ_ALBUM)) out[kept++] = page[i];
+            if (page[i].kind == (kind ? FJ_PHOTO : FJ_ALBUM)) out[kept++] = page[i];
             else (*others)++;
         }
         if (n == 0) break;
@@ -528,7 +531,7 @@ static void jf_download(const FjItem *folder)
     FjItem *ph = malloc(sizeof(FjItem) * JF_MAX_PHOTOS);
     g_items = malloc(sizeof(Item) * JF_MAX_PHOTOS);
     if (!ph || !g_items) { message_screen("DOWNLOAD", "OUT OF MEMORY"); goto out; }
-    int others, np = jf_list(folder->id, true, ph, JF_MAX_PHOTOS, &others);
+    int others, np = jf_list(folder->id, folder->loose ? 2 : 1, ph, JF_MAX_PHOTOS, &others);
     if (np < 0) goto out;
     if (np == 0) { message_screen("THIS ALBUM HAS NO PHOTOS", ""); goto out; }
     make_lib_dir();
@@ -567,8 +570,11 @@ static void jf_open(const FjItem *folder, int depth)
 {
     FjItem *al = malloc(sizeof(FjItem) * JF_MAX_ALBUMS);
     if (!al) { message_screen("JELLYFIN", "OUT OF MEMORY"); return; }
-    int others, n = jf_list(folder->id, false, al, JF_MAX_ALBUMS, &others);
-    if (n > 0) jf_browse(al, n, folder->name, depth);
+    int others, n = jf_list(folder->id, 0, al, JF_MAX_ALBUMS, &others);
+    if (n > 0) {
+        n = fj_add_loose(al, n, JF_MAX_ALBUMS, folder, others);   /* photos lying loose in this folder become an album of their own */
+        jf_browse(al, n, folder->name, depth);
+    }
     else if (n == 0) {
         StartMenu m;
         start_menu_init(&m, folder->name, others > 0 ? "THIS ALBUM HOLDS PHOTOS." : "THIS ALBUM IS EMPTY.", get_time_ms());
@@ -587,7 +593,7 @@ static void jf_browse(const FjItem *it, int n, const char *title, int depth)
         StartMenu m;
         start_menu_init(&m, it[row].name, NULL, get_time_ms());
         start_menu_add_action(&m, "DOWNLOAD ALL PHOTOS");
-        int e_open = depth < JF_MAX_DEPTH ? start_menu_add_action(&m, "OPEN") : -1;
+        int e_open = depth < JF_MAX_DEPTH && !it[row].loose ? start_menu_add_action(&m, "OPEN") : -1;
         start_menu_add_action(&m, "BACK");
         int r = menu_run(&m, NULL);
         if (r == 0) jf_download(&it[row]);
@@ -612,6 +618,21 @@ static void from_jellyfin(void)
     if (fj_path_views(path, sizeof path, g_jl.user_id) > 0 && jf_get(path, buf, JF_LIST_MAX, &len)) {
         n = fj_parse_libraries(buf, len, libs, 16);
         if (n < 0) message_screen("UNEXPECTED ANSWER FROM THE SERVER", "TRY AGAIN LATER.");
+    }
+    if (n > 0) {                       /* a library not typed "photos" counts only when it holds a Photo */
+        int kept = 0;
+        for (int i = 0; i < n; i++) {
+            if (libs[i].probe) {
+                FjItem one[1];
+                int total = 0, pn = -1;
+                if (fj_path_photos(path, sizeof path, g_jl.user_id, libs[i].id, 0, 1) > 0 && jf_get(path, buf, JF_LIST_MAX, &len))
+                    pn = fj_parse_items(buf, len, one, 1, &total);
+                printf("frame: jellyfin: library \"%s\" probe: %d photo(s)\n", libs[i].name, pn < 0 ? -1 : total);
+                if (pn < 1) continue;
+            }
+            libs[kept++] = libs[i];
+        }
+        n = kept;
     }
     free(buf);
     if (n == 0) message_screen("NO PHOTO LIBRARY ON THE SERVER", "");
@@ -668,6 +689,8 @@ static int lib_count(void)
     return n;
 }
 
+static int g_fill;                        /* FRAME_FILL_*: the start menu's FILL choice, read by slot_load */
+
 typedef struct { uint32_t *px; int pic; } Slot;
 
 static bool slot_load(const Lib *l, Slot *s, int pic)
@@ -677,7 +700,11 @@ static bool slot_load(const Lib *l, Slot *s, int pic)
     snprintf(path, sizeof path, "%s/%s", LIB_DIR, l->name[pic]);
     Framebuffer *fb = &g_dev.fb;
     memset(s->px, 0, (size_t)fb->width * fb->height * 4);
-    if (frame_load(path, s->px, fb->width, fb->height, fb->width, NULL) != 0) return false;
+    uint32_t t0 = get_time_ms();
+    frame_info_t fi;
+    if (frame_load_mode(path, s->px, fb->width, fb->height, fb->width, g_fill, &fi) != 0) return false;
+    printf("frame: slide %s %dx%d %s %lu ms\n", l->name[pic], fi.out_w, fi.out_h,
+           frame_fill_wanted(g_fill, fi.out_w, fi.out_h, fb->width, fb->height) ? "fill" : "fit", (unsigned long)(get_time_ms() - t0));
     s->pic = pic;
     return true;
 }
@@ -687,7 +714,7 @@ static void blit(const Slot *s, bool hint)
     Framebuffer *fb = &g_dev.fb;
     memcpy(fb->back_buffer, s->px, (size_t)fb->width * fb->height * 4);
     if (hint) {
-        const char *t = "TAP CENTRE OR ESC TO EXIT";
+        const char *t = "TAP CENTRE FOR THE MENU, ESC TO EXIT";
         int w = text_measure_width(t, 2);
         int x = SCREEN_VISIBLE_LEFT + (SCREEN_VISIBLE_WIDTH - w) / 2;
         int y = SCREEN_VISIBLE_BOTTOM - 34;
@@ -695,6 +722,29 @@ static void blit(const Slot *s, bool hint)
         fb_draw_text(fb, x, y, t, COLOR_WHITE, 2);
     }
     present();
+}
+
+enum { SL_RESUME = 0, SL_DELETE, SL_LEAVE };
+
+/* The slideshow's menu (centre tap, Tab / RB / Home): resume, delete the picture on screen (after a confirm), or
+ * leave.  Esc resumes; in the confirm it goes back to the menu. */
+static int slide_menu(void)
+{
+    for (;;) {
+        StartMenu m;
+        start_menu_init(&m, "PICTURE", NULL, get_time_ms());
+        start_menu_add_action(&m, "RESUME");
+        start_menu_add_action(&m, "DELETE THIS PICTURE");
+        start_menu_add_action(&m, "EXIT SLIDESHOW");
+        int r = menu_run(&m, NULL);
+        if (r == 2) return SL_LEAVE;
+        if (r != 1) return SL_RESUME;
+        StartMenu c;
+        start_menu_init(&c, "DELETE THIS PICTURE?", "IT CANNOT BE UNDONE.", get_time_ms());
+        start_menu_add_action(&c, "CANCEL");
+        start_menu_add_action(&c, "DELETE");
+        if (menu_run(&c, NULL) == 1) return SL_DELETE;
+    }
 }
 
 static void slideshow(int interval_s, bool shuffle)
@@ -725,7 +775,7 @@ static void slideshow(int interval_s, bool shuffle)
     uint32_t shown_at = 0, start = get_time_ms();
     uint32_t interval_ms = (uint32_t)interval_s * 1000u;
     int lastx = 0, fails = 0;
-    bool leave = false;
+    bool leave = false, open_menu = false;
 
     while (g_running && !leave) {
         uint32_t now = get_time_ms();
@@ -736,15 +786,39 @@ static void slideshow(int interval_s, bool shuffle)
         if (bt[BTN_ID_RIGHT].pressed || bt[BTN_ID_JUMP].pressed || bt[BTN_ID_ACTION].pressed ||
             bt[BTN_ID_DOWN].pressed || bt[BTN_ID_PGDN].pressed) step = 1;
         if (bt[BTN_ID_LEFT].pressed || bt[BTN_ID_UP].pressed || bt[BTN_ID_PGUP].pressed) step = -1;
+        if (bt[BTN_ID_NEXT].pressed || bt[BTN_ID_HOME].pressed) open_menu = true;
         if (g_ts.pressed || g_ts.held) { lastx = g_ts.x; if (g_ts.pressed) touch_down = true; }
         if (g_ts.released && touch_down) {
             touch_down = false;
             int w40 = SCREEN_SAFE_WIDTH * 2 / 5;
             if (lastx < SCREEN_SAFE_LEFT + w40) step = -1;
             else if (lastx >= SCREEN_SAFE_RIGHT - w40) step = 1;
-            else leave = true;
+            else open_menu = true;
         }
         if (leave) break;
+        if (open_menu) {
+            open_menu = false;
+            int act = slide_menu();
+            memset(&g_in, 0, sizeof g_in);
+            pointer_drain(&g_dev.ptr);
+            touch_down = false;
+            if (act == SL_LEAVE) break;
+            if (act == SL_DELETE) {
+                int p = frame_order_cur(&ord);
+                char path[300];
+                snprintf(path, sizeof path, "%s/%s", LIB_DIR, lib.name[p]);
+                printf("frame: delete %s: %s\n", lib.name[p], unlink(path) == 0 ? "ok" : "failed");
+                lib_free(&lib);
+                lib_load(&lib);
+                if (lib.n == 0) break;
+                frame_order_init(&ord, order, lib.n, shuffle, get_time_ms());
+                if (!shuffle) ord.pos = p < lib.n ? p : 0;       /* the next picture moved into this place */
+                slot[0].pic = slot[1].pic = -1;
+                fails = 0;
+            }
+            need_show = true;
+            continue;
+        }
         if (!need_show && step == 0 && now - shown_at >= interval_ms) step = 1;
         if (step != 0) {
             if (step > 0) frame_order_next(&ord); else frame_order_prev(&ord);
@@ -793,14 +867,16 @@ static void slideshow(int interval_s, bool shuffle)
 
 /* ── menus ──────────────────────────────────────────────────────────────── */
 
-static int g_iv_idx, g_ord_idx, g_saved_iv = -1, g_saved_ord = -1;
+static int g_iv_idx, g_ord_idx, g_fill_idx, g_saved_iv = -1, g_saved_ord = -1, g_saved_fill = -1;
 
 static void persist_hook(StartMenu *m)
 {
-    int iv = start_menu_value(m, g_iv_idx), od = start_menu_value(m, g_ord_idx);
-    if (iv != g_saved_iv || od != g_saved_ord) {
+    int iv = start_menu_value(m, g_iv_idx), od = start_menu_value(m, g_ord_idx), fl = start_menu_value(m, g_fill_idx);
+    if (iv != g_saved_iv || od != g_saved_ord || fl != g_saved_fill) {
         g_saved_iv = iv;
         g_saved_ord = od;
+        g_saved_fill = fl;
+        config_set_int(&g_cfg, "fill", fl);
         config_set_int(&g_cfg, "interval_s", INTERVAL_S[iv]);
         config_set_int(&g_cfg, "shuffle", od);
         save_conf();
@@ -823,6 +899,31 @@ static void empty_library(void)
     int r = menu_run(&m, NULL);
     if (r == 0) import_from_usb();
     else if (r == 1) from_jellyfin();
+}
+
+/* DELETE ALL PICTURES: a confirm that shows the count, then every library picture is removed. */
+static void delete_all(void)
+{
+    Lib l;
+    lib_load(&l);
+    int n = l.n;
+    if (n == 0) { lib_free(&l); message_screen("NO PICTURES TO DELETE", ""); return; }
+    char text[64];
+    snprintf(text, sizeof text, "DELETE ALL %d PICTURES?", n);
+    StartMenu c;
+    start_menu_init(&c, text, "THEY CANNOT BE GOT BACK.", get_time_ms());
+    start_menu_add_action(&c, "CANCEL");
+    start_menu_add_action(&c, "DELETE ALL");
+    int gone = 0;
+    if (menu_run(&c, NULL) == 1) {
+        for (int i = 0; i < n; i++) {
+            char path[300];
+            snprintf(path, sizeof path, "%s/%s", LIB_DIR, l.name[i]);
+            if (unlink(path) == 0) gone++;
+        }
+        printf("frame: deleted %d of %d pictures\n", gone, n);
+    }
+    lib_free(&l);
 }
 
 int main(int argc, char *argv[])
@@ -859,6 +960,9 @@ int main(int argc, char *argv[])
     int od = config_get_int(&g_cfg, "shuffle", 0) ? 1 : 0;
     g_saved_iv = iv;
     g_saved_ord = od;
+    int fl = config_get_int(&g_cfg, "fill", 0);
+    if (fl < 0 || fl >= FRAME_FILL_N) fl = 0;
+    g_saved_fill = fl;
 
     if (import_dir) {
         const char *d[1] = { import_dir };
@@ -870,8 +974,10 @@ int main(int argc, char *argv[])
     int e_start = start_menu_add_action(&m, "START SLIDESHOW");
     g_iv_idx    = start_menu_add_choice(&m, "INTERVAL", INTERVAL_NAMES, N_INTERVALS, iv);
     g_ord_idx   = start_menu_add_choice(&m, "ORDER", ORDER_NAMES, 2, od);
+    g_fill_idx  = start_menu_add_choice(&m, "FILL", FILL_NAMES, FRAME_FILL_N, fl);
     int e_imp   = start_menu_add_action(&m, "IMPORT FROM USB");
     int e_jf    = start_menu_add_action(&m, "FROM JELLYFIN");
+    int e_del   = start_menu_add_action(&m, "DELETE ALL PICTURES");
     int e_exit  = start_menu_add_action(&m, "EXIT");
     start_menu_select(&m, e_start, get_time_ms());
 
@@ -880,9 +986,11 @@ int main(int argc, char *argv[])
         if (r == SM_EXIT || r == e_exit) break;
         if (r == e_start) {
             if (lib_count() == 0) empty_library();
-            else slideshow(INTERVAL_S[start_menu_value(&m, g_iv_idx)], start_menu_value(&m, g_ord_idx) == 1);
+            else { g_fill = start_menu_value(&m, g_fill_idx); slideshow(INTERVAL_S[start_menu_value(&m, g_iv_idx)], start_menu_value(&m, g_ord_idx) == 1); if (lib_count() == 0) empty_library(); }
         } else if (r == e_imp) {
             import_from_usb();
+        } else if (r == e_del) {
+            delete_all();
         } else if (r == e_jf) {
             from_jellyfin();
         }

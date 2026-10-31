@@ -37,7 +37,7 @@ static void test_paths(void)
     CHECK(fj_path_children(b, 40, UID, PID, 0, 10) == -1, "children cap too small");
 
     n = fj_path_image(b, sizeof b, PID, 800, 480);
-    CHECK(n == (int)strlen(b) && !strcmp(b, "/Items/" PID "/Images/Primary?maxWidth=800&maxHeight=480&quality=90&format=Jpg"), "image: %s", b);
+    CHECK(n == (int)strlen(b) && !strcmp(b, "/Items/" PID "/Images/Primary?fillWidth=800&fillHeight=480&quality=90&format=Jpg"), "image: %s", b);
     CHECK(fj_path_image(b, sizeof b, "0123456789abcdef0123456789abcde", 800, 480) == -1, "image 31-char id");
     CHECK(fj_path_image(b, 20, PID, 800, 480) == -1, "image cap");
     CHECK(fj_path_image(b, sizeof b, PID, 0, 480) == -1, "image zero width");
@@ -114,12 +114,32 @@ static void test_libraries(void)
                       "{\"Id\":\"" PID "\",\"Name\":\"NoType\"},"
                       "{\"Id\":\"bad\",\"Name\":\"BadId\",\"CollectionType\":\"photos\"}", "");
     int n = fj_parse_libraries(j, strlen(j), it, 8);
-    CHECK(n == 3, "libraries kept %d", n);
-    CHECK(n == 3 && !strcmp(it[0].name, "Pics") && it[0].kind == FJ_ALBUM && !strcmp(it[1].name, "Clips") && !strcmp(it[2].name, "Shows"), "library names");
+    CHECK(n == 4, "libraries kept %d", n);
+    CHECK(n == 4 && !strcmp(it[0].name, "Pics") && it[0].kind == FJ_ALBUM && !strcmp(it[1].name, "Clips") && !strcmp(it[2].name, "Shows") && !strcmp(it[3].name, "NoType"), "library names");
+    CHECK(n == 4 && !it[0].probe && it[1].probe && !it[2].probe && it[3].probe, "probe: only photos-typed is trusted");
     CHECK(fj_parse_libraries(j, strlen(j), it, 2) == 2, "libraries capped by max");
     CHECK(fj_parse_libraries(j, strlen(j) - 5, it, 8) == -1, "libraries truncated");
     CHECK(fj_parse_libraries("garbage", 7, it, 8) == -1, "libraries non-JSON");
     CHECK(fj_parse_libraries("{\"Items\":[]}", 12, it, 8) == 0, "libraries empty");
+}
+
+static void test_loose(void)
+{
+    FjItem al[4], lib;
+    memset(al, 0, sizeof al);
+    memset(&lib, 0, sizeof lib);
+    snprintf(lib.id, sizeof lib.id, "%s", IDU);
+    snprintf(lib.name, sizeof lib.name, "Home Videos and Photos");
+    lib.kind = FJ_ALBUM; lib.probe = 1;
+    snprintf(al[0].id, sizeof al[0].id, "%s", PID); snprintf(al[0].name, sizeof al[0].name, "Trip");
+    CHECK(fj_add_loose(al, 1, 4, &lib, 29) == 2, "loose album added");
+    CHECK(!strcmp(al[0].name, "Home Videos and Photos") && al[0].loose && !al[0].probe && !strcmp(al[0].id, IDU) && !strcmp(al[1].name, "Trip") && !al[1].loose, "loose album first, named after the library");
+    CHECK(fj_add_loose(al, 1, 4, &lib, 0) == 1, "no loose photo: no album");
+    CHECK(fj_add_loose(al, 4, 4, &lib, 3) == 4, "no room: unchanged");
+    char b[400];
+    int n = fj_path_loose(b, sizeof b, UID, IDU, 0, 100);
+    CHECK(n > 0 && strstr(b, "IncludeItemTypes=Photo") && !strstr(b, "Recursive") && strstr(b, "ParentId=" IDU), "loose path is not recursive");
+    CHECK(fj_path_loose(b, sizeof b, UID, "bad", 0, 100) == -1, "loose path bad id");
 }
 
 int main(void)
@@ -128,6 +148,7 @@ int main(void)
     test_key();
     test_items();
     test_libraries();
+    test_loose();
     printf("%s: %d checks, %d failed\n", fails ? "FAIL" : "PASS", checks, fails);
     return fails ? 1 : 0;
 }

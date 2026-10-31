@@ -23,6 +23,15 @@ int main(void)
     CHECK(!frame_is_image_name("._IMG_1.jpg"));
     CHECK(!frame_is_image_name(""));
     CHECK(!frame_is_image_name("a.jpgx"));
+    /* fill rule: OFF none, ALL every picture, LANDSCAPE only a picture whose orientation matches the screen */
+    CHECK(!frame_fill_wanted(FRAME_FILL_OFF, 800, 600, 800, 480) && !frame_fill_wanted(FRAME_FILL_OFF, 600, 800, 800, 480));
+    CHECK(frame_fill_wanted(FRAME_FILL_ALL, 800, 600, 800, 480) && frame_fill_wanted(FRAME_FILL_ALL, 600, 800, 800, 480));
+    CHECK(frame_fill_wanted(FRAME_FILL_LANDSCAPE, 800, 600, 800, 480));
+    CHECK(!frame_fill_wanted(FRAME_FILL_LANDSCAPE, 600, 800, 800, 480));
+    CHECK(!frame_fill_wanted(FRAME_FILL_LANDSCAPE, 500, 500, 800, 480));
+    CHECK(frame_fill_wanted(FRAME_FILL_LANDSCAPE, 480, 800, 480, 800));            /* a portrait screen: portrait matches */
+    CHECK(!frame_fill_wanted(99, 800, 600, 800, 480) && !frame_fill_wanted(-1, 800, 600, 800, 480));
+
 
     char k1[128], k2[128], k3[128], k4[128];
     CHECK(frame_key("/media/usb0/DCIM/IMG_0001.JPG", 1234567, k1, sizeof k1) > 0);
