@@ -10,6 +10,8 @@
  * is LOCAL time.  The zone row cycles a short curated list (sys_tz_*) and APPLY
  * (confirmed) repoints /etc/localtime and rewrites /etc/timezone, each by a
  * temp file and rename(), then tzset().
+ * The TIME FORMAT button persists "clock_24h" (12 h / 24 h) for every clock that
+ * shows the current time.
  * The boot-time network sync (rdate) overrides a manual set.
  */
 #include "cp_page.h"
@@ -57,9 +59,17 @@ static void read_zone(void) {
 }
 
 
+static bool clock_24h = true;       /* the persisted TIME FORMAT, "clock_24h" */
+
 static void fmt_tm(const struct tm *tm, char *out, size_t len) {
-    snprintf(out, len, "%04d-%02d-%02d %02d:%02d:%02d", tm->tm_year + 1900,
-             tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
+    if (clock_24h) {
+        snprintf(out, len, "%04d-%02d-%02d %02d:%02d:%02d", tm->tm_year + 1900,
+                 tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
+        return;
+    }
+    snprintf(out, len, "%04d-%02d-%02d %d:%02d:%02d %s", tm->tm_year + 1900,
+             tm->tm_mon + 1, tm->tm_mday, tm->tm_hour % 12 ? tm->tm_hour % 12 : 12,
+             tm->tm_min, tm->tm_sec, tm->tm_hour < 12 ? "AM" : "PM");
 }
 
 /* The clock and the RTC; true when what is shown changed. */
@@ -118,8 +128,29 @@ static void edit_from_clock(void) {
         edit.day = sys_days_in_month(edit.year, edit.mon);
 }
 
+static Button fmt_btn;
+static int    fmt_y;
+
+static void fmt_label(void) {
+    snprintf(fmt_btn.text, sizeof(fmt_btn.text), "TIME FORMAT: %s", clock_24h ? "24 H" : "12 H");
+}
+
+/* Same shape as blank_persist() in display_page.c: the key goes into the file by
+ * re-reading it, then saved.  Followers read the file themselves. */
+static void fmt_persist(Config *mem) {
+    config_set_bool(mem, "clock_24h", clock_24h);
+    Config disk;
+    config_init(&disk);
+    config_load(&disk);
+    config_set_bool(&disk, "clock_24h", clock_24h);
+    if (config_save(&disk) != 0) {
+        fprintf(stderr, "control_panel: clock_24h save failed\n");
+        cp_status("TIME FORMAT SAVE FAILED", false);
+    }
+}
+
 static void system_page_load(const Config *cfg) {
-    (void)cfg;
+    clock_24h = config_clock_24h(cfg);
     read_zone();
     read_clock();
     edit_from_clock();
@@ -176,6 +207,9 @@ static void system_page_layout(void) {
     button_init_full(&tz_next_btn, CONTENT_RIGHT - SYS_TZ_APPLY_W - 6 - SYS_TZ_ARROW_W, tz_y,
                      SYS_TZ_ARROW_W, SYS_TZ_H - 2, ">", RGB(80, 80, 80), COLOR_WHITE,
                      BTN_COLOR_HIGHLIGHT, 2);
+    fmt_y = y;        y += SYS_TZ_H;
+    button_init_full(&fmt_btn, CONTENT_LEFT, fmt_y, CONTENT_WIDTH, SYS_TZ_H - 2, "",
+                     RGB(80, 80, 80), COLOR_WHITE, BTN_COLOR_HIGHLIGHT, 2);
     y += SYS_GAP;
     sec_set_y = y;    y += SYS_HEADER_H;
 
@@ -225,7 +259,7 @@ static void system_page_layout(void) {
         if (low > bottom) bottom = low;
         int right = set_btn.x + set_btn.width;
         const char *clash = NULL;          /* a text that would run under a button */
-        int w = clock_vx + text_measure_width("2026-10-06 14:00:00 AEDT", 2);
+        int w = clock_vx + text_measure_width(clock_24h ? "2026-10-06 14:00:00 AEDT" : "2026-10-06 12:00:00 PM AEDT", 2);
         if (w > right) right = w;
         /* The zone name sits between the arrows; the longest listed name must fit. */
         w = text_measure_width("America/Los_Angeles", 2);
@@ -264,6 +298,9 @@ static void system_page_draw(Framebuffer *fb) {
         button_draw(fb, &tz_next_btn);
         button_draw(fb, &tz_apply_btn);
     }
+
+    fmt_label();
+    button_draw(fb, &fmt_btn);
 
     draw_section_header(fb, sec_set_y, "SET DATE AND TIME");
     char s[8];
@@ -342,7 +379,6 @@ static void apply_clock(Config *cfg) {
 
 static CpPageResult system_page_input(Config *cfg, int tx, int ty,
                                       bool touching, uint32_t now) {
-    (void)cfg;
     CpPageResult act = CP_PAGE_IDLE;
 
     for (int i = 0; i < SYS_DT_FIELDS; i++) {
@@ -361,6 +397,12 @@ static CpPageResult system_page_input(Config *cfg, int tx, int ty,
     }
     if (button_update(&tz_next_btn, tx, ty, touching, now)) {
         tz_sel = sys_tz_step(tz_sel, +1);
+        act = CP_PAGE_REDRAW;
+    }
+    if (button_update(&fmt_btn, tx, ty, touching, now)) {
+        clock_24h = !clock_24h;
+        read_clock();
+        fmt_persist(cfg);
         act = CP_PAGE_REDRAW;
     }
     if (button_update(&tz_apply_btn, tx, ty, touching, now)) {
@@ -396,6 +438,7 @@ static int system_page_focusables(UiRect *out, int max) {
     n = focus_add_button(out, n, max, &tz_prev_btn);
     n = focus_add_button(out, n, max, &tz_next_btn);
     n = focus_add_button(out, n, max, &tz_apply_btn);
+    n = focus_add_button(out, n, max, &fmt_btn);
     for (int i = 0; i < SYS_DT_FIELDS; i++) {
         n = focus_add_button(out, n, max, &plus_btn[i]);
         n = focus_add_button(out, n, max, &minus_btn[i]);

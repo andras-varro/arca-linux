@@ -1,6 +1,7 @@
 /* top_bar.c — see top_bar.h. */
 #include "top_bar.h"
 #include "status_line.h"
+#include "config.h"
 #include "icon_grid.h"
 #include <stdio.h>
 #include <string.h>
@@ -256,8 +257,14 @@ bool top_bar_info_sample(TopBar *t) {
      * /etc/localtime and re-reads the file only if it changed. */
     tzset();
     if (localtime_r(&now, &tm)) { hour = tm.tm_hour; min = tm.tm_min; }
+    /* Live, once a second like the CPU figure: a change on the System page shows
+     * in every bar that is already up, with no plumbing between the two. */
+    Config cfg;
+    config_init(&cfg);
+    config_load(&cfg);
+    bool h24 = config_clock_24h(&cfg);
     char right[sizeof(t->right_buf)];
-    status_line_format(right, sizeof(right), pct, hour, min);
+    status_line_format(right, sizeof(right), pct, hour, min, h24);
 
     bool changed = strcmp(right, t->right_buf) != 0;
     memcpy(t->right_buf, right, sizeof(right));

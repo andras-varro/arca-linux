@@ -134,7 +134,7 @@ UiRect top_bar_button_draw_rect(const TopBarLayout *L, TbHit which);
 /* Print one receipt line saying how much of the bar is pressable. */
 void top_bar_receipt(const TopBar *t, const char *tag);
 
-/* The right-hand text, "CPU 7%  14:05".  top_bar_info_due() is true once a
+/* The right-hand text, "CPU 7%  14:05" (or "2:05 PM", per config_clock_24h(), re-read each sample).  top_bar_info_due() is true once a
  * second (and on the first call); top_bar_info_sample() then reads /proc and
  * the clock, and says whether the text changed — redraw only on true. */
 bool top_bar_info_due(TopBar *t, uint32_t now_ms);

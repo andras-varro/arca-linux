@@ -12,7 +12,7 @@
  * every way out of main().
  *
  * Settings: /home/root/data/clock.conf (clock_core's key=value text); the 12/24 h choice is the
- * app's own file, /home/root/data/clock_fmt.conf, because clock_core has no field for it.
+ * system setting "clock_24h" (Control Panel, System page), read at start.
  */
 
 #include <errno.h>
@@ -35,7 +35,6 @@
 #include "seg7.h"
 
 #define SETTINGS_PATH "/home/root/data/clock.conf"
-#define FMT_PATH      "/home/root/data/clock_fmt.conf"
 #define TONE_HZ       880
 #define TONE_MS       350
 
@@ -45,7 +44,6 @@ static void on_signal(int sig) { (void)sig; g_running = 0; }
 typedef struct { Framebuffer fb; TouchInput touch; GamepadManager gp; Pointer ptr; } Dev;
 
 static Dev    g_dev;
-static Config g_fmt_cfg;
 static const char *g_fb_dev = "/dev/fb0", *g_touch_dev = "/dev/input/touchscreen0";
 
 static ClockSettings g_set;
@@ -101,12 +99,6 @@ static void settings_save(void)
     bool ok = fwrite(buf, 1, (size_t)n, f) == (size_t)n;
     ok = (fclose(f) == 0) && ok;
     if (ok) rename(tmp, SETTINGS_PATH); else remove(tmp);
-}
-
-static void fmt_save(void)
-{
-    config_set_int(&g_fmt_cfg, "h24", g_h24 ? 1 : 0);
-    config_save(&g_fmt_cfg);
 }
 
 /* ── ring and backlight service, called from every loop ─────────────────── */
@@ -582,8 +574,6 @@ static bool timer_menu(void)
 /* ── main menu ──────────────────────────────────────────────────────────── */
 
 
-static const char *const FMT_NAMES[] = { "24 H", "12 H" };
-static int g_fmt_idx;
 
 /* The menu entry shows the state: "DIM: OFF", "DIM: ON" or "DIM: 22:00-07:00". */
 static const char *dim_label(char *out, size_t n)
@@ -597,12 +587,6 @@ static const char *dim_label(char *out, size_t n)
         snprintf(out, n, "DIM: %s", g_set.dim_mode == CLOCK_DIM_ON ? "ON" : "OFF");
     }
     return out;
-}
-
-static void menu_hook(StartMenu *m)
-{
-    bool h24 = start_menu_value(m, g_fmt_idx) == 0;
-    if (h24 != g_h24) { g_h24 = h24; fmt_save(); }
 }
 
 /* Returns false when the app should exit. */
@@ -619,13 +603,12 @@ static bool main_menu(void)
     int e_alarm = start_menu_add_action(&m, l);
     int e_timer = start_menu_add_action(&m, "TIMER");
     int e_dim = start_menu_add_action(&m, dim_label(dl, sizeof dl));
-    g_fmt_idx = start_menu_add_choice(&m, "TIME FORMAT", FMT_NAMES, 2, g_h24 ? 0 : 1);
     int e_back = start_menu_add_action(&m, "BACK TO CLOCK");
     int e_exit = start_menu_add_action(&m, "EXIT");
     start_menu_select(&m, e_back, get_time_ms());
     bool stay = true;
     while (g_running && stay) {
-        int r = menu_run(&m, menu_hook);
+        int r = menu_run(&m, NULL);
         if (clock_ringing(&g_state)) return true;
         if (r == SM_EXIT || r == e_back) break;
         if (r == e_exit) return false;
@@ -793,9 +776,12 @@ int main(int argc, char *argv[])
     pointer_init(&g_dev.ptr);
     memset(&g_in, 0, sizeof g_in);
 
-    config_init_path(&g_fmt_cfg, FMT_PATH);
-    config_load(&g_fmt_cfg);
-    g_h24 = config_get_int(&g_fmt_cfg, "h24", 1) != 0;
+    {   /* The 12/24 h choice is the system setting (Control Panel, System page), read at start. */
+        Config sys;
+        config_init(&sys);
+        config_load(&sys);
+        g_h24 = config_clock_24h(&sys);
+    }
     settings_load();
 
     hw_blank_set_enabled(false);

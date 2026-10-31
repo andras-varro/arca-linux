@@ -32,13 +32,22 @@ int status_cpu_percent(const CpuSnap *prev, const CpuSnap *cur, unsigned clk_tck
     return (others + self + 5) / 10;      /* permille -> rounded percent */
 }
 
-int status_line_format(char *buf, size_t n, int cpu_percent, int hour, int min) {
+int status_clock_text(char *buf, size_t n, int hour, int min, bool h24) {
     if (n == 0) return 0;
-    char cpu[8], clk[8];
+    int w;
+    if (hour < 0 || hour > 23 || min < 0 || min > 59) w = snprintf(buf, n, "--:--");
+    else if (h24) w = snprintf(buf, n, "%02d:%02d", hour, min);
+    else w = snprintf(buf, n, "%d:%02d %s", hour % 12 ? hour % 12 : 12, min, hour < 12 ? "AM" : "PM");
+    if (w < 0) { buf[0] = '\0'; return 0; }
+    return (size_t)w >= n ? (int)n - 1 : w;
+}
+
+int status_line_format(char *buf, size_t n, int cpu_percent, int hour, int min, bool h24) {
+    if (n == 0) return 0;
+    char cpu[8], clk[12];
     if (cpu_percent < 0) snprintf(cpu, sizeof cpu, "--");
     else snprintf(cpu, sizeof cpu, "%d", cpu_percent > 100 ? 100 : cpu_percent);
-    if (hour < 0 || hour > 23 || min < 0 || min > 59) snprintf(clk, sizeof clk, "--:--");
-    else snprintf(clk, sizeof clk, "%02d:%02d", hour, min);
+    status_clock_text(clk, sizeof clk, hour, min, h24);
     int w = snprintf(buf, n, "CPU %s%%  %s", cpu, clk);
     if (w < 0) { buf[0] = '\0'; return 0; }
     return (size_t)w >= n ? (int)n - 1 : w;

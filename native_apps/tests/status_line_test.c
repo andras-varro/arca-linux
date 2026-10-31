@@ -51,17 +51,38 @@ int main(void) {
 
     /* C — formatting */
     char buf[32];
-    status_line_format(buf, sizeof buf, 7, 9, 5);
+    status_line_format(buf, sizeof buf, 7, 9, 5, true);
     CHECK(strcmp(buf, "CPU 7%  09:05") == 0, "C: shape, got '%s'", buf);
-    status_line_format(buf, sizeof buf, -1, 14, 30);
+    status_line_format(buf, sizeof buf, -1, 14, 30, true);
     CHECK(strcmp(buf, "CPU --%  14:30") == 0, "C: no sample, got '%s'", buf);
-    status_line_format(buf, sizeof buf, 250, 23, 59);
+    status_line_format(buf, sizeof buf, 250, 23, 59, true);
     CHECK(strcmp(buf, "CPU 100%  23:59") == 0, "C: clamp, got '%s'", buf);
-    status_line_format(buf, sizeof buf, 0, 24, 0);
+    status_line_format(buf, sizeof buf, 0, 24, 0, true);
     CHECK(strcmp(buf, "CPU 0%  --:--") == 0, "C: bad hour, got '%s'", buf);
     char tiny[6];
-    int w = status_line_format(tiny, sizeof tiny, 12, 1, 2);
+    int w = status_line_format(tiny, sizeof tiny, 12, 1, 2, true);
     CHECK(strlen(tiny) == 5 && w == 5, "C: tiny buffer terminates, len %zu w %d", strlen(tiny), w);
+
+    /* D — 12 h (the System page TIME FORMAT setting) */
+    status_line_format(buf, sizeof buf, 7, 13, 5, false);
+    CHECK(strcmp(buf, "CPU 7%  1:05 PM") == 0, "D: 13:05, got '%s'", buf);
+    status_line_format(buf, sizeof buf, 7, 0, 9, false);
+    CHECK(strcmp(buf, "CPU 7%  12:09 AM") == 0, "D: midnight hour, got '%s'", buf);
+    status_line_format(buf, sizeof buf, 7, 12, 0, false);
+    CHECK(strcmp(buf, "CPU 7%  12:00 PM") == 0, "D: noon, got '%s'", buf);
+    status_line_format(buf, sizeof buf, 7, 11, 59, false);
+    CHECK(strcmp(buf, "CPU 7%  11:59 AM") == 0, "D: 11:59, got '%s'", buf);
+    status_line_format(buf, sizeof buf, 7, 23, 59, false);
+    CHECK(strcmp(buf, "CPU 7%  11:59 PM") == 0, "D: 23:59, got '%s'", buf);
+    status_line_format(buf, sizeof buf, 0, 24, 0, false);
+    CHECK(strcmp(buf, "CPU 0%  --:--") == 0, "D: bad hour in 12 h, got '%s'", buf);
+    status_clock_text(buf, sizeof buf, 1, 5, false);
+    CHECK(strcmp(buf, "1:05 AM") == 0, "D: clock text alone, got '%s'", buf);
+    status_clock_text(buf, sizeof buf, 1, 5, true);
+    CHECK(strcmp(buf, "01:05") == 0, "D: clock text 24 h, got '%s'", buf);
+    char widest[24];
+    int ww = status_line_format(widest, sizeof widest, 100, 12, 59, false);
+    CHECK(ww == (int)strlen(widest) && ww < 24, "D: widest line fits TopBar.right_buf (24), %d", ww);
 
     printf(fails ? "status_line_test: %d FAILED\n" : "status_line_test: all passed\n", fails);
     return fails ? 1 : 0;

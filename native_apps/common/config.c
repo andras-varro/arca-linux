@@ -352,3 +352,7 @@ int config_blank_minutes(const Config *cfg) {
     int m = config_get_int(cfg, "blank_minutes", 10);
     return m < 0 ? 0 : m;
 }
+
+bool config_clock_24h(const Config *cfg) {
+    return config_get_bool(cfg, "clock_24h", true);
+}

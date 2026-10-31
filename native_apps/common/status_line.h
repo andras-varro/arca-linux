@@ -38,9 +38,13 @@ CpuSnap status_cpu_snap(const char *stat_text, const char *uptime_text);
  * there is no honest sample. */
 int status_cpu_percent(const CpuSnap *prev, const CpuSnap *cur, unsigned clk_tck);
 
-/* The right-hand text, "CPU 7%  14:05".  cpu_percent < 0 prints "CPU --%".
+/* The right-hand text, "CPU 7%  14:05" ("CPU 7%  2:05 PM" with h24 false).  cpu_percent < 0 prints "CPU --%".
  * hour/min out of range yield "--:--". Always NUL-terminated within n;
  * returns the length written. */
-int status_line_format(char *buf, size_t n, int cpu_percent, int hour, int min);
+/* h24 false: "1:05 PM" (hour 0 is 12 AM, hour 12 is 12 PM).  The one 12/24 h
+ * text of the status line; out-of-range values print "--:--" either way. */
+int status_clock_text(char *buf, size_t n, int hour, int min, bool h24);
+
+int status_line_format(char *buf, size_t n, int cpu_percent, int hour, int min, bool h24);
 
 #endif

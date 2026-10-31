@@ -154,6 +154,11 @@ int config_backlight_brightness(const Config *cfg);
  * page. */
 int config_blank_minutes(const Config *cfg);
 
+/* Whether the clocks show 24 h (true, default) or 12 h with AM/PM.  Key
+ * "clock_24h", set once on the System page; read by the top bar and the clock
+ * app. */
+bool config_clock_24h(const Config *cfg);
+
 /* ── Atomic file writes ──────────────────────────────────────────────────
  *
  * fopen(path, "w") truncates before a single byte is written, and without an
