@@ -300,19 +300,15 @@ paths a launcher plus one game actually touch, listed from a BBB boot.
 
 **Future scope, operator-agreed, not scheduled:** mouse-only operation of the launcher, Control Panel and games, for a unit with no touch and no keyboard or pad. The operator has a RoomWizard whose touch is broken, and a BeagleBone has no touch. The mouse pointer in the launcher and the Control Panel exists and is operator-verified; the games still take no mouse pointer.
 
-### F163. Edit and view text files in the Files app with nano — open, operator decision 2026-10-30, not started
+### F163. Edit and view text files in the Files app with nano — open, built; the save and keyboard checks are left
 
-Operator prefers not writing our own editor: **nano** is both editor and viewer (`nano -v` is its read-only view mode), started
-from `native_apps/file_manager` on the selected file, for a game's `.opt`, the files under `/home/root/data/retro/options/`,
-and a short list of system files. **Measured 2026-10-30 (grep):** `rootfs/configs/arca_defconfig` names neither nano nor
-ncurses, so the package is missing; `native_apps/terminal/terminal.c` is an on-device terminal (login in a pty, drawn with
-libvterm, physical keyboard through `common/term_keymap.h`, a touch toolbar with arrows, Ctrl, Esc and the on-screen keyboard),
-so a terminal surface exists; `file_manager` has no call that starts another program, so the launch hook is missing.
-**Missing:** the nano package (and the terminfo entry for the terminal's `TERM`) in the rootfs, a way to start the terminal app
-running `nano <path>` instead of `/bin/login` and return to Files on exit, and the launch hook in `file_manager`.
-**To decide:** which paths are allowed and whether system files need an explicit unlock; whether `nano` runs as root. The same launch hook lets Files open a picture from a stick in the Pictures app (`native_apps/frame`), unoptimised, as it is.
-**Done when** an option file opened from Files edits and saves in nano on the panel, with either keyboard, and the next game
-start uses it; and `nano -v` on a file refuses writes, and a picture opened from Files shows in Pictures.
+Files opens a text file in nano (`/opt/games/terminal … --exec nano`), editable under `/home/root/data` and on a USB stick and
+`nano -v` elsewhere, and a picture in `frame --show`; the rules are `fm_open_cmd` in `native_apps/file_manager/fm_core.c`.
+**Measured 2026-10-31 on .115 with synthetic taps:** edit mode on a data file, view mode on `/etc/passwd`, a picture shown and
+dismissed by a tap, a binary file not opened, and Files responsive after each return. **Not measured:** a save from nano,
+a physical keyboard in nano, Enter and pad X as the open key (`arca_tap` sends no keys), and a real finger.
+**Done when** an option file opened from Files is edited and saved on the panel with a physical keyboard and with the
+on-screen one, and the next game start uses it.
 
 ### Potential ideas (not planned)
 
