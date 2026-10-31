@@ -187,6 +187,21 @@ case "$1" in
     # enable-usb-host.sh is idempotent, so restart just calls start
     "$0" start
     ;;
+  off)
+    # Power the port down by unbinding musb. arcamond runs this when
+    # VBUS_ERROR repeats (an overloaded bus: the kernel re-asserts the session,
+    # the hub and every device drop and re-enumerate, forever). Unbinding runs
+    # musb_stop/remove, which clears the DEVCTL SESSION bit, the only thing
+    # that drives VBUS here. The glue is gone afterwards, so a plug raises
+    # nothing: only `recover` (a bind) brings the port back.
+    if [ ! -d "$MUSB_DRIVER" ]; then
+        echo "ERROR: $MUSB_DRIVER absent -- the musb-hdrc driver is not loaded."
+        exit 1
+    fi
+    echo "$MUSB_DEVICE" > "$MUSB_DRIVER/unbind" 2>/dev/null
+    sleep 1
+    echo "Port off. VBUS: $(vbus_state)"
+    ;;
   recover)
     # Re-probe the MUSB driver, which re-runs the root hub's port-power path and
     # so re-asserts the session. Plug the device in FIRST, then run this.
@@ -277,7 +292,7 @@ case "$1" in
     exit 1
     ;;
   *)
-    echo "Usage: $0 {start|stop|status|restart|recover}"
+    echo "Usage: $0 {start|stop|status|restart|recover|off}"
     exit 1
     ;;
 esac

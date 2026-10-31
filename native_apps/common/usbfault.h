@@ -14,7 +14,9 @@
  * happen (clear), absent latches the fault and asks for a recover.  While
  * latched, retries come at 5 s, 15 s and 45 s after the error and then every
  * USBF_REPEAT_MS, never faster, with no end; the latch clears the moment a
- * non-hub device is present.  Only one recover runs at a time.
+ * non-hub device is present.  Only one recover runs at a time.  Three errors
+ * inside 30 s (the overload loop, where the devices are back before every
+ * check) cut the port instead: see usbf_step.
  */
 #ifndef USBFAULT_H
 #define USBFAULT_H
@@ -25,6 +27,10 @@
 #define USBF_SECOND_MS  15000u
 #define USBF_THIRD_MS   45000u
 #define USBF_REPEAT_MS  120000u
+#define USBF_CUT_COUNT  3
+#define USBF_CUT_WIN_MS 30000u
+#define USBF_ACT_RECOVER 1   /* usbf_step: run usb-host recover */
+#define USBF_ACT_OFF     2   /* usbf_step: run usb-host off (the port loop) */
 
 typedef struct {
     int armed;        /* error seen, first check not yet made */
@@ -32,11 +38,21 @@ typedef struct {
     int tries;        /* recovers started since the error */
     uint32_t err_ms;  /* when the error was seen */
     uint32_t next_ms; /* when the next check or recover is due */
+    int nerr;         /* recent error stamps held (0..3) */
+    uint32_t errs[3]; /* the newest error times, oldest first */
 } UsbFault;
 
 static inline void usbf_init(UsbFault *f) {
     f->armed = f->latched = f->tries = 0;
     f->err_ms = f->next_ms = 0;
+    f->nerr = 0;
+}
+
+/* Back to idle, keeping the error history the loop rule counts. */
+static inline void usbf_clear(UsbFault *f) {
+    int n = f->nerr; uint32_t e[3] = { f->errs[0], f->errs[1], f->errs[2] };
+    usbf_init(f);
+    f->nerr = n; f->errs[0] = e[0]; f->errs[1] = e[1]; f->errs[2] = e[2];
 }
 
 /* The ring flag: the confirmed fault only, not the 5 s waiting window. */
@@ -71,11 +87,8 @@ static inline int usbf_wants_scan(const UsbFault *f, uint32_t now_ms) {
     return f->armed && (int32_t)(now_ms - f->next_ms) >= 0;
 }
 
-/* One step.  error_seen: a VBUS_ERROR record arrived since the last step.
- * dev_present: a non-hub device is enumerated (only read when
- * usbf_wants_scan() said so).  recover_running: a recover child is alive.
- * Returns 1 when the caller must start a recover now. */
-static inline int usbf_step(UsbFault *f, uint32_t now_ms, int error_seen,
+/* The single-drop machine (header comment).  Returns 1 for a recover. */
+static inline int usbf_step_drop(UsbFault *f, uint32_t now_ms, int error_seen,
                             int dev_present, int recover_running) {
     if (error_seen && !f->armed && !f->latched) {
         f->armed = 1;
@@ -85,9 +98,9 @@ static inline int usbf_step(UsbFault *f, uint32_t now_ms, int error_seen,
         return 0;
     }
     if (!f->armed && !f->latched) return 0;
-    if (f->latched && dev_present) { usbf_init(f); return 0; }
+    if (f->latched && dev_present) { usbf_clear(f); return 0; }
     if ((int32_t)(now_ms - f->next_ms) < 0) return 0;
-    if (f->armed && dev_present) { usbf_init(f); return 0; }
+    if (f->armed && dev_present) { usbf_clear(f); return 0; }
     if (recover_running) return 0;   /* due, but wait for the child */
     f->armed = 0;
     f->latched = 1;
@@ -101,4 +114,36 @@ static inline int usbf_step(UsbFault *f, uint32_t now_ms, int error_seen,
     return 1;
 }
 
+
+/* One step.  error_seen: how many VBUS_ERROR records arrived since the last
+ * step.  dev_present: a non-hub device is enumerated (only read when
+ * usbf_wants_scan() said so).  recover_running: a recover child is alive.
+ *
+ * The loop rule: USBF_CUT_COUNT errors within USBF_CUT_WIN_MS mean the bus is
+ * overloaded and the kernel is re-asserting the session forever, with the
+ * devices back before every T+5 s check.  The port is turned off (return
+ * USBF_ACT_OFF), the fault latches, and the next recover follows USBF_REPEAT_MS
+ * later; if that one overloads again the same rule cuts again.  A cut that is
+ * due while a recover child runs waits for it.
+ * Returns USBF_ACT_RECOVER / USBF_ACT_OFF / 0. */
+static inline int usbf_step(UsbFault *f, uint32_t now_ms, int error_seen,
+                            int dev_present, int recover_running) {
+    for (int i = 0; i < error_seen && i < USBF_CUT_COUNT; i++) {
+        if (f->nerr == USBF_CUT_COUNT) {
+            f->errs[0] = f->errs[1]; f->errs[1] = f->errs[2]; f->nerr--;
+        }
+        f->errs[f->nerr++] = now_ms;
+    }
+    if (f->nerr == USBF_CUT_COUNT && !recover_running &&
+        (uint32_t)(now_ms - f->errs[0]) <= USBF_CUT_WIN_MS) {
+        f->nerr = 0;
+        f->armed = 0;
+        f->latched = 1;
+        f->tries = 3;
+        f->err_ms = now_ms;
+        f->next_ms = now_ms + USBF_REPEAT_MS;
+        return USBF_ACT_OFF;
+    }
+    return usbf_step_drop(f, now_ms, error_seen, dev_present, recover_running);
+}
 #endif

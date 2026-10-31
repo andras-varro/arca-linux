@@ -142,7 +142,7 @@ static int kmsg_open(void) {
     return fd;
 }
 
-/* 1 when any record read since the last call carries VBUS_ERROR. */
+/* How many records read since the last call carry VBUS_ERROR. */
 static int kmsg_vbus_error(int fd) {
     char rec[1024];
     int seen = 0;
@@ -155,7 +155,7 @@ static int kmsg_vbus_error(int fd) {
         }
         if (n == 0) break;
         rec[n] = '\0';
-        if (strstr(rec, "VBUS_ERROR")) seen = 1;
+        if (strstr(rec, "VBUS_ERROR")) seen++;
     }
     return seen;
 }
@@ -189,10 +189,10 @@ static int recover_running(void) {
     return recover_pid > 0;
 }
 
-static void recover_start(void) {
+static void recover_start(const char *verb) {
     pid_t p = fork();
     if (p == 0) {
-        execl(USB_RECOVER, "usb-host", "recover", (char *)NULL);
+        execl(USB_RECOVER, "usb-host", verb, (char *)NULL);
         _exit(127);
     }
     if (p > 0) recover_pid = p;
@@ -291,9 +291,13 @@ int main(void) {
             int was_f = usbf_flag(&uf);
             int present = usbf_wants_scan(&uf, now_ms) ? usb_peripheral_present() : 0;
             if (err) puts("arcamond: VBUS_ERROR in the kernel log");
-            if (usbf_step(&uf, now_ms, err, present, recover_running())) {
+            int act = usbf_step(&uf, now_ms, err, present, recover_running());
+            if (act == USBF_ACT_OFF) {
+                puts("arcamond: VBUS_ERROR loop, running usb-host off");
+                recover_start("off");
+            } else if (act == USBF_ACT_RECOVER) {
                 puts("arcamond: USB fault, running usb-host recover");
-                recover_start();
+                recover_start("recover");
             }
             if (usbf_flag(&uf) != was_f)
                 puts(usbf_flag(&uf) ? "arcamond: USB fault indicator on"
