@@ -45,9 +45,9 @@ Three games draw a capped HUD lives row and each caps it differently:
 |---|---|---|
 | `frogger.c:1269` | `lives_shown = min(lives, 5)`, then lays out from `lives_shown * LIFE_ICON_PITCH` | correct |
 | `platformer.c:1541` | lays out from the capped number and draws one icon plus `x10` past the cap | correct |
-| `brick_breaker.c:1224` | `for (i < game.lives && i < 9)`, each heart at a fixed anchor minus `i * 14` | **silently truncates** |
+| `brick_breaker.c:1398` | `for (i < game.lives && i < 9)`, each heart at a fixed anchor minus `i * 14` | **silently truncates** |
 
-The extra-life power-up at `brick_breaker.c:718` does `game.lives++` with no cap, so a tenth life and
+The extra-life power-up at `brick_breaker.c:765` does `game.lives++` with no cap, so a tenth life and
 every one after it is **invisible**: the HUD reads nine whether you hold nine or fourteen, and losing one
 appears to change nothing. Cosmetic, never a crash, and it needs a power-up-heavy run to reach, which is
 why it has not been seen.
@@ -347,25 +347,6 @@ typed-key queue; check the device's evdev nodes and which node the letters arriv
 also has **no mouse support** (no pointer click on a key). **Done when** typing on that Bluetooth keyboard and on a plain USB
 keyboard enters letters, and a mouse click presses an on-screen key, at the panel.
 
-### F158. Jellyfin video client — open, operator wish 2026-10-23
-
-Movies, series → seasons → episodes, search by name/person/genre, a details page (overview, cast, similar), audio and subtitle choice
-before playback. **A separate app** beside Ludfin (`native_apps/jellyfin/`), both linking `native_apps/jf_shared/`, which knows no app name (client name, config path, art cache passed at run time);
-`jf_model` there still holds Ludfin's item shape, so split it when the video item model is designed. **Login (operator):** each app has its own config file and `DeviceId`; the video app's three-field login dialog is its own copy and offers "reuse saved login": server and user prefilled from Ludfin's file, password asked once, own token.
-Decode cost is measured and fits ([Display](SYSTEM_ANALYSIS.md#32-display)). **Stream (measured on `.115`, Jellyfin 12.1):** `stream.mpg?container=mpeg&videoCodec=mpeg1video&audioCodec=mp2&audioChannels=1&audioSampleRate=44100&maxWidth=400&maxHeight=240&videoBitRate=800000`
-→ MPEG-PS at 400×216, which pl_mpeg reads natively through a `plm_buffer` load callback (`container=ts` it does not read). Live end to end
-(1920×1040 h264 source, 300 s): ~0.9 Mbit/s, RSS 2.2 MB, A-V mean 5.5 ms / max 42 ms on the audio clock (bytes written minus
-`SNDCTL_DSP_GETODELAY`), no drift; CPU 52 % at 16bpp, 54 % at 32bpp, yet 0.5 % / 1.4 % frames dropped with half the CPU idle → **decode
-ahead into a frame queue**, not on demand. **Decided (operator):** 32bpp (16bpp bands on skin), 2× pixel doubling, audio through the shared mix bus Ludfin uses (the internal speaker is poor; USB/Bluetooth outputs must work), never straight to `/dev/dsp`.
-**Audio:** `AudioStreamIndex=<n>`; `IsDefault` is set on several tracks of one item, so pick by a preferred-language setting, else the first.
-**Subtitles:** burn-in (`SubtitleMethod=Encode`) switches the output to mpeg2video, which pl_mpeg cannot decode, so render SRT on the device
-(`/Videos/<id>/<mediaSourceId>/Subtitles/<index>/0/Stream.srt`, UTF-8, Hungarian ő ű; font coverage of Latin Extended-A unchecked). The first
-fetch per item took 110 s (the server extracts every embedded track), later ones 0.05 s: fetch asynchronously, start without subtitles.
-**Seek:** restart with `StartTimeTicks` and a fresh `PlaySessionId` (a reused one returns the old job), first byte ~1.1 s. **Stop:**
-`DELETE /Videos/ActiveEncodings?deviceId=..&playSessionId=..` → 204.
-**Next:** browse UI, player. The player also levels the audio (AGC plus limiter: the server's 5.1→mono downmix peaks near −18 dBFS and the operator found dialogue barely audible) and takes an adjustable A/V offset (operator unsure whether lip sync is off).
-**Done when** a movie and an episode play with the chosen audio track and subtitles at the panel.
-
 ### F160. Does BT/USB audio need the speaker's `>>1` ceiling? — open, operator decision 2026-10-24
 
 `AUDIO_MASTER_SHIFT` (`common/audio_gen.h`, set in `common/audio.c`) halves every output: it is the internal speaker's ceiling,
@@ -528,5 +509,3 @@ for USB storage** (the file manager and the Backup page); the enumeration-at-pro
 
 **Bundles hold built artifacts only — settled**, because the one consumer that installs device scripts runs
 from a clone and has `device-files/` beside it either way.
-
-**Design (defaults the operator may overrule, 2026-10-07).** New `native_apps/common/start_menu.h/.c` on the `GameOverScreen` pattern (init/update/draw/needs_redraw; the layout rects are the hit-test). The caller passes `get_time_ms()` as the game clock; blink is 1 s, 500 on / 500 off, and a new `audio_ping` (1319 Hz, 40 ms) fires on on-edges where `blink_idx % 6 < 3`, edge-detected, skipped when effects are off. UP/DOWN move through `ui_focus` (add `ui_focus.o` to `GAMEPAD_OBJ`), LEFT/RIGHT cycle a choice, JUMP/ACTION/PAUSE activate, BACK exits, touch acts on release. 2 PLAYERS is enabled only while `gamepad_player_mask(gm)&3==3` and offered only by games that implement 2P, pong first (P2 drives the right paddle, `pong.c:232`). EXIT entry last; TEST MODE / TRAINING are added as choices and the pause toggles kept. Migration order: widget + host test, pilot snake, pong (1P/2P + difficulty), tetris + frogger, samegame + platformer, brick_breaker, then retire `screen_draw_welcome*`.

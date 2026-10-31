@@ -5,6 +5,12 @@
  * returned, or -1 when it does not fit `cap` or an id is not 32 hex digits.
  * The generic half (encoding, ids, views, scope, session id) is jf_shared/jf_url.h.
  *
+ * Burn-in subtitles (SubtitleMethod=Encode) switch the server's output to
+ * mpeg2video, which pl_mpeg cannot decode, so subtitles are fetched as SRT
+ * and drawn on the device; the first SRT fetch per item can take ~110 s
+ * (the server extracts every embedded track) [measured, Jellyfin 12.1], so it
+ * is asynchronous and playback starts without subtitles.
+ *
  * The token is NOT here: it travels only in the Authorization header, and the
  * server refuses it in a query.  The DeviceId in a stream URL names the device
  * so the encoding job can be found and deleted again; it is percent-encoded.
