@@ -255,10 +255,6 @@ Two package kinds: a ready-to-use generic card image (`.img`) and a bundle updat
 update normally avoids reflashing, so the unit keeps its host keys. **Done when** a unit updates from a bundle with only the changed
 components installed, from a configured upstream.
 
-### F146. A 12-hour AM/PM clock format — open, operator request 2026-10-12
-
-An option for the clocks that print the time (`native_apps/common/top_bar.c:251`, `control_panel/system_page.c`, `control_panel/control_panel.c:586`). It goes in the settings app (the Control Panel), as a persisted setting. **Done when** the choice is made on a Control Panel page and every one of those clocks follows it.
-
 ### F147. Immersive games with no on-screen menu or close button — open, operator wish 2026-10-12, not designed
 
 The operator wants games that show no menu or close button at all. Open design question: how a touch-only player pauses and exits (pad and keyboard keep their keys). The games do not carry the shared top bar, so their own exit X is part of the same question. **Done when** the question is answered with the operator and one game follows the answer.
