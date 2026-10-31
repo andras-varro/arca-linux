@@ -135,35 +135,23 @@ Boot-console errors are defects here. Every line the current image logs (`grep -
 
 **Next steps.** On `.115`, capture `btmon` during the failing power-on and during the failing Pair. Record `bluetoothctl info <pad MAC>` (Paired, Bonded, Trusted, link key present) before and after the idle-off. Confirm the pad model and compare the capture with B52's. **Done when** the failing power-on is attributed by capture, or the workaround is documented.
 
-### B75. A USB overload drop is never recovered, and nothing on screen says so — open, measured 2026-10-29 on `.115`
+### B75. A USB overload drop: recovery and indicator built, the real-drop and BT-pad checks are left — open
 
-**Measured, `.115`, 16:52 device clock:** after many minutes with no change in what was plugged (an unpowered hub
-carrying a USB audio card, a USB stick and a BT dongle) the kernel logged `VBUS_ERROR in a_idle (90, <VBusValid)`; the
-whole hub died and came back only on a physical replug, and the BT pad only after a power cycle. The same signature on
-`.188`, where `usb-host recover` fixed it, is in `SYSTEM_ANALYSIS.md` (the `$MUSB/mode` row). The operator reports
-overload drops "many times", and it may still be present when a retry runs. **Mechanism, read from vanilla
-`musb_core.c` (`MUSB_INTR_VBUSERROR`), not traced [inferred]:** the session is retried only in `A_HOST`, `A_WAIT_BCON`
-and `A_WAIT_VRISE`; in `A_IDLE` the code ends in `musb_platform_set_vbus(musb, 0)` and nothing turns VBUS on again. Our
-`musb-*` patches were not diffed against that block.
-
-**Design (userspace first; a kernel retry in `A_IDLE` is the second choice — a new image per unit, and a retry while
-VBUS still collapses can loop at IRQ rate).** (1) `arcamond` latches a USB fault when `$MUSB/mode` reads `b_*` while a
-peripheral was enumerated at the last good sample (or a new `VBUS_ERROR` kernel line appears) and runs
-`/etc/init.d/usb-host recover` at 5 s, 15 s, 45 s, then every 120 s, never faster; the latch clears at the first
-enumerated non-hub device. (2) New ring flag `MON_FLAG_USBFAULT` (bit 1, `native_apps/sysmon/mon_ring.h`), read by
-`framebuffer.c` with the over-temp flag in the same once-a-second ring read, painted into the front buffer like the
-over-temp square: a 16×16 red square top-left (over-temp keeps top-right) and red sidebars flashing three times, repeating
-until the latch clears (operator's proposal). (3) `device-files/bluetooth` `watch()` runs `reconnect_all` once per new
-`hci0`; BlueZ 5.66 starts no BR/EDR connection on adapter re-add, so repeat it on the same backoff for a bounded window.
-
-**Open questions (operator):** a letter or colour so the square says which fault; sidebar width and flash rate (they
-cover edge touch targets); whether retries stop, and the indicator stays, after hours of failure; whether a rebind may
-drop USB audio mid-game or waits for the launcher; a "use a powered hub" line on the Control Panel USB page; the BT
-window length. **Unverified:** that `mode` reads `b_*` on `.115`; that `arcamond` can read the kernel log cheaply;
-whether the retro cores' frontend shows the indicator; the sidebars at 16 bpp. **Done when** on `.115`, after a real or
-simulated drop, the hub returns without a replug, square and bars show during the fault and vanish after, a sustained
-fault retries no faster than the 120 s cap, and a previously connected BT pad reconnects without a power cycle.
-Redeploy: `framebuffer.c` is linked by all three components.
+**Built (measured 2026-10-31 on `.115` with a simulated drop: the hub's `authorized` set to 0 and a `VBUS_ERROR` line written
+to `/dev/kmsg`):** `arcamond` reads new `/dev/kmsg` records; a `VBUS_ERROR` line arms a check at 5 s, and if no non-hub
+device is then enumerated it latches `MON_FLAG_USBFAULT` and runs `/etc/init.d/usb-host recover` at 5, 15 and 45 s, then
+every 120 s with no end, clearing at the first non-hub device (decision: `native_apps/common/usbfault.h`). While latched,
+`framebuffer.c` paints a 16×16 red square top-left and 6 px red sidebars, three 200 ms flashes every 10 s. The hub came back
+at ~9 s and the indicator cleared. The `$MUSB/mode` file is no detector: it reads `a_idle` with the hub, a USB audio card and
+the BT dongle all working. `device-files/bluetooth` `watch()` now sees each new `hci0` (it used `stat`, which BusyBox here
+lacks, so it never fired) and retries bonded devices at 5, 15, 45 s and three 120 s rounds, starting over on a newer instance.
+**Not measured:** a real overcurrent drop; a BT pad actually reconnecting after one; the indicator at 16 bpp (ScummVM, VNC)
+and in the retro cores; the sidebars flash only when the app presents (the launcher ~1 Hz).
+**Defaults chosen with the operator away, to overrule:** no letter in the square; 6 px bars, 3 × 200 ms per 10 s; retries
+never stop and the indicator stays; a recover does not wait for the launcher (the hub is already gone); no Control Panel
+"powered hub" line; the BT window ~7 min.
+**Done when** on `.115`, after a real drop, the hub returns without a replug, square and bars show during the fault and
+vanish after, and a previously connected BT pad reconnects without a power cycle.
 
 ## Features
 

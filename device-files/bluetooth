@@ -104,8 +104,10 @@ HCI=hci0
 BUS=unix:path=/run/dbus/system_bus_socket
 WATCHPID=/var/run/bluetooth-watch.pid
 # Seconds to wait before each connect round. The first gives bluealsa time to register its
-# endpoints once bluetoothd is up; a device found connected is skipped in later rounds.
-ROUNDS="5 15 45"
+# endpoints once bluetoothd is up; a device found connected is skipped in later rounds. The
+# 120 s rounds keep trying for minutes after a USB recovery brings the dongle back, because
+# BlueZ starts no BR/EDR connection by itself when an adapter is re-added.
+ROUNDS="5 15 45 120 120 120"
 
 log() { logger -t bluetooth -p daemon.notice "$*" 2>/dev/null; }
 
@@ -128,7 +130,10 @@ bus() { DBUS_SYSTEM_BUS_ADDRESS=$BUS dbus-send --system --print-reply --dest=org
 # <object path> <interface> <property>
 prop() { bus "$1" org.freedesktop.DBus.Properties.Get "string:$2" "string:$3"; }
 
-# One pass over the bonded devices: wait for the adapter to be powered, then connect.
+# The identity of the current hci0 instance: its sysfs inode, new for each re-add (BusyBox here has no stat applet).
+hci_tok() { ls -dLi "/sys/class/bluetooth/$HCI" 2>/dev/null | awk '{print $1}'; }
+
+# One pass over the bonded devices for adapter instance $1: wait for it to be powered, then connect.
 reconnect_all() {
   i=0
   until prop "/org/bluez/$HCI" org.bluez.Adapter1 Powered | grep -q 'boolean true'; do
@@ -140,6 +145,7 @@ reconnect_all() {
   [ -n "$addr" ] || return
   for wait in $ROUNDS; do
     sleep "$wait"
+    [ "$(hci_tok)" = "$1" ] || return   # a newer adapter instance: the watcher starts over for it
     left=0
     for d in $(candidates "$addr"); do
       p="/org/bluez/$HCI/dev_$(echo "$d" | tr : _)"
@@ -160,11 +166,11 @@ watch() {
   echo $$ > "$WATCHPID"
   last=
   while :; do
-    tok=$(stat -L -c %i "/sys/class/bluetooth/$HCI" 2>/dev/null)
+    tok=$(hci_tok)
     if [ -n "$tok" ] && [ "$tok" != "$last" ]; then
       last=$tok
       log "reconnect: $HCI appeared (inode $tok)"
-      reconnect_all
+      reconnect_all "$tok"
     fi
     sleep 3
   done
