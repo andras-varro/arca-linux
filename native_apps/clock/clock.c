@@ -347,6 +347,200 @@ static void alarm_screen(void)
     }
 }
 
+/* ── night-dim dialog: OFF, ON, SET TIME; SET TIME has its own screen ───── */
+
+enum { N_SH, N_SM, N_EH, N_EM, N_DONE, N_ROWS };
+
+typedef struct { UiRect row[N_ROWS], minus[N_ROWS], plus[N_ROWS]; } DimSetLayout;
+
+static void dimset_layout(DimSetLayout *L)
+{
+    int cx = SCREEN_VISIBLE_LEFT + SCREEN_VISIBLE_WIDTH / 2;
+    int top = SCREEN_SAFE_TOP + 56, h = 52, gap = 10;
+    memset(L, 0, sizeof *L);
+    for (int i = 0; i < N_ROWS; i++) {
+        int y = top + i * (h + gap);
+        L->row[i] = (UiRect){ cx - 200, y, 400, h };
+        L->minus[i] = (UiRect){ cx - 200, y, 96, h };
+        L->plus[i]  = (UiRect){ cx + 104, y, 96, h };
+    }
+}
+
+/* Edits the two minutes of the day given; hours wrap through 24, minutes through 60 within the hour. */
+static void dimset_adjust(int *start, int *end, int row, int d)
+{
+    int *v = row < N_EH ? start : end;
+    if (row == N_SH || row == N_EH) *v = (*v + d * 60 + 1440) % 1440;
+    else *v = (*v / 60) * 60 + (*v % 60 + d + 60) % 60;
+}
+
+static void dimset_draw(const DimSetLayout *L, int sel, int start, int end)
+{
+    static const char *const NAME[] = { "START HOUR", "START MIN", "END HOUR", "END MIN" };
+    Framebuffer *fb = &g_dev.fb;
+    fb_clear(fb, COLOR_BLACK);
+    centered("DIM TIME", SCREEN_VISIBLE_TOP + 6, 5, COLOR_WHITE);
+    for (int i = 0; i < N_ROWS; i++) {
+        const UiRect *r = &L->row[i];
+        uint32_t edge = (i == sel) ? RGB(255, 200, 60) : RGB(110, 110, 110);
+        fb_draw_rect(fb, r->x, r->y, r->w, r->h, edge);
+        if (i == sel) fb_draw_rect(fb, r->x + 1, r->y + 1, r->w - 2, r->h - 2, edge);
+        char t[40];
+        if (i == N_DONE) {
+            fb_draw_text(fb, r->x + (r->w - text_measure_width("DONE", 3)) / 2, r->y + 14, "DONE", COLOR_WHITE, 3);
+        } else {
+            int m = i < N_EH ? start : end;
+            int v = (i == N_SH || i == N_EH) ? m / 60 : m % 60;
+            snprintf(t, sizeof t, "%s %02d", NAME[i], v);
+            fb_draw_text(fb, r->x + (r->w - text_measure_width(t, 2)) / 2, r->y + 18, t, COLOR_WHITE, 2);   /* scale 2: "START MIN 00" must clear the - and + boxes */
+            fb_draw_rect(fb, L->minus[i].x, L->minus[i].y, L->minus[i].w, L->minus[i].h, edge);
+            fb_draw_rect(fb, L->plus[i].x, L->plus[i].y, L->plus[i].w, L->plus[i].h, edge);
+            fb_draw_text(fb, L->minus[i].x + 36, r->y + 14, "-", COLOR_WHITE, 3);
+            fb_draw_text(fb, L->plus[i].x + 36, r->y + 14, "+", COLOR_WHITE, 3);
+        }
+    }
+    char a[16], b[16], t[48];
+    clock_fmt_minute_of_day(a, sizeof a, start, g_h24);
+    clock_fmt_minute_of_day(b, sizeof b, end, g_h24);
+    snprintf(t, sizeof t, "DIM %s TO %s", a, b);
+    centered(t, SCREEN_SAFE_BOTTOM - 26, 2, COLOR_GRAY);
+}
+
+/* Returns true when DONE was chosen (the schedule is then active); Escape leaves the times unchanged. */
+static bool dimset_screen(void)
+{
+    DimSetLayout L;
+    dimset_layout(&L);
+    int start = g_set.dim_start, end = g_set.dim_end;
+    int sel = N_SH;
+    int rep_row = -1, rep_dir = 0;
+    uint32_t rep_next = 0;
+    bool redraw = true;
+    while (g_running) {
+        uint32_t now = get_time_ms();
+        poll_input(now);
+        service(now);
+        if (clock_ringing(&g_state)) return false;
+        const ButtonState *bt = g_in.buttons;
+        if (back_pressed()) return false;
+        if (bt[BTN_ID_UP].pressed && sel > 0) { sel--; redraw = true; }
+        if (bt[BTN_ID_DOWN].pressed && sel < N_ROWS - 1) { sel++; redraw = true; }
+        if (bt[BTN_ID_LEFT].pressed && sel != N_DONE) { dimset_adjust(&start, &end, sel, -1); redraw = true; }
+        if (bt[BTN_ID_RIGHT].pressed && sel != N_DONE) { dimset_adjust(&start, &end, sel, 1); redraw = true; }
+        bool done = (bt[BTN_ID_JUMP].pressed || bt[BTN_ID_ACTION].pressed) && sel == N_DONE;
+        if (g_ts.pressed) {
+            for (int i = 0; i < N_ROWS; i++) {
+                if (i == N_DONE) {
+                    if (in_rect(&L.row[i], g_ts.x, g_ts.y)) { sel = i; done = true; }
+                } else if (in_rect(&L.minus[i], g_ts.x, g_ts.y) || in_rect(&L.plus[i], g_ts.x, g_ts.y)) {
+                    sel = i;
+                    rep_row = i;
+                    rep_dir = in_rect(&L.minus[i], g_ts.x, g_ts.y) ? -1 : 1;
+                    rep_next = now + 450;
+                    dimset_adjust(&start, &end, i, rep_dir);
+                    redraw = true;
+                }
+            }
+        }
+        if (done) {
+            g_set.dim_start = start;
+            g_set.dim_end = end;
+            g_set.dim_mode = CLOCK_DIM_SCHEDULE;
+            settings_save();
+            return true;
+        }
+        if (g_ts.released) rep_row = -1;
+        if (rep_row >= 0 && g_ts.held && (int32_t)(now - rep_next) >= 0) {
+            dimset_adjust(&start, &end, rep_row, rep_dir);
+            rep_next = now + 90;
+            redraw = true;
+        }
+        if (redraw) {
+            dimset_draw(&L, sel, start, end);
+            present();
+            redraw = false;
+        }
+        bool moved = pointer_paint(&g_dev.ptr, &g_dev.fb);
+        usleep(moved ? 8000 : 16000);
+    }
+    return false;
+}
+
+enum { D_OFF, D_ON, D_SET, D_ROWS };
+
+static void dim_layout(UiRect row[D_ROWS])
+{
+    int cx = SCREEN_VISIBLE_LEFT + SCREEN_VISIBLE_WIDTH / 2;
+    int top = SCREEN_SAFE_TOP + 62, h = 56, gap = 14;
+    for (int i = 0; i < D_ROWS; i++) row[i] = (UiRect){ cx - 200, top + i * (h + gap), 400, h };
+}
+
+static int dim_current_row(void)
+{
+    return g_set.dim_mode == CLOCK_DIM_ON ? D_ON : g_set.dim_mode == CLOCK_DIM_SCHEDULE ? D_SET : D_OFF;
+}
+
+static void dim_draw(const UiRect row[D_ROWS], int sel)
+{
+    static const char *const NAME[D_ROWS] = { "OFF", "ON", "SET TIME" };
+    Framebuffer *fb = &g_dev.fb;
+    fb_clear(fb, COLOR_BLACK);
+    centered("NIGHT DIM", SCREEN_VISIBLE_TOP + 10, 5, COLOR_WHITE);
+    for (int i = 0; i < D_ROWS; i++) {
+        const UiRect *r = &row[i];
+        uint32_t edge = (i == sel) ? RGB(255, 200, 60) : RGB(110, 110, 110);
+        fb_draw_rect(fb, r->x, r->y, r->w, r->h, edge);
+        if (i == sel) fb_draw_rect(fb, r->x + 1, r->y + 1, r->w - 2, r->h - 2, edge);
+        uint32_t c = (i == dim_current_row()) ? RGB(110, 230, 120) : COLOR_WHITE;   /* the mode in force is green */
+        fb_draw_text(fb, r->x + (r->w - text_measure_width(NAME[i], 3)) / 2, r->y + 16, NAME[i], c, 3);
+    }
+    centered("ON DIMS UNTIL SWITCHED OFF", SCREEN_SAFE_BOTTOM - 26, 2, COLOR_GRAY);
+}
+
+/* Returns true when the choice should take the app back to the clock screen. */
+static bool dim_dialog(void)
+{
+    UiRect row[D_ROWS];
+    dim_layout(row);
+    int sel = dim_current_row();
+    bool redraw = true;
+    while (g_running) {
+        uint32_t now = get_time_ms();
+        poll_input(now);
+        service(now);
+        if (clock_ringing(&g_state)) return false;
+        const ButtonState *bt = g_in.buttons;
+        if (back_pressed()) return false;
+        if (bt[BTN_ID_UP].pressed && sel > 0) { sel--; redraw = true; }
+        if (bt[BTN_ID_DOWN].pressed && sel < D_ROWS - 1) { sel++; redraw = true; }
+        int pick = -1;
+        if (bt[BTN_ID_JUMP].pressed || bt[BTN_ID_ACTION].pressed) pick = sel;
+        if (g_ts.pressed)
+            for (int i = 0; i < D_ROWS; i++)
+                if (in_rect(&row[i], g_ts.x, g_ts.y)) { sel = i; pick = i; }
+        if (pick == D_OFF || pick == D_ON) {
+            g_set.dim_mode = pick == D_ON ? CLOCK_DIM_ON : CLOCK_DIM_OFF;
+            settings_save();
+            return true;
+        }
+        if (pick == D_SET) {
+            if (dimset_screen()) return true;
+            if (clock_ringing(&g_state)) return false;
+            memset(&g_in, 0, sizeof g_in);
+            pointer_drain(&g_dev.ptr);
+            redraw = true;
+        }
+        if (redraw) {
+            dim_draw(row, sel);
+            present();
+            redraw = false;
+        }
+        bool moved = pointer_paint(&g_dev.ptr, &g_dev.fb);
+        usleep(moved ? 8000 : 16000);
+    }
+    return false;
+}
+
 /* ── timer menu ─────────────────────────────────────────────────────────── */
 
 /* Returns true when a timer was started (so the caller goes back to the clock). */
@@ -387,15 +581,27 @@ static bool timer_menu(void)
 
 /* ── main menu ──────────────────────────────────────────────────────────── */
 
-static const char *const DIM_NAMES[] = { "OFF", "ON" };
+
 static const char *const FMT_NAMES[] = { "24 H", "12 H" };
-static int g_dim_idx, g_fmt_idx;
+static int g_fmt_idx;
+
+/* The menu entry shows the state: "DIM: OFF", "DIM: ON" or "DIM: 22:00-07:00". */
+static const char *dim_label(char *out, size_t n)
+{
+    if (g_set.dim_mode == CLOCK_DIM_SCHEDULE) {
+        char a[12], b[12];
+        clock_fmt_minute_of_day(a, sizeof a, g_set.dim_start, g_h24);
+        clock_fmt_minute_of_day(b, sizeof b, g_set.dim_end, g_h24);
+        snprintf(out, n, "DIM: %s-%s", a, b);
+    } else {
+        snprintf(out, n, "DIM: %s", g_set.dim_mode == CLOCK_DIM_ON ? "ON" : "OFF");
+    }
+    return out;
+}
 
 static void menu_hook(StartMenu *m)
 {
-    bool dim = start_menu_value(m, g_dim_idx) == 1;
     bool h24 = start_menu_value(m, g_fmt_idx) == 0;
-    if (dim != g_set.dim_on) { g_set.dim_on = dim; settings_save(); }
     if (h24 != g_h24) { g_h24 = h24; fmt_save(); }
 }
 
@@ -407,12 +613,12 @@ static bool main_menu(void)
     ClockTime t;
     now_time(&t);
     start_menu_init(&m, "CLOCK", NULL, get_time_ms());
-    char am[16];
+    char am[16], dl[32];
     clock_fmt_minute_of_day(am, sizeof am, g_set.alarm_min, g_h24);
     snprintf(l, sizeof l, "ALARM %s", g_set.alarm_on ? am : "OFF");
     int e_alarm = start_menu_add_action(&m, l);
     int e_timer = start_menu_add_action(&m, "TIMER");
-    g_dim_idx = start_menu_add_choice(&m, "NIGHT DIM", DIM_NAMES, 2, g_set.dim_on ? 1 : 0);
+    int e_dim = start_menu_add_action(&m, dim_label(dl, sizeof dl));
     g_fmt_idx = start_menu_add_choice(&m, "TIME FORMAT", FMT_NAMES, 2, g_h24 ? 0 : 1);
     int e_back = start_menu_add_action(&m, "BACK TO CLOCK");
     int e_exit = start_menu_add_action(&m, "EXIT");
@@ -428,6 +634,10 @@ static bool main_menu(void)
             if (clock_ringing(&g_state)) return true;
             clock_fmt_minute_of_day(am, sizeof am, g_set.alarm_min, g_h24);
             snprintf(m.entries[e_alarm].label, sizeof m.entries[e_alarm].label, "ALARM %s", g_set.alarm_on ? am : "OFF");
+        } else if (r == e_dim) {
+            if (dim_dialog()) break;
+            if (clock_ringing(&g_state)) return true;
+            dim_label(m.entries[e_dim].label, sizeof m.entries[e_dim].label);
         } else if (r == e_timer) {
             if (timer_menu()) break;
         }

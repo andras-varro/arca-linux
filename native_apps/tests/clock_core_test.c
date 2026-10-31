@@ -227,7 +227,7 @@ int main(void)
     clock_settings_defaults(&s);
 
     /* ---- dim ---- */
-    s.dim_on = true;                                          /* 22:00-07:00, level 10 */
+    s.dim_mode = CLOCK_DIM_SCHEDULE;                          /* 22:00-07:00, level 10 */
     ClockTime d;
     d = T(30, 21, 59, 0); CHECK(clock_backlight(&s, &d, 80) == 80);
     d = T(30, 22, 0, 0);  CHECK(clock_backlight(&s, &d, 80) == 10);
@@ -237,9 +237,9 @@ int main(void)
     d = T(31, 7, 0, 0);   CHECK(clock_backlight(&s, &d, 80) == 80);
     d = T(31, 12, 0, 0);  CHECK(clock_backlight(&s, &d, 80) == 80);
     d = T(30, 23, 0, 0);  CHECK(clock_backlight(&s, &d, 5) == 5);     /* never brighter than the maximum */
-    s.dim_on = false;
+    s.dim_mode = CLOCK_DIM_OFF;
     d = T(30, 23, 0, 0);  CHECK(clock_backlight(&s, &d, 80) == 80);
-    s.dim_on = true; s.dim_start = 13 * 60; s.dim_end = 15 * 60;       /* non-wrapping */
+    s.dim_mode = CLOCK_DIM_SCHEDULE; s.dim_start = 13 * 60; s.dim_end = 15 * 60;       /* non-wrapping */
     d = T(30, 12, 59, 0); CHECK(clock_backlight(&s, &d, 70) == 70);
     d = T(30, 13, 0, 0);  CHECK(clock_backlight(&s, &d, 70) == 10);
     d = T(30, 14, 59, 0); CHECK(clock_backlight(&s, &d, 70) == 10);
@@ -250,10 +250,18 @@ int main(void)
     d = T(30, 18, 0, 0);  CHECK(clock_backlight(&s, &d, 70) == 70);
     s.dim_start = 22 * 60; s.dim_end = 7 * 60; s.dim_level = 0;
     d = T(30, 23, 0, 0);  CHECK(clock_backlight(&s, &d, 70) == 0);
+    s.dim_mode = CLOCK_DIM_ON; s.dim_level = 10;                       /* ON: dim at any hour, no window */
+    d = T(30, 12, 0, 0);  CHECK(clock_backlight(&s, &d, 70) == 10);
+    d = T(30, 3, 0, 0);   CHECK(clock_backlight(&s, &d, 70) == 10);
+    d = T(30, 12, 0, 0);  CHECK(clock_backlight(&s, &d, 5) == 5);
+    s.dim_start = s.dim_end = 6 * 60;
+    d = T(30, 12, 0, 0);  CHECK(clock_backlight(&s, &d, 70) == 10);   /* ON ignores an empty window */
+    s.dim_mode = CLOCK_DIM_OFF; s.dim_start = 22 * 60; s.dim_end = 7 * 60;
+    d = T(30, 23, 0, 0);  CHECK(clock_backlight(&s, &d, 70) == 70);   /* OFF ignores the window */
 
     /* ---- settings ---- */
     clock_settings_defaults(&s);
-    CHECK(!s.alarm_on && s.alarm_min == 420 && !s.dim_on && s.dim_start == 1320 && s.dim_end == 420 &&
+    CHECK(!s.alarm_on && s.alarm_min == 420 && s.dim_mode == CLOCK_DIM_OFF && s.dim_start == 1320 && s.dim_end == 420 &&
           s.dim_level == 10 && s.snooze_min == 9 && s.ring_s == 60 && s.pom_work == 25 &&
           s.pom_break == 5 && s.pom_long == 15 && s.pom_every == 4);
     ClockSettings r;
@@ -278,7 +286,7 @@ int main(void)
         "alarm=25:00\n"                    /* out of range: keeps 06:45 */
         "dim_end=7:00\n"                   /* wrong shape: keeps 05:15 */
         "\n");
-    CHECK(r.alarm_on && r.alarm_min == 6 * 60 + 45 && r.dim_on && r.dim_start == 23 * 60 + 30 &&
+    CHECK(r.alarm_on && r.alarm_min == 6 * 60 + 45 && r.dim_mode == CLOCK_DIM_SCHEDULE && r.dim_start == 23 * 60 + 30 &&
           r.dim_end == 5 * 60 + 15 && r.dim_level == 100 && r.snooze_min == 1 && r.ring_s == 600 &&
           r.pom_work == 25 && r.pom_break == 5 && r.pom_long == 15 && r.pom_every == 3);
     clock_settings_defaults(&r);
@@ -294,14 +302,27 @@ int main(void)
     clock_settings_parse(&r, txt);
     CHECK(r.dim_level == 33);
 
+    /* the dim mode: the old key maps on/off to schedule/off, the new key wins by order and is clamped */
+#define PARSE_MODE(txt) (clock_settings_defaults(&r), clock_settings_parse(&r, txt), r.dim_mode)
+    CHECK(PARSE_MODE("dim_on=0\n") == CLOCK_DIM_OFF);
+    CHECK(PARSE_MODE("dim_on=1\n") == CLOCK_DIM_SCHEDULE);
+    CHECK(PARSE_MODE("dim_mode=0\n") == CLOCK_DIM_OFF);
+    CHECK(PARSE_MODE("dim_mode=1\n") == CLOCK_DIM_ON);
+    CHECK(PARSE_MODE("dim_mode=2\n") == CLOCK_DIM_SCHEDULE);
+    CHECK(PARSE_MODE("dim_mode=9\n") == CLOCK_DIM_SCHEDULE);          /* clamped */
+    CHECK(PARSE_MODE("dim_mode=1\ndim_on=1\n") == CLOCK_DIM_SCHEDULE);  /* the later line wins */
+#undef PARSE_MODE
+    r.dim_mode = CLOCK_DIM_ON;
+    { char o[512]; clock_settings_serialise(&r, o, sizeof o); CHECK(strstr(o, "dim_mode=1\n") && !strstr(o, "dim_on")); }
+
     /* round trip, including a non-default set */
-    ClockSettings w = { true, 23 * 60 + 59, true, 0, 12 * 60 + 5, 77, 15, 120, 45, 2, 12, 5 };
+    ClockSettings w = { true, 23 * 60 + 59, CLOCK_DIM_ON, 0, 12 * 60 + 5, 77, 15, 120, 45, 2, 12, 5 };
     char file[512];
     int n = clock_settings_serialise(&w, file, sizeof file);
     CHECK(n > 0 && (size_t)n == strlen(file));
     clock_settings_defaults(&r);
     clock_settings_parse(&r, file);
-    CHECK(r.alarm_on && r.alarm_min == 1439 && r.dim_on && r.dim_start == 0 && r.dim_end == 725 &&
+    CHECK(r.alarm_on && r.alarm_min == 1439 && r.dim_mode == CLOCK_DIM_ON && r.dim_start == 0 && r.dim_end == 725 &&
           r.dim_level == 77 && r.snooze_min == 15 && r.ring_s == 120 && r.pom_work == 45 &&
           r.pom_break == 2 && r.pom_long == 12 && r.pom_every == 5);
     char again[512];

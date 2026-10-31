@@ -16,7 +16,7 @@ void clock_settings_defaults(ClockSettings *s)
 {
     s->alarm_on = false;
     s->alarm_min = CLOCK_DEF_ALARM_MIN;
-    s->dim_on = false;
+    s->dim_mode = CLOCK_DIM_OFF;
     s->dim_start = CLOCK_DEF_DIM_START;
     s->dim_end = CLOCK_DEF_DIM_END;
     s->dim_level = CLOCK_DEF_DIM_LEVEL;
@@ -53,7 +53,8 @@ static void apply(ClockSettings *s, const char *key, const char *val)
     int v;
     if (!strcmp(key, "alarm_on")) { if (parse_int(val, &v)) s->alarm_on = v != 0; }
     else if (!strcmp(key, "alarm")) { v = parse_hhmm(val); if (v >= 0) s->alarm_min = v; }
-    else if (!strcmp(key, "dim_on")) { if (parse_int(val, &v)) s->dim_on = v != 0; }
+    else if (!strcmp(key, "dim_mode")) { if (parse_int(val, &v)) s->dim_mode = clampi(v, CLOCK_DIM_OFF, CLOCK_DIM_SCHEDULE); }
+    else if (!strcmp(key, "dim_on")) { if (parse_int(val, &v)) s->dim_mode = v != 0 ? CLOCK_DIM_SCHEDULE : CLOCK_DIM_OFF; }   /* older files */
     else if (!strcmp(key, "dim_start")) { v = parse_hhmm(val); if (v >= 0) s->dim_start = v; }
     else if (!strcmp(key, "dim_end")) { v = parse_hhmm(val); if (v >= 0) s->dim_end = v; }
     else if (!strcmp(key, "dim_level")) { if (parse_int(val, &v)) s->dim_level = clampi(v, 0, 100); }
@@ -92,10 +93,10 @@ void clock_settings_parse(ClockSettings *s, const char *text)
 int clock_settings_serialise(const ClockSettings *s, char *out, size_t n)
 {
     int w = snprintf(out, n,
-        "alarm_on=%d\nalarm=%02d:%02d\ndim_on=%d\ndim_start=%02d:%02d\ndim_end=%02d:%02d\ndim_level=%d\n"
+        "alarm_on=%d\nalarm=%02d:%02d\ndim_mode=%d\ndim_start=%02d:%02d\ndim_end=%02d:%02d\ndim_level=%d\n"
         "snooze_min=%d\nring_s=%d\npom_work=%d\npom_break=%d\npom_long=%d\npom_every=%d\n",
         s->alarm_on ? 1 : 0, s->alarm_min / 60, s->alarm_min % 60,
-        s->dim_on ? 1 : 0, s->dim_start / 60, s->dim_start % 60, s->dim_end / 60, s->dim_end % 60,
+        s->dim_mode, s->dim_start / 60, s->dim_start % 60, s->dim_end / 60, s->dim_end % 60,
         s->dim_level, s->snooze_min, s->ring_s, s->pom_work, s->pom_break, s->pom_long, s->pom_every);
     return (w < 0 || (size_t)w >= n) ? -1 : w;
 }
@@ -147,7 +148,8 @@ int clock_fmt_date(char *out, size_t n, const ClockTime *t)
 int clock_backlight(const ClockSettings *s, const ClockTime *t, int max_level)
 {
     max_level = clampi(max_level, 0, 100);
-    if (!s->dim_on || s->dim_start == s->dim_end) return max_level;
+    if (s->dim_mode == CLOCK_DIM_ON) return s->dim_level < max_level ? s->dim_level : max_level;
+    if (s->dim_mode != CLOCK_DIM_SCHEDULE || s->dim_start == s->dim_end) return max_level;
     int m = clampi(t->hour, 0, 23) * 60 + clampi(t->min, 0, 59);
     bool in = s->dim_start < s->dim_end ? (m >= s->dim_start && m < s->dim_end)
                                         : (m >= s->dim_start || m < s->dim_end);

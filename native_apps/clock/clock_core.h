@@ -37,10 +37,11 @@ typedef struct {
 } ClockTime;
 
 /* ---- settings ---- */
+enum { CLOCK_DIM_OFF = 0, CLOCK_DIM_ON = 1, CLOCK_DIM_SCHEDULE = 2 };
 typedef struct {
     bool alarm_on;
     int  alarm_min;         /* minute of the day, 0-1439 */
-    bool dim_on;
+    int  dim_mode;          /* CLOCK_DIM_OFF / CLOCK_DIM_ON (dim until switched off) / CLOCK_DIM_SCHEDULE (the window) */
     int  dim_start, dim_end;/* minute of the day; start > end wraps midnight; start == end = no window */
     int  dim_level;         /* 0-100 backlight percent while dimmed */
     int  snooze_min;        /* 1-60 */
@@ -65,8 +66,9 @@ int  clock_fmt_date(char *out, size_t n, const ClockTime *t);      /* "FRI 30 OC
 int  clock_fmt_minute_of_day(char *out, size_t n, int minute, bool h24);   /* for the alarm/dim rows: "22:00" / "10:00 PM" */
 
 /* ---- night dim ---- */
-/* The backlight percent to hold now: `max_level` outside the window or when dimming is off, otherwise
- * min(dim_level, max_level).  The window is [start, end), wrapping midnight when start > end. */
+/* The backlight percent to hold now: `max_level` when dimming is off or (mode SCHEDULE) outside the window,
+ * otherwise min(dim_level, max_level).  Mode ON dims at any time.  The window is [start, end), wrapping
+ * midnight when start > end. */
 int  clock_backlight(const ClockSettings *s, const ClockTime *t, int max_level);
 
 /* ---- one state for alarm + timer + the ring they share ---- */
