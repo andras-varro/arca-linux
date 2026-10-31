@@ -32,6 +32,7 @@
 #include "../common/audio.h"
 #include "../common/config.h"
 #include "clock_core.h"
+#include "seg7.h"
 
 #define SETTINGS_PATH "/home/root/data/clock.conf"
 #define FMT_PATH      "/home/root/data/clock_fmt.conf"
@@ -494,6 +495,20 @@ static void ring_screen(void)
 
 /* ── main screen ────────────────────────────────────────────────────────── */
 
+static Seg7Face g_big, g_small;   /* lit digits 0-9 and colon, rendered once at start-up */
+
+static struct { int x, y, w, h; } g_sec;   /* where draw_main put the seconds; w == 0 until it has */
+static int g_sec_space = 6;
+
+/* A tick of the seconds alone: the back buffer still holds the rest of the screen, so only the
+ * seconds box is cleared, redrawn and presented (a full redraw costs about 6 ms of CPU a second). */
+static void draw_seconds(const char *ss)
+{
+    Framebuffer *fb = &g_dev.fb;
+    fb_fill_rect(fb, g_sec.x, g_sec.y, g_sec.w, g_sec.h, COLOR_BLACK);
+    seg7_draw_text(fb->back_buffer, (int)fb->width, (int)fb->height, &g_small, ss, g_sec.x, g_sec.y, g_sec_space);
+}
+
 static void draw_main(const ClockTime *t, const char *status)
 {
     Framebuffer *fb = &g_dev.fb;
@@ -502,20 +517,21 @@ static void draw_main(const ClockTime *t, const char *status)
     clock_fmt_seconds(ss, sizeof ss, t);
     clock_fmt_date(dt, sizeof dt, t);
     const char *ap = clock_fmt_ampm(t, g_h24);
-    int big = 16, small = 6;
-    int wb = text_measure_width(hm, big), ws = text_measure_width(ss, small);
-    int gap = 14;
+    int bsp = 12, ssp = g_sec_space;
+    int wb = seg7_text_width(&g_big, hm, bsp), ws = seg7_text_width(&g_small, ss, ssp);
+    int gap = 22;
     int total = wb + gap + ws;
     int x = SCREEN_VISIBLE_LEFT + (SCREEN_VISIBLE_WIDTH - total) / 2;
-    int y = SCREEN_VISIBLE_TOP + 70;
-    int bigh = text_measure_height(big);
+    int y = SCREEN_VISIBLE_TOP + 46;
+    int bigh = g_big.h;
     fb_clear(fb, COLOR_BLACK);
-    fb_draw_text(fb, x, y, hm, COLOR_WHITE, big);
-    int sx = x + wb + gap, sy = y + bigh - text_measure_height(small);
-    fb_draw_text(fb, sx, sy, ss, RGB(170, 170, 170), small);
-    if (ap[0]) fb_draw_text(fb, sx, sy - text_measure_height(5) - 8, ap, RGB(255, 200, 60), 5);
-    centered(dt, y + bigh + 36, 5, RGB(120, 200, 255));
-    if (status[0]) centered(status, y + bigh + 36 + text_measure_height(5) + 28, 3, RGB(110, 230, 120));
+    seg7_draw_text(fb->back_buffer, (int)fb->width, (int)fb->height, &g_big, hm, x, y, bsp);
+    int sx = x + wb + gap, sy = y + bigh - g_small.h;
+    seg7_draw_text(fb->back_buffer, (int)fb->width, (int)fb->height, &g_small, ss, sx, sy, ssp);
+    g_sec.x = sx; g_sec.y = sy; g_sec.w = ws; g_sec.h = g_small.h;
+    if (ap[0]) fb_draw_text(fb, sx, sy - text_measure_height(5) - 12, ap, RGB(255, 200, 60), 5);
+    centered(dt, y + bigh + 30, 5, RGB(120, 200, 255));
+    if (status[0]) centered(status, y + bigh + 30 + text_measure_height(5) + 24, 3, RGB(110, 230, 120));
     centered("TAP FOR MENU", SCREEN_VISIBLE_BOTTOM - 30, 2, RGB(90, 90, 90));
 }
 
@@ -553,6 +569,12 @@ int main(int argc, char *argv[])
     memset(&g_dev, 0, sizeof g_dev);
     fb_set_bpp(g_fb_dev, 32);
     if (fb_init(&g_dev.fb, g_fb_dev) < 0) { fprintf(stderr, "clock: cannot open framebuffer %s\n", g_fb_dev); return 1; }
+    if (g_dev.fb.bytes_per_pixel != 4 ||
+        seg7_face_build(&g_big, 112, 216, 26, 3, COLOR_WHITE, COLOR_BLACK, 9) < 0 ||
+        seg7_face_build(&g_small, 46, 90, 11, 2, RGB(170, 170, 170), COLOR_BLACK, 9) < 0) {
+        fprintf(stderr, "clock: needs a 32bpp framebuffer and memory for the digit cache\n");
+        return 1;
+    }
     if (touch_init(&g_dev.touch, g_touch_dev) == 0) {
         touch_set_screen_size(&g_dev.touch, g_dev.fb.width, g_dev.fb.height);
         touch_drain_events(&g_dev.touch);
@@ -599,7 +621,13 @@ int main(int argc, char *argv[])
         clock_fmt_seconds(ss, sizeof ss, &t);
         build_status(status, sizeof status);
         bool changed = force || strcmp(hm, drawn_hm) || strcmp(ss, drawn_ss) || strcmp(status, drawn_status);
-        if (changed) {
+        bool seconds_only = !force && g_sec.w > 0 && !strcmp(hm, drawn_hm) && !strcmp(status, drawn_status);
+        if (changed && seconds_only) {
+            draw_seconds(ss);
+            fb_swap_rect(&g_dev.fb, g_sec.x, g_sec.y, g_sec.w, g_sec.h);
+            pointer_invalidate(&g_dev.ptr);
+            snprintf(drawn_ss, sizeof drawn_ss, "%s", ss);
+        } else if (changed) {
             draw_main(&t, status);
             present();
             snprintf(drawn_hm, sizeof drawn_hm, "%s", hm);

@@ -70,7 +70,7 @@ cpu_budget() {
         audio_mix_test) echo 25 ;;   # 13 13 14
         retro_picker)   echo 60 ;;   # 42 41 43  (measured 2026-10-26, idle list, no input)
         frame)          echo 45 ;;   # 31 30 (measured 2026-10-30, start menu, no input; the slideshow itself idles near 1%)
-        clock)          echo 15 ;;   # 8 (measured 2026-10-30, main screen idle, 47 ticks over 60 s, n=1; redraws only when the text changes)
+        clock)          echo 15 ;;   # 3 (measured 2026-10-30, main screen idle, 20 ticks over 60 s, n=1; cached seven-segment glyphs, only the seconds box redrawn each second)
         theremin)       echo 960 ;;  # 872 862 863: synthesises continuously, ~87% of the core
         touch_raw)      echo 760 ;;  # 682 683 686: polls its input flat out, ~68%
         *) return 1 ;;

@@ -382,7 +382,7 @@ $CC "${WARN[@]}" -O2 -I. -Icommon -Iframe frame/frame.c frame/frame_core.c frame
 
 # clock: the full-screen clock (alarm, timer, night dim); clock_core.c is its host-tested logic.
 step "40/40" "clock"
-$CC "${WARN[@]}" -O2 -I. -Icommon -Iclock clock/clock.c clock/clock_core.c build/pointer.o "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/clock -lm "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. -Icommon -Iclock clock/clock.c clock/clock_core.c clock/seg7.c build/pointer.o "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/clock -lm "${AUDIO_LIBS[@]}"
 
 # Collect icon files from source dirs → build/icons/.  control_panel/icons/ holds
 # the control panel's home-grid icons (gen_cp_icons.py); control_panel reads them

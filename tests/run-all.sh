@@ -184,6 +184,7 @@ CTEST_ROWS=(
     "frame_jf_test|-I common -I frame -I jf_shared -fsanitize=undefined,address|frame/frame_jf.c jf_shared/jf_url.c common/json.c"
     "frame_logic_test|-I frame -fsanitize=undefined,address|frame/frame_logic.c"
     "clock_core_test|-I clock -fsanitize=undefined,address|clock/clock_core.c"
+    "seg7_test|-I clock -fsanitize=undefined,address|clock/seg7.c"
     "vid_ring_test|-I jfvideo -fsanitize=undefined,address|jfvideo/vid_ring.c|-lpthread"
     "vid_clock_test|-I jfvideo -fsanitize=undefined,address|jfvideo/vid_clock.c|-lm"
     "vid_level_test|-I jfvideo -fsanitize=undefined,address|jfvideo/vid_level.c|-lm"
