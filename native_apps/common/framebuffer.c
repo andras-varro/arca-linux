@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include "overtemp.h"
+#include "usbfault.h"
 
 #define LOGGER_LIB_CLIENT
 #include "logger.h"
@@ -683,8 +684,6 @@ static void fb_present_rect(Framebuffer *fb, int x, int y, int w, int h) {
 // so an app that presents once a second shows them to that granularity.
 #define FB_OT_SIZE 16
 #define FB_UF_BAR 6
-#define FB_UF_PERIOD_MS 10000u
-#define FB_UF_PHASE_MS 200u
 
 static struct { long long last_ms; int on; int usb; int bars; } fb_ot = { -1, 0, 0, 0 };
 
@@ -732,11 +731,10 @@ static void fb_overtemp_paint(Framebuffer *fb) {
     fb_mark_red(fb, fb->width - (uint32_t)s, 0, s, s);
 }
 
-// Whether the sidebars are in an "on" phase at now_ms (even 200 ms slots of
-// the first 1200 ms of each 10 s).
+// Whether the sidebars are in an "on" phase at now_ms: usbf_flash_on(), the
+// cadence the red LED shares (arcamond).
 static int fb_usbfault_bars_on(uint32_t now_ms) {
-    const uint32_t t = now_ms % FB_UF_PERIOD_MS;
-    return t < 6u * FB_UF_PHASE_MS && ((t / FB_UF_PHASE_MS) & 1u) == 0;
+    return usbf_flash_on(now_ms);
 }
 
 void fb_overtemp_poll(Framebuffer *fb) {

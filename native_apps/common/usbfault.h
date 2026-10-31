@@ -3,7 +3,8 @@
  * The kernel logs "VBUS_ERROR" when an overcurrent drops the musb session and
  * then never raises VBUS again.  arcamond (sysmon/arcamond.c) feeds this
  * state machine once a second and acts on its answer; it publishes the latch
- * as MON_FLAG_USBFAULT in the ring header, which framebuffer.c paints.
+ * as MON_FLAG_USBFAULT in the ring header, which framebuffer.c paints and
+ * which arcamond also flashes on red_led (usbf_led below).
  * Header-only and pure: no file, clock or process access; the caller passes
  * a uint32_t millisecond clock (wraps are handled by signed differences).
  * tests/usbfault_test.c drives it.
@@ -40,6 +41,29 @@ static inline void usbf_init(UsbFault *f) {
 
 /* The ring flag: the confirmed fault only, not the 5 s waiting window. */
 static inline int usbf_flag(const UsbFault *f) { return f->latched; }
+
+/* The fault's flash cadence, shared by the screen's sidebars (framebuffer.c)
+ * and the red LED (arcamond.c): lit in the even 200 ms slots of the first
+ * 1200 ms of every 10 s of the monotonic millisecond clock, so both flash
+ * together. */
+#define USBF_FLASH_PERIOD_MS 10000u
+#define USBF_FLASH_PHASE_MS  200u
+
+static inline int usbf_flash_on(uint32_t now_ms) {
+    const uint32_t t = now_ms % USBF_FLASH_PERIOD_MS;
+    return t < 6u * USBF_FLASH_PHASE_MS && ((t / USBF_FLASH_PHASE_MS) & 1u) == 0;
+}
+
+/* What arcamond does with red_led: give it back, light it, or hold it dark
+ * (a flash's off phase; the saved value stays saved).  Over-temperature is
+ * solid and wins over a latched fault. */
+enum { USBF_LED_RELEASE = 0, USBF_LED_LIT = 1, USBF_LED_DARK = 2 };
+
+static inline int usbf_led(int overtemp, int latched, uint32_t now_ms) {
+    if (overtemp) return USBF_LED_LIT;
+    if (!latched) return USBF_LED_RELEASE;
+    return usbf_flash_on(now_ms) ? USBF_LED_LIT : USBF_LED_DARK;
+}
 
 /* Whether the caller must look at /sys/bus/usb/devices this second. */
 static inline int usbf_wants_scan(const UsbFault *f, uint32_t now_ms) {

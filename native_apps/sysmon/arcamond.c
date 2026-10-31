@@ -10,7 +10,7 @@
  *   - CPU: niced to 19, no threads, no SCHED_RR; one wakeup a second on an
  *     absolute monotonic deadline, so it never drifts into a busy loop.
  *   - the framebuffer, input devices, audio: none are opened.  The one LED
- *     it touches is red_led, and only while over-temperature (below).
+ *     it touches is red_led, and only while over-temperature or a USB fault.
  *   - a missing sensor is a "-" field, never an exit: a kernel without the
  *     bandgap driver has no thermal zone, and that is a normal unit.
  * SIGTERM / SIGINT: the ring file is removed and the process exits 0, so a
@@ -27,6 +27,11 @@
  * latch clears or the daemon stops.  While FORCE_PATH exists the flag is set
  * regardless of the reading: the SSH-only way to test the square and the LED
  * without heating the SoC (touch it to force, rm it to release).
+ *
+ * A latched USB fault (usbfault.h) flashes the same LED in the cadence of the
+ * screen's red sidebars: three 200 ms flashes at the start of every 10 s,
+ * the wait cut into 200 ms slots only while it flashes.  Over-temperature, solid,
+ * wins; one save and one restore serve both.
  */
 #define FORCE_PATH "/var/run/arcamond.force_overtemp"
 #include "control_panel/cpu_load.h"
@@ -100,18 +105,20 @@ static void publish(const char *text, int len) {
 }
 
 /* red_led while warning: led_saved is the RAW sysfs text to put back, empty
- * when the warning does not own the LED.  Lit through hw_set_led() so the
+ * when no warning owns the LED.  Lit or darkened through hw_set_led() so the
  * configured LED maximum applies; saved and restored raw, because the
  * helpers' percent scaling does not round-trip (30 came back as 29 at 70 %,
- * measured on .188). */
+ * measured on .188).  One owner for both warnings: mode is usbf_led()'s
+ * answer (release, lit, or dark for a fault flash's off phase). */
 #define RED_LED_SYSFS "/sys/class/leds/red_led/brightness"
 static char led_saved[16];
 
-static void warn_led(int on) {
-    if (on) {
+static void warn_led(int mode) {
+    if (mode != USBF_LED_RELEASE) {
+        int want = mode == USBF_LED_LIT ? 100 : 0;
         if (!led_saved[0] && read_text(RED_LED_SYSFS, led_saved, sizeof(led_saved)) <= 0)
             strcpy(led_saved, "0");
-        if (hw_get_led(LED_RED) != 100) hw_set_led(LED_RED, 100);
+        if (hw_get_led(LED_RED) != want) hw_set_led(LED_RED, want);
     } else if (led_saved[0]) {
         int fd = open(RED_LED_SYSFS, O_WRONLY);
         if (fd >= 0) {
@@ -191,6 +198,38 @@ static void recover_start(void) {
     if (p > 0) recover_pid = p;
 }
 
+static uint32_t mono_ms(void) {
+    struct timespec tn;
+    clock_gettime(CLOCK_MONOTONIC, &tn);
+    return (uint32_t)tn.tv_sec * 1000u + (uint32_t)(tn.tv_nsec / 1000000);
+}
+
+static void sleep_until(const struct timespec *t) {
+    while (running && clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, t, NULL) == EINTR)
+        ;
+}
+
+/* The wait for the next one-second deadline.  While a fault flashes the LED
+ * it is cut at every 200 ms slot boundary of the monotonic clock, so the LED
+ * follows usbf_led()'s slots (the sidebars' cadence) instead of the 1 s tick. */
+static void wait_tick(const struct timespec *next, int flash) {
+    while (flash && running) {
+        struct timespec t;
+        clock_gettime(CLOCK_MONOTONIC, &t);
+        long long left = ((long long)next->tv_sec - t.tv_sec) * 1000000000LL
+                       + (next->tv_nsec - t.tv_nsec);
+        long long step = (long long)(USBF_FLASH_PHASE_MS - mono_ms() % USBF_FLASH_PHASE_MS)
+                       * 1000000LL;
+        if (left <= step) break;
+        t.tv_nsec += (long)(step % 1000000000LL);
+        t.tv_sec += (time_t)(step / 1000000000LL);
+        if (t.tv_nsec >= 1000000000L) { t.tv_nsec -= 1000000000L; t.tv_sec++; }
+        sleep_until(&t);
+        if (running) warn_led(usbf_led(0, 1, mono_ms()));
+    }
+    sleep_until(next);
+}
+
 int main(void) {
     static MonRing ring;
     static char text[MON_RING_TEXT_MAX];
@@ -213,7 +252,7 @@ int main(void) {
     mon_ring_clear(&ring);
     CpuSnap prev, cur;
     snap(&prev);
-    int hot = 0, warned = 0;
+    int hot = 0, warned = 0, flashing = 0;
     int kmsg = kmsg_open();
     UsbFault uf;
     usbf_init(&uf);
@@ -222,8 +261,7 @@ int main(void) {
     clock_gettime(CLOCK_MONOTONIC, &next);
     while (running) {
         next.tv_sec += 1;
-        while (running && clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL) == EINTR)
-            ;
+        wait_tick(&next, flashing);
         if (!running) break;
 
         MonSample s = { MON_ABSENT, MON_ABSENT, MON_ABSENT };
@@ -247,11 +285,8 @@ int main(void) {
             printf("arcamond: over-temperature warning %s (%d mC%s)\n", warn ? "on" : "off",
                    s.temp_mc, hot == warn ? "" : ", forced");
         warned = warn;
-        warn_led(warn);
         {
-            struct timespec tn;
-            clock_gettime(CLOCK_MONOTONIC, &tn);
-            uint32_t now_ms = (uint32_t)tn.tv_sec * 1000u + (uint32_t)(tn.tv_nsec / 1000000);
+            uint32_t now_ms = mono_ms();
             int err = kmsg_vbus_error(kmsg);
             int was_f = usbf_flag(&uf);
             int present = usbf_wants_scan(&uf, now_ms) ? usb_peripheral_present() : 0;
@@ -264,6 +299,8 @@ int main(void) {
                 puts(usbf_flag(&uf) ? "arcamond: USB fault indicator on"
                                     : "arcamond: USB fault indicator off");
         }
+        warn_led(usbf_led(warn, usbf_flag(&uf), mono_ms()));
+        flashing = !warn && usbf_flag(&uf);
         unsigned flags = (warn ? MON_FLAG_OVERTEMP : 0u) | (usbf_flag(&uf) ? MON_FLAG_USBFAULT : 0u);
         int len = cur.valid ? mon_ring_format(&ring, cur.wall_cs, flags, text, sizeof(text)) : -1;
         if (len > 0) publish(text, len);
@@ -275,7 +312,7 @@ int main(void) {
         if (now.tv_sec > next.tv_sec + 1) next = now;
     }
     unlink(MON_RING_PATH);
-    warn_led(0);
+    warn_led(USBF_LED_RELEASE);
     printf("arcamond: stopped\n");
     return 0;
 }

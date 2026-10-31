@@ -10,7 +10,10 @@
  *   D  a device appearing while latched clears flag and schedule at once;
  *   E  a running recover defers a due retry, never doubles it;
  *   F  no error means no action, and the flag is off before the first check;
- *   G  the schedule survives the uint32_t millisecond clock wrapping.
+ *   G  the schedule survives the uint32_t millisecond clock wrapping;
+ *   H  the red LED: solid for over-temperature, three 200 ms flashes at the
+ *      start of every 10 s for a latched fault (the sidebars' cadence), released
+ *      when neither, and over-temperature wins.
  */
 #include "common/usbfault.h"
 #include <stdio.h>
@@ -70,6 +73,17 @@ int main(void) {
     n = run(0xFFFFFFFFu - 20000u, 400, -1, at, 32);
     CHECK("G", n >= 5 && at[0] == 5 && at[1] == 15 && at[2] == 45 && at[3] == 165,
           "wrap: n=%d at=%d,%d,%d,%d", n, at[0], at[1], at[2], at[3]);
+
+    for (uint32_t t = 0; t < 30000u; t += 50u) {   /* H */
+        uint32_t m = t % 10000u;
+        int want = (m < 1200u && (m / 200u) % 2u == 0u) ? USBF_LED_LIT : USBF_LED_DARK;
+        CHECK("H", usbf_led(0, 1, t) == want, "flash at %u: %d", t, usbf_led(0, 1, t));
+        CHECK("H", usbf_led(1, 1, t) == USBF_LED_LIT && usbf_led(1, 0, t) == USBF_LED_LIT,
+              "over-temperature not solid at %u", t);
+        CHECK("H", usbf_led(0, 0, t) == USBF_LED_RELEASE, "idle not released at %u", t);
+    }
+    { int on = 0; for (uint32_t t = 0; t < 10000u; t += 10u) on += usbf_led(0, 1, t) == USBF_LED_LIT;
+      CHECK("H", on == 3 * 20, "lit %d ticks of 10 ms per period, want 60", on); }
 
     if (fails) { printf("usbfault_test: %d FAILED\n", fails); return 1; }
     printf("usbfault_test: ok\n");
