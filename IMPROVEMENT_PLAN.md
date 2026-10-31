@@ -83,23 +83,6 @@ Cause not investigated;
 nesting subclass. **Next:** read the upstream change to
 `l2cap_sock_new_connection_cb`; decide between backporting the annotation and dropping lockdep from the image.
 
-### B51. BT failover miss: a BlueALSA A2DP stream froze without error — open, sporadic, seen once 2026-10-02
-
-**Measured, `.188`, 11:15 CDT:** `WI-C310` (`90:7A:58:B9:C6:F5`) pinned, `VT360` (`08:EB:ED:FE:C1:3D`) connected. In
-the Mix Bus Test the music voice stopped consuming after 11.2 s while `snd_pcm_avail` kept succeeding with the ring
-full; there was no "is gone", underrun or reopen line (`services=2801` over 94.7 s, `starve=0`), so no failover ran.
-The music release never completed, so the next WAV tap was refused ("bed REFUSED - see /tmp/mix.log"). **Not
-distinguished [inferred]:** a frozen BlueALSA hardware pointer versus a blocked `bluealsad`. The operator tried many
-times and could not reproduce it.
-
-**Detector deployed, never fired:** `alsa_space` in `common/audio_out.c` treats a ring that owes playback and makes no
-progress for `ALSA_STALL_MS` (2000) as a lost device, logs `audio_out: <pcm> stalled — no progress for N ms (avail=…
-state=…)` and refuses that PCM until a link change. "is gone" / "is available" and the `audio_mix_test` session start
-carry wall-clock stamps. **Seen on a real link loss, measured `.188` 13:55 device time:** the operator switched off the `WI-C310`, then unplugged the BT dongle; both times it logged "stalled — no progress for ~2030 ms (avail=26624 state=DISCONNECTED)", then "is gone" and a working failover. The detector works on a real loss; the original freeze (no error, no disconnect) has not recurred. **Known consequence:** with one headset a pin stall can fall to the same frozen transport and
-stall again, up to ~4 s of silence. **Open work, on the next occurrence:** read `/tmp/mix.log` and `app_stdout.log` for
-the "stalled" line and its time, correlate with `/var/log/messages`, and optionally run `bluealsa` verbose. **Done when**
-a recurrence is attributed to one of the two mechanisms, or none recurs over a long session.
-
 ### B52. The 8BitDo Pro 2 does not reconnect by itself after a bluetoothd restart — open, confirmed 2026-10-03
 
 **Measured, `.188`, `btmon`.** (1) `/etc/init.d/bluetooth restart` (`device-files/bluetooth`: stop kills `bluetoothd`,
@@ -120,32 +103,12 @@ blinks; if host paging works, have the init script or a `bluetoothd` policy conn
 check whether `bluetoothd` can stop without powering the adapter off, so no 0x15 is sent. **Done when** a restart
 leaves the pad connected, or the pad's behaviour is attributed and the workaround documented.
 
-### D7. mDNS does not resolve from WSL, which is where the deploy scripts run — open, confirmed 2026-08-15
-
-A named unit answers to `<name>.local` from Windows (`set-hostname` in the rootfs overlay, the avahi link). Two
-residues:
-
-1. **WSL cannot resolve `.local`.** Its `/etc/nsswitch.conf` is `hosts: files dns` — no mDNS module —
-   so `./provision.sh rw09.local` passes validation, reaches the SSH step and then fails to
-   resolve. ⚠️ **`libnss-mdns` alone is insufficient, measured 2026-09-06:** it is installed and in
-   `nsswitch.conf`, avahi runs on the device, and `.local` still does not resolve — WSL2 is NAT'd onto its own
-   subnet and mDNS is link-local multicast, so it cannot cross. The fix is `networkingMode=mirrored` in
-   `.wslconfig`, which changes networking for every distro on the host and is the operator's call. **Until
-   then the mDNS payoff applies to Windows-side `ssh` only, not to the build/deploy path.**
-2. **The reboot path is unproven.** `S30avahi-daemon` is in place but the link was written directly
-   rather than by a full `provision.sh` run, so "it comes up on its own after a reboot" has not
-   been observed.
-
 ### B57. Does MADC ADCIN6 follow what is plugged into the USB port? — open, n=1, needs a joint session (operator replugs while ch6 is read)
 
 `in_voltage6` read 26-29 mV on `.188` while an Xbox 360 pad was on the USB port and a steady 344-364 mV after the BT dongle replaced it
 ([`SYSTEM_ANALYSIS.md#311-adc-and-temperature-twl4030-madc`](SYSTEM_ANALYSIS.md#311-adc-and-temperature-twl4030-madc)); the two states
 differ in more than the device, so the link is unproven. It needs a joint session (operator confirmed 2026-10-07): the operator replugs while ch6 is read. **Done when** an operator swaps pad and dongle back and forth on the port
 (reading `in_voltage6_input` after each swap, and once with the port empty) and the table says which condition, if any, moves it.
-
-### B64. The device-tree `model` string and the U-Boot board name disagree — open, measured 2026-10-12
-
-`kernel/dts/rw20.dts:25` says `model = "Steelcase RoomWizard 20"` (the vendor DT's string; `HARDWARE.md` records it, the kernel prints it as `Machine model:`), while `uboot/rw20-board.patch:42` says `"Steelcase RoomWizard rw20"`. Operator ruling 2026-10-12: the board name stays "Steelcase RoomWizard rw20", because it names the hardware. **Measured by `Grep`:** nothing in the tree reads `/proc/device-tree/model` on the device (the one reader, `vnc_client/setup-vnc-viewer.sh`, checks for a Raspberry Pi host), so the string reaches only the boot log. **Done when** the DT string matches the ruling and `HARDWARE.md` says the vendor's own string was the old one.
 
 ### B68. The syslog shows red lines at every boot — open, operator-observed 2026-10-12
 
@@ -206,33 +169,7 @@ Redeploy: `framebuffer.c` is linked by all three components.
 
 Userspace except F101, which is the image build.
 
-### F8. Smooth LED effects — open
-
-The two LEDs are true PWM and drive to red / amber / green with smooth crossfade, visible from outside
-the room
-([`SYSTEM_ANALYSIS.md#37-leds-backlight-and-pwm`](SYSTEM_ANALYSIS.md#37-leds-backlight-and-pwm)).
-Ideas: health/timer bar, heartbeat pulse during ScummVM loading, flash on high score. `hardware.c`
-already reaches both channels and already has the non-blocking `LedPulse` API, so this is presentation
-work only.
-
 ---
-
-### F13. Building a card image from Windows without WSL, and from macOS — open, unsolved
-
-Delivery is two steps with different host needs. **Writing** a finished `card.img` is a raw block copy, which any OS's
-imager does (the operator writes cards from Windows). **Building** one is not: `rootfs/make-card-image.sh` creates the image with
-`sfdisk` and `mkfs.vfat`, loop-mounts it
-and needs read-write ext4 across the partitions, real symlinks (the `rc*.d` links) and a real `chmod` (the `+x`
-assertion is a measurement precisely because ext4 honours it) — a kernel-filesystem need that no shell dialect supplies.
-
-| Host | Build | Status |
-|---|---|---|
-| Linux, or Windows + WSL2 | native / inside WSL | the documented path |
-| Windows, no WSL | none | no native ext4; third-party drivers are not something to stake a card on |
-| macOS | Linux VM | untested from here; `ext4fuse` is read-only |
-
-A published per-release image (every image is now the same, with no unit state) would remove the build step — which is the
-generic flash-and-go image entry. **Done when** an operator with no Linux host can produce a working card.
 
 ### F101. Build our own kernel image, rebased onto 4.14.336 — open
 
@@ -326,17 +263,6 @@ An option for the clocks that print the time (`native_apps/common/top_bar.c:251`
 
 The operator wants games that show no menu or close button at all. Open design question: how a touch-only player pauses and exits (pad and keyboard keep their keys). The games do not carry the shared top bar, so their own exit X is part of the same question. **Done when** the question is answered with the operator and one game follows the answer.
 
-### F150. Every control draws its own keyboard-focus ring — open, operator request 2026-10-13, not designed
-
-Apply the top bar's pattern (`top_bar_draw_focus`, `native_apps/common/top_bar.c:267`; the caller picks only the target) to every
-focusable control. Today the Control Panel draws one generic ring from the selected rectangle alone
-(`control_panel/control_panel.c:994`, `icon_grid_draw_ring`), the launcher grid draws its own selection (`app_launcher.c:335`) and
-the modal dialog highlights its own button (`common/common.c:645`), so a toggle, slider or rounded button gets a ring that does not
-follow its shape. Navigation stays as it is: the pages' `*_page_focusables` rect lists, nearest-in-direction moves in
-`common/ui_focus.c` and Enter as a synthetic tap. Open design question: whether a focus stop carries a kind/shape the ring is drawn
-from, or a draw callback owned by the widget. **Done when** buttons, toggles, sliders, launcher tiles, dialog buttons and the bar draw
-focus through one mechanism, and the Control Panel's generic ring is gone.
-
 ### F157. Physical keyboard and mouse input in the on-screen keyboard — open, operator request 2026-10-22
 
 `keyboard_enter` (`common/keyboard.c`) now accepts typed letters from a physical keyboard (`kb_apply_key`, `gamepad_text_entry` /
@@ -378,42 +304,6 @@ paths a launcher plus one game actually touch, listed from a BBB boot.
 
 **Future scope, operator-agreed, not scheduled:** mouse-only operation of the launcher, Control Panel and games, for a unit with no touch and no keyboard or pad. The operator has a RoomWizard whose touch is broken, and a BeagleBone has no touch. The mouse pointer in the launcher and the Control Panel exists and is operator-verified; the games still take no mouse pointer.
 
-### F111. Redraw the launcher's tile icons in the Control Panel's rounded style — open, operator request 2026-10-01, future
-
-The launcher tiles look dated next to the Control Panel's page icons. **Where each comes from (read from
-source):** the launcher and the Control Panel draw their tiles through the same `icon_grid_draw_tile()`
-(`common/icon_grid.c:116`, `TILE_RADIUS` 12 at `:17`; called from `app_launcher.c:264` and `control_panel.c:346`),
-so the tile frame is already rounded and shared — the difference is the 96x96 PPM *inside* it
-(`ICON_GRID_ICON_SIZE`, `common/icon_grid.h:23`). The Control Panel's are generated by
-`control_panel/gen_cp_icons.py` (`base()` at `:28` draws a supersampled `rounded_rectangle` radius 16 in an
-accent colour, glyphs drawn white on it). The launcher's are per-app `<app>/<app>.ppm` — generated for only three
-by `frogger/gen_icon.py`, `platformer/gen_icon.py`, `samegame/gen_icon.py` (64x64 square scenes, no rounding), the
-rest committed as bare PPMs with no generator — and collected by the `*//*.ppm` glob in
-`native_apps/build-and-deploy.sh:307`; manifests name them in `app-manifests.sh:39-47`. **Fix:** one generator in
-the style of `gen_cp_icons.py` for all ten apps, so every PPM has a source, then delete the three old scripts.
-**Done when** the launcher grid on the panel reads as the same family as the Control Panel's. Operator 2026-10-07 also wants a better icon for the Control Panel's System page, done with this rework: its page has `.icon = NULL` (`system_page.c:563`) and `ICONS` in `gen_cp_icons.py:178` has no System entry.
-
-### F161. Picture viewer / digital picture frame — open, mostly built 2026-10-30
-
-The app is in `native_apps/frame/` (library `/home/root/data/pictures/`, stick import, slideshow, From Jellyfin download; host tests `frame_core_test`, `frame_logic_test`, `frame_jf_test`).
-
-**Left:**
-
-1. **Live Jellyfin test** on unit `.115`: the operator's server answered "no photo library" for the saved user. Needs a photos library visible to that user, then verify the album list, the download, that the server honours `maxWidth`/`maxHeight` (log the received size), second-run skip, and cancel. Also unverified: whether a Photo item's Primary image or `/Download` is the right source.
-2. **Panel, untested:** pad, keyboard and Esc on every frame screen; shuffle order; import from a real USB stick (the `arca-storage mount` output parse); cancel during import; whether Back/OK dismisses the cannot-reach-server screen (one tap did not).
-3. **Files** views a stick picture as it is (unoptimised): needs the "Files starts another program" launch hook of F163. Not started.
-4. **Night dimming** shared with F162. Not started.
-
-**Done when** a live Jellyfin album downloads at the server-resized size and skips on a second run, cancel works in both import and download, a stick import lands in the library with progress, every frame screen works with pad and keyboard and Esc, shuffle works, Files shows a stick picture unoptimised, and night dimming follows the F162 schedule.
-
-### F162. Digital clock app — open, built 2026-10-30, panel checks left
-
-The app is in `native_apps/clock/` (core `clock_core.c` with host test `clock_core_test`; settings
-`/home/root/data/clock.conf`). **Left:** pomodoro
-on the panel (WORK 25:00, the phase ring); pad, keyboard and mouse on every screen (no input device was attached); one scripted
-tap on TIME FORMAT did not switch it back to 24 h, so reproduce it before calling it a bug. The 12/24-hour choice is the app's own
-(`/home/root/data/clock_fmt.conf`) until F146 gives one system setting; then the clock reads that. **Done when** those pass.
-
 ### F163. Edit and view text files in the Files app with nano — open, operator decision 2026-10-30, not started
 
 Operator prefers not writing our own editor: **nano** is both editor and viewer (`nano -v` is its read-only view mode), started
@@ -424,9 +314,9 @@ libvterm, physical keyboard through `common/term_keymap.h`, a touch toolbar with
 so a terminal surface exists; `file_manager` has no call that starts another program, so the launch hook is missing.
 **Missing:** the nano package (and the terminfo entry for the terminal's `TERM`) in the rootfs, a way to start the terminal app
 running `nano <path>` instead of `/bin/login` and return to Files on exit, and the launch hook in `file_manager`.
-**To decide:** which paths are allowed and whether system files need an explicit unlock; whether `nano` runs as root.
+**To decide:** which paths are allowed and whether system files need an explicit unlock; whether `nano` runs as root. The same launch hook lets Files open a picture from a stick in the Pictures app (`native_apps/frame`), unoptimised, as it is.
 **Done when** an option file opened from Files edits and saves in nano on the panel, with either keyboard, and the next game
-start uses it; and `nano -v` on a file refuses writes.
+start uses it; and `nano -v` on a file refuses writes, and a picture opened from Files shows in Pictures.
 
 ### Potential ideas (not planned)
 
@@ -439,22 +329,6 @@ Recorded so they are not lost; none has an owner or a design.
 - Ambient sound or white-noise generator on `common/audio_gen.c`.
 
 ## Structural and cleanup
-
-### C9. A bundle cannot prove its stripped binaries were ever gated — open, measured 2026-08-08
-
-`native_apps/check-arm-safe.sh` is sound only on a binary that still has its symbol table, and both
-`scummvm` and `vnc_client` ship stripped. Why, with the byte-level measurement:
-[`SYSTEM_ANALYSIS.md#61-cortex-a8-has-no-hardware-integer-divide`](SYSTEM_ANALYSIS.md#61-cortex-a8-has-no-hardware-integer-divide).
-So all three component build scripts gate the unstripped artifact at build time, and
-`rootfs/commission-offline.sh` reports the stripped remainder as **taken on trust** — loudly, by
-count and by name — rather than refusing it.
-
-⚠️ **What is open is that "taken on trust" is the honest description, and it should not have to be.** The
-sound verdict exists only at build time, so it has to travel with the bundle: a per-component attestation
-in `manifest.d/`, written where the unstripped artifact is still on disk, and checked by the installer
-instead of re-disassembling. `release.sh`'s own bundles would then carry proof, and a third-party bundle
-carrying none would be *visibly* unattested instead of indistinguishable from an attested one. Until then
-the installer's summary must keep saying `TAKEN ON TRUST` in those words.
 
 ### C10. Make a deep game state reachable without playing to it — open
 
