@@ -13,6 +13,7 @@
 #     --out DIR   output directory for the stripped .so files (default ~/retro-build/out)
 #     --work DIR  clone/build area, one subdirectory per core (default ~/retro-build)
 #     core ...    any of: ep128emu-core fuse fceumm vice mame2003-plus snes9x2002 snes9x2005 pcsx_rearmed uae4arm dosbox-pure picodrive (default: all)
+#     --except ID leave this core out of the default (all) selection; repeatable
 #     --pgo-gen   vice only: instrumented build (-fprofile-generate), used by retro/pgo-vice.sh
 #     --no-pgo    vice: ignore the profile, build plain -O2
 #   A vice build is profile-guided (-fprofile-use) when $RETRO_PGO_DIR (default
@@ -104,10 +105,12 @@ WORK="$HOME/retro-build"
 PGO_MODE=auto   # auto: use the profile if there is one; gen: instrument; off: never
 PGO_DIR="${RETRO_PGO_DIR:-$HOME/retro-build/pgo/vice}"
 SEL=()
+EXC=()
 while [ $# -gt 0 ]; do
     case $1 in
         --out)  OUT=${2:?--out needs a directory}; shift 2 ;;
         --work) WORK=${2:?--work needs a directory}; shift 2 ;;
+        --except) EXC+=("${2:?--except needs a core id}"); shift 2 ;;
         --pgo-gen) PGO_MODE=gen; shift ;;
         --no-pgo)  PGO_MODE=off; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -118,7 +121,10 @@ while [ $# -gt 0 ]; do
     esac
 done
 if [ ${#SEL[@]} -eq 0 ]; then
-    SEL=("${CORES[@]}")
+    for c in "${CORES[@]}"; do
+        skip=0; for e in ${EXC[@]+"${EXC[@]}"}; do [ "$c" = "$e" ] && skip=1; done
+        [ "$skip" -eq 1 ] || SEL+=("$c")
+    done
 fi
 
 if [ "$PGO_MODE" = gen ] && { [ ${#SEL[@]} -ne 1 ] || [ "${SEL[0]}" != vice ]; }; then die "--pgo-gen needs exactly the core: vice"; fi

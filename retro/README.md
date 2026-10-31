@@ -1,7 +1,7 @@
 # retro: libretro cores behind our own frontend
 
 The frontend is `native_apps/retro` (the player) with `native_apps/retro_picker` (the game grid, the launcher tile "Retro"). Cores
-are built by `retro/build-cores.sh` and deployed with `retro/build-and-deploy.sh <ip>`. `tools/retro_bench.c` is a headless
+are built by `retro/build-cores.sh` and deployed with `retro/build-and-deploy.sh <ip>`; an image carries them except three ([Cores not in the image](#cores-not-in-the-image)). `tools/retro_bench.c` is a headless
 core runner and `tools/fb_bench.c` a display-path bench (device-only). Every device fact is linked to
 [`SYSTEM_ANALYSIS.md`](../SYSTEM_ANALYSIS.md); claims are marked **measured**, **read in source**, **inferred** or **unverified**.
 
@@ -60,6 +60,31 @@ Shipped cores. Licences **read from each repository LICENSE/COPYING file** at th
 
 Legal test content to **link, never ship**: `mamedev.org/roms` (free, non-commercial, distribution on that site only);
 MIT homebrew NES built from source: `zorchenhimer/nes-runner`, `xram64/falling-nes`. Out of reach for this CPU: N64, NDS, Dreamcast, PSP.
+
+### Cores not in the image
+
+A fresh card image and a release bundle carry every core in the table above, with its `systems/*.sys` and system-dir files,
+**except** Enterprise 128 (`ep128emu-core`), ZX Spectrum (`fuse`) and C64 (`vice`). Their built `.so` files embed ROM images whose
+rights holders have granted no redistribution (rows above), so they are left out; the three systems do not appear in the picker of
+an installed image. The list is `IMAGE_EXCLUDE` in `retro/build-and-deploy.sh`, and `tests/retro_bundle_test.sh` fails if a bundle
+carries any of the three. snes9x2005 is built but belongs to no system, so it is not staged either.
+
+To use them, build from source and deploy over SSH (WSL, a unit reachable with key auth, the cross toolchain from
+[`setup-build-env.sh`](../setup-build-env.sh)):
+
+```bash
+wsl.exe -e bash -lc "cd /mnt/c/work/roomwizard/retro && ./build-and-deploy.sh <ip> ep128emu-core fuse vice"
+```
+
+`<ip>` alone (no core ids) builds and deploys every core, these three included. `--no-build` deploys what is already in
+`~/retro-build/out` (or `$RETRO_OUT`); `--no-pgo` builds VICE without a profile (`retro/pgo-vice.sh`). The script copies the cores
+to `/home/root/data/retro/cores`, the `.sys` files to `/home/root/data/retro/systems` and everything under `retro/system/` (the
+Enterprise configuration among it) to `/home/root/data/retro/system`, then checks md5 on the unit. It never touches `roms/` or
+`content/`.
+
+The ROMs of these three cores are compiled in from the pinned upstream clone, so a build needs no ROM file placed anywhere; a
+BIOS or firmware a core loads from disk (the FDS BIOS for NES, a real Kickstart or PlayStation BIOS) goes in
+`/home/root/data/retro/system` on the unit. Whether a user-supplied ROM can replace the built-in one in these three cores was Content goes in `/home/root/data/retro/roms/<system>/` as for every system.
 
 ## 4. Display
 

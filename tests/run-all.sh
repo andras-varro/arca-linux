@@ -95,6 +95,7 @@ SUITE_ROWS=(
     "card_layout_test.sh|deploy"
     "arca_provision_test.sh|deploy"
     "arca_release_test.sh|deploy"
+    "retro_bundle_test.sh|deploy"
     "arca_ssh_test.sh|deploy"
     "arca_state_test.sh|deploy"
     "arca_backup_test.sh|deploy"

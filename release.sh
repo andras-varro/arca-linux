@@ -107,7 +107,9 @@ err()  { echo -e "${RED}  ✗ $*${NC}" >&2; exit 1; }
 # usb_host is here as of 2026-08-08. Its --bundle needs
 # usb_host/modules/*.ko, a gitignored build artifact (usb_host/device_config, the
 # base kernel config, is tracked); on a fresh clone it builds them from the tracked config.
-RELEASE_COMPONENTS=(native_apps vnc_client scummvm-arca usb_host bluetooth)
+# retro is here as of 2026-10-31: its --bundle stages every core except IMAGE_EXCLUDE
+# (retro/build-and-deploy.sh), and builds them from the pinned clones in ~/retro-src.
+RELEASE_COMPONENTS=(native_apps vnc_client scummvm-arca usb_host bluetooth retro)
 
 usage() {
     echo "Usage: $0 --stage-only [--out <dir>] [--component <name>]... [--source-offer]"
@@ -620,6 +622,20 @@ installed beside them as `LICENCE.rtlwifi_firmware.txt`:
     Copyright (c) 2010, Realtek Semiconductor Corporation. All rights reserved.
     Redistribution in binary form, without modification, is permitted; the full
     conditions and disclaimer are in that file.
+
+retro
+-----
+The libretro cores in /home/root/data/retro/cores are third-party emulators, each under
+its own licence: FCEUmm, PCSX-ReARMed, uae4arm and DOSBox Pure under the GPL (version 2
+or later, or 2 only for FCEUmm and PCSX-ReARMed); the AROS Kickstart replacement inside
+uae4arm under the AROS Public License; MAME 2003-Plus (classic MAME non-commercial
+licence), snes9x2002 (Snes9x non-commercial licence) and PicoDrive (non-commercial
+licence) for non-commercial use only.  The pinned upstream commits and the licence file
+read for each are listed in `retro/README.md`, and the build recipe is
+`retro/build-cores.sh`, which together with the patches in `retro/patches/` is the
+corresponding source for the GPL cores.  No game, BIOS or ROM image is included.  The
+Enterprise, ZX Spectrum and Commodore 64 cores embed ROMs without a redistribution grant
+and are deliberately NOT part of this bundle (`retro/README.md`, "Cores not in the image").
 
 Not included
 ------------
