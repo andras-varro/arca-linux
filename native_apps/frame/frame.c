@@ -36,6 +36,7 @@
 #include "../common/config.h"
 #include "frame_core.h"
 #include "frame_logic.h"
+#include "frame_grid.h"
 #include "frame_jf.h"
 #include "../common/http.h"
 #include "../common/list_view.h"
@@ -323,6 +324,7 @@ static void draw_progress(const char *verb, int n, int m, const char *src, uint3
 }
 
 /* Import (USB) or download (g_job_jf) everything pending in g_items.  Returns the done/failed counts. */
+static bool make_thumb(const char *name);
 static void import_items(int *imported, int *failed, bool *cancelled)
 {
     *imported = *failed = 0;
@@ -342,6 +344,7 @@ static void import_items(int *imported, int *failed, bool *cancelled)
             signal(SIGINT, SIG_DFL);
             int rc = g_job_jf ? jf_fetch_one(g_items[i].id, g_items[i].key, dst)
                              : frame_import(g_items[i].src, dst, SCREEN_VISIBLE_WIDTH, SCREEN_VISIBLE_HEIGHT, 0, NULL);
+            if (rc == 0) make_thumb(g_items[i].key);
             _exit(rc == 0 ? 0 : 1);
         }
         g_child = pid;
@@ -747,7 +750,8 @@ static int slide_menu(void)
     }
 }
 
-static void slideshow(int interval_s, bool shuffle)
+static bool lib_remove(const char *name);
+static void slideshow(int interval_s, bool shuffle, const char *start_name)
 {
     Lib lib;
     lib_load(&lib);
@@ -767,6 +771,9 @@ static void slideshow(int interval_s, bool shuffle)
     slot[0].pic = slot[1].pic = -1;
     FrameOrder ord;
     frame_order_init(&ord, order, lib.n, shuffle, get_time_ms());
+    if (start_name) {                      /* the grid opened a picture: begin there */
+        for (int k = 0; k < lib.n; k++) if (strcmp(lib.name[order[k]], start_name) == 0) { ord.pos = k; break; }
+    }
 
     hw_blank_set_enabled(false);
     int cur = 0;                    /* slot on screen */
@@ -805,9 +812,7 @@ static void slideshow(int interval_s, bool shuffle)
             if (act == SL_LEAVE) break;
             if (act == SL_DELETE) {
                 int p = frame_order_cur(&ord);
-                char path[300];
-                snprintf(path, sizeof path, "%s/%s", LIB_DIR, lib.name[p]);
-                printf("frame: delete %s: %s\n", lib.name[p], unlink(path) == 0 ? "ok" : "failed");
+                printf("frame: delete %s: %s\n", lib.name[p], lib_remove(lib.name[p]) ? "ok" : "failed");
                 lib_free(&lib);
                 lib_load(&lib);
                 if (lib.n == 0) break;
@@ -865,6 +870,254 @@ static void slideshow(int interval_s, bool shuffle)
     lib_free(&lib);
 }
 
+/* ── thumbnails and the picture grid ───────────────────────────────────── */
+
+static void thumb_dir(void)
+{
+    mkdir(LIB_DIR "/" FRAME_THUMB_DIR, 0755);
+}
+
+/* Make the sidecar thumbnail of library picture `name`.  Best effort: a picture without one is backfilled when the grid opens. */
+static bool make_thumb(const char *name)
+{
+    char rel[160], src[300], dst[300];
+    if (frame_thumb_name(name, rel, sizeof rel) < 0) return false;
+    thumb_dir();
+    snprintf(src, sizeof src, "%s/%s", LIB_DIR, name);
+    snprintf(dst, sizeof dst, "%s/%s", LIB_DIR, rel);
+    return frame_import(src, dst, FRAME_THUMB_W, FRAME_THUMB_H, 80, NULL) == FRAME_OK;
+}
+
+/* Remove a library picture and its thumbnail.  True when the picture itself is gone. */
+static bool lib_remove(const char *name)
+{
+    char rel[160], path[300];
+    if (frame_thumb_name(name, rel, sizeof rel) == 0) {
+        snprintf(path, sizeof path, "%s/%s", LIB_DIR, rel);
+        unlink(path);
+        snprintf(path, sizeof path, "%s/%s.tmp", LIB_DIR, rel);
+        unlink(path);
+    }
+    snprintf(path, sizeof path, "%s/%s", LIB_DIR, name);
+    return unlink(path) == 0;
+}
+
+/* Give every library picture a thumbnail, with progress.  False when the operator cancelled. */
+static bool backfill_thumbs(const Lib *l)
+{
+    int missing = 0, done = 0;
+    for (int i = 0; i < l->n; i++) {
+        char rel[160], path[300];
+        struct stat st;
+        if (frame_thumb_name(l->name[i], rel, sizeof rel) < 0) continue;
+        snprintf(path, sizeof path, "%s/%s", LIB_DIR, rel);
+        if (stat(path, &st) != 0) missing++;
+    }
+    if (missing == 0) return true;
+    for (int i = 0; i < l->n && g_running; i++) {
+        char rel[160], path[300];
+        struct stat st;
+        if (frame_thumb_name(l->name[i], rel, sizeof rel) < 0) continue;
+        snprintf(path, sizeof path, "%s/%s", LIB_DIR, rel);
+        if (stat(path, &st) == 0) continue;
+        poll_input(get_time_ms());
+        if (back_pressed() || g_ts.pressed) return false;
+        draw_progress("THUMBNAILS", done + 1, missing, l->name[i], 0);
+        make_thumb(l->name[i]);
+        done++;
+    }
+    return true;
+}
+
+#define GRID_COLS 4
+#define GRID_GAP  8
+#define GRID_BAR  40
+
+typedef struct { int x, y, w, h; } GRect;
+
+static bool in_rect(const GRect *r, int x, int y) { return x >= r->x && x < r->x + r->w && y >= r->y && y < r->y + r->h; }
+
+static void grid_button(const GRect *r, const char *t, bool on)
+{
+    Framebuffer *fb = &g_dev.fb;
+    fb_fill_rect(fb, r->x, r->y, r->w, r->h, on ? RGB(40, 110, 200) : RGB(50, 50, 50));
+    fb_draw_rect(fb, r->x, r->y, r->w, r->h, COLOR_GRAY);
+    fb_draw_text(fb, r->x + (r->w - text_measure_width(t, 2)) / 2, r->y + (r->h - 14) / 2, t, COLOR_WHITE, 2);
+}
+
+/* The thumbnails of one page, decoded into `tiles` (GRID tile buffers of FRAME_THUMB_W x FRAME_THUMB_H). */
+static void grid_load_page(const Lib *l, const FrameGrid *g, int page, uint32_t *tiles)
+{
+    int per = frame_grid_per_page(g);
+    for (int s = 0; s < per; s++) {
+        uint32_t *t = tiles + (size_t)s * FRAME_THUMB_W * FRAME_THUMB_H;
+        memset(t, 0, (size_t)FRAME_THUMB_W * FRAME_THUMB_H * 4);
+        int i = frame_grid_index(g, page, s);
+        char rel[160], path[300];
+        if (i < 0 || frame_thumb_name(l->name[i], rel, sizeof rel) < 0) continue;
+        snprintf(path, sizeof path, "%s/%s", LIB_DIR, rel);
+        frame_load(path, t, FRAME_THUMB_W, FRAME_THUMB_H, FRAME_THUMB_W, NULL);
+    }
+}
+
+/* VIEW ALL PICTURES: a paged grid of thumbnails.  Tap / Enter opens the picture in the slideshow; SELECT marks
+ * pictures for DELETE (n).  Redraws only when something changed. */
+static void library_grid(int interval_s, bool shuffle)
+{
+    Lib lib;
+    lib_load(&lib);
+    if (lib.n == 0) { lib_free(&lib); message_screen("NO PICTURES", ""); return; }
+    if (!backfill_thumbs(&lib)) { lib_free(&lib); return; }
+    int avail = SCREEN_SAFE_HEIGHT - GRID_BAR - GRID_GAP;
+    int rows = (avail + GRID_GAP) / (FRAME_THUMB_H + GRID_GAP);
+    if (rows < 1) rows = 1;
+    if (rows > 3) rows = 3;
+    uint8_t *marks = malloc((size_t)lib.n + 1);
+    uint32_t *tiles = malloc((size_t)GRID_COLS * rows * FRAME_THUMB_W * FRAME_THUMB_H * 4);
+    if (!marks || !tiles) { free(marks); free(tiles); lib_free(&lib); message_screen("PICTURES", "OUT OF MEMORY"); return; }
+    FrameGrid g;
+    frame_grid_init(&g, lib.n, GRID_COLS, rows, marks);
+    int gw = GRID_COLS * FRAME_THUMB_W + (GRID_COLS - 1) * GRID_GAP;
+    int gx = SCREEN_SAFE_LEFT + (SCREEN_SAFE_WIDTH - gw) / 2, gy = SCREEN_SAFE_TOP + GRID_BAR + GRID_GAP;
+    GRect b_back = { SCREEN_SAFE_LEFT + 4, SCREEN_SAFE_TOP + 2, 96, GRID_BAR - 4 };
+    GRect b_sel  = { b_back.x + 104, b_back.y, 120, GRID_BAR - 4 };
+    GRect b_del  = { b_sel.x + 128, b_back.y, 200, GRID_BAR - 4 };
+    GRect b_next = { SCREEN_SAFE_RIGHT - 4 - 48, b_back.y, 48, GRID_BAR - 4 };
+    GRect b_prev = { b_next.x - 52 - 110, b_back.y, 48, GRID_BAR - 4 };
+    bool select = false, dirty = true, touch_down = false;
+    int loaded_page = -1;
+
+    while (g_running) {
+        uint32_t now = get_time_ms();
+        poll_input(now);
+        const ButtonState *bt = g_in.buttons;
+        int act = -1;                                   /* picture to open */
+        bool do_delete = false, leave = false;
+        if (back_pressed()) { if (select) { select = false; frame_grid_clear_marks(&g); dirty = true; } else leave = true; }
+        if (bt[BTN_ID_LEFT].pressed)  { frame_grid_move(&g, -1, 0); dirty = true; }
+        if (bt[BTN_ID_RIGHT].pressed) { frame_grid_move(&g, 1, 0); dirty = true; }
+        if (bt[BTN_ID_UP].pressed)    { frame_grid_move(&g, 0, -1); dirty = true; }
+        if (bt[BTN_ID_DOWN].pressed)  { frame_grid_move(&g, 0, 1); dirty = true; }
+        if (bt[BTN_ID_PGUP].pressed)  { frame_grid_page_step(&g, -1); dirty = true; }
+        if (bt[BTN_ID_PGDN].pressed)  { frame_grid_page_step(&g, 1); dirty = true; }
+        if (bt[BTN_ID_NEXT].pressed || bt[BTN_ID_HOME].pressed) {
+            select = !select;
+            frame_grid_clear_marks(&g);
+            dirty = true;
+        }
+        if (bt[BTN_ID_JUMP].pressed || bt[BTN_ID_ACTION].pressed) {
+            if (select) { frame_grid_toggle(&g, g.cursor); dirty = true; }
+            else act = g.cursor;
+        }
+        if (g_ts.pressed) touch_down = true;
+        if (g_ts.released && touch_down) {
+            touch_down = false;
+            int tx = g_ts.x, ty = g_ts.y;
+            if (in_rect(&b_back, tx, ty)) { if (select) { select = false; frame_grid_clear_marks(&g); } else leave = true; dirty = true; }
+            else if (in_rect(&b_sel, tx, ty)) { select = !select; frame_grid_clear_marks(&g); dirty = true; }
+            else if (select && frame_grid_marked(&g) > 0 && in_rect(&b_del, tx, ty)) do_delete = true;
+            else if (in_rect(&b_prev, tx, ty)) { frame_grid_page_step(&g, -1); dirty = true; }
+            else if (in_rect(&b_next, tx, ty)) { frame_grid_page_step(&g, 1); dirty = true; }
+            else {
+                int cx = tx - gx, cy = ty - gy;
+                int col = cx / (FRAME_THUMB_W + GRID_GAP), row = cy / (FRAME_THUMB_H + GRID_GAP);
+                if (cx >= 0 && cy >= 0 && col < GRID_COLS && row < rows &&
+                    cx % (FRAME_THUMB_W + GRID_GAP) < FRAME_THUMB_W && cy % (FRAME_THUMB_H + GRID_GAP) < FRAME_THUMB_H) {
+                    int i = frame_grid_index(&g, frame_grid_page(&g), row * GRID_COLS + col);
+                    if (i >= 0) {
+                        g.cursor = i;
+                        if (select) frame_grid_toggle(&g, i); else act = i;
+                        dirty = true;
+                    }
+                }
+            }
+        }
+        if (leave) break;
+        if (do_delete) {
+            int n = frame_grid_marked(&g);
+            char text[48];
+            snprintf(text, sizeof text, "DELETE %d PICTURE%s?", n, n == 1 ? "" : "S");
+            StartMenu c;
+            start_menu_init(&c, text, "THEY CANNOT BE GOT BACK.", get_time_ms());
+            start_menu_add_action(&c, "CANCEL");
+            start_menu_add_action(&c, "DELETE");
+            if (menu_run(&c, NULL) == 1) {
+                int gone = 0;
+                for (int i = 0; i < lib.n; i++) if (marks[i] && lib_remove(lib.name[i])) gone++;
+                printf("frame: deleted %d of %d marked pictures\n", gone, n);
+                lib_free(&lib);
+                lib_load(&lib);
+                if (lib.n == 0) break;
+                frame_grid_resize(&g, lib.n);
+                select = false;
+            }
+            memset(&g_in, 0, sizeof g_in);
+            pointer_drain(&g_dev.ptr);
+            touch_down = false;
+            loaded_page = -1;
+            dirty = true;
+            continue;
+        }
+        if (act >= 0) {
+            slideshow(interval_s, shuffle, lib.name[act]);
+            memset(&g_in, 0, sizeof g_in);
+            pointer_drain(&g_dev.ptr);
+            touch_down = false;
+            lib_free(&lib);
+            lib_load(&lib);
+            if (lib.n == 0) break;
+            frame_grid_resize(&g, lib.n);
+            select = false;
+            loaded_page = -1;
+            dirty = true;
+            continue;
+        }
+        if (dirty || g_ts.pressed || g_ts.released) {
+            Framebuffer *fb = &g_dev.fb;
+            int page = frame_grid_page(&g);
+            if (page != loaded_page) { grid_load_page(&lib, &g, page, tiles); loaded_page = page; }
+            fb_clear(fb, COLOR_BLACK);
+            grid_button(&b_back, select ? "CANCEL" : "BACK", false);
+            grid_button(&b_sel, "SELECT", select);
+            if (select) {
+                char t[32];
+                snprintf(t, sizeof t, "DELETE (%d)", frame_grid_marked(&g));
+                grid_button(&b_del, t, frame_grid_marked(&g) > 0);
+            }
+            grid_button(&b_prev, "<", false);
+            grid_button(&b_next, ">", false);
+            char pg[24];
+            snprintf(pg, sizeof pg, "%d/%d", page + 1, frame_grid_pages(&g));
+            fb_draw_text(fb, b_prev.x + 52 + (58 - text_measure_width(pg, 2)) / 2, b_prev.y + 13, pg, COLOR_WHITE, 2);
+            for (int s = 0; s < frame_grid_per_page(&g); s++) {
+                int i = frame_grid_index(&g, page, s);
+                if (i < 0) break;
+                int x = gx + (s % GRID_COLS) * (FRAME_THUMB_W + GRID_GAP), y = gy + (s / GRID_COLS) * (FRAME_THUMB_H + GRID_GAP);
+                const uint32_t *t = tiles + (size_t)s * FRAME_THUMB_W * FRAME_THUMB_H;
+                for (int r = 0; r < FRAME_THUMB_H; r++)
+                    memcpy((uint32_t *)fb->back_buffer + (size_t)(y + r) * fb->width + x, t + (size_t)r * FRAME_THUMB_W, FRAME_THUMB_W * 4);
+                if (i == g.cursor) {
+                    fb_draw_rect(fb, x - 2, y - 2, FRAME_THUMB_W + 4, FRAME_THUMB_H + 4, COLOR_WHITE);
+                    fb_draw_rect(fb, x - 1, y - 1, FRAME_THUMB_W + 2, FRAME_THUMB_H + 2, COLOR_WHITE);
+                }
+                if (marks[i]) {
+                    fb_draw_rect(fb, x, y, FRAME_THUMB_W, FRAME_THUMB_H, RGB(60, 200, 90));
+                    fb_draw_rect(fb, x + 1, y + 1, FRAME_THUMB_W - 2, FRAME_THUMB_H - 2, RGB(60, 200, 90));
+                    fb_fill_rect(fb, x + FRAME_THUMB_W - 26, y + 4, 22, 22, RGB(60, 200, 90));
+                    fb_draw_text(fb, x + FRAME_THUMB_W - 22, y + 7, "X", COLOR_BLACK, 2);
+                }
+            }
+            present();
+            dirty = false;
+        }
+        bool moved = pointer_paint(&g_dev.ptr, &g_dev.fb);
+        usleep(moved ? 8000 : 16000);
+    }
+    free(marks);
+    free(tiles);
+    lib_free(&lib);
+}
+
 /* ── menus ──────────────────────────────────────────────────────────────── */
 
 static int g_iv_idx, g_ord_idx, g_fill_idx, g_saved_iv = -1, g_saved_ord = -1, g_saved_fill = -1;
@@ -916,14 +1169,27 @@ static void delete_all(void)
     start_menu_add_action(&c, "DELETE ALL");
     int gone = 0;
     if (menu_run(&c, NULL) == 1) {
-        for (int i = 0; i < n; i++) {
-            char path[300];
-            snprintf(path, sizeof path, "%s/%s", LIB_DIR, l.name[i]);
-            if (unlink(path) == 0) gone++;
-        }
+        for (int i = 0; i < n; i++) if (lib_remove(l.name[i])) gone++;
         printf("frame: deleted %d of %d pictures\n", gone, n);
     }
     lib_free(&l);
+}
+
+/* LIBRARY: the grid of all pictures, the two ways in, and the way to empty it.  Five entries; a StartMenu holds six. */
+static void library_menu(int interval_s, bool shuffle)
+{
+    StartMenu m;
+    start_menu_init(&m, "LIBRARY", NULL, get_time_ms());
+    int e_view = start_menu_add_action(&m, "VIEW ALL PICTURES");
+    int e_imp  = start_menu_add_action(&m, "IMPORT FROM USB");
+    int e_jf   = start_menu_add_action(&m, "FROM JELLYFIN");
+    int e_del  = start_menu_add_action(&m, "DELETE ALL PICTURES");
+    start_menu_add_action(&m, "BACK");
+    int r = menu_run(&m, NULL);
+    if (r == e_view) library_grid(interval_s, shuffle);
+    else if (r == e_imp) import_from_usb();
+    else if (r == e_jf) from_jellyfin();
+    else if (r == e_del) delete_all();
 }
 
 int main(int argc, char *argv[])
@@ -975,9 +1241,7 @@ int main(int argc, char *argv[])
     g_iv_idx    = start_menu_add_choice(&m, "INTERVAL", INTERVAL_NAMES, N_INTERVALS, iv);
     g_ord_idx   = start_menu_add_choice(&m, "ORDER", ORDER_NAMES, 2, od);
     g_fill_idx  = start_menu_add_choice(&m, "FILL", FILL_NAMES, FRAME_FILL_N, fl);
-    int e_imp   = start_menu_add_action(&m, "IMPORT FROM USB");
-    int e_jf    = start_menu_add_action(&m, "FROM JELLYFIN");
-    int e_del   = start_menu_add_action(&m, "DELETE ALL PICTURES");
+    int e_lib   = start_menu_add_action(&m, "LIBRARY");
     int e_exit  = start_menu_add_action(&m, "EXIT");
     start_menu_select(&m, e_start, get_time_ms());
 
@@ -986,13 +1250,10 @@ int main(int argc, char *argv[])
         if (r == SM_EXIT || r == e_exit) break;
         if (r == e_start) {
             if (lib_count() == 0) empty_library();
-            else { g_fill = start_menu_value(&m, g_fill_idx); slideshow(INTERVAL_S[start_menu_value(&m, g_iv_idx)], start_menu_value(&m, g_ord_idx) == 1); if (lib_count() == 0) empty_library(); }
-        } else if (r == e_imp) {
-            import_from_usb();
-        } else if (r == e_del) {
-            delete_all();
-        } else if (r == e_jf) {
-            from_jellyfin();
+            else { g_fill = start_menu_value(&m, g_fill_idx); slideshow(INTERVAL_S[start_menu_value(&m, g_iv_idx)], start_menu_value(&m, g_ord_idx) == 1, NULL); if (lib_count() == 0) empty_library(); }
+        } else if (r == e_lib) {
+            g_fill = start_menu_value(&m, g_fill_idx);
+            library_menu(INTERVAL_S[start_menu_value(&m, g_iv_idx)], start_menu_value(&m, g_ord_idx) == 1);
         }
         memset(&g_in, 0, sizeof g_in);
         pointer_drain(&g_dev.ptr);

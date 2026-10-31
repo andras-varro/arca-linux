@@ -378,7 +378,7 @@ $CC "${WARN[@]}" -O2 -I. -Icommon retro_picker/retro_picker.c build/list_view.o 
 
 # frame: the picture frame (library import + slideshow). Carries its own stb_image in frame_core.c, so no common/jf_img.c.
 step "39/40" "frame"
-$CC "${WARN[@]}" -O2 -I. -Icommon -Iframe frame/frame.c frame/frame_core.c frame/frame_logic.c frame/frame_jf.c jf_shared/jf_url.c jf_shared/jf_login.c build/http.o build/json.o -Ijf_shared build/list_view.o build/pointer.o "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/frame -lm "${SSL_LIBS[@]}" "${AUDIO_LIBS[@]}"
+$CC "${WARN[@]}" -O2 -I. -Icommon -Iframe frame/frame.c frame/frame_core.c frame/frame_logic.c frame/frame_grid.c frame/frame_jf.c jf_shared/jf_url.c jf_shared/jf_login.c build/http.o build/json.o -Ijf_shared build/list_view.o build/pointer.o "${COMMON_OBJ[@]}" "${GAMEPAD_OBJ[@]}" -o build/frame -lm "${SSL_LIBS[@]}" "${AUDIO_LIBS[@]}"
 
 # clock: the full-screen clock (alarm, timer, night dim); clock_core.c is its host-tested logic.
 step "40/40" "clock"

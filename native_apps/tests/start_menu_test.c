@@ -448,6 +448,21 @@ static void group_demo_over_and_sound(void)
           "after an input, sound is allowed again");
 }
 
+/* An add past SM_MAX_ENTRIES is refused with -1 and leaves the menu as it was (a caller that adds more than fits loses the tail). */
+static void group_overflow(void)
+{
+    printf("overflow\n");
+    StartMenu m;
+    start_menu_init(&m, "T", NULL, T0);
+    int last = -2;
+    for (int i = 0; i < SM_MAX_ENTRIES; i++) last = start_menu_add_action(&m, "X");
+    check(last == SM_MAX_ENTRIES - 1 && m.count == SM_MAX_ENTRIES, "the last entry that fits is added");
+    check(start_menu_add_action(&m, "ONE TOO MANY") == -1, "an action past the cap returns -1");
+    const char *v[2] = { "A", "B" };
+    check(start_menu_add_choice(&m, "CH", v, 2, 0) == -1, "a choice past the cap returns -1");
+    check(m.count == SM_MAX_ENTRIES, "the count is unchanged");
+}
+
 static void group_reopen(void)
 {
     printf("12. reopen (a game returning to its menu)\n");
@@ -511,6 +526,7 @@ int main(void)
     group_attract();
     group_demo_over_and_sound();
     group_reopen();
+    group_overflow();
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

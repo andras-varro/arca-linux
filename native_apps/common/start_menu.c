@@ -339,7 +339,10 @@ void start_menu_set_warning(StartMenu *m, const char *warning)
 
 static int sm_add(StartMenu *m, StartMenuKind kind, const char *label)
 {
-    if (m->count >= SM_MAX_ENTRIES) return -1;
+    if (m->count >= SM_MAX_ENTRIES) {
+        fprintf(stderr, "start_menu: menu \"%s\" is full (%d entries), entry \"%s\" NOT ADDED\n", m->title, SM_MAX_ENTRIES, label ? label : "?");
+        return -1;
+    }
     StartMenuEntry *e = &m->entries[m->count];
     memset(e, 0, sizeof(*e));
     e->kind = kind;
