@@ -892,7 +892,7 @@ static bool make_thumb(const char *name)
 static bool lib_remove(const char *name)
 {
     char rel[160], path[300];
-    if (frame_thumb_name(name, rel, sizeof rel) == 0) {
+    if (frame_thumb_name(name, rel, sizeof rel) > 0) {
         snprintf(path, sizeof path, "%s/%s", LIB_DIR, rel);
         unlink(path);
         snprintf(path, sizeof path, "%s/%s.tmp", LIB_DIR, rel);
@@ -985,6 +985,9 @@ static void library_grid(int interval_s, bool shuffle)
     GRect b_next = { SCREEN_SAFE_RIGHT - 4 - 48, b_back.y, 48, GRID_BAR - 4 };
     GRect b_prev = { b_next.x - 52 - 110, b_back.y, 48, GRID_BAR - 4 };
     bool select = false, dirty = true, touch_down = false;
+    /* Delete and X are not latched buttons: text-entry mode queues them.  It also stops W/A/S/D/Space latching, so the
+     * queue loop below gives those back; it is off around the slideshow and the confirm, which read them as buttons. */
+    gamepad_text_entry(&g_dev.gp, true);
     int loaded_page = -1;
 
     while (g_running) {
@@ -1009,6 +1012,27 @@ static void library_grid(int interval_s, bool shuffle)
             if (select) { frame_grid_toggle(&g, g.cursor); dirty = true; }
             else act = g.cursor;
         }
+        GamepadKeyEv ke[8];
+        int nk = gamepad_take_keys(&g_dev.gp, ke, 8);
+        for (int k = 0; k < nk; k++) {
+            switch (ke[k].code) {
+            case KEY_W: frame_grid_move(&g, 0, -1); dirty = true; break;
+            case KEY_S: frame_grid_move(&g, 0, 1); dirty = true; break;
+            case KEY_A: frame_grid_move(&g, -1, 0); dirty = true; break;
+            case KEY_D: frame_grid_move(&g, 1, 0); dirty = true; break;
+            case KEY_SPACE:
+                if (ke[k].repeat) break;
+                if (select) { frame_grid_toggle(&g, g.cursor); dirty = true; }
+                else act = g.cursor;
+                break;
+            case KEY_DELETE:
+            case KEY_X:
+                if (!ke[k].repeat && select && frame_grid_marked(&g) > 0) do_delete = true;
+                break;
+            default: break;
+            }
+        }
+        if (bt[BTN_ID_PREV].pressed && select && frame_grid_marked(&g) > 0) do_delete = true;   /* pad LB, beside RB = SELECT */
         if (g_ts.pressed) touch_down = true;
         if (g_ts.released && touch_down) {
             touch_down = false;
@@ -1041,7 +1065,10 @@ static void library_grid(int interval_s, bool shuffle)
             start_menu_init(&c, text, "THEY CANNOT BE GOT BACK.", get_time_ms());
             start_menu_add_action(&c, "CANCEL");
             start_menu_add_action(&c, "DELETE");
-            if (menu_run(&c, NULL) == 1) {
+            gamepad_text_entry(&g_dev.gp, false);
+            int pick = menu_run(&c, NULL);
+            gamepad_text_entry(&g_dev.gp, true);
+            if (pick == 1) {
                 int gone = 0;
                 for (int i = 0; i < lib.n; i++) if (marks[i] && lib_remove(lib.name[i])) gone++;
                 printf("frame: deleted %d of %d marked pictures\n", gone, n);
@@ -1059,7 +1086,9 @@ static void library_grid(int interval_s, bool shuffle)
             continue;
         }
         if (act >= 0) {
+            gamepad_text_entry(&g_dev.gp, false);
             slideshow(interval_s, shuffle, lib.name[act]);
+            gamepad_text_entry(&g_dev.gp, true);
             memset(&g_in, 0, sizeof g_in);
             pointer_drain(&g_dev.ptr);
             touch_down = false;
@@ -1113,6 +1142,7 @@ static void library_grid(int interval_s, bool shuffle)
         bool moved = pointer_paint(&g_dev.ptr, &g_dev.fb);
         usleep(moved ? 8000 : 16000);
     }
+    gamepad_text_entry(&g_dev.gp, false);
     free(marks);
     free(tiles);
     lib_free(&lib);
