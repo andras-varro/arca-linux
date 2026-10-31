@@ -163,6 +163,15 @@ launcher state, or `provision.sh` detects a reboot that did not happen. **Not re
 booted, during `rc 5`, two `reboot`s at once). Next capture before `reboot -f`: `/proc/<rc pid>/stack`, `stty -F /dev/console -a`
 and `stty -F /dev/ttyO1 -a`; `rc` echoes to the console (serial `ttyO1` + `tty0`) before each K script [inferred first write].
 
+### B77. `rootfs/build-rootfs.sh` fails its own `check-rootfs.sh`: the `K05bluetooth` shutdown links dangle by design — open, measured 2026-10-31
+
+**Measured 2026-10-31 (WSL, `~/br-rw`, incremental build):** 51 of 53 checks pass; the two `rc0.d`/`rc6.d` "every link
+resolves" checks fail on `K05bluetooth`, which `rootfs/board/arca/post-build.sh` links on purpose although
+`/etc/init.d/bluetooth` comes only from the provision rules (`rc` skips a dangling link). The tarball is written first, but
+`set -e` stops the script before `make legal-info`. **To decide (operator, it edits a check):** let `check_links` accept a
+dangling `../init.d/<name>` only when `provision-rules.conf` installs `/etc/init.d/<name>`, or install the bluetooth script
+in the image. **Done when** `build-rootfs.sh` exits 0 and the check still fails on a dangling link no rule installs.
+
 ## Features
 
 Userspace except F101, which is the image build.
