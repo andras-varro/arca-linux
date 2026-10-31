@@ -163,15 +163,6 @@ launcher state, or `provision.sh` detects a reboot that did not happen. **Not re
 booted, during `rc 5`, two `reboot`s at once). Next capture before `reboot -f`: `/proc/<rc pid>/stack`, `stty -F /dev/console -a`
 and `stty -F /dev/ttyO1 -a`; `rc` echoes to the console (serial `ttyO1` + `tty0`) before each K script [inferred first write].
 
-### B77. `rootfs/build-rootfs.sh` fails its own `check-rootfs.sh`: the `K05bluetooth` shutdown links dangle by design — open, measured 2026-10-31
-
-**Measured 2026-10-31 (WSL, `~/br-rw`, incremental build):** 51 of 53 checks pass; the two `rc0.d`/`rc6.d` "every link
-resolves" checks fail on `K05bluetooth`, which `rootfs/board/arca/post-build.sh` links on purpose although
-`/etc/init.d/bluetooth` comes only from the provision rules (`rc` skips a dangling link). The tarball is written first, but
-`set -e` stops the script before `make legal-info`. **To decide (operator, it edits a check):** let `check_links` accept a
-dangling `../init.d/<name>` only when `provision-rules.conf` installs `/etc/init.d/<name>`, or install the bluetooth script
-in the image. **Done when** `build-rootfs.sh` exits 0 and the check still fails on a dangling link no rule installs.
-
 ## Features
 
 Userspace except F101, which is the image build.
@@ -306,15 +297,6 @@ Steelcase RoomWizard stays on 4.14.52 omapfb. **Done when** the first question i
 paths a launcher plus one game actually touch, listed from a BBB boot.
 
 **Future scope, operator-agreed, not scheduled:** mouse-only operation of the launcher, Control Panel and games, for a unit with no touch and no keyboard or pad. The operator has a RoomWizard whose touch is broken, and a BeagleBone has no touch. The mouse pointer in the launcher and the Control Panel exists and is operator-verified; the games still take no mouse pointer.
-
-### F166. The on-screen keyboard has no Alt key, so nano's Alt commands cannot be typed by touch — open, built; the panel check is left
-
-**Reported** (operator, `.115`): in nano from the terminal, Ctrl commands work from the physical and the on-screen keyboard,
-but the on-screen one offers no Alt, so `M-` commands (`M-U` undo, `M-6` copy, …) are reachable only from a physical
-keyboard. The key layout is `native_apps/common/keyboard.c`; the terminal's key-to-byte mapping is its keymap
-(`term_keymap_test`). **Done when** an on-screen Alt (a latching modifier like Ctrl) sends `ESC` + key, and `M-U` undoes in
-nano on the panel by touch alone. **Built 2026-10-31, deployed to `.115`:** an ALT sticky button beside CTRL on the terminal's
-toolbar (`TermSticky` in `native_apps/common/term_keymap.h`); ASCII with Alt is sent as ESC + byte; host test only.
 
 ### Potential ideas (not planned)
 
