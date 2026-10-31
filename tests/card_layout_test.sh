@@ -331,6 +331,37 @@ if [ "$HAVE_SFDISK" = yes ]; then
     table_case no "$TMP/vendor8.img" "$VENDOR8" "8G" "a vendor-style 8 GB table is rejected"
 fi
 
+# ── E. check-rootfs.sh: which dangling rc links are allowed ─────────────────
+# A link in rc0.d/rc6.d may dangle in the Buildroot tarball only when a provision-rules install record
+# supplies its target; the finished tree (--tree) allows no dangling link at all.
+
+echo ""
+echo "E. check-rootfs.sh rc links: dangling only where a rule installs the target"
+
+CR="$REPO_DIR/rootfs/check-rootfs.sh"
+mkrc() { # <dir> <rc0.d link name> <target name>: a tree with one script, one resolving link per rc dir
+    local t="$1"
+    rm -rf "$t"; mkdir -p "$t/etc/init.d" "$t/etc/rcS.d" "$t/etc/rc5.d" "$t/etc/rc0.d" "$t/etc/rc6.d"
+    printf '#!/bin/sh\n' > "$t/etc/init.d/real"; chmod 755 "$t/etc/init.d/real"
+    for d in rcS.d rc5.d rc0.d rc6.d; do ln -s ../init.d/real "$t/etc/$d/S01real"; done
+    ln -s "../init.d/$3" "$t/etc/rc0.d/$2"
+}
+printf 'install\tbluetooth\t0755\t/etc/init.d/bluetooth\tdevice-files/bluetooth\tnote\n' > "$TMP/rules.conf"
+rc_line() { RULES="$TMP/rules.conf" bash "$CR" "$1" 2> /dev/null | grep 'every etc/rc0.d link' | cut -c1-4; }
+
+mkrc "$TMP/e1" K05bluetooth bluetooth;  tar -C "$TMP/e1" -cf "$TMP/e1.tar" .
+expect_eq "PASS" "$(rc_line "$TMP/e1.tar")" "tarball: K05bluetooth dangling, a rule installs /etc/init.d/bluetooth: allowed"
+mkrc "$TMP/e2" K99nothing nothing;      tar -C "$TMP/e2" -cf "$TMP/e2.tar" .
+expect_eq "FAIL" "$(rc_line "$TMP/e2.tar")" "tarball: a dangling link no rule installs still fails (negative control)"
+mkrc "$TMP/e3" K05bluetooth bluetooth;  : > "$TMP/e3/etc/init.d/bluetooth"; tar -C "$TMP/e3" -cf "$TMP/e3.tar" .
+expect_eq "FAIL" "$(rc_line "$TMP/e3.tar")" "tarball: a present but non-executable target still fails (the exemption is for absent targets only)"
+printf 'unlink\tusb\t-\t/etc/init.d/bluetooth\t-\tnote\n' > "$TMP/rules.conf"
+expect_eq "FAIL" "$(rc_line "$TMP/e1.tar")" "tarball: a rule that is not an install record does not exempt the link (negative control)"
+printf 'install\tbluetooth\t0755\t/etc/init.d/bluetooth\tdevice-files/bluetooth\tnote\n' > "$TMP/rules.conf"
+bash "$CR" --tree "$TMP/e1" > /dev/null 2>&1; expect_eq "1" "$?" "--tree: the same dangling K05bluetooth fails on a finished tree, whatever the rules say"
+printf '#!/bin/sh\n' > "$TMP/e1/etc/init.d/bluetooth"; chmod 755 "$TMP/e1/etc/init.d/bluetooth"
+bash "$CR" --tree "$TMP/e1" > /dev/null 2>&1; expect_eq "0" "$?" "--tree: passes once the script is installed"
+
 # ── result, including a check on the harness ────────────────────────────────
 
 echo ""
@@ -340,8 +371,8 @@ echo "  $PASS passed, $FAIL failed, $SKIP skipped"
 # A harness that runs nothing reports success. Counted by RUNNING the file (the real u-boot.img
 # case is skippable and not counted): MIN_FULL with sfdisk, MIN_NOSFDISK without it, because
 # otherwise fixing a missing tool just trades a skip for a red harness error.
-MIN_FULL=59
-MIN_NOSFDISK=46
+MIN_FULL=65
+MIN_NOSFDISK=52
 MIN_CASES=$MIN_FULL
 [ "$HAVE_SFDISK" = no ] && MIN_CASES=$MIN_NOSFDISK
 if [ "$TOTAL" -lt "$MIN_CASES" ]; then

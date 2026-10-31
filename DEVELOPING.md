@@ -105,11 +105,11 @@ The device half: `native_apps/smoke-first-screen.sh <ip> [binary ...]` (`--list`
 ### Delivering a unit — build a card image, one boot
 
 A card is one whole-card image built by `rootfs/make-card-image.sh` (root, WSL): our boot files on p1 (`MLO`,
-`u-boot.img` and the kernel), our root filesystem, the kernel modules and — with `--bundle` — every component, installed by
+`u-boot.img` and the kernel), our root filesystem, the kernel modules and — by default (`--bundle`, else `build/release`; `--no-bundle` skips it) — every component, installed by
 `rootfs/commission-offline.sh`. The unit works at first boot and never needs to be reachable.
 
 ```bash
-sudo ./rootfs/make-card-image.sh --mlo <MLO> --uboot <u-boot.img> --kernel <uImage> --bundle <tar.gz|dir> <rootfs.tar> <out.img>
+sudo ./rootfs/make-card-image.sh --mlo <MLO> --uboot <u-boot.img> --kernel <uImage> [--bundle <tar.gz|dir> | --no-bundle] <rootfs.tar> <out.img>
 ```
 
 `MLO` and `u-boot.img` come from `uboot/build.sh`, `<uImage>` from `kernel/build-image.sh`, the kernel modules from
@@ -207,7 +207,7 @@ arca-linux/
 | Layer | Script | Runs |
 |-------|--------|------|
 | **Front door** | `arca.sh` | Whenever you'd rather not remember the flags (composition only) |
-| **Card image** | `rootfs/make-card-image.sh` | Once per card (offline, WSL root); `--bundle` runs `rootfs/commission-offline.sh` over it |
+| **Card image** | `rootfs/make-card-image.sh` | Once per card (offline, WSL root); runs `rootfs/commission-offline.sh` over it unless `--no-bundle` |
 | **Update a unit** | `provision.sh` | Per update (SSH; backs up first, reboots) |
 | **Deploy all** | `deploy-all.sh` | After setup (builds + deploys everything) |
 | **Build + stage + publish** | `release.sh` | Per release |

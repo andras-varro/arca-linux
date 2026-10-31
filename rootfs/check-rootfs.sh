@@ -4,6 +4,7 @@
 # It cannot say whether the image boots; it says the files init will look for are there.
 #
 # Usage: rootfs/check-rootfs.sh <rootfs.tar>
+#        rootfs/check-rootfs.sh --tree <root dir>   (rc links only, on a finished tree, no exemptions)
 # Exit status: 0 when every check passes, 1 when any fails, 2 on a usage error.
 
 set -u
@@ -11,8 +12,12 @@ set -u
 usage() {
     cat <<'USAGE'
 Usage: rootfs/check-rootfs.sh <rootfs.tar>
+       rootfs/check-rootfs.sh --tree <root dir>
 
 Prints one PASS or FAIL line per check and a summary. Exits non-zero if any check fails.
+--tree checks only that every rc link in a finished, mounted root resolves to an executable init.d
+script, with no exemption: the tarball check lets a link dangle when a provision-rules install
+record supplies its target later, and this is the check that the target arrived.
 USAGE
 }
 
@@ -20,6 +25,26 @@ case "${1:-}" in
     -h|--help) usage; exit 0 ;;
     "") usage >&2; exit 2 ;;
 esac
+if [ "${1:-}" = "--tree" ]; then
+    ROOT=${2:-}
+    [ -d "$ROOT/etc/init.d" ] || { echo "no etc/init.d under: $ROOT" >&2; exit 2; }
+    bad=0
+    for d in rcS.d rc5.d rc0.d rc6.d; do
+        n=0
+        for l in "$ROOT/etc/$d"/*; do
+            [ -L "$l" ] || continue
+            n=$((n + 1))
+            case "$(readlink "$l")" in
+                ../init.d/*) ;;
+                *) echo "FAIL  etc/$d/${l##*/} is not a ../init.d link"; bad=1; continue ;;
+            esac
+            if [ ! -f "$l" ] || [ ! -x "$l" ]; then echo "FAIL  etc/$d/${l##*/} does not resolve to an executable init.d script"; bad=1; fi
+        done
+        [ "$n" -gt 0 ] || { echo "FAIL  etc/$d has no links"; bad=1; }
+    done
+    [ "$bad" -eq 0 ] && echo "PASS  every rc link in $ROOT resolves to an executable init.d script"
+    exit "$bad"
+fi
 TAR=$1
 [ -f "$TAR" ] || { echo "no such file: $TAR" >&2; exit 2; }
 
@@ -56,6 +81,14 @@ member() { tar -xOf "$TAR" "./$1" 2>/dev/null; }
 # member_has <path> <fixed string>
 member_has() { member "$1" | grep -qF -- "$2"; }
 
+# Some init.d scripts are not in the Buildroot tree: device-files/provision-rules.conf installs them
+# when the bundle is commissioned onto the image (record: install <group> <mode> <dest> <src> ...).
+# A link to one may dangle in this tarball and in no other case; RULES overrides the file for tests.
+RULES=${RULES:-$(dirname "$0")/../device-files/provision-rules.conf}
+rule_installs() { # <init.d script name>
+    [ -f "$RULES" ] && awk -F'\t' -v d="/etc/init.d/$1" '$1 == "install" && $4 == d { f = 1 } END { exit f ? 0 : 1 }' "$RULES"
+}
+
 # A link in an rc directory must be a symlink whose target, resolved inside /etc/<dir>,
 # is an executable regular file in /etc/init.d.
 check_links() { # <dir>
@@ -69,6 +102,9 @@ check_links() { # <dir>
             ../init.d/*) ;;
             *) echo "      etc/$d/$name -> '$t' is not a ../init.d link"; bad=1; continue ;;
         esac
+        if ! entry "etc/init.d/${t#../init.d/}" > /dev/null && rule_installs "${t#../init.d/}"; then
+            continue   # the target arrives from a provision-rules install record; --tree checks it did
+        fi
         line=$(entry "etc/init.d/${t#../init.d/}") || { echo "      etc/$d/$name: no ${t#../init.d/}"; bad=1; continue; }
         case "$line" in
             -??x*) ;;

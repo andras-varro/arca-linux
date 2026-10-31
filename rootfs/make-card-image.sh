@@ -1,6 +1,6 @@
 #!/bin/bash
 # make-card-image.sh --mlo <MLO> --uboot <u-boot.img> --kernel <uImage> [--uenv <file>] [--modules <dir>]
-#                    [--bundle <b>] <rootfs.tar> <out.img>
+#                    [--bundle <b> | --no-bundle] <rootfs.tar> <out.img>
 #
 # Builds a whole SD-card IMAGE FILE for an Arca, from nothing but our own parts: one kind of
 # image, generic and publishable, with no file of the vendor's on it and nothing of any unit's.
@@ -43,7 +43,8 @@
 # filtered), and the image has no host name of its own: the unit names itself and makes its SSH host
 # key on the first boot.
 #
-# With --bundle <dir|tar> (a release.sh --stage-only bundle) it then mounts p3 and p2
+# Unless --no-bundle, it takes a bundle (--bundle <dir|tar>, else build/release left by release.sh
+# --stage-only) and then mounts p3 and p2
 # as <base>/{root,log} and runs rootfs/commission-offline.sh
 # over them: the boot scripts, their links and every component's files go in, and that
 # script's own verify pass checks them. It asks nothing and cleans nothing: the tree is
@@ -55,7 +56,7 @@ die() { echo "FAIL: $*" >&2; exit 1; }
 usage() {
     cat <<'USAGE'
 Usage: make-card-image.sh --mlo <MLO> --uboot <u-boot.img> --kernel <uImage> [--uenv <file>]
-                          [--modules <dir>] [--bundle <dir|tar>] [--legal-info <dir>]
+                          [--modules <dir>] [--bundle <dir|tar> | --no-bundle] [--legal-info <dir>]
                           [--source-tag <tag>] [--source-url <url>] <rootfs.tar> <out.img>
 
   --mlo <file>     the SPL (MLO) from uboot/build.sh; becomes p1/MLO, written first
@@ -67,11 +68,13 @@ Usage: make-card-image.sh --mlo <MLO> --uboot <u-boot.img> --kernel <uImage> [--
   --modules <dir>  directory of kernel modules (*.ko) copied to p3
                    /lib/modules/4.14.52/extra/ (default: ~/rw-kmods of the
                    invoking user, $SUDO_USER under sudo). cy8ctmg120_ts.ko is required.
-  --bundle <b>     a release.sh --stage-only bundle (directory or .tar.gz),
-                   installed with rootfs/commission-offline.sh (no prompt),
-                   so the card boots with every component
-                   and no provision.sh or deploy-all.sh afterwards. Needs
-                   arm-linux-gnueabihf-objdump (that script's ARM check).
+  --bundle <b>     a release.sh --stage-only bundle (directory or .tar.gz), installed with
+                   rootfs/commission-offline.sh (no prompt), so the card boots with every component and
+                   no provision.sh or deploy-all.sh afterwards. Default: build/release of this
+                   repository (where release.sh --stage-only stages), refused when it is not a staged
+                   bundle. Needs arm-linux-gnueabihf-objdump (that script's ARM check).
+  --no-bundle      build the bare base image instead: no components, no device files; run
+                   provision.sh and deploy-all.sh after the first boot
   --legal-info <d> Buildroot's legal-info tree (make legal-info): its manifest.csv and licenses/ are
                    copied to p3 /usr/share/doc/arca-licenses/ (default: br-rw/legal-info of the
                    invoking user, when it is there). Without one the image carries no package
@@ -88,6 +91,7 @@ USAGE
 }
 MODDIR=""
 BUNDLE=""
+NO_BUNDLE=0
 MLO=""
 UBOOT=""
 KERNEL=""
@@ -111,6 +115,7 @@ while [ $# -gt 0 ]; do
         --modules=*) MODDIR="${1#--modules=}"; shift ;;
         --bundle) need_val $#; BUNDLE="$2"; shift 2 ;;
         --bundle=*) BUNDLE="${1#--bundle=}"; shift ;;
+        --no-bundle) NO_BUNDLE=1; shift ;;
         --legal-info) need_val $#; LEGAL="$2"; shift 2 ;;
         --legal-info=*) LEGAL="${1#--legal-info=}"; shift ;;
         --source-tag) need_val $#; SOURCE_TAG="$2"; shift 2 ;;
@@ -126,6 +131,7 @@ done
 if [ -z "$MLO" ] || [ -z "$UBOOT" ] || [ -z "$KERNEL" ]; then
     echo "--mlo, --uboot and --kernel are all required" >&2; usage >&2; exit 2
 fi
+[ "$NO_BUNDLE" -eq 0 ] || [ -z "$BUNDLE" ] || { echo "--bundle and --no-bundle exclude each other" >&2; exit 2; }
 ROOTTAR="$1"; OUT="$2"
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 [ -n "$UENV" ] || UENV="$SCRIPT_DIR/../uboot/uEnv.txt"
@@ -188,7 +194,15 @@ for t in sfdisk losetup mke2fs e2fsck fsck.vfat mkfs.vfat truncate; do
     command -v "$t" > /dev/null || die "$t not installed"
 done
 BUNDLE_TAG=""
-if [ -n "$BUNDLE" ]; then
+# A complete image is the default. With no --bundle, the bundle is the one release.sh --stage-only
+# leaves in build/release (its default --out): the only place this repository stages one, so nothing is
+# built or guessed here. A directory that is not a staged bundle is refused rather than skipped, so a
+# card is never silently built bare.
+if [ "$NO_BUNDLE" -eq 0 ] && [ -z "$BUNDLE" ]; then
+    BUNDLE="$SCRIPT_DIR/../build/release"
+    [ -f "$BUNDLE/manifest.d/bundle.info" ] || die "no staged bundle in $BUNDLE: run ./release.sh --stage-only, pass --bundle <dir|tar>, or --no-bundle for the bare base image"
+fi
+if [ "$NO_BUNDLE" -eq 0 ]; then
     # Absolute, because commission-offline.sh runs from the repo root. Checked here,
     # before any image exists, rather than after p3 is filled.
     [ -e "$BUNDLE" ] || die "no bundle $BUNDLE"
@@ -434,7 +448,7 @@ fill() {   # fill <partnum> <rootfs tar>
 echo "== filling p3 (p2, the log partition, stays empty)"
 fill 3 "$ROOTTAR"
 
-if [ -n "$BUNDLE" ]; then
+if [ "$NO_BUNDLE" -eq 0 ]; then
     echo "== installing bundle $BUNDLE_TAG"
     # The layout arca_check_card_mounts and arca_offline_path expect: p3 as root, p2 as log,
     # mounted, so a bundle path under /home/root/log lands on p2 and not in p3's empty mount point;
@@ -453,6 +467,8 @@ if [ -n "$BUNDLE" ]; then
         rm -f "$OUTABS"
         die "the bundle put SSH key material on the image; the image is deleted"
     fi
+    # The tarball check let the links to provision-installed scripts dangle; on the finished tree none may.
+    bash "$SCRIPT_DIR/check-rootfs.sh" --tree "$MNT/base/root" || { rm -f "$OUTABS"; die "an rc link on the finished image does not resolve (above); the image is deleted"; }
     for r in root log; do umount "$MNT/base/$r" || die "umount base/$r"; done
 fi
 
@@ -484,7 +500,7 @@ echo "size:            $(stat -c %s "$OUTABS") bytes apparent ($DISK_SECT sector
 echo "rootfs tar:      $ROOTTAR ($(stat -c %y "$ROOTTAR"))"
 echo "p1:              $P1_WANT"
 echo "fsck:            $([ "$FSCK_BAD" -eq 0 ] && echo 'p1, p2, p3 clean' || echo 'PROBLEMS, see above')"
-echo "bundle:          ${BUNDLE_TAG:-none (no --bundle: run provision.sh and deploy-all.sh after the first boot)}"
+echo "bundle:          ${BUNDLE_TAG:-none (--no-bundle: run provision.sh and deploy-all.sh after the first boot)}"
 echo "licences:        /usr/share/doc/arca-licenses: LICENSE.md, SOURCE-OFFER.txt$([ -n "$LEGAL" ] && echo ", manifest.csv, licenses/")"
 if [ -z "$LEGAL" ]; then
     echo "WARNING:         no --legal-info: the package licence texts are NOT on this image. Do not publish it."

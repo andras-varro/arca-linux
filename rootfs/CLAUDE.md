@@ -37,7 +37,7 @@ Everything that builds the **root filesystem we boot instead of the vendor's Yoc
 
 - **Root's login shell is `/bin/bash`**, set by `rootfs/board/arca/post-build.sh` (the Buildroot skeleton gives `/bin/sh`,
   BusyBox ash); the prompt comes from the overlay's `/etc/profile.d/prompt.sh`. Measured on `.188`.
-- **`make-card-image.sh --bundle <release bundle>` installs every component offline** (`rootfs/commission-offline.sh --base <tree>` against the new image's p3 and p2). Measured on `.188`: a card built that way boots to the launcher, touch works, and the launcher's Shutdown tile runs `poweroff` and the panel goes dark.
+- **`make-card-image.sh` installs every component offline by default** (`--bundle <b>`, else `build/release`; `--no-bundle` builds the bare base) (`rootfs/commission-offline.sh --base <tree>` against the new image's p3 and p2). Measured on `.188`: a card built that way boots to the launcher, touch works, and the launcher's Shutdown tile runs `poweroff` and the panel goes dark.
 - **The image carries its licence documents:** `LICENSE.md`, `manifest.csv`, `licenses/` and `SOURCE-OFFER.txt` in p3 `/usr/share/doc/arca-licenses/` (`licence_docs_install`). `--legal-info` (default: `br-rw/legal-info` of the invoking user), `--source-tag` (default: the bundle's tag) and `--source-url` feed them; without a legal-info tree or a tag the summary prints `WARNING` lines and **that image must not be published**. Measured: a real image held all four, mode 0644, fsck clean.
 
 ## What the image must carry, and what it need not
@@ -69,13 +69,13 @@ file, so they cannot drift; `/etc/hostname` is the only home of the name. NAME i
 ## `commission-offline.sh`: the image step, not a user flow
 
 `rootfs/commission-offline.sh --bundle <tar.gz|dir> --base <dir>` installs a release bundle and the provision plan into the partitions
-`make-card-image.sh --bundle` mounted as `<base>/{root,log}`, which is its only caller. **It has no prompt, no clean and no disk scan:** it
+`make-card-image.sh` mounted as `<base>/{root,log}`, which is its only caller. **It has no prompt, no clean and no disk scan:** it
 reads no terminal, needs no root of its own, mounts nothing and never writes p1; `lib/arca-identify.sh` refuses a `root` that lacks our
 marker. The retired flags (`--no-clean`, `--keep-<group>`, `--delete-factory`, `--unattended`, `--disk`, `--release`, `--ssh-auth=*`,
 `--sshd-only`) are **refused by name with a non-zero exit** — a flag accepted and ignored reads as a choice honoured. Host name, password and
 ssh identity are not set here. **It verifies what it installed, on the card:** md5 of every installed file against the bundle manifest; `+x`
 (real ext4 honours it, so offline that check is a measurement and on `/mnt/c` it cannot be); `check-arm-safe.sh` over the downloaded binaries;
-every `.app`'s `exec=`/`icon=` and that `default-app` names one; `dash -n` on every `/bin/sh` script it wrote.
+every `.app`'s `exec=`/`icon=` and that `default-app` names one; `dash -n` on every `/bin/sh` script it wrote. `make-card-image.sh` then runs `check-rootfs.sh --tree <base>/root`, which allows no dangling rc link: the tarball check lets one dangle only when a `provision-rules.conf` `install` record supplies its `/etc/init.d` target (the bluetooth stop link).
 
 ⚠️ Three ways that verification can lie, all guarded: `dash -n` misses bashisms (`[[` parses as a command name); a missing
 `arm-linux-gnueabihf-objdump` is a **refusal**, not a pass, so the caller counts the ELF candidates itself and says what it did not check
