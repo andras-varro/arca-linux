@@ -893,6 +893,31 @@ CA_REMOTE="$(ssh "$DEVICE" md5sum /opt/arca/ca-certificates.crt | awk '{print $1
 ok "CA bundle installed (md5 matches)"
 echo ""
 
+# nano, for a unit that was flashed before the image carried it (the Files app opens
+# text files in it through `terminal --exec`).  It is the Buildroot package's own
+# binary — same soft-float ABI as the rootfs, linked to the libncurses.so.6 every
+# image already has — taken from the rootfs build tree (rootfs/build-rootfs.sh,
+# BR2_PACKAGE_NANO), so nothing is cross-built a second way.  Not in GAMES_BINARIES:
+# that array is our own code.  No build tree on this host means a skip, not a failure.
+NANO_SRC="${ARCA_NANO_BIN:-$HOME/br-rw/target/usr/bin/nano}"
+if [[ -x "$NANO_SRC" ]]; then
+    NANO_LOCAL="$(md5sum < "$NANO_SRC" | awk '{print $1}')"
+    NANO_REMOTE="$(ssh "$DEVICE" 'md5sum /usr/bin/nano 2>/dev/null' | awk '{print $1}' || true)"
+    if [[ "$NANO_LOCAL" == "$NANO_REMOTE" ]]; then
+        ok "nano already on the device (md5 matches)"
+    else
+        info "Installing nano..."
+        scp "$NANO_SRC" "$DEVICE:/usr/bin/nano.part"
+        ssh "$DEVICE" "chmod 755 /usr/bin/nano.part && mv /usr/bin/nano.part /usr/bin/nano"
+        NANO_REMOTE="$(ssh "$DEVICE" md5sum /usr/bin/nano | awk '{print $1}')"
+        [[ "$NANO_LOCAL" == "$NANO_REMOTE" ]] || err "nano md5 mismatch (local $NANO_LOCAL, device $NANO_REMOTE)"
+        ok "nano installed (md5 matches)"
+    fi
+else
+    info "nano not installed: no $NANO_SRC (run rootfs/build-rootfs.sh, or set ARCA_NANO_BIN)"
+fi
+echo ""
+
 # ── 4. set-default mode? ────────────────────────────────────────────────────
 if [[ "$MODE" == "set-default" ]]; then
     info "Setting app launcher as default app..."

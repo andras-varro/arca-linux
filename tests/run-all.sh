@@ -231,6 +231,7 @@ CTEST_ROWS=(
     "log_filter_test|-I.|control_panel/log_filter.c"
     "log_sources_test|-I.|control_panel/log_sources.c"
     "term_keymap_test|-I common|"
+    "term_args_test|-I common|"
     "file_manager_test|-I.|file_manager/fm_core.c"
     "vnc_pad_test|-I common -I ../vnc_client|../vnc_client/vnc_pad.c common/ui_focus.c common/input_scan.c"
 )

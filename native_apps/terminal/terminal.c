@@ -20,6 +20,9 @@
  *   - a pad: D-pad = arrows, A = Enter, B = Escape, X = Tab, Start = the
  *     on-screen keyboard, Select tapped = Ctrl-C, Select held 1 s = leave.
  *
+ * With --exec the program runs instead of login (TERM=xterm, HOME=/home/root, optional
+ * --cwd DIR); when it exits so does terminal, with its status. Parsing: common/term_args.h.
+ *
  * Run on device (the launcher passes the first two):
  *   /opt/games/terminal /dev/fb0 /dev/input/touchscreen0
  *
@@ -52,6 +55,7 @@
 #include "../common/touch_input.h"
 #include "control_panel/sys_settings.h"
 #include "../common/term_keymap.h"
+#include "../common/term_args.h"
 
 #define MAX_ROWS   100
 #define MAX_COLS   200
@@ -66,6 +70,8 @@
 #define COL_BG  RGB(0, 0, 0)
 
 static volatile bool running = true;
+static const TermArgs *g_args;   /* parsed command line */
+static int g_exit_code;          /* terminal's own status: the --exec program's */
 static void sig_handler(int s) { (void)s; running = false; }
 
 /* ── terminal state ──────────────────────────────────────────────────────── */
@@ -236,6 +242,7 @@ static void hint_if_root_locked(void) {
 
 /* 0 on success; -1 with errno set, and a line already written to the screen. */
 static int start_session(void) {
+    const bool exec_mode = g_args && g_args->exec_argv;
     int m = posix_openpt(O_RDWR | O_NOCTTY);
     if (m < 0 || grantpt(m) < 0 || unlockpt(m) < 0) {
         int e = errno;
@@ -256,7 +263,7 @@ static int start_session(void) {
     ws.ws_col = (unsigned short)T.cols;
     ioctl(m, TIOCSWINSZ, &ws);
 
-    hint_if_root_locked();
+    if (!exec_mode) hint_if_root_locked();
     pid_t pid = fork();
     if (pid < 0) {
         int e = errno;
@@ -278,6 +285,12 @@ static int start_session(void) {
         signal(SIGINT, SIG_DFL);
         signal(SIGTERM, SIG_DFL);
         setenv("TERM", TERM_NAME, 1);
+        if (exec_mode) {
+            setenv("HOME", "/home/root", 1);
+            if (g_args->cwd && chdir(g_args->cwd) != 0) _exit(126);
+            execvp(g_args->exec_argv[0], g_args->exec_argv);
+            _exit(127);
+        }
         execl("/bin/login", "login", (char *)NULL);
         _exit(127);
     }
@@ -351,6 +364,11 @@ static void reap_child(uint32_t now) {
         if (T.master >= 0) { close(T.master); T.master = -1; }
     }
     T.child = -1;
+    if (g_args && g_args->exec_argv) {      /* a program, not a shell: leave with its status */
+        g_exit_code = (r > 0) ? term_exit_code(st) : 1;
+        running = false;
+        return;
+    }
     bool clean = (r > 0) && WIFEXITED(st) && WEXITSTATUS(st) == 0;
     bool quick = (now - T.started_ms) < QUICK_EXIT_MS;
     printf("terminal: session ended, status 0x%x after %u ms\n", (unsigned)st, (unsigned)(now - T.started_ms));
@@ -391,7 +409,11 @@ static VTermKey vkey_for(int key) {
 
 static void send_out(TermKeyOut o) {
     if (o.kind == TK_CHAR) {
-        vterm_keyboard_unichar(T.vt, o.ch, (VTermModifier)o.mods);
+        uint32_t ch = o.ch;
+        /* libvterm maps Ctrl+letter to a control byte for lowercase only; the on-screen
+         * keyboard types capitals, and a capital would arrive as an unknown CSI sequence. */
+        if ((o.mods & TMOD_CTRL) && ch >= (uint32_t)'A' && ch <= (uint32_t)'Z') ch += 32;
+        vterm_keyboard_unichar(T.vt, ch, (VTermModifier)o.mods);
     } else if (o.kind == TK_KEY) {
         VTermKey k = vkey_for(o.key);
         if (k != VTERM_KEY_NONE) vterm_keyboard_key(T.vt, k, (VTermModifier)o.mods);
@@ -739,8 +761,14 @@ int main(int argc, char *argv[]) {
     /* Line-buffer stdout first: at boot it is a log file (native_apps/CLAUDE.md). */
     setvbuf(stdout, NULL, _IOLBF, 0);
 
-    const char *fb_device = (argc > 1) ? argv[1] : "/dev/fb0";
-    const char *touch_device = (argc > 2) ? argv[2] : "/dev/input/touchscreen0";
+    TermArgs args;
+    if (term_args_parse(argc, argv, &args) != 0) {
+        fprintf(stderr, "usage: terminal [fb [touch]] [--cwd DIR] [--exec PROG [ARG...]]\n");
+        return 2;
+    }
+    g_args = &args;
+    const char *fb_device = args.fb;
+    const char *touch_device = args.touch;
 
     int lock_fd = acquire_instance_lock("terminal");
     if (lock_fd < 0) {
@@ -792,7 +820,7 @@ int main(int argc, char *argv[]) {
     T.need_full = true;
 
     kbd_scan();
-    if (start_session() < 0) T.waiting_exit = true;
+    if (start_session() < 0) { T.waiting_exit = true; if (args.exec_argv) g_exit_code = 1; }
 
     Repeat rep[BTN_ID_COUNT];
     memset(rep, 0, sizeof rep);
@@ -900,5 +928,5 @@ int main(int argc, char *argv[]) {
     fb_swap(&fb);
     fb_close(&fb);
     close(lock_fd);
-    return 0;
+    return g_exit_code;
 }

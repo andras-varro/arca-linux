@@ -181,6 +181,7 @@ are on the card too, so they have rows.
 | expat | 2.8.4 | MIT |
 | zlib (`libzlib`) | 1.3.2 | zlib licence |
 | ncurses | 6.4-20230603 | MIT (with the advertising clause) |
+| nano | 8.2 | **GPL-3.0-or-later** (a separate program, `/usr/bin/nano`, linked to ncurses only; the Files app starts it through the Terminal app) |
 | eudev | 3.2.14 | **GPL-2.0-or-later** (programs), **LGPL-2.1-or-later** (libraries) |
 | kmod | 33 | **LGPL-2.1-or-later** (library); the tools are GPL-2.0-or-later (unverified: the manifest names only the library) |
 | libxcrypt | 4.4.38 | **LGPL-2.1-or-later** |
